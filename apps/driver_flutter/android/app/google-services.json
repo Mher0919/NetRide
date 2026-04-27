@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "672761115284",
+    "project_id": "uberish-493800",
+    "storage_bucket": "uberish-493800.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:672761115284:android:be1697da54255584207a81",
+        "android_client_info": {
+          "package_name": "com.uberish.driver.driver_flutter"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "672761115284-incnp6sb76e4ma52o7ohil237vantraa.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMrUdyw0TiOXbRBYyD_ClbY1FFkgROebY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "672761115284-incnp6sb76e4ma52o7ohil237vantraa.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:672761115284:android:eec4d9af67621628207a81",
+        "android_client_info": {
+          "package_name": "com.uberish.rider.rider_flutter"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "672761115284-incnp6sb76e4ma52o7ohil237vantraa.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMrUdyw0TiOXbRBYyD_ClbY1FFkgROebY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "672761115284-incnp6sb76e4ma52o7ohil237vantraa.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

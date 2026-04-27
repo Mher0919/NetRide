@@ -1,0 +1,117 @@
+// backend/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  RIDER
+  DRIVER
+}
+
+enum BackgroundCheckStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TripStatus {
+  REQUESTED
+  ACCEPTED
+  DRIVER_ARRIVING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum VehicleCategory {
+  ECONOMY
+  PREMIUM
+  SUV
+  VAN
+}
+
+model User {
+  id                String   @id @default(uuid())
+  role              UserRole
+  email             String   @unique
+  phone_number      String?  @unique
+  full_name         String
+  date_of_birth     DateTime?
+  profile_image_url String?
+  is_verified       Boolean  @default(false)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  driver_profile    Driver?
+  rides_as_rider    Ride[]   @relation("RiderRides")
+  rides_as_driver    Ride[]   @relation("DriverRides")
+  ratings_given     Rating[] @relation("RiderRatings")
+  ratings_received  Rating[] @relation("DriverRatings")
+}
+
+model Driver {
+  user_id                 String                @id
+  user                    User                  @relation(fields: [user_id], references: [id])
+  license_number          String?
+  license_expiry_date     DateTime?
+  license_photo_url       String?
+  license_photo_back_url  String?
+  background_check_status BackgroundCheckStatus @default(PENDING)
+  rating                  Float                 @default(5.0)
+  total_rides             Int                   @default(0)
+  is_active               Boolean               @default(false)
+  
+  vehicles                DriverVehicle[]
+}
+
+model Vehicle {
+  id       String          @id @default(uuid())
+  make     String
+  model    String
+  year     Int
+  category VehicleCategory
+  
+  drivers  DriverVehicle[]
+}
+
+model DriverVehicle {
+  id                        String  @id @default(uuid())
+  driver_id                 String
+  driver                    Driver  @relation(fields: [driver_id], references: [user_id])
+  vehicle_id                String
+  vehicle                   Vehicle @relation(fields: [vehicle_id], references: [id])
+  license_plate_number      String
+  license_plate_photo_url   String?
+  car_photo_urls            String[] // Prisma supports String[] in PostgreSQL
+}
+
+model Ride {
+  id         String     @id @default(uuid())
+  rider_id   String
+  rider      User       @relation("RiderRides", fields: [rider_id], references: [id])
+  driver_id  String?
+  driver     User?      @relation("DriverRides", fields: [driver_id], references: [id])
+  status     TripStatus @default(REQUESTED)
+  created_at DateTime   @default(now())
+  
+  rating     Rating?
+}
+
+model Rating {
+  id          String   @id @default(uuid())
+  ride_id     String   @unique
+  ride        Ride     @relation(fields: [ride_id], references: [id])
+  rider_id    String
+  rider       User     @relation("RiderRatings", fields: [rider_id], references: [id])
+  driver_id   String
+  driver      User     @relation("DriverRatings", fields: [driver_id], references: [id])
+  rating      Int      // 1-5
+  review_text String?
+  created_at  DateTime @default(now())
+}
