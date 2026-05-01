@@ -37,8 +37,8 @@ export class AuthService {
       await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
     }
 
-    const token = this.generateToken(user);
-    return { user, token };
+    await OTPService.generateOTP(data.email);
+    return { otp_required: true, message: 'Verification code sent to email' };
   }
 
   static async loginWithPassword(data: {

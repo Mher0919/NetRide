@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import 'verification_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -23,20 +24,32 @@ class _SignupScreenState extends State<SignupScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await AuthService.signupWithPassword(
+      final res = await AuthService.signupWithPassword(
         email: _emailController.text.trim(),
         fullName: _nameController.text.trim(),
         password: _passwordController.text.trim(),
         role: 'DRIVER',
       );
       if (mounted) {
-        // Go to splash then onboarding
-        Navigator.pushNamedAndRemoveUntil(
-          context, 
-          '/splash', 
-          (route) => false,
-          arguments: {'targetRoute': '/onboarding'},
-        );
+        if (res['otp_required'] == true) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => VerificationScreen(
+                email: _emailController.text.trim(),
+                role: 'DRIVER',
+              ),
+            ),
+          );
+        } else {
+          // Fallback
+          Navigator.pushNamedAndRemoveUntil(
+            context, 
+            '/splash', 
+            (route) => false,
+            arguments: {'targetRoute': '/onboarding'},
+          );
+        }
       }
     } catch (e) {
       if (mounted) {

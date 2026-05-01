@@ -86,6 +86,10 @@ class AuthService {
 
       if (response.statusCode == 200) {
         final data = response.data;
+        if (data['otp_required'] == true) {
+          return data;
+        }
+
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['id']);
