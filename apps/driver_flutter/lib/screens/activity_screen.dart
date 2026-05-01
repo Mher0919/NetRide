@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 
 class ActivityScreen extends StatefulWidget {
@@ -22,6 +23,13 @@ class _ActivityScreenState extends State<ActivityScreen> {
 
   Future<void> _fetchHistory() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token');
+      if (token == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
       final response = await ApiService.dio.get('/ride/history');
       setState(() {
         _history = response.data;
@@ -40,9 +48,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFEEEBE6),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFFEEEBE6),
         elevation: 0,
         title: Text('Earnings & Activity', style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold)),
       ),
@@ -118,7 +126,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
     final rating = ride['rating'];
 
     return Container(
-      margin: const EdgeInsets.bottom(16),
+      margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,

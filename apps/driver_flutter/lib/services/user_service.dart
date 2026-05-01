@@ -3,8 +3,8 @@ import 'api_service.dart';
 class UserService {
   static Future<Map<String, dynamic>> getProfile() async {
     try {
-      final response = await ApiService.dio.get('/driver/profile');
-      return response.data;
+      final response = await ApiService.dio.get('driver/profile');
+      return response.data ?? {};
     } catch (e) {
       rethrow;
     }
@@ -12,7 +12,7 @@ class UserService {
 
   static Future<void> updateProfile(Map<String, dynamic> data) async {
     try {
-      await ApiService.dio.patch('/driver/profile', data: data);
+      await ApiService.dio.patch('driver/profile', data: data);
     } catch (e) {
       rethrow;
     }
@@ -20,7 +20,7 @@ class UserService {
 
   static Future<List<dynamic>> getVehicles() async {
     try {
-      final response = await ApiService.dio.get('/driver/vehicles');
+      final response = await ApiService.dio.get('driver/vehicles');
       return response.data;
     } catch (e) {
       rethrow;

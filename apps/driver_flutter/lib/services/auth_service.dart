@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:convert';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
@@ -20,12 +19,18 @@ class AuthService {
         'role': role,
       });
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = response.data;
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('jwt_token', data['token']);
-        await prefs.setString('user_id', data['user']['id']);
-        await prefs.setString('user_role', data['user']['role']);
+        final token = data['token'];
+        if (token != null) {
+          await prefs.setString('jwt_token', token);
+          await prefs.setString('user_id', data['user']['id']);
+          await prefs.setString('user_role', data['user']['role']);
+          debugPrint('[AuthService] Token saved successfully');
+        } else {
+          debugPrint('[AuthService] No token found in response');
+        }
         return data;
       }
       throw Exception('Login failed');
@@ -56,15 +61,127 @@ class AuthService {
         if (role != null) 'role': role,
       });
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = response.data;
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('jwt_token', data['token']);
-        await prefs.setString('user_id', data['user']['id']);
-        await prefs.setString('user_role', data['user']['role']);
+        final token = data['token'];
+        if (token != null) {
+          await prefs.setString('jwt_token', token);
+          await prefs.setString('user_id', data['user']['id']);
+          await prefs.setString('user_role', data['user']['role']);
+          debugPrint('[AuthService] Token saved successfully');
+        } else {
+          debugPrint('[AuthService] No token found in response');
+        }
         return data;
       }
       throw Exception('Verification failed');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> signupWithPassword({
+    required String email,
+    required String fullName,
+    required String password,
+    required String role,
+  }) async {
+    try {
+      final response = await ApiService.dio.post('/auth/signup-password', data: {
+        'email': email,
+        'full_name': fullName,
+        'password': password,
+        'role': role,
+      });
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = response.data;
+        final prefs = await SharedPreferences.getInstance();
+        final token = data['token'];
+        if (token != null) {
+          await prefs.setString('jwt_token', token);
+          await prefs.setString('user_id', data['user']['id']);
+          await prefs.setString('user_role', data['user']['role']);
+          debugPrint('[AuthService] Token saved successfully');
+        } else {
+          debugPrint('[AuthService] No token found in response');
+        }
+        return data;
+      }
+      throw Exception('Signup failed');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> loginWithPassword({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final response = await ApiService.dio.post('/auth/login-password', data: {
+        'email': email,
+        'password': password,
+      });
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = response.data;
+        if (data['otp_required'] == true) {
+          return data;
+        }
+
+        final prefs = await SharedPreferences.getInstance();
+        final token = data['token'];
+        if (token != null) {
+          await prefs.setString('jwt_token', token);
+          await prefs.setString('user_id', data['user']['id']);
+          await prefs.setString('user_role', data['user']['role']);
+          debugPrint('[AuthService] Token saved successfully');
+        } else {
+          debugPrint('[AuthService] No token found in response');
+        }
+        return data;
+      }
+      throw Exception('Login failed');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<void> changePassword({String? currentPassword, required String newPassword}) async {
+    try {
+      await ApiService.dio.post('/auth/change-password', data: {
+        if (currentPassword != null) 'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<void> forgotPassword(String email) async {
+    try {
+      await ApiService.dio.post('/auth/forgot-password', data: {'email': email});
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<void> resetPassword(String token, String newPassword) async {
+    try {
+      await ApiService.dio.post('/auth/reset-password', data: {
+        'token': token,
+        'newPassword': newPassword,
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<void> requestEmailChange(String newEmail) async {
+    try {
+      await ApiService.dio.post('/user/request-email-change', data: {'newEmail': newEmail});
     } catch (e) {
       rethrow;
     }

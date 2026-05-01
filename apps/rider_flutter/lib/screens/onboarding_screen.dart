@@ -11,35 +11,15 @@ class OnboardingScreen extends StatefulWidget {
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _phoneController = TextEditingController();
-  final _dobController = TextEditingController();
   bool _isLoading = false;
-
-  bool _validateAge(String dob) {
-    if (dob.isEmpty) return false;
-    try {
-      final birthDate = DateTime.parse(dob);
-      final today = DateTime.now();
-      int age = today.year - birthDate.year;
-      if (today.month < birthDate.month || (today.month == birthDate.month && today.day < birthDate.day)) {
-        age--;
-      }
-      return age >= 18;
-    } catch (e) {
-      return false;
-    }
-  }
 
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _submit() async {
-    if (_phoneController.text.isEmpty || _dobController.text.isEmpty) {
-      _showError('Please fill in all fields');
-      return;
-    }
-    if (!_validateAge(_dobController.text)) {
-      _showError('Riders must be at least 18 years old (YYYY-MM-DD)');
+    if (_phoneController.text.isEmpty) {
+      _showError('Please enter your phone number');
       return;
     }
 
@@ -47,7 +27,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     try {
       await UserService.updateProfile({
         'phone_number': _phoneController.text.trim(),
-        'date_of_birth': _dobController.text.trim(),
       });
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/');
@@ -62,7 +41,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFEEEBE6),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
@@ -71,7 +50,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             children: [
               const SizedBox(height: 40),
               Text(
-                'Welcome to Uberish',
+                'Welcome to NetRide',
                 style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
@@ -86,20 +65,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 decoration: InputDecoration(
                   labelText: 'Phone Number',
                   hintText: '+1 (555) 000-0000',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Colors.black, width: 2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _dobController,
-                keyboardType: TextInputType.datetime,
-                decoration: InputDecoration(
-                  labelText: 'Date of Birth',
-                  hintText: 'YYYY-MM-DD',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -130,3 +95,4 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 }
+

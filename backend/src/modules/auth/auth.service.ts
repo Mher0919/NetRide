@@ -65,8 +65,8 @@ export class AuthService {
        throw new Error('Password is required');
     }
 
-    const token = this.generateToken(user);
-    return { user, token };
+    await OTPService.generateOTP(data.email);
+    return { otp_required: true, message: 'Verification code sent to email' };
   }
 
   static async changePassword(userId: string, data: { currentPassword?: string, newPassword: string }) {

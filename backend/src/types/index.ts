@@ -16,9 +16,10 @@ export enum TripStatus {
 
 export enum VehicleCategory {
   ECONOMY = 'ECONOMY',
-  PREMIUM = 'PREMIUM',
-  SUV = 'SUV',
-  VAN = 'VAN'
+  EXTRA = 'EXTRA',
+  LUX = 'LUX',
+  SUV_LUX = 'SUV_LUX',
+  PREMIER = 'PREMIER'
 }
 
 export interface User {

@@ -7,7 +7,7 @@ class SuccessScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFEEEBE6),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24.0),

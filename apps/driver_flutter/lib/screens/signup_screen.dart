@@ -30,13 +30,25 @@ class _SignupScreenState extends State<SignupScreen> {
         role: 'DRIVER',
       );
       if (mounted) {
-        // Go to onboarding
-        Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
+        // Go to splash then onboarding
+        Navigator.pushNamedAndRemoveUntil(
+          context, 
+          '/splash', 
+          (route) => false,
+          arguments: {'targetRoute': '/onboarding'},
+        );
       }
     } catch (e) {
       if (mounted) {
+        String errorMsg = e.toString();
+        if (errorMsg.contains('User already exists')) {
+          errorMsg = 'User already exists';
+        }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(
+            content: Text(errorMsg),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -47,9 +59,9 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFEEEBE6),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFFEEEBE6),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 20),
@@ -65,8 +77,20 @@ class _SignupScreenState extends State<SignupScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 20),
+                Center(
+                  child: Hero(
+                    tag: 'auth_icon',
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 120,
+                      height: 120,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Text(
-                  'Drive with Uberish',
+                  'Drive with NetRide',
                   style: GoogleFonts.poppins(
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
@@ -206,3 +230,4 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 }
+

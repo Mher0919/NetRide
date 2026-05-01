@@ -6,6 +6,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../services/auth_service.dart';
 import 'signup_screen.dart';
+import 'verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -33,11 +34,11 @@ class _LoginScreenState extends State<LoginScreen> {
         if (user != null) {
           await AuthService.loginWithOAuth(
             email: user.email,
-            fullName: user.displayName ?? 'Uberish Rider',
+            fullName: user.displayName ?? 'NetRide Rider',
             profileImageUrl: user.photoUrl,
             role: 'RIDER',
           );
-          if (mounted) Navigator.pushReplacementNamed(context, '/onboarding');
+          if (mounted) Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
         }
       } else if (provider == 'apple') {
         final credential = await SignInWithApple.getAppleIDCredential(
@@ -50,11 +51,11 @@ class _LoginScreenState extends State<LoginScreen> {
         await AuthService.loginWithOAuth(
           email: credential.email ?? '',
           fullName: '${credential.givenName ?? ''} ${credential.familyName ?? ''}'.trim().isEmpty 
-            ? 'Uberish Rider' 
+            ? 'NetRide Rider' 
             : '${credential.givenName ?? ''} ${credential.familyName ?? ''}'.trim(),
           role: 'RIDER',
         );
-        if (mounted) Navigator.pushReplacementNamed(context, '/onboarding');
+        if (mounted) Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
       }
     } catch (e) {
       if (mounted) {
@@ -83,12 +84,24 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await AuthService.loginWithPassword(
+      final res = await AuthService.loginWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/');
+        if (res['otp_required'] == true) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => VerificationScreen(
+                email: _emailController.text.trim(),
+                role: 'RIDER',
+              ),
+            ),
+          );
+        } else {
+          Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/'});
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -130,55 +143,30 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
-      backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const SizedBox(height: 60),
                 Text(
-                  'Uberish',
-                  style: GoogleFonts.poppins(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: -1,
+                  'NetRide',
+                  style: theme.textTheme.displayLarge?.copyWith(
+                    fontSize: 40,
+                    letterSpacing: -2,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Request a ride in seconds',
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red[100]!),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info_outline, size: 18, color: Colors.red[700]),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'You must be at least 18 years old to use Uberish.',
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            color: Colors.red[700],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
+                  'Premium private transportation',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.onSurface.withOpacity(0.6),
+                    letterSpacing: 0.5,
                   ),
                 ),
                 const SizedBox(height: 40),
@@ -186,13 +174,26 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Hero(
                     tag: 'auth_icon',
                     child: Container(
-                      width: 160,
-                      height: 160,
+                      width: 260,
+                      height: 260,
                       decoration: BoxDecoration(
-                        color: Colors.blue[50],
                         shape: BoxShape.circle,
+                        color: Colors.white.withOpacity(0.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 30,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
                       ),
-                      child: Icon(Icons.person_pin_circle_rounded, size: 70, color: Colors.blue[700]),
+                      child: Padding(
+                        padding: const EdgeInsets.all(40.0),
+                        child: Image.asset(
+                          'assets/images/logo-noBackground.png',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -200,7 +201,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 400),
                   child: _isLoading 
-                    ? const Center(child: CircularProgressIndicator(color: Colors.black))
+                    ? const Center(child: CircularProgressIndicator())
                     : _showEmailField 
                       ? Column(
                           key: const ValueKey('email_flow'),
@@ -208,33 +209,21 @@ class _LoginScreenState extends State<LoginScreen> {
                             TextField(
                               controller: _emailController,
                               keyboardType: TextInputType.emailAddress,
-                              style: GoogleFonts.poppins(),
-                              decoration: InputDecoration(
-                                hintText: 'Enter your email',
-                                prefixIcon: const Icon(Icons.email_outlined),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(color: Colors.black, width: 2),
-                                ),
+                              decoration: const InputDecoration(
+                                hintText: 'Email address',
+                                prefixIcon: Icon(Icons.email_outlined, size: 20),
                               ),
                             ),
                             const SizedBox(height: 16),
                             TextField(
                               controller: _passwordController,
                               obscureText: _obscurePassword,
-                              style: GoogleFonts.poppins(),
                               decoration: InputDecoration(
-                                hintText: 'Enter your password',
-                                prefixIcon: const Icon(Icons.lock_outline_rounded),
+                                hintText: 'Password',
+                                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
                                 suffixIcon: IconButton(
-                                  icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                                  icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, size: 20, color: Colors.grey),
                                   onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                                ),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(color: Colors.black, width: 2),
                                 ),
                               ),
                             ),
@@ -242,26 +231,21 @@ class _LoginScreenState extends State<LoginScreen> {
                               alignment: Alignment.centerRight,
                               child: TextButton(
                                 onPressed: _handleForgotPassword,
-                                child: Text('Forgot Password?', style: GoogleFonts.poppins(color: Colors.blue[700], fontSize: 13)),
+                                child: Text('Forgot Password?', style: TextStyle(color: theme.colorScheme.primary, fontSize: 13, fontWeight: FontWeight.w500)),
                               ),
                             ),
                             const SizedBox(height: 8),
                             SizedBox(
                               width: double.infinity,
-                              height: 56,
                               child: ElevatedButton(
                                 onPressed: _handleEmailLogin,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.black,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                                child: Text('Login', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
+                                child: const Text('Login'),
                               ),
                             ),
+                            const SizedBox(height: 12),
                             TextButton(
                               onPressed: () => setState(() => _showEmailField = false),
-                              child: Text('Other options', style: GoogleFonts.poppins(color: Colors.grey[600])),
+                              child: Text('Back to other options', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5))),
                             ),
                           ],
                         )
@@ -272,8 +256,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               icon: Icons.g_mobiledata_rounded,
                               label: 'Continue with Google',
                               onPressed: () => _handleOAuth('google'),
-                              color: Colors.white,
-                              textColor: Colors.black,
+                              backgroundColor: Colors.white,
+                              textColor: theme.colorScheme.onSurface,
                               hasBorder: true,
                             ),
                             const SizedBox(height: 12),
@@ -281,7 +265,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               icon: Icons.apple_rounded,
                               label: 'Continue with Apple',
                               onPressed: () => _handleOAuth('apple'),
-                              color: Colors.black,
+                              backgroundColor: theme.colorScheme.onSurface,
                               textColor: Colors.white,
                             ),
                             const SizedBox(height: 12),
@@ -289,8 +273,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               icon: Icons.email_rounded,
                               label: 'Continue with Email',
                               onPressed: () => setState(() => _showEmailField = true),
-                              color: Colors.grey[100]!,
-                              textColor: Colors.black,
+                              backgroundColor: Colors.transparent,
+                              textColor: theme.colorScheme.onSurface,
+                              hasBorder: true,
                             ),
                           ],
                         ),
@@ -302,18 +287,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text("Don't have an account? ", style: GoogleFonts.poppins(color: Colors.grey[600])),
+                          Text("Don't have an account? ", style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6))),
                           GestureDetector(
                             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SignupScreen())),
-                            child: Text("Sign Up", style: GoogleFonts.poppins(color: Colors.blue[700], fontWeight: FontWeight.bold)),
+                            child: Text("Sign Up", style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 32),
                       Text(
                         'By continuing, you agree to our Terms and Privacy Policy',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                        style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface.withOpacity(0.4)),
                       ),
                     ],
                   ),
@@ -332,7 +317,7 @@ class _OAuthButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onPressed;
-  final Color color;
+  final Color backgroundColor;
   final Color textColor;
   final bool hasBorder;
 
@@ -340,7 +325,7 @@ class _OAuthButton extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onPressed,
-    required this.color,
+    required this.backgroundColor,
     required this.textColor,
     this.hasBorder = false,
   });
@@ -353,22 +338,22 @@ class _OAuthButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: color,
+          backgroundColor: backgroundColor,
           foregroundColor: textColor,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: hasBorder ? BorderSide(color: Colors.grey[300]!) : BorderSide.none,
+            borderRadius: BorderRadius.circular(16),
+            side: hasBorder ? BorderSide(color: Theme.of(context).dividerColor) : BorderSide.none,
           ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 28),
+            Icon(icon, size: 24),
             const SizedBox(width: 12),
             Text(
               label,
-              style: GoogleFonts.poppins(
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
@@ -379,3 +364,5 @@ class _OAuthButton extends StatelessWidget {
     );
   }
 }
+
+

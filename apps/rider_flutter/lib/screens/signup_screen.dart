@@ -30,8 +30,13 @@ class _SignupScreenState extends State<SignupScreen> {
         role: 'RIDER',
       );
       if (mounted) {
-        // Go to onboarding
-        Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
+        // Go to splash then onboarding
+        Navigator.pushNamedAndRemoveUntil(
+          context, 
+          '/splash', 
+          (route) => false,
+          arguments: {'targetRoute': '/onboarding'},
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -47,9 +52,9 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFEEEBE6),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFFEEEBE6),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 20),
@@ -65,6 +70,18 @@ class _SignupScreenState extends State<SignupScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 20),
+                Center(
+                  child: Hero(
+                    tag: 'auth_icon',
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 120,
+                      height: 120,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Text(
                   'Create Account',
                   style: GoogleFonts.poppins(
@@ -75,7 +92,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Join Uberish and start riding today.',
+                  'Join NetRide and start riding today.',
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     color: Colors.grey[600],
@@ -206,3 +223,4 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 }
+

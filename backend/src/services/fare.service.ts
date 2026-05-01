@@ -14,14 +14,17 @@ export const fareService = {
     let typeMultiplier = 1.0;
 
     switch (vehicleType) {
-      case VehicleCategory.SUV:
-        typeMultiplier = 1.5;
+      case VehicleCategory.EXTRA:
+        typeMultiplier = 1.3;
         break;
-      case VehicleCategory.VAN:
+      case VehicleCategory.LUX:
         typeMultiplier = 1.8;
         break;
-      case VehicleCategory.PREMIUM:
+      case VehicleCategory.SUV_LUX:
         typeMultiplier = 2.0;
+        break;
+      case VehicleCategory.PREMIER:
+        typeMultiplier = 2.5;
         break;
       case VehicleCategory.ECONOMY:
       default:

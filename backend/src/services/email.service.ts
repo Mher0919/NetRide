@@ -24,9 +24,10 @@ export class EmailService {
    * easy MIME/Attachment generation.
    */
   private static async sendEmail(options: nodemailer.SendMailOptions): Promise<void> {
-    if (!env.GMAIL_USER_EMAIL || !env.GMAIL_REFRESH_TOKEN) {
-      console.warn('⚠️ Gmail credentials missing. Email not sent.');
-      return;
+    if (!env.GMAIL_USER_EMAIL || !env.GMAIL_REFRESH_TOKEN || !env.GMAIL_CLIENT_ID || !env.GMAIL_CLIENT_SECRET) {
+      console.warn('⚠️ [GMAIL API] Gmail credentials missing in .env. Email will NOT be sent.');
+      console.info('💡 TIP: Check your backend console logs for the verification code in development mode.');
+      throw new Error('Email service not configured');
     }
 
     try {
@@ -57,8 +58,9 @@ export class EmailService {
           raw: encodedMessage,
         },
       });
-    } catch (error) {
-      console.error('❌ [GMAIL API] Send Error:', error);
+      console.log(`✅ [GMAIL API] Email sent successfully to ${options.to}`);
+    } catch (error: any) {
+      console.error('❌ [GMAIL API] Send Error:', error.message);
       throw error;
     }
   }
@@ -98,26 +100,25 @@ export class EmailService {
     try {
       await this.sendEmail({
         to: email,
-        subject: 'Your Uberish Verification Code',
+        subject: 'Your NetRide Verification Code',
         html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-          <h2 style="color: #000; text-align: center;">Uberish</h2>
+          <h2 style="color: #000; text-align: center;">NetRide</h2>
           <p>Hello,</p>
-          <p>Your verification code for Uberish is:</p>
+          <p>Your verification code for NetRide is:</p>
           <div style="background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
             ${code}
           </div>
           <p>This code will expire in 10 minutes. If you did not request this code, please ignore this email.</p>
           <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
           <p style="font-size: 12px; color: #777; text-align: center;">
-            &copy; 2026 Uberish. All rights reserved.
+            &copy; 2026 NetRide. All rights reserved.
           </p>
         </div>
         `,
       });
-      console.log(`✅ [GMAIL API] Verification code sent to ${email}`);
     } catch (error) {
-      // Logged in sendEmail
+      // Error is already logged in sendEmail
     }
   }
 
@@ -231,7 +232,7 @@ export class EmailService {
       
       await this.sendEmail({
         to: email,
-        subject: 'Reset your Uberish Password',
+        subject: 'Reset your NetRide Password',
         html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
           <h2 style="color: #333;">Password Reset</h2>
@@ -256,7 +257,7 @@ export class EmailService {
       
       await this.sendEmail({
         to: email,
-        subject: 'Verify your new Uberish Email',
+        subject: 'Verify your new NetRide Email',
         html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
           <h2 style="color: #333;">Verify New Email</h2>
@@ -274,3 +275,4 @@ export class EmailService {
     }
   }
 }
+

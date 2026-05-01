@@ -31,9 +31,10 @@ enum TripStatus {
 
 enum VehicleCategory {
   ECONOMY
-  PREMIUM
-  SUV
-  VAN
+  EXTRA
+  LUX
+  SUV_LUX
+  PREMIER
 }
 
 model User {
@@ -62,6 +63,8 @@ model Driver {
   license_expiry_date     DateTime?
   license_photo_url       String?
   license_photo_back_url  String?
+  insurance_photo_url     String?
+  registration_photo_url  String?
   background_check_status BackgroundCheckStatus @default(PENDING)
   rating                  Float                 @default(5.0)
   total_rides             Int                   @default(0)
@@ -89,6 +92,8 @@ model DriverVehicle {
   license_plate_number      String
   license_plate_photo_url   String?
   car_photo_urls            String[] // Prisma supports String[] in PostgreSQL
+  color                     String?
+  interior_color            String?
 }
 
 model Ride {

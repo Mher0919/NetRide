@@ -8,7 +8,8 @@
 PRODUCT_NAME = rider_flutter
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.uberish.rider.riderFlutter
+PRODUCT_BUNDLE_IDENTIFIER = com.NetRide.rider.riderFlutter
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.uberish.rider. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.NetRide.rider. All rights reserved.
+

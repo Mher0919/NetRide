@@ -1,17 +1,18 @@
 // backend/src/modules/driver/driver.service.ts
 import { pool } from '../../config/database';
+import { EmailService } from '../../services/email.service';
 
 export class DriverService {
   static async getProfile(userId: string) {
     const res = await pool.query(
       `SELECT u.*, d.* 
        FROM users u 
-       JOIN drivers d ON u.id = d.user_id 
+       LEFT JOIN drivers d ON u.id = d.user_id 
        WHERE u.id = $1`,
       [userId]
     );
     const profile = res.rows[0];
-    if (profile) {
+    if (profile && profile.user_id) {
       const vehicleRes = await pool.query(
         `SELECT dv.*, v.* 
          FROM driver_vehicles dv 
@@ -34,6 +35,9 @@ export class DriverService {
       if (!data.identity.license_photo_url || !data.identity.license_photo_back_url) {
         throw new Error('Both front and back photos of the license are mandatory');
       }
+      if (!data.identity.insurance_photo_url || !data.identity.registration_photo_url) {
+        throw new Error('Insurance and car registration photos are mandatory');
+      }
 
       // 1. Update User
       await client.query(
@@ -43,21 +47,37 @@ export class DriverService {
         [data.personalInfo.phone_number, data.personalInfo.date_of_birth, data.personalInfo.profile_image_url, userId]
       );
 
-      // 2. Update Driver
+      // 2. Ensure Driver Record Exists and Update
+      // Check if driver record exists
+      const driverExists = await client.query('SELECT * FROM drivers WHERE user_id = $1', [userId]);
+      if (driverExists.rows.length === 0) {
+        await client.query('INSERT INTO drivers (user_id) VALUES ($1)', [userId]);
+      }
+
       const driverRes = await client.query(
         `UPDATE drivers 
-         SET license_number = $1, license_expiry_date = $2, license_photo_url = $3, license_photo_back_url = $4,
+         SET license_number = $1, license_expiry_date = $2, 
+             license_photo_url = $3, license_photo_back_url = $4,
+             insurance_photo_url = $5, registration_photo_url = $6,
              background_check_status = 'PENDING', is_active = false 
-         WHERE user_id = $5
+         WHERE user_id = $7
          RETURNING *`,
-        [data.identity.license_number, data.identity.license_expiry_date, data.identity.license_photo_url, data.identity.license_photo_back_url, userId]
+        [
+          data.identity.license_number, 
+          data.identity.license_expiry_date, 
+          data.identity.license_photo_url, 
+          data.identity.license_photo_back_url,
+          data.identity.insurance_photo_url,
+          data.identity.registration_photo_url,
+          userId
+        ]
       );
 
       // 3. Create DriverVehicle
       await client.query(
-        `INSERT INTO driver_vehicles (driver_id, vehicle_id, license_plate_number, license_plate_photo_url, car_photo_urls)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [userId, data.vehicle.vehicle_id, data.vehicle.license_plate_number, data.vehicle.license_plate_photo_url, data.vehicle.car_photo_urls]
+        `INSERT INTO driver_vehicles (driver_id, vehicle_id, license_plate_number, license_plate_photo_url, car_photo_urls, color, interior_color)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [userId, data.vehicle.vehicle_id, data.vehicle.license_plate_number, data.vehicle.license_plate_photo_url, data.vehicle.car_photo_urls, data.vehicle.color, data.vehicle.interior_color]
       );
 
       await client.query('COMMIT');

@@ -13,7 +13,7 @@ class AuthService {
     required String role,
   }) async {
     try {
-      final response = await ApiService.dio.post('/auth/oauth', data: {
+      final response = await ApiService.dio.post('auth/oauth', data: {
         'email': email,
         'full_name': fullName,
         'profile_image_url': profileImageUrl,
@@ -36,7 +36,7 @@ class AuthService {
 
   static Future<void> requestOTP(String email) async {
     try {
-      await ApiService.dio.post('/auth/request-otp', data: {'email': email});
+      await ApiService.dio.post('auth/request-otp', data: {'email': email});
     } catch (e) {
       rethrow;
     }
@@ -49,7 +49,7 @@ class AuthService {
     String? role,
   }) async {
     try {
-      final response = await ApiService.dio.post('/auth/verify-otp', data: {
+      final response = await ApiService.dio.post('auth/verify-otp', data: {
         'email': email,
         'code': code,
         if (fullName != null) 'full_name': fullName,
@@ -77,7 +77,7 @@ class AuthService {
     required String role,
   }) async {
     try {
-      final response = await ApiService.dio.post('/auth/signup-password', data: {
+      final response = await ApiService.dio.post('auth/signup-password', data: {
         'email': email,
         'full_name': fullName,
         'password': password,
@@ -103,13 +103,17 @@ class AuthService {
     required String password,
   }) async {
     try {
-      final response = await ApiService.dio.post('/auth/login-password', data: {
+      final response = await ApiService.dio.post('auth/login-password', data: {
         'email': email,
         'password': password,
       });
 
       if (response.statusCode == 200) {
         final data = response.data;
+        if (data['otp_required'] == true) {
+          return data;
+        }
+        
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['id']);
@@ -124,7 +128,7 @@ class AuthService {
 
   static Future<void> changePassword({String? currentPassword, required String newPassword}) async {
     try {
-      await ApiService.dio.post('/auth/change-password', data: {
+      await ApiService.dio.post('auth/change-password', data: {
         if (currentPassword != null) 'currentPassword': currentPassword,
         'newPassword': newPassword,
       });
@@ -135,7 +139,7 @@ class AuthService {
 
   static Future<void> forgotPassword(String email) async {
     try {
-      await ApiService.dio.post('/auth/forgot-password', data: {'email': email});
+      await ApiService.dio.post('auth/forgot-password', data: {'email': email});
     } catch (e) {
       rethrow;
     }
@@ -143,7 +147,7 @@ class AuthService {
 
   static Future<void> resetPassword(String token, String newPassword) async {
     try {
-      await ApiService.dio.post('/auth/reset-password', data: {
+      await ApiService.dio.post('auth/reset-password', data: {
         'token': token,
         'newPassword': newPassword,
       });
@@ -154,7 +158,7 @@ class AuthService {
 
   static Future<void> requestEmailChange(String newEmail) async {
     try {
-      await ApiService.dio.post('/user/request-email-change', data: {'newEmail': newEmail});
+      await ApiService.dio.post('user/request-email-change', data: {'newEmail': newEmail});
     } catch (e) {
       rethrow;
     }
@@ -167,7 +171,7 @@ class AuthService {
       final filename = file.path.split(Platform.pathSeparator).last;
       final mimetype = _getMimeType(filename);
 
-      final response = await ApiService.dio.post('/upload', data: {
+      final response = await ApiService.dio.post('upload', data: {
         'image': base64Image,
         'mimetype': mimetype,
         'filename': filename,

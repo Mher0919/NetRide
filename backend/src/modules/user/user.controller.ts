@@ -30,13 +30,21 @@ export class UserController {
   static async getProfile(req: AuthRequest, res: Response) {
     try {
       const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      if (!userId) {
+        console.warn('[USER] ❌ No userId in request user object');
+        return res.status(401).json({ message: 'Unauthorized' });
+      }
 
+      console.log(`[USER] 👤 Fetching profile for ID: ${userId}`);
       const user = await UserService.getProfile(userId);
-      if (!user) return res.status(404).json({ message: 'User not found' });
+      if (!user) {
+        console.warn(`[USER] ❌ User not found in DB for ID: ${userId}`);
+        return res.status(404).json({ message: 'User not found' });
+      }
 
       res.json(user);
     } catch (error: any) {
+      console.error(`[USER] ❌ Error in getProfile: ${error.message}`);
       res.status(500).json({ message: error.message });
     }
   }

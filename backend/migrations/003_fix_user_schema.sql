@@ -18,6 +18,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth TIMESTAMPTZ;
 -- Add profile_image_url column if missing
 ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT;
 
+-- Add password_hash column if missing
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
 -- Make phone_number and password_hash nullable
 ALTER TABLE users ALTER COLUMN phone_number DROP NOT NULL;
 ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;

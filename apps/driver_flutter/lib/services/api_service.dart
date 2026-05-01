@@ -5,10 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
   static final String _baseUrl = kIsWeb 
-      ? 'http://localhost:3000/api'
+      ? 'http://localhost:3000/api/'
       : Platform.isAndroid 
-          ? 'http://10.0.2.2:3000/api' 
-          : 'http://localhost:3000/api';
+          ? 'http://10.0.2.2:3000/api/' 
+          : 'http://localhost:3000/api/';
 
   static final Dio dio = Dio(
     BaseOptions(
@@ -29,8 +29,15 @@ class ApiService {
         final token = prefs.getString('jwt_token');
         if (token != null) {
           options.headers['Authorization'] = 'Bearer $token';
+          debugPrint('[API] Sending request to ${options.path} with token');
+        } else {
+          debugPrint('[API] Sending request to ${options.path} WITHOUT token');
         }
         return handler.next(options);
+      },
+      onError: (e, handler) {
+        debugPrint('[API] Error for ${e.requestOptions.path}: [${e.response?.statusCode}] ${e.response?.data}');
+        return handler.next(e);
       },
     ));
   }
