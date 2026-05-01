@@ -29,18 +29,22 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await AuthService.verifyOTP(
+      final res = await AuthService.verifyOTP(
         email: widget.email,
         code: code,
         fullName: widget.fullName,
         role: widget.role,
       );
+      
       if (mounted) {
+        final user = res['user'];
+        final bool isNewUser = user['phone_number'] == null || user['phone_number'].toString().isEmpty;
+        
         Navigator.pushNamedAndRemoveUntil(
           context, 
           '/splash', 
           (route) => false,
-          arguments: {'targetRoute': '/onboarding'},
+          arguments: {'targetRoute': isNewUser ? '/onboarding' : '/'},
         );
       }
     } catch (e) {
@@ -149,27 +153,38 @@ class _VerificationScreenState extends State<VerificationScreen> {
   }
 
   Widget _buildDigitBox(int index) {
-    return Container(
+    return SizedBox(
       width: 45,
       height: 55,
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _focusNodes[index].hasFocus ? Colors.black : Colors.transparent,
-          width: 1.5,
-        ),
-      ),
       child: TextField(
         controller: _controllers[index],
         focusNode: _focusNodes[index],
         keyboardType: TextInputType.number,
         textAlign: TextAlign.center,
+        textAlignVertical: TextAlignVertical.center,
         maxLength: 1,
-        style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold),
-        decoration: const InputDecoration(
+        cursorColor: Colors.black,
+        style: const TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+          color: Colors.black,
+        ),
+        decoration: InputDecoration(
           counterText: "",
-          border: InputBorder.none,
+          filled: true,
+          fillColor: Colors.grey.shade50,
+          contentPadding: EdgeInsets.zero,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(
+              color: Colors.black,
+              width: 1.5,
+            ),
+          ),
         ),
         onChanged: (value) {
           if (value.isNotEmpty && index < 5) {
@@ -177,6 +192,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
           } else if (value.isEmpty && index > 0) {
             _focusNodes[index - 1].requestFocus();
           }
+
           if (_controllers.every((c) => c.text.isNotEmpty)) {
             _verify();
           }
