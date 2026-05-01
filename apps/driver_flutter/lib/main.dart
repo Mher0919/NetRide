@@ -51,14 +51,14 @@ class NetRideDriver extends StatelessWidget {
       title: 'NetRide Driver',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      initialRoute: isAuthenticated ? '/splash' : '/login',
+      initialRoute: '/splash',
       onGenerateRoute: (settings) {
         Widget page;
         switch (settings.name) {
           case '/splash':
             final args = settings.arguments as Map<String, dynamic>?;
             page = SplashScreen(
-              targetRoute: args?['targetRoute'] ?? '/',
+              targetRoute: args?['targetRoute'] ?? (isAuthenticated ? '/' : '/login'),
               arguments: args?['arguments'],
             );
             break;

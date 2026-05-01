@@ -37,6 +37,44 @@ class _ActivityScreenState extends State<ActivityScreen> {
     }
   }
 
+  Future<void> _deleteActivity(String id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Activity'),
+        content: const Text('Are you sure you want to delete this trip from your history?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await ApiService.dio.delete('/ride/history/$id');
+      setState(() {
+        _history.removeWhere((ride) => ride['id'] == id);
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Activity deleted')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete activity: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -102,10 +140,11 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Widget _buildRideCard(dynamic ride, ThemeData theme) {
-    final date = DateTime.parse(ride['created_at']);
+    final dateStr = ride['requested_at'] ?? ride['created_at'];
+    final date = dateStr != null ? DateTime.parse(dateStr.toString()) : DateTime.now();
     final formattedDate = DateFormat('EEE, MMM d • h:mm a').format(date);
     final status = ride['status']?.toString().toUpperCase() ?? 'COMPLETED';
-    final fare = ride['estimated_fare'] ?? '0.00';
+    final fare = ride['fare_amount'] ?? ride['estimated_fare'] ?? '0.00';
     final rating = ride['rating'];
 
     return Container(
@@ -137,13 +176,23 @@ class _ActivityScreenState extends State<ActivityScreen> {
                   color: Color(0xFF2F3A32),
                 ),
               ),
-              Text(
-                '\$$fare',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                  color: Color(0xFF2F3A32),
-                ),
+              Row(
+                children: [
+                  Text(
+                    '\$$fare',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      color: Color(0xFF2F3A32),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                    onPressed: () => _deleteActivity(ride['id']),
+                  ),
+                ],
               ),
             ],
           ),
@@ -151,7 +200,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
           _buildLocationRow(
             icon: Icons.circle,
             iconColor: const Color(0xFF5B7760),
-            address: ride['pickup_address'] ?? 'Unknown Pickup',
+            address: ride['pickup']?['address']?.toString() ?? ride['pickup_address']?.toString() ?? 'Unknown Pickup',
           ),
           const Padding(
             padding: EdgeInsets.only(left: 4, top: 4, bottom: 4),
@@ -163,7 +212,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
           _buildLocationRow(
             icon: Icons.square,
             iconColor: const Color(0xFF2F3A32),
-            address: ride['destination_address'] ?? 'Unknown Destination',
+            address: ride['destination']?['address']?.toString() ?? ride['destination_address']?.toString() ?? 'Unknown Destination',
           ),
           const SizedBox(height: 20),
           Row(
