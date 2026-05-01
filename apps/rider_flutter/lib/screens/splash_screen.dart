@@ -81,9 +81,12 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               child: SizedBox(
                 width: 200,
                 height: 200,
-                child: Image.asset(
-                  'assets/images/logo.png',
-                  fit: BoxFit.contain,
+                child: Hero(
+                  tag: 'auth_icon',
+                  child: Image.asset(
+                    'assets/images/logo-noBackground.png',
+                    fit: BoxFit.contain,
+                  ),
                 ),
               ),
             ),
