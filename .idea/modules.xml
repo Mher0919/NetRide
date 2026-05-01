@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Uberish.iml" filepath="$PROJECT_DIR$/.idea/Uberish.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/NetRide.iml" filepath="$PROJECT_DIR$/.idea/NetRide.iml" />
     </modules>
   </component>
 </project>

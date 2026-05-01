@@ -22,7 +22,7 @@ export class AdminController {
       res.send(`
         <div style="font-family: Arial; text-align: center; padding: 50px;">
           <h1 style="color: green;">✅ Driver Verified Successfully!</h1>
-          <p>The driver (${userId}) can now start using the Uberish app.</p>
+          <p>The driver (${userId}) can now start using the NetRide app.</p>
         </div>
       `);
     } catch (error: any) {
@@ -53,3 +53,4 @@ export class AdminController {
     }
   }
 }
+

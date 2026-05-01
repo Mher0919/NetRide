@@ -25,6 +25,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     final models.Location pickup = args['pickup'];
     final models.Location destination = args['destination'];
     final rideProvider = Provider.of<RideProvider>(context);
+    final theme = Theme.of(context);
 
     if (rideProvider.status == models.TripStatus.ACCEPTED) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -33,73 +34,86 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 20),
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF2F3A32)),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Ride Details', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 22)),
+        title: Text(
+          'Confirm Ride',
+          style: theme.textTheme.headlineMedium?.copyWith(fontSize: 24),
+        ),
+        centerTitle: true,
       ),
       body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('PICKUP', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
-            const SizedBox(height: 10),
-            Hero(
-              tag: 'pickup_search',
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Text(pickup.address ?? 'Selected Pickup', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                ),
-              ),
+            _buildLocationSection(
+              title: 'PICKUP',
+              address: pickup.address ?? 'Current Location',
+              icon: Icons.circle,
+              iconColor: const Color(0xFF5B7760),
             ),
-            const SizedBox(height: 25),
-            const Text('DESTINATION', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
-            const SizedBox(height: 10),
-            Hero(
-              tag: 'destination_search',
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Text(destination.address ?? 'Selected Destination', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                ),
-              ),
+            const SizedBox(height: 24),
+            _buildLocationSection(
+              title: 'DESTINATION',
+              address: destination.address ?? 'Selected Destination',
+              icon: Icons.square,
+              iconColor: const Color(0xFF2F3A32),
             ),
             const SizedBox(height: 40),
             Container(
-              padding: const EdgeInsets.all(25),
+              padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(32),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: const Color(0xFFD8D2CA)),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10)),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
                 ],
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('ESTIMATED FARE', style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
-                  Text('\$${_fare.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -1)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Estimated fare',
+                        style: TextStyle(
+                          color: const Color(0xFF2F3A32).withOpacity(0.5),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'NetRide Premium',
+                        style: TextStyle(
+                          color: const Color(0xFF2F3A32),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    '\$${_fare.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      color: Color(0xFF2F3A32),
+                      fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -1,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -108,23 +122,33 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
               Center(
                 child: Column(
                   children: [
-                    const SizedBox(
-                      height: 60,
-                      width: 60,
-                      child: CircularProgressIndicator(color: Colors.black, strokeWidth: 5),
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 32),
+                    Text(
+                      'Finding your driver...',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                      ),
                     ),
-                    const SizedBox(height: 30),
-                    const Text('Connecting you to a driver...', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-                    const SizedBox(height: 10),
-                    const Text('Hang tight, we\'re finding the best match', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Matching you with a nearby premium vehicle',
+                      style: TextStyle(
+                        color: const Color(0xFF2F3A32).withOpacity(0.5),
+                      ),
+                    ),
                     const SizedBox(height: 40),
                     TextButton(
                       onPressed: () => rideProvider.reset(),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+                      child: const Text(
+                        'CANCEL REQUEST',
+                        style: TextStyle(
+                          color: Color(0xFFC65A5A),
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.2,
+                        ),
                       ),
-                      child: const Text('CANCEL REQUEST', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
                     ),
                   ],
                 ),
@@ -132,36 +156,68 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
             else
               Hero(
                 tag: 'confirm_button',
-                child: Container(
+                child: SizedBox(
                   width: double.infinity,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(32),
-                    gradient: const LinearGradient(
-                      colors: [Colors.black, Color(0xFF2C2C2C)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 15, offset: const Offset(0, 8)),
-                    ],
-                  ),
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.all(22),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
-                      elevation: 0,
-                    ),
                     onPressed: () => rideProvider.requestRide(pickup, destination),
-                    child: const Text('REQUEST UBERISH', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2)),
+                    child: const Text('REQUEST NetRide'),
                   ),
                 ),
               ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 20),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildLocationSection({
+    required String title,
+    required String address,
+    required IconData icon,
+    required Color iconColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            color: const Color(0xFF2F3A32).withOpacity(0.4),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.5,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFD8D2CA)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 10, color: iconColor),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  address,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF2F3A32),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
+

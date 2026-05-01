@@ -14,12 +14,16 @@ const OnboardSchema = z.object({
     license_expiry_date: z.string(),
     license_photo_url: z.string().url(),
     license_photo_back_url: z.string().url(),
+    insurance_photo_url: z.string().url(),
+    registration_photo_url: z.string().url(),
   }),
   vehicle: z.object({
     vehicle_id: z.string().uuid(),
     license_plate_number: z.string(),
     license_plate_photo_url: z.string().url(),
     car_photo_urls: z.array(z.string().url()).min(2).max(4),
+    color: z.string().optional(),
+    interior_color: z.string().optional(),
   }),
 });
 

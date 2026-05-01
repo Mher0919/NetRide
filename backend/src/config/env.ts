@@ -18,7 +18,7 @@ const envSchema = z.object({
   GMAIL_CLIENT_SECRET: z.string().optional(),
   GMAIL_REFRESH_TOKEN: z.string().optional(),
   GMAIL_USER_EMAIL: z.string().optional(),
-  EMAIL_FROM: z.string().default('Uberish <noreply@uberish.com>'),
+  EMAIL_FROM: z.string().default('NetRide <noreply@netride.com>'),
   APP_URL: z.string().default('http://localhost:3000'),
 });
 
@@ -30,3 +30,4 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+

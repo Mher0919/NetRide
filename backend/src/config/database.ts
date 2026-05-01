@@ -10,8 +10,9 @@ export const pool = new Pool({
 console.log('🔌 Attempting to connect to database at:', env.DATABASE_URL.replace(/:[^:@/]+@/, ':****@'));
 
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  console.error('⚠️ [DATABASE] Unexpected error on idle client:', err.message);
+  // Do not process.exit(-1) here. The pool will handle reconnecting on the next query.
+  // In development, idle connections are often terminated by Postgres or network resets.
 });
 
 export const query = (text: string, params?: any[]) => pool.query(text, params);

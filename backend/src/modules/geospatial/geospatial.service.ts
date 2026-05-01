@@ -130,10 +130,14 @@ export class GeospatialService {
   }
 
   static async preCacheHotZones(zones: [number, number][]) {
-    console.log('[GEOSPATIAL] Waiting for OSRM to load into RAM...');
+    console.log('[GEOSPATIAL] OSRM health check started in background...');
+    
+    let checks = 0;
+    const maxChecks = 12; // 1 minute at 5s intervals
     
     // Background health check loop
     const checkInterval = setInterval(async () => {
+      checks++;
       try {
         const url = `${env.OSRM_URL.replace('/route/v1/driving', '/nearest/v1/driving')}/${zones[0][1]},${zones[0][0]}?number=1`;
         await this.axiosClient.get(url);
@@ -149,7 +153,10 @@ export class GeospatialService {
           }
         }
       } catch (e) {
-        // Silently wait
+        if (checks >= maxChecks) {
+          console.log('[GEOSPATIAL] ℹ️ OSRM still offline. Continuing with synthetic fallback. Pre-caching disabled.');
+          clearInterval(checkInterval);
+        }
       }
     }, 5000);
   }

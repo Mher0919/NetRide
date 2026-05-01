@@ -24,6 +24,12 @@ export class OTPService {
   }
 
   static async verifyOTP(email: string, code: string): Promise<boolean> {
+    // DEV BYPASS: Allow '111111' for dummy users in development
+    if (process.env.NODE_ENV === 'development' && code === '111111' && email.endsWith('@NetRide.dev')) {
+      console.log(`[AUTH] 🛠️ Dev OTP bypass used for ${email}`);
+      return true;
+    }
+
     const res = await pool.query(
       'SELECT * FROM verification_codes WHERE email = $1 AND code = $2 AND expires_at > NOW()',
       [email, code]

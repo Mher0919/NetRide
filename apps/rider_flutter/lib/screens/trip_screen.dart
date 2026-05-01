@@ -98,6 +98,7 @@ class _TripScreenState extends State<TripScreen> {
   Widget build(BuildContext context) {
     final rideProvider = Provider.of<RideProvider>(context);
     final driver = rideProvider.driver;
+    final theme = Theme.of(context);
 
     if (rideProvider.status == models.TripStatus.COMPLETED) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -106,16 +107,22 @@ class _TripScreenState extends State<TripScreen> {
     }
 
     if (driver == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF5F5F5),
+      return Scaffold(
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(color: Colors.black, strokeWidth: 3),
-              SizedBox(height: 25),
-              Text('Your driver is on the way', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black)),
-              Text('Preparing trip details...', style: TextStyle(color: Colors.grey)),
+              const CircularProgressIndicator(),
+              const SizedBox(height: 32),
+              Text(
+                'Driver is on the way',
+                style: theme.textTheme.headlineMedium?.copyWith(fontSize: 20),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Preparing your premium experience...',
+                style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5)),
+              ),
             ],
           ),
         ),
@@ -138,13 +145,12 @@ class _TripScreenState extends State<TripScreen> {
 
     String statusText = 'Driver is arriving';
     if (rideProvider.status == models.TripStatus.IN_PROGRESS) {
-      statusText = 'Proceeding to destination';
+      statusText = 'Heading to destination';
     }
 
     final showRiderMarker = rideProvider.status != models.TripStatus.IN_PROGRESS && _riderLocation != null;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
       body: Stack(
         children: [
           if (driverLocation != null)
@@ -163,16 +169,22 @@ class _TripScreenState extends State<TripScreen> {
                 TileLayer(
                   urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
                   subdomains: const ['a', 'b', 'c', 'd'],
-                  userAgentPackageName: 'com.uberish.rider',
+                  userAgentPackageName: 'com.NetRide.rider',
                   tileBuilder: (context, tileWidget, tile) {
                     return ColorFiltered(
-                      colorFilter: const ColorFilter.matrix([
-                        0.2126, 0.7152, 0.0722, 0, 0,
-                        0.2126, 0.7152, 0.0722, 0, 0,
-                        0.2126, 0.7152, 0.0722, 0, 0,
-                        0,      0,      0,      1, 0,
+                      colorFilter: const ColorFilter.matrix(<double>[
+                        0.937, 0, 0, 0, 0, // R
+                        0, 0.922, 0, 0, 0, // G
+                        0, 0, 0.902, 0, 0, // B
+                        0, 0, 0, 1, 0,      // A
                       ]),
-                      child: tileWidget,
+                      child: ColorFiltered(
+                        colorFilter: ColorFilter.mode(
+                          const Color(0xFFEEEBE6).withOpacity(0.3),
+                          BlendMode.multiply,
+                        ),
+                        child: tileWidget,
+                      ),
                     );
                   },
                 ),
@@ -180,35 +192,35 @@ class _TripScreenState extends State<TripScreen> {
                   markers: [
                     Marker(
                       point: driverLocation,
-                      width: 70,
-                      height: 70,
-                      child: Column(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.black,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 15, spreadRadius: 2),
-                              ],
+                      width: 50,
+                      height: 50,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2F3A32),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 10,
+                              spreadRadius: 2,
                             ),
-                            child: const Icon(Icons.directions_car, color: Colors.white, size: 30),
-                          ),
-                        ],
+                          ],
+                        ),
+                        child: const Icon(Icons.directions_car, color: Colors.white, size: 24),
                       ),
                     ),
                     if (showRiderMarker)
                       Marker(
                         point: _riderLocation!,
-                        width: 60,
-                        height: 60,
+                        width: 40,
+                        height: 40,
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.blueAccent.withOpacity(0.2),
+                            color: const Color(0xFF5B7760).withOpacity(0.15),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.person_pin_circle, color: Colors.blueAccent, size: 40),
+                          child: const Icon(Icons.person_pin_circle, color: Color(0xFF5B7760), size: 30),
                         ),
                       ),
                   ],
@@ -216,36 +228,59 @@ class _TripScreenState extends State<TripScreen> {
               ],
             )
           else
-            const Center(child: CircularProgressIndicator(color: Colors.black)),
+            const Center(child: CircularProgressIndicator()),
           
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(32),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8)),
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
                   ],
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(statusText, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(
+                      statusText,
+                      style: const TextStyle(
+                        color: Color(0xFF2F3A32),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
                     Row(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-                          child: Text(_distanceRemaining, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text(
+                          _eta,
+                          style: const TextStyle(
+                            color: Color(0xFF5B7760),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 12),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-                          child: Text(_eta, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16)),
+                          width: 1,
+                          height: 20,
+                          color: const Color(0xFFD8D2CA),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _distanceRemaining,
+                          style: TextStyle(
+                            color: const Color(0xFF2F3A32).withOpacity(0.5),
+                            fontWeight: FontWeight.w500,
+                            fontSize: 14,
+                          ),
                         ),
                       ],
                     ),
@@ -260,17 +295,19 @@ class _TripScreenState extends State<TripScreen> {
               right: 20,
               bottom: 280,
               child: FloatingActionButton(
+                heroTag: 'follow_fab',
                 backgroundColor: Colors.white,
-                elevation: 8,
+                foregroundColor: const Color(0xFF2F3A32),
+                elevation: 4,
                 mini: true,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: const CircleBorder(),
                 onPressed: () {
                   if (driverLocation != null) {
                     setState(() => _shouldFollowDriver = true);
                     _mapController.move(driverLocation, 15.0);
                   }
                 },
-                child: const Icon(Icons.navigation, color: Colors.black),
+                child: const Icon(Icons.navigation),
               ),
             ),
 
@@ -278,108 +315,128 @@ class _TripScreenState extends State<TripScreen> {
             bottom: 0,
             left: 0,
             right: 0,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 500),
-              padding: const EdgeInsets.all(25),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(40),
-                  topRight: Radius.circular(40),
-                ),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 30, offset: const Offset(0, -10)),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 20,
+                    offset: const Offset(0, -10),
+                  ),
                 ],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 40,
+                    width: 32,
                     height: 4,
-                    margin: const EdgeInsets.only(bottom: 20),
-                    decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD8D2CA),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
+                  const SizedBox(height: 24),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.grey.shade200, width: 2),
+                      Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: const Color(0xFFD8D2CA)),
+                        ),
+                        child: CircleAvatar(
+                          radius: 28,
+                          backgroundColor: const Color(0xFFF7F4EF),
+                          child: const Icon(Icons.person, color: Color(0xFF5B7760), size: 32),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              driver.name,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF2F3A32),
+                              ),
                             ),
-                            child: CircleAvatar(
-                              radius: 30,
-                              backgroundColor: Colors.grey[100],
-                              child: const Icon(Icons.person, color: Colors.black54, size: 35),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${driver.vehicle} • ${driver.plate}',
+                              style: TextStyle(
+                                color: const Color(0xFF2F3A32).withOpacity(0.5),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 15),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(driver.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-                              Text('${driver.vehicle} • ${driver.plate}', style: const TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 4))],
+                          color: const Color(0xFFF7F4EF),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: const Row(
                           children: [
-                            Icon(Icons.star, color: Colors.amber, size: 16),
-                            SizedBox(width: 6),
-                            Text('4.9', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+                            Icon(Icons.star, color: Color(0xFFC79A4A), size: 14),
+                            SizedBox(width: 4),
+                            Text(
+                              '4.9',
+                              style: TextStyle(
+                                color: Color(0xFF2F3A32),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 30),
+                  const SizedBox(height: 32),
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton(
                           onPressed: () {},
                           style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.all(20),
-                            side: BorderSide(color: Colors.grey.shade300, width: 2),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                           ),
-                          child: const Icon(Icons.message, color: Colors.black, size: 28),
+                          child: const Icon(Icons.message, size: 24),
                         ),
                       ),
-                      const SizedBox(width: 15),
+                      const SizedBox(width: 12),
                       Expanded(
-                        flex: 3,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(24),
-                            boxShadow: [
-                              BoxShadow(color: Colors.redAccent.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8)),
-                            ],
-                          ),
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red.withOpacity(0.08),
-                              foregroundColor: Colors.redAccent,
-                              padding: const EdgeInsets.all(20),
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                        flex: 2,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            rideProvider.cancelRide();
+                            Navigator.popUntil(context, ModalRoute.withName('/'));
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFC65A5A).withOpacity(0.1),
+                            foregroundColor: const Color(0xFFC65A5A),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
                             ),
-                            onPressed: () {
-                              rideProvider.cancelRide();
-                              Navigator.popUntil(context, ModalRoute.withName('/'));
-                            },
-                            child: const Text('CANCEL TRIP', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.5)),
+                          ),
+                          child: const Text(
+                            'CANCEL TRIP',
+                            style: TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
                       ),
@@ -399,25 +456,29 @@ class _TripScreenState extends State<TripScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
-        title: const Text('Arrived!', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 24)),
-        content: const Text('You have reached your destination. Hope you had a great ride with Uberish!', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text(
+          'Arrived',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 22, color: Color(0xFF2F3A32)),
+          textAlign: TextAlign.center,
+        ),
+        content: Text(
+          'You have reached your destination. We hope you enjoyed your NetRide experience.',
+          style: TextStyle(fontSize: 15, color: const Color(0xFF2F3A32).withOpacity(0.7)),
+          textAlign: TextAlign.center,
+        ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.all(10),
+          SizedBox(
+            width: double.infinity,
             child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
               onPressed: () {
                 final rideProvider = Provider.of<RideProvider>(context, listen: false);
                 rideProvider.reset();
                 Navigator.popUntil(context, (route) => route.isFirst);
               },
-              child: const Text('DONE', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('DONE'),
             ),
           ),
         ],
@@ -425,3 +486,5 @@ class _TripScreenState extends State<TripScreen> {
     );
   }
 }
+
+

@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
   full_name         TEXT NOT NULL,
   date_of_birth     TIMESTAMPTZ,
   profile_image_url TEXT,
+  password_hash     TEXT,
   is_verified       BOOLEAN DEFAULT FALSE,
   created_at        TIMESTAMPTZ DEFAULT NOW(),
   updated_at        TIMESTAMPTZ DEFAULT NOW()

@@ -1,5 +1,5 @@
 {
-  "name": "uberish-backend",
+  "name": "NetRide-backend",
   "version": "1.0.0",
   "description": "Uber-like backend with real-time tracking",
   "main": "src/app.ts",
@@ -44,3 +44,4 @@
     "typescript": "^5.3.3"
   }
 }
+

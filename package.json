@@ -1,8 +1,9 @@
 {
-  "name": "uberish",
+  "name": "NetRide",
   "version": "1.0.0",
   "private": true,
   "dependencies": {
     "expo": "54.0.0"
   }
 }
+

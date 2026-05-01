@@ -12,7 +12,9 @@ import 'screens/verification_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/main_wrapper.dart';
+import 'screens/splash_screen.dart';
 import 'services/api_service.dart';
+import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
@@ -34,34 +36,32 @@ void main() async {
           return provider;
         }),
       ],
-      child: UberishRider(isAuthenticated: token != null),
+      child: NetRideRider(isAuthenticated: token != null),
     ),
   );
 }
 
-class UberishRider extends StatelessWidget {
+class NetRideRider extends StatelessWidget {
   final bool isAuthenticated;
-  const UberishRider({super.key, required this.isAuthenticated});
+  const NetRideRider({super.key, required this.isAuthenticated});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Uberish Rider',
+      title: 'NetRide Rider',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primaryColor: Colors.black,
-        useMaterial3: true,
-        fontFamily: 'UberMove',
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
-          ),
-        ),
-      ),
-      initialRoute: isAuthenticated ? '/' : '/login',
+      theme: AppTheme.lightTheme,
+      initialRoute: isAuthenticated ? '/splash' : '/login',
       onGenerateRoute: (settings) {
         Widget page;
         switch (settings.name) {
+          case '/splash':
+            final args = settings.arguments as Map<String, dynamic>?;
+            page = SplashScreen(
+              targetRoute: args?['targetRoute'] ?? '/',
+              arguments: args?['arguments'],
+            );
+            break;
           case '/login':
             page = const LoginScreen();
             break;
@@ -101,3 +101,4 @@ class UberishRider extends StatelessWidget {
     );
   }
 }
+

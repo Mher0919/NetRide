@@ -20,7 +20,7 @@ export const socketAuthMiddleware = (socket: Socket, next: (err?: Error) => void
     if (env.NODE_ENV === 'development' && token.toString().startsWith('dummy-')) {
       const role = token.toString().includes('driver') ? 'driver' : 'rider';
       (socket as any).user = {
-        id: `dev-${role}-id`,
+        id: role === 'driver' ? '00000000-0000-0000-0000-000000000001' : '00000000-0000-0000-0000-000000000002',
         role: role
       };
       return next();

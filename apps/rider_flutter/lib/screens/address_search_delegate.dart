@@ -103,7 +103,7 @@ class AddressSearchDelegate extends SearchDelegate<AddressSearchResult?> {
       final response = await _dio.get(
         'https://nominatim.openstreetmap.org/search',
         queryParameters: params,
-        options: Options(headers: {'User-Agent': 'UberishApp/1.0'}),
+        options: Options(headers: {'User-Agent': 'NetRideApp/1.0'}),
       );
 
       final List<dynamic> data = response.data;
@@ -113,3 +113,4 @@ class AddressSearchDelegate extends SearchDelegate<AddressSearchResult?> {
     }
   }
 }
+

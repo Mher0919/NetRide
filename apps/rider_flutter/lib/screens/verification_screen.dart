@@ -36,7 +36,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
         role: widget.role,
       );
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(
+          context, 
+          '/splash', 
+          (route) => false,
+          arguments: {'targetRoute': '/onboarding'},
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -52,9 +57,9 @@ class _VerificationScreenState extends State<VerificationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFEEEBE6),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFFEEEBE6),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 20),

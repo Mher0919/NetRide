@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -54,6 +55,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      if (e is DioException && e.response?.statusCode == 404) {
+        debugPrint('User not found (404), logging out...');
+        await AuthService.logout();
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+        }
+        return;
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to load profile: $e')),
@@ -473,200 +483,110 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
+        title: Text(
+          'Account',
+          style: theme.textTheme.headlineMedium?.copyWith(fontSize: 24),
         ),
-        title: Text('Profile', style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold)),
         actions: [
           if (!_isLoading)
             Padding(
               padding: const EdgeInsets.only(right: 12.0),
               child: IconButton(
-                icon: Icon(_isEditing ? Icons.close : Icons.edit, color: Colors.black, size: 28),
-                onPressed: () => setState(() => _isEditing = !_isEditing),
+                icon: Icon(_isEditing ? Icons.check_circle_outline : Icons.edit_outlined, color: const Color(0xFF5B7760)),
+                onPressed: () {
+                  if (_isEditing) {
+                    _saveProfile();
+                  } else {
+                    setState(() => _isEditing = true);
+                  }
+                },
               ),
             ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.black))
+          ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                    child: Column(
-                      children: [
-                        Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 50,
-                              backgroundColor: Colors.grey[200],
-                              backgroundImage: _profileImageUrl != null ? NetworkImage(_profileImageUrl!) : null,
-                              child: _profileImageUrl == null ? const Icon(Icons.person, size: 50, color: Colors.grey) : null,
-                            ),
-                            if (_isEditing)
-                              Positioned(
-                                bottom: 0,
-                                right: 0,
-                                child: CircleAvatar(
-                                  radius: 18,
-                                  backgroundColor: Colors.black,
-                                  child: IconButton(
-                                    icon: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
-                                    onPressed: _changeProfilePicture,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: _isVerified ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: _isVerified ? Colors.green : Colors.red),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _isVerified ? Icons.verified : Icons.error_outline,
-                                size: 16,
-                                color: _isVerified ? Colors.green : Colors.red,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                _isVerified ? 'VERIFIED RIDER' : 'UNVERIFIED',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: _isVerified ? Colors.green : Colors.red,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  _buildProfileHeader(theme),
                   const SizedBox(height: 32),
-                  _buildSectionTitle('Personal Information'),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    label: 'Full Name',
-                    controller: _nameController,
-                    enabled: _isEditing,
-                    icon: Icons.person_outline,
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
+                  _buildSectionCard(
+                    title: 'Personal Details',
                     children: [
-                      Expanded(
-                        child: _buildTextField(
-                          label: 'Email',
-                          controller: TextEditingController(text: _email),
-                          enabled: false,
-                          icon: Icons.email_outlined,
-                        ),
+                      _buildProfileItem(
+                        icon: Icons.person_outline_rounded,
+                        label: 'Full Name',
+                        controller: _nameController,
+                        enabled: _isEditing,
                       ),
-                      if (_isEditing)
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
-                          onPressed: _showEmailChangeDialog,
-                        ),
+                      const Divider(height: 32),
+                      _buildProfileItem(
+                        icon: Icons.email_outlined,
+                        label: 'Email Address',
+                        controller: _emailController,
+                        enabled: false,
+                        onAction: _isEditing ? _showEmailChangeDialog : null,
+                      ),
+                      const Divider(height: 32),
+                      _buildProfileItem(
+                        icon: Icons.phone_outlined,
+                        label: 'Phone Number',
+                        controller: _phoneController,
+                        enabled: _isEditing,
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const Divider(height: 32),
+                      _buildProfileItem(
+                        icon: Icons.cake_outlined,
+                        label: 'Date of Birth',
+                        controller: _dobController,
+                        enabled: false,
+                        onAction: _isEditing ? _updateAgeAndVerify : null,
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    label: 'Phone Number',
-                    controller: _phoneController,
-                    enabled: _isEditing,
-                    icon: Icons.phone_outlined,
-                    keyboardType: TextInputType.phone,
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
+                  const SizedBox(height: 24),
+                  _buildSectionCard(
+                    title: 'Security',
                     children: [
-                      Expanded(
-                        child: _buildTextField(
-                          label: 'Date of Birth',
-                          controller: _dobController,
-                          enabled: false, 
-                          icon: Icons.cake_outlined,
-                          hint: 'MM-DD-YYYY',
-                        ),
+                      _buildMenuTile(
+                        icon: Icons.lock_outline_rounded,
+                        title: 'Password & Security',
+                        onTap: _showChangePasswordDialog,
                       ),
-                      const SizedBox(width: 16),
-                      if (_isEditing)
-                        TextButton.icon(
-                          onPressed: _isSaving ? null : _updateAgeAndVerify,
-                          icon: const Icon(Icons.edit_calendar_outlined, size: 18),
-                          label: const Text('Change'),
-                          style: TextButton.styleFrom(foregroundColor: Colors.blue),
-                        ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Text('Age: ${_calculateAge(_dobController.text)}', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-
-                  const SizedBox(height: 32),
-                  _buildSectionTitle('Account Security'),
-                  const SizedBox(height: 16),
-                  ListTile(
-                    leading: const Icon(Icons.lock_outline),
-                    title: const Text('Change Password'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: _showChangePasswordDialog,
-                  ),
-                  const SizedBox(height: 32),
-                  _buildSectionTitle('Payment Methods'),
-                  const SizedBox(height: 16),
-                  _buildPaymentCard('•••• 4242', 'Visa', Icons.credit_card),
-                  const SizedBox(height: 32),
-                  if (_isEditing)
-                    SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: ElevatedButton(
-                        onPressed: _isSaving ? null : _saveProfile,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.black,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: _isSaving
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : Text('Save Changes', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 24),
+                  _buildSectionCard(
+                    title: 'Payments',
+                    children: [
+                      _buildMenuTile(
+                        icon: Icons.credit_card_outlined,
+                        title: 'Payment Methods',
+                        onTap: () {},
+                        trailing: Text('Visa • 4242', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5), fontSize: 13)),
                       ),
-                    ),
-                  const SizedBox(height: 16),
+                    ],
+                  ),
+                  const SizedBox(height: 40),
                   SizedBox(
                     width: double.infinity,
-                    height: 56,
-                    child: OutlinedButton(
+                    child: TextButton(
                       onPressed: _handleLogout,
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.red),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        foregroundColor: const Color(0xFFC65A5A),
                       ),
-                      child: Text(
-                        'Logout',
-                        style: GoogleFonts.poppins(color: Colors.red, fontWeight: FontWeight.bold),
-                      ),
+                      child: const Text('Logout', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                     ),
                   ),
                 ],
@@ -675,59 +595,184 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+  Widget _buildProfileHeader(ThemeData theme) {
+    return Center(
+      child: Column(
+        children: [
+          Stack(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFD8D2CA), width: 1),
+                ),
+                child: CircleAvatar(
+                  radius: 50,
+                  backgroundColor: const Color(0xFFF7F4EF),
+                  backgroundImage: _profileImageUrl != null ? NetworkImage(_profileImageUrl!) : null,
+                  child: _profileImageUrl == null ? const Icon(Icons.person, size: 48, color: Color(0xFF5B7760)) : null,
+                ),
+              ),
+              if (_isEditing)
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: GestureDetector(
+                    onTap: _changeProfilePicture,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF5B7760),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _isVerified ? const Color(0xFF6E8B74).withOpacity(0.1) : const Color(0xFFC65A5A).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _isVerified ? Icons.verified_user : Icons.error_outline_rounded,
+                  size: 14,
+                  color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _isVerified ? 'VERIFIED' : 'UNVERIFIED',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                    color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildTextField({
+  Widget _buildSectionCard({required String title, required List<Widget> children}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 12),
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF2F3A32),
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFFD8D2CA)),
+          ),
+          child: Column(
+            children: children,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProfileItem({
+    required IconData icon,
     required String label,
     required TextEditingController controller,
     required bool enabled,
-    required IconData icon,
+    VoidCallback? onAction,
     TextInputType? keyboardType,
-    String? hint,
   }) {
-    return TextField(
-      controller: controller,
-      enabled: enabled,
-      keyboardType: keyboardType,
-      style: GoogleFonts.poppins(fontSize: 16),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        prefixIcon: Icon(icon, color: Colors.grey),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        disabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.4)),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: const Color(0xFF2F3A32).withOpacity(0.4),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              enabled
+                  ? TextField(
+                      controller: controller,
+                      keyboardType: keyboardType,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                      ),
+                    )
+                  : Text(
+                      controller.text.isEmpty ? 'Not set' : controller.text,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
+                    ),
+            ],
+          ),
         ),
-      ),
+        if (onAction != null)
+          GestureDetector(
+            onTap: onAction,
+            child: const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF5B7760)),
+          ),
+      ],
     );
   }
 
-  Widget _buildPaymentCard(String last4, String type, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey[200]!),
-        borderRadius: BorderRadius.circular(12),
-      ),
+  Widget _buildMenuTile({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    Widget? trailing,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Row(
         children: [
-          Icon(icon, color: Colors.black),
+          Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.4)),
           const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(type, style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-              Text(last4, style: GoogleFonts.poppins(color: Colors.grey)),
-            ],
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
+            ),
           ),
-          const Spacer(),
-          const Icon(Icons.chevron_right, color: Colors.grey),
+          if (trailing != null) trailing,
+          const SizedBox(width: 8),
+          Icon(Icons.chevron_right_rounded, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.2)),
         ],
       ),
     );
