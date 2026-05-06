@@ -54,8 +54,31 @@ export class RideController {
       const role = req.user?.role;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
+      console.log(`[RIDE] 📜 Fetching history for user ${userId} [Role: ${role}]`);
+      const start = Date.now();
       const history = await RideService.getHistory(userId, role);
+      const duration = Date.now() - start;
+      console.log(`[RIDE] ✅ History fetched in ${duration}ms (${history.length} records)`);
+      
       res.json(history);
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Error fetching history: ${error.message}`);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async deleteHistory(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const { id } = req.params;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const success = await RideService.deleteHistory(id, userId);
+      if (success) {
+        res.json({ message: 'Activity deleted successfully' });
+      } else {
+        res.status(404).json({ error: 'Activity not found or unauthorized' });
+      }
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

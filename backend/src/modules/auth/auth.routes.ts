@@ -13,8 +13,11 @@ router.post('/verify-otp', AuthController.verifyOTP);
 router.post('/signup-password', AuthController.signupPassword);
 router.post('/login-password', AuthController.loginPassword);
 router.post('/change-password', authMiddleware, AuthController.changePassword);
+router.post('/request-password-change', authMiddleware, AuthController.requestPasswordChange);
 router.post('/forgot-password', AuthController.forgotPassword);
 router.post('/reset-password', AuthController.resetPassword);
 router.get('/reset-password', AuthController.renderResetPasswordForm);
+router.delete('/account', authMiddleware, AuthController.deleteAccount);
+router.post('/deactivate-account', authMiddleware, AuthController.deactivateAccount);
 
 export default router;

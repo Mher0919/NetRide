@@ -8,8 +8,9 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 const OAuthSchema = z.object({
   email: z.string().email(),
   full_name: z.string(),
-  profile_image_url: z.string().optional(),
+  profile_image_url: z.string().nullable().optional(),
   role: z.nativeEnum(UserRole),
+  token: z.string().nullable().optional(),
 });
 
 const SignupPasswordSchema = z.object({
@@ -36,6 +37,10 @@ const ForgotPasswordSchema = z.object({
 const ResetPasswordSchema = z.object({
   token: z.string(),
   newPassword: z.string().min(6),
+});
+
+const RequestPasswordChangeSchema = z.object({
+  currentPassword: z.string(),
 });
 
 export class AuthController {
@@ -86,6 +91,43 @@ export class AuthController {
     try {
       const { token, newPassword } = ResetPasswordSchema.parse(req.body);
       const result = await AuthService.resetPassword(token, newPassword);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async requestPasswordChange(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { currentPassword } = RequestPasswordChangeSchema.parse(req.body);
+      const result = await AuthService.requestPasswordChange(userId, currentPassword);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async deleteAccount(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const result = await AuthService.deleteAccount(userId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async deactivateAccount(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const result = await AuthService.deactivateAccount(userId);
       res.json(result);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -169,10 +211,12 @@ export class AuthController {
 
   static async oauth(req: Request, res: Response) {
     try {
+      console.log(`[AUTH] 📥 Incoming OAuth request:`, req.body);
       const validatedData = OAuthSchema.parse(req.body);
       const result = await AuthService.handleOAuth(validatedData);
       res.json(result);
     } catch (error: any) {
+      console.error(`[AUTH] ❌ OAuth error:`, error.message || error);
       res.status(400).json({ error: error.message });
     }
   }

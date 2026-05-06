@@ -72,7 +72,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Future<void> _initLiveLocation() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
 
@@ -80,7 +80,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
         return;
       }
     }
@@ -102,7 +102,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _updateUserLocation(position);
     });
 
-    setState(() => _isLoading = false);
+    if (mounted) setState(() => _isLoading = false);
   }
 
   void _updateUserLocation(Position position) {

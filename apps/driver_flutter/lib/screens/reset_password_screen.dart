@@ -62,13 +62,16 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             children: [
               Text('Reset Password', style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text('Enter the token from your email and choose a new password.', style: GoogleFonts.poppins(color: Colors.grey)),
+              Text('Enter your new password below.', style: GoogleFonts.poppins(color: Colors.grey)),
               const SizedBox(height: 32),
-              TextField(
-                controller: _tokenController,
-                decoration: const InputDecoration(labelText: 'Reset Token', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 16),
+              if (widget.token == null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: TextField(
+                    controller: _tokenController,
+                    decoration: const InputDecoration(labelText: 'Reset Token', border: OutlineInputBorder()),
+                  ),
+                ),
               TextField(
                 controller: _passwordController,
                 obscureText: _obscure,

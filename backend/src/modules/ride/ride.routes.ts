@@ -9,5 +9,6 @@ router.post('/request', authMiddleware, RideController.requestRide);
 router.post('/accept', authMiddleware, RideController.acceptTrip);
 router.post('/rate', authMiddleware, RideController.rateRide);
 router.get('/history', authMiddleware, RideController.getHistory);
+router.delete('/history/:id', authMiddleware, RideController.deleteHistory);
 
 export default router;

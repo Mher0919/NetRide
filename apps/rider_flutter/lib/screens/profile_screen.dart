@@ -5,9 +5,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:url_launcher/url_launcher.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import 'settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -27,11 +30,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isSaving = false;
   bool _isEditing = false;
   bool _isVerified = false;
-
-  // Local state for verification
-  File? _pickedIdFront;
-  File? _pickedIdBack;
-  String? _pendingDob;
+  bool _hasPassword = false;
+  bool _showVerificationHint = false;
 
   @override
   void initState() {
@@ -52,6 +52,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _emailController.text = _email;
         _profileImageUrl = profile['profile_image_url'];
         _isVerified = profile['is_verified'] == true || profile['is_verified'] == 'true';
+        _hasPassword = profile['has_password'] == true;
         _isLoading = false;
       });
     } catch (e) {
@@ -67,6 +68,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to load profile: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _handleSupport() async {
+    final Uri smsLaunchUri = Uri(
+      scheme: 'sms',
+      path: '7477245408',
+    );
+    if (await canLaunchUrl(smsLaunchUri)) {
+      await launchUrl(smsLaunchUri);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not launch SMS app')),
         );
       }
     }
@@ -97,7 +114,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _updateAgeAndVerify() async {
-    // 1. Pick new DOB
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now().subtract(const Duration(days: 365 * 18)),
@@ -123,7 +139,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (!mounted) return;
     
-    // 2. Ask for Front
     final proceedFront = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -155,7 +170,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (!mounted) return;
 
-    // 3. Ask for Back
     final proceedBack = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -203,7 +217,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final backImage = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
     if (backImage == null) return;
 
-    // 4. Confirm and Submit
     if (!mounted) return;
     final confirm = await showDialog<bool>(
       context: context,
@@ -250,121 +263,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } finally {
       setState(() => _isSaving = false);
     }
-  }
-
-  Widget _buildImageUploadBox({required String label, File? file, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 120,
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[300]!, style: BorderStyle.solid),
-          image: file != null ? DecorationImage(image: FileImage(file), fit: BoxFit.cover) : null,
-        ),
-        child: file == null
-            ? Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.add_a_photo_outlined, color: Colors.grey, size: 32),
-                  const SizedBox(height: 8),
-                  Text(label, style: GoogleFonts.poppins(color: Colors.grey, fontSize: 12)),
-                ],
-              )
-            : Container(
-                alignment: Alignment.bottomRight,
-                padding: const EdgeInsets.all(8),
-                child: const CircleAvatar(
-                  backgroundColor: Colors.black,
-                  radius: 12,
-                  child: Icon(Icons.check, size: 16, color: Colors.white),
-                ),
-              ),
-      ),
-    );
-  }
-
-  Future<void> _showChangePasswordDialog() async {
-    final currentPasswordController = TextEditingController();
-    final newPasswordController = TextEditingController();
-    final confirmPasswordController = TextEditingController();
-    bool obscure = true;
-
-    await showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('Change Password', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: currentPasswordController,
-                obscureText: obscure,
-                decoration: InputDecoration(
-                  labelText: 'Current Password',
-                  suffixIcon: IconButton(
-                    icon: Icon(obscure ? Icons.visibility_off : Icons.visibility),
-                    onPressed: () => setDialogState(() => obscure = !obscure),
-                  ),
-                ),
-              ),
-              TextField(
-                controller: newPasswordController,
-                obscureText: obscure,
-                decoration: const InputDecoration(labelText: 'New Password'),
-              ),
-              TextField(
-                controller: confirmPasswordController,
-                obscureText: obscure,
-                decoration: const InputDecoration(labelText: 'Confirm New Password'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                try {
-                  await AuthService.forgotPassword(_email);
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reset link sent to your email')));
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              },
-              child: const Text('Forgot?', style: TextStyle(color: Colors.blue)),
-            ),
-            const Spacer(),
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () async {
-                if (newPasswordController.text != confirmPasswordController.text) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Passwords do not match')));
-                  return;
-                }
-                try {
-                  await AuthService.changePassword(
-                    currentPassword: currentPasswordController.text,
-                    newPassword: newPasswordController.text,
-                  );
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password changed successfully')));
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-              child: const Text('Change'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _showEmailChangeDialog() async {
@@ -437,26 +335,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  int _calculateAge(String dob) {
-    if (dob.isEmpty) return 0;
-    try {
-      DateTime birthDate;
-      if (dob.contains('-') && dob.split('-')[0].length == 4) {
-        birthDate = DateTime.parse(dob);
-      } else {
-        birthDate = DateFormat('MM-dd-yyyy').parse(dob);
-      }
-      final today = DateTime.now();
-      int age = today.year - birthDate.year;
-      if (today.month < birthDate.month || (today.month == birthDate.month && today.day < birthDate.day)) {
-        age--;
-      }
-      return age;
-    } catch (e) {
-      return 0;
-    }
-  }
-
   Future<void> _handleLogout() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -489,6 +367,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        automaticallyImplyLeading: false,
         title: Text(
           'Account',
           style: theme.textTheme.headlineMedium?.copyWith(fontSize: 24),
@@ -556,24 +435,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 24),
                   _buildSectionCard(
-                    title: 'Security',
+                    title: 'Support',
                     children: [
                       _buildMenuTile(
-                        icon: Icons.lock_outline_rounded,
-                        title: 'Password & Security',
-                        onTap: _showChangePasswordDialog,
+                        icon: Icons.support_agent_rounded,
+                        title: 'Customer Support',
+                        onTap: _handleSupport,
                       ),
                     ],
                   ),
                   const SizedBox(height: 24),
                   _buildSectionCard(
-                    title: 'Payments',
+                    title: 'Settings',
                     children: [
                       _buildMenuTile(
-                        icon: Icons.credit_card_outlined,
-                        title: 'Payment Methods',
-                        onTap: () {},
-                        trailing: Text('Visa • 4242', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5), fontSize: 13)),
+                        icon: Icons.settings_outlined,
+                        title: 'App Settings',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => SettingsScreen(hasPassword: _hasPassword)),
+                        ),
                       ),
                     ],
                   ),
@@ -633,33 +514,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: _isVerified ? const Color(0xFF6E8B74).withOpacity(0.1) : const Color(0xFFC65A5A).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  _isVerified ? Icons.verified_user : Icons.error_outline_rounded,
-                  size: 14,
-                  color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _isVerified ? 'VERIFIED' : 'UNVERIFIED',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5,
+          GestureDetector(
+            onTap: () {
+              if (!_isVerified) {
+                setState(() => _showVerificationHint = true);
+                Future.delayed(const Duration(seconds: 3), () {
+                  if (mounted) setState(() => _showVerificationHint = false);
+                });
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _isVerified ? const Color(0xFF6E8B74).withOpacity(0.1) : const Color(0xFFC65A5A).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _isVerified ? Icons.verified_user : Icons.error_outline_rounded,
+                    size: 14,
                     color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Text(
+                    _isVerified ? 'VERIFIED' : 'UNVERIFIED',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                      color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+          if (_showVerificationHint)
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: Text(
+                'Age should be verified to become verified.',
+                style: TextStyle(fontSize: 10, color: const Color(0xFFC65A5A), fontWeight: FontWeight.w500),
+              ),
+            ),
         ],
       ),
     );
@@ -756,24 +655,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required String title,
     required VoidCallback onTap,
     Widget? trailing,
+    bool enabled = true,
+    Color? textColor,
   }) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       behavior: HitTestBehavior.opaque,
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.4)),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.4,
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.4)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF2F3A32)),
+              ),
             ),
-          ),
-          if (trailing != null) trailing,
-          const SizedBox(width: 8),
-          Icon(Icons.chevron_right_rounded, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.2)),
-        ],
+            if (trailing != null) trailing,
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.2)),
+          ],
+        ),
       ),
     );
   }

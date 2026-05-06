@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
+import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
+import '../providers/ride_provider.dart';
 import '../services/auth_service.dart';
 import 'signup_screen.dart';
 import 'verification_screen.dart';
@@ -25,38 +29,64 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleOAuth(String provider) async {
     setState(() => _isLoading = true);
     try {
-      if (provider == 'google') {
-        final googleSignIn = GoogleSignIn(
-          clientId: Platform.isIOS ? dotenv.env['GOOGLE_CLIENT_ID_IOS'] : null,
-          serverClientId: dotenv.env['GOOGLE_CLIENT_ID_WEB'],
-        );
-        final user = await googleSignIn.signIn();
-        if (user != null) {
-          await AuthService.loginWithOAuth(
-            email: user.email,
-            fullName: user.displayName ?? 'NetRide Rider',
-            profileImageUrl: user.photoUrl,
-            role: 'RIDER',
-          );
-          if (mounted) Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
+      final supabase = Supabase.instance.client;
+      
+      StreamSubscription<AuthState>? subscription;
+
+      // 1. Listen for the FIRST session event to complete the login
+      subscription = supabase.auth.onAuthStateChange.listen((data) async {
+        final session = data.session;
+        if (session != null) {
+          try {
+            final user = session.user;
+            final metadata = user.userMetadata ?? {};
+            
+            final res = await AuthService.loginWithOAuth(
+              email: user.email!,
+              fullName: metadata['full_name'] ?? metadata['name'] ?? 'NetRide Rider',
+              profileImageUrl: metadata['avatar_url'] ?? metadata['picture'],
+              role: 'RIDER',
+              token: session.accessToken,
+            );
+            
+            final userData = res['user'];
+            final hasPhone = userData != null && 
+                            userData['phone_number'] != null && 
+                            userData['phone_number'].toString().isNotEmpty;
+            
+            if (mounted) {
+              debugPrint('[LOGIN] ✅ Backend sync successful. User ID: ${userData['id']}');
+              AuthService.isAuthenticatedNotifier.value = true;
+              Provider.of<RideProvider>(context, listen: false).initSocket(res['token']);
+
+              Navigator.pushReplacementNamed(
+                context, 
+                '/splash', 
+                arguments: {'targetRoute': hasPhone ? '/' : '/onboarding'}
+              );
+            }
+          } catch (e) {
+            debugPrint('[LOGIN] ❌ Backend OAuth sync failed: $e');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Failed to sync with backend: $e')),
+              );
+            }
+          } finally {
+            subscription?.cancel();
+          }
         }
-      } else if (provider == 'apple') {
-        final credential = await SignInWithApple.getAppleIDCredential(
-          scopes: [
-            AppleIDAuthorizationScopes.email,
-            AppleIDAuthorizationScopes.fullName,
-          ],
-        );
-        
-        await AuthService.loginWithOAuth(
-          email: credential.email ?? '',
-          fullName: '${credential.givenName ?? ''} ${credential.familyName ?? ''}'.trim().isEmpty 
-            ? 'NetRide Rider' 
-            : '${credential.givenName ?? ''} ${credential.familyName ?? ''}'.trim(),
-          role: 'RIDER',
-        );
-        if (mounted) Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
-      }
+      });
+
+      // 2. Trigger the OAuth flow
+      await supabase.auth.signInWithOAuth(
+        provider == 'google' ? OAuthProvider.google : OAuthProvider.apple,
+        redirectTo: 'io.supabase.netride://login-callback/',
+      );
+
+      // Clean up subscription after a timeout if no session is received
+      Future.delayed(const Duration(minutes: 5), () => subscription?.cancel());
+
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -364,5 +394,3 @@ class _OAuthButton extends StatelessWidget {
     );
   }
 }
-
-

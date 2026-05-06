@@ -3,14 +3,18 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 
 class AuthService {
+  static final ValueNotifier<bool> isAuthenticatedNotifier = ValueNotifier<bool>(false);
+
   static Future<Map<String, dynamic>> loginWithOAuth({
     required String email,
     required String fullName,
     String? profileImageUrl,
     required String role,
+    String? token,
   }) async {
     try {
       final response = await ApiService.dio.post('auth/oauth', data: {
@@ -18,17 +22,25 @@ class AuthService {
         'full_name': fullName,
         'profile_image_url': profileImageUrl,
         'role': role,
+        'token': token,
       });
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = response.data;
+        final token = data['token'];
+        debugPrint('[AUTH DEBUG] 📥 Token received from backend (length: ${token?.length})');
+        
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('jwt_token', data['token']);
+        await prefs.setString('jwt_token', token);
         await prefs.setString('user_id', data['user']['id']);
         await prefs.setString('user_role', data['user']['role']);
+        
+        final verifyToken = prefs.getString('jwt_token');
+        debugPrint('[AUTH DEBUG] 💾 Token saved to storage. Read-back check: ${verifyToken != null ? "SUCCESS" : "FAILED"}');
+        
         return data;
       }
-      throw Exception('Login failed');
+      throw Exception('OAuth login failed');
     } catch (e) {
       rethrow;
     }
@@ -141,6 +153,32 @@ class AuthService {
     }
   }
 
+  static Future<void> requestPasswordChange(String currentPassword) async {
+    try {
+      await ApiService.dio.post('auth/request-password-change', data: {'currentPassword': currentPassword});
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<void> deleteAccount() async {
+    try {
+      await ApiService.dio.delete('auth/account');
+      await logout();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<void> deactivateAccount() async {
+    try {
+      await ApiService.dio.post('auth/deactivate-account');
+      await logout();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   static Future<void> forgotPassword(String email) async {
     try {
       await ApiService.dio.post('auth/forgot-password', data: {'email': email});
@@ -195,10 +233,47 @@ class AuthService {
   }
 
   static Future<void> logout() async {
+    try {
+      await Supabase.instance.client.auth.signOut();
+    } catch (e) {
+      debugPrint('Supabase signout error: $e');
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('jwt_token');
     await prefs.remove('user_id');
     await prefs.remove('user_role');
+    isAuthenticatedNotifier.value = false;
+  }
+
+  static Future<bool> syncWithBackend() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final session = supabase.auth.currentSession;
+      if (session == null) return false;
+
+      final user = session.user;
+      final metadata = user.userMetadata ?? {};
+      
+      debugPrint('[AUTH SYNC] 🔄 Syncing with backend for ${user.email}...');
+
+      final res = await loginWithOAuth(
+        email: user.email!,
+        fullName: metadata['full_name'] ?? metadata['name'] ?? 'NetRide Rider',
+        profileImageUrl: metadata['avatar_url'] ?? metadata['picture'],
+        role: 'RIDER',
+        token: session.accessToken,
+      );
+
+      if (res['token'] != null) {
+        debugPrint('[AUTH SYNC] ✅ Sync successful');
+        isAuthenticatedNotifier.value = true;
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('[AUTH SYNC] ❌ Sync failed: $e');
+      return false;
+    }
   }
 
   static Future<bool> isAuthenticated() async {
