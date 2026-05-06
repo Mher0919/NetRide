@@ -96,6 +96,31 @@ export class EmailService {
     return null;
   }
 
+  static async sendPasswordChangeVerification(email: string, fullName: string, token: string): Promise<void> {
+    try {
+      const verifyUrl = `io.supabase.netride://password-reset?token=${token}`;
+      
+      await this.sendEmail({
+        to: email,
+        subject: 'Verify Password Change',
+        html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+          <h2 style="color: #333;">Security Verification</h2>
+          <p>Hi ${fullName},</p>
+          <p>We received a request to change your NetRide password. Is this you?</p>
+          <div style="margin-top: 30px; text-align: center;">
+            <a href="${verifyUrl}" style="background-color: #007bff; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">YES, CHANGE PASSWORD</a>
+          </div>
+          <p style="margin-top: 20px; font-size: 12px; color: #777;">If you did not request this, please ignore this email and your password will remain unchanged.</p>
+        </div>
+        `,
+      });
+      console.log(`✅ [GMAIL API] Password change verification sent to ${email}`);
+    } catch (error) {
+      console.error('❌ [GMAIL API] Error sending password change verification:', error);
+    }
+  }
+
   static async sendOTP(email: string, code: string): Promise<void> {
     try {
       await this.sendEmail({

@@ -155,4 +155,8 @@ export class RideService {
     }
     return RideRepository.findCurrentByRiderId(userId);
   }
+
+  static async deleteHistory(rideId: string, userId: string): Promise<boolean> {
+    return RideRepository.delete(rideId, userId);
+  }
 }

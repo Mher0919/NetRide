@@ -22,7 +22,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
 
   Future<void> _fetchHistory() async {
     try {
-      final response = await ApiService.dio.get('/ride/history');
+      final response = await ApiService.dio.get('ride/history');
       setState(() {
         _history = response.data;
         _isLoading = false;

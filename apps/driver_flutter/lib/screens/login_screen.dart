@@ -4,6 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
+import '../providers/driver_provider.dart';
 import '../services/auth_service.dart';
 import 'signup_screen.dart';
 import 'verification_screen.dart';
@@ -25,38 +28,41 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleOAuth(String provider) async {
     setState(() => _isLoading = true);
     try {
-      if (provider == 'google') {
-        final googleSignIn = GoogleSignIn(
-          clientId: Platform.isIOS ? dotenv.env['GOOGLE_CLIENT_ID_IOS'] : null,
-          serverClientId: dotenv.env['GOOGLE_CLIENT_ID_WEB'],
-        );
-        final user = await googleSignIn.signIn();
-        if (user != null) {
-          await AuthService.loginWithOAuth(
-            email: user.email,
-            fullName: user.displayName ?? 'NetRide Driver',
-            profileImageUrl: user.photoUrl,
-            role: 'DRIVER',
-          );
-          if (mounted) Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
+      final supabase = Supabase.instance.client;
+      
+      // 1. Listen for the FIRST session event to complete the login
+      final subscription = supabase.auth.onAuthStateChange.listen((data) async {
+        final session = data.session;
+        if (session != null) {
+          try {
+            final res = await AuthService.loginWithOAuth(
+              email: session.user.email!,
+              fullName: session.user.userMetadata?['full_name'] ?? 'NetRide Driver',
+              profileImageUrl: session.user.userMetadata?['avatar_url'],
+              role: 'DRIVER',
+            );
+            
+            if (mounted) {
+              // Initialize socket with the backend token
+              Provider.of<DriverProvider>(context, listen: false).initSocket(res['token']);
+
+              Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
+            }
+          } catch (e) {
+            debugPrint('Error during backend OAuth sync: $e');
+          }
         }
-      } else if (provider == 'apple') {
-        final credential = await SignInWithApple.getAppleIDCredential(
-          scopes: [
-            AppleIDAuthorizationScopes.email,
-            AppleIDAuthorizationScopes.fullName,
-          ],
-        );
-        
-        await AuthService.loginWithOAuth(
-          email: credential.email ?? '',
-          fullName: '${credential.givenName ?? ''} ${credential.familyName ?? ''}'.trim().isEmpty 
-            ? 'NetRide Driver' 
-            : '${credential.givenName ?? ''} ${credential.familyName ?? ''}'.trim(),
-          role: 'DRIVER',
-        );
-        if (mounted) Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
-      }
+      });
+
+      // 2. Trigger the OAuth flow
+      await supabase.auth.signInWithOAuth(
+        provider == 'google' ? OAuthProvider.google : OAuthProvider.apple,
+        redirectTo: 'io.supabase.netride://login-callback/',
+      );
+
+      // Clean up subscription after a timeout if no session is received
+      Future.delayed(const Duration(minutes: 5), () => subscription.cancel());
+
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -100,7 +106,12 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else {
-          Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/'});
+          final hasPhone = res['user']['phone_number'] != null && res['user']['phone_number'].toString().isNotEmpty;
+          Navigator.pushReplacementNamed(
+            context, 
+            '/splash', 
+            arguments: {'targetRoute': hasPhone ? '/' : '/'}
+          );
         }
       }
     } catch (e) {
@@ -364,4 +375,3 @@ class _OAuthButton extends StatelessWidget {
     );
   }
 }
-

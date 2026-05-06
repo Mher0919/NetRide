@@ -25,9 +25,13 @@ export enum VehicleCategory {
 export interface User {
   id: string;
   email: string;
-  phone: string;
+  phone_number?: string;
   full_name: string;
+  profile_image_url?: string;
+  date_of_birth?: Date;
   role: UserRole;
+  is_verified: boolean;
+  is_active: boolean;
   created_at: Date;
 }
 

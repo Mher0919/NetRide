@@ -1,5 +1,7 @@
 // backend/src/app.ts
 import express from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -53,30 +55,14 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Diagnostic Ping
+app.get('/api/ping', (req, res) => {
+  res.json({ status: 'pong', time: new Date().toISOString() });
+});
+
 // Middleware for Socket.io auth
 io.use((socket, next) => {
   const token = socket.handshake.auth.token || socket.handshake.headers.authorization;
-
-  // ALWAYS allow dummy tokens for development/testing
-  if (token && token.toString().startsWith('dummy-')) {
-    const role = token.toString().includes('driver') ? 'driver' : 'rider';
-    console.log(`[AUTH] 🛠️ Dev bypass for ${role} (Dummy Token: ${token})`);
-    (socket as any).user = { 
-      id: role === 'driver' ? '00000000-0000-0000-0000-000000000001' : '00000000-0000-0000-0000-000000000002', 
-      role: role 
-    };
-    return next();
-  }
-
-  // If in development, also allow missing tokens as dummy rider
-  if (env.NODE_ENV === 'development' && !token) {
-    console.log(`[AUTH] 🛠️ Dev bypass for rider (No Token)`);
-    (socket as any).user = { 
-      id: '00000000-0000-0000-0000-000000000002', 
-      role: 'rider' 
-    };
-    return next();
-  }
 
   if (!token) {
     return next(new Error('Authentication error: No token provided'));
@@ -88,12 +74,8 @@ io.use((socket, next) => {
     (socket as any).user = decoded;
     next();
   } catch (err: any) {
-    console.warn(`[AUTH] ⚠️ Socket JWT verification failed. Falling back to dummy rider in dev mode:`, err.message);
-    (socket as any).user = { 
-      id: '00000000-0000-0000-0000-000000000002', 
-      role: 'rider' 
-    };
-    return next();
+    console.error(`[AUTH] ❌ Socket JWT verification failed:`, err.message);
+    return next(new Error('Authentication error: Invalid token'));
   }
 });
 
@@ -148,48 +130,27 @@ async function runMigrations() {
       const schemaPath = path.join(__dirname, '../migrations/004_add_license_back_photo.sql');
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
-      console.log('✅ Driver schema patched successfully');
+      console.log('✅ Driver schema (004) patched successfully');
     }
 
-    // Seed Dev Users if they don't exist
-    if (env.NODE_ENV === 'development') {
-      try {
-        console.log('🌱 Ensuring dummy dev users exist...');
-        const dummyRiderId = '00000000-0000-0000-0000-000000000002';
-        const dummyDriverId = '00000000-0000-0000-0000-000000000001';
-        const passwordHash = await bcrypt.hash('password', 10);
+    // Add Insurance/Registration
+    const hasInsurance = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'drivers' AND column_name = 'insurance_photo_url'");
+    if (hasInsurance.rowCount === 0) {
+      console.log('⚡ Patching driver schema (005)...');
+      const schemaPath = path.join(__dirname, '../migrations/005_add_insurance_registration.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Driver schema (005) patched successfully');
+    }
 
-        const riderCheck = await pool.query('SELECT id FROM users WHERE id = $1', [dummyRiderId]);
-        if (riderCheck.rowCount === 0) {
-          console.log('👤 Creating dummy rider...');
-          await pool.query(`
-            INSERT INTO users (id, role, email, full_name, is_verified, password_hash)
-            VALUES ($1, 'RIDER', 'rider@NetRide.dev', 'Dummy Rider', true, $2)
-          `, [dummyRiderId, passwordHash]);
-        }
-
-        const driverCheck = await pool.query('SELECT id FROM users WHERE id = $1', [dummyDriverId]);
-        if (driverCheck.rowCount === 0) {
-          console.log('👤 Creating dummy driver...');
-          await pool.query(`
-            INSERT INTO users (id, role, email, full_name, is_verified, password_hash)
-            VALUES ($1, 'DRIVER', 'driver@NetRide.dev', 'Dummy Driver', true, $2)
-          `, [dummyDriverId, passwordHash]);
-        }
-
-        // Ensure driver record exists
-        const profileCheck = await pool.query('SELECT user_id FROM drivers WHERE user_id = $1', [dummyDriverId]);
-        if (profileCheck.rowCount === 0) {
-          console.log('🪪 Creating dummy driver profile...');
-          await pool.query(`
-            INSERT INTO drivers (user_id, background_check_status, is_active)
-            VALUES ($1, 'APPROVED', true)
-          `, [dummyDriverId]);
-        }
-        console.log('✅ Dummy dev users verified');
-      } catch (err: any) {
-        console.error('❌ Failed to seed dummy users:', err.message);
-      }
+    // Add Is Active to Users
+    const hasIsActive = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_active'");
+    if (hasIsActive.rowCount === 0) {
+      console.log('⚡ Patching user schema (006)...');
+      const schemaPath = path.join(__dirname, '../migrations/006_add_is_active_to_users.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ User schema (006) patched successfully');
     }
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);

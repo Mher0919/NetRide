@@ -86,6 +86,14 @@ export class RideRepository {
     return res.rows[0] ? this.mapToTrip(res.rows[0]) : null;
   }
 
+  static async delete(id: string, userId: string): Promise<boolean> {
+    const res = await pool.query(
+      'DELETE FROM rides WHERE id = $1 AND (rider_id = $2 OR driver_id = $2)',
+      [id, userId]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
   private static mapToTrip(row: any): Trip {
     return {
       id: row.id,

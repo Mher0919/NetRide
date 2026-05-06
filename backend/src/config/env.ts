@@ -20,6 +20,8 @@ const envSchema = z.object({
   GMAIL_USER_EMAIL: z.string().optional(),
   EMAIL_FROM: z.string().default('NetRide <noreply@netride.com>'),
   APP_URL: z.string().default('http://localhost:3000'),
+  SUPABASE_URL: z.string().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

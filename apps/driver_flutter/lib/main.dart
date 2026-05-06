@@ -16,14 +16,33 @@ import 'screens/splash_screen.dart';
 import 'services/api_service.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'package:app_links/app_links.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
+
+  await Supabase.initialize(
+    url: dotenv.env['SUPABASE_URL'] ?? '',
+    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+  );
+
   await ApiService.init();
   
   final prefs = await SharedPreferences.getInstance();
-  final token = prefs.getString('jwt_token');
+  String? token = prefs.getString('jwt_token');
+
+  // SYNC LOGIC: If we have a Supabase session but no backend token, sync now
+  final supabase = Supabase.instance.client;
+  if (supabase.auth.currentSession != null && token == null) {
+    debugPrint('[MAIN] 💡 Supabase session found but no backend token. Syncing...');
+    final success = await AuthService.syncWithBackend();
+    if (success) {
+      token = prefs.getString('jwt_token');
+    }
+  }
 
   runApp(
     MultiProvider(
@@ -41,13 +60,40 @@ void main() async {
   );
 }
 
-class NetRideDriver extends StatelessWidget {
+class NetRideDriver extends StatefulWidget {
   final bool isAuthenticated;
   const NetRideDriver({super.key, required this.isAuthenticated});
 
   @override
+  State<NetRideDriver> createState() => _NetRideDriverState();
+}
+
+class _NetRideDriverState extends State<NetRideDriver> {
+  late AppLinks _appLinks;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinks();
+  }
+
+  void _initDeepLinks() {
+    _appLinks = AppLinks();
+    _appLinks.uriLinkStream.listen((uri) {
+      debugPrint('🔗 Received Deep Link: $uri');
+      if (uri.host == 'password-reset' || uri.path.contains('password-reset')) {
+        final token = uri.queryParameters['token'];
+        if (token != null) {
+          ApiService.navigatorKey.currentState?.pushNamed('/reset-password', arguments: {'token': token});
+        }
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: ApiService.navigatorKey,
       title: 'NetRide Driver',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
@@ -58,7 +104,7 @@ class NetRideDriver extends StatelessWidget {
           case '/splash':
             final args = settings.arguments as Map<String, dynamic>?;
             page = SplashScreen(
-              targetRoute: args?['targetRoute'] ?? (isAuthenticated ? '/' : '/login'),
+              targetRoute: args?['targetRoute'] ?? (widget.isAuthenticated ? '/' : '/login'),
               arguments: args?['arguments'],
             );
             break;
@@ -101,4 +147,3 @@ class NetRideDriver extends StatelessWidget {
     );
   }
 }
-
