@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/trip_models.dart';
+import '../services/api_service.dart';
 
 class DriverProvider with ChangeNotifier {
   DriverStatus _status = DriverStatus.offline;
@@ -136,6 +137,14 @@ class DriverProvider with ChangeNotifier {
 
   void completeTrip(String tripId) {
     _socket?.emit('completeTrip', tripId);
+  }
+
+  Future<void> rateRide(String rideId, int rating, String reviewText) async {
+    await ApiService.rateRide(
+      rideId: rideId,
+      rating: rating,
+      reviewText: reviewText,
+    );
   }
 
   void updateLocation(double lat, double lng, {double heading = 0}) {

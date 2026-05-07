@@ -446,6 +446,37 @@ class _IncomingRequestCard extends StatelessWidget {
               Text('\$${(request.fareAmount ?? 0.00).toStringAsFixed(2)}', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32))),
             ],
           ),
+          const SizedBox(height: 16),
+          if (request.riderInfo != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F4EF),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_outline, size: 16, color: Color(0xFF5B7760)),
+                  const SizedBox(width: 8),
+                  Text(
+                    request.riderInfo!.name,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                  const Spacer(),
+                  const Icon(Icons.star_rounded, color: Color(0xFFC79A4A), size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    request.riderInfo!.rating.toStringAsFixed(1),
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '(${request.riderInfo!.totalRides})',
+                    style: TextStyle(fontSize: 12, color: const Color(0xFF2F3A32).withOpacity(0.5)),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 24),
           _buildRow(Icons.circle, const Color(0xFF5B7760), request.pickup.address ?? 'Pickup'),
           const SizedBox(height: 12),

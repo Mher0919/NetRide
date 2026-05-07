@@ -74,4 +74,16 @@ class ApiService {
       },
     ));
   }
+
+  static Future<Response> rateRide({
+    required String rideId,
+    required int rating,
+    String? reviewText,
+  }) async {
+    return await dio.post('ride/rate', data: {
+      'ride_id': rideId,
+      'rating': rating,
+      'review_text': reviewText,
+    });
+  }
 }

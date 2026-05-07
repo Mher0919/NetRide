@@ -36,7 +36,7 @@ export class AuthService {
     }
 
     await OTPService.generateOTP(data.email);
-    return { otp_required: true, message: 'Verification code sent to email' };
+    return { otp_required: true, phone_number_required: true, message: 'Verification code sent to email' };
   }
 
   static async loginWithPassword(data: { email: string; password?: string }) {
@@ -66,7 +66,8 @@ export class AuthService {
     }
 
     const token = this.generateToken(user);
-    return { user, token };
+    const phoneNumberRequired = !user.phone_number;
+    return { user, token, phone_number_required: phoneNumberRequired };
   }
 
   static async changePassword(userId: string, data: { currentPassword?: string, newPassword: string }) {
@@ -176,12 +177,12 @@ export class AuthService {
     let user = existingRes.rows[0];
 
     if (!user) {
-      // 3. Create User - Default to verified if coming from trusted OAuth
+      // 3. Create User - Default to UNVERIFIED (is_verified = false) even for OAuth
       const createRes = await pool.query(
         `INSERT INTO users (email, full_name, profile_image_url, role, is_verified, is_active)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [email, data.full_name, data.profile_image_url, data.role, true, true]
+        [email, data.full_name, data.profile_image_url, data.role, false, true]
       );
       user = createRes.rows[0];
 
@@ -197,7 +198,9 @@ export class AuthService {
     }
 
     const token = this.generateToken(user);
-    return { user, token };
+    const phoneNumberRequired = !user.phone_number;
+    
+    return { user, token, phone_number_required: phoneNumberRequired };
   }
 
   static async requestOTP(email: string) {
@@ -225,12 +228,12 @@ export class AuthService {
         throw new Error('User not found. Please sign up.');
       }
 
-      // Create User (Signup)
+      // Create User (Signup) - Default to UNVERIFIED
       const createRes = await pool.query(
         `INSERT INTO users (email, full_name, role, is_verified, is_active)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [data.email, data.full_name, data.role, true, true]
+        [data.email, data.full_name, data.role, false, true]
       );
       user = createRes.rows[0];
 
@@ -246,7 +249,9 @@ export class AuthService {
     }
 
     const token = this.generateToken(user);
-    return { user, token };
+    const phoneNumberRequired = !user.phone_number;
+    
+    return { user, token, phone_number_required: phoneNumberRequired };
   }
 
   static async requestPasswordChange(userId: string, currentPassword: string) {

@@ -118,6 +118,51 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
               ),
             ),
             const Spacer(),
+            if (rideProvider.status == models.TripStatus.ACCEPTED && rideProvider.currentTrip?.driverInfo != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 32),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6E8B74).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: const Color(0xFF6E8B74).withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const CircleAvatar(
+                      backgroundColor: Colors.white,
+                      child: Icon(Icons.person, color: Color(0xFF5B7760)),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            rideProvider.currentTrip!.driverInfo!.name,
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                          ),
+                          Row(
+                            children: [
+                              const Icon(Icons.star_rounded, color: Color(0xFFC79A4A), size: 16),
+                              const SizedBox(width: 4),
+                              Text(
+                                rideProvider.currentTrip!.driverInfo!.rating.toStringAsFixed(1),
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '(${rideProvider.currentTrip!.driverInfo!.totalRides} rides)',
+                                style: TextStyle(fontSize: 12, color: const Color(0xFF2F3A32).withOpacity(0.5)),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (rideProvider.status == models.TripStatus.REQUESTED)
               Center(
                 child: Column(
