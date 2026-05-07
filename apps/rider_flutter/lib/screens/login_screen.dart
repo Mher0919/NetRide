@@ -130,7 +130,15 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else {
-          Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/'});
+          final hasPhone = res['user']['phone_number'] != null && 
+                          res['user']['phone_number'].toString().isNotEmpty &&
+                          res['phone_number_required'] != true;
+          
+          Navigator.pushReplacementNamed(
+            context, 
+            '/splash', 
+            arguments: {'targetRoute': hasPhone ? '/' : '/onboarding'}
+          );
         }
       }
     } catch (e) {

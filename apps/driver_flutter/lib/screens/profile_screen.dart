@@ -38,6 +38,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isVerified = false;
   bool _hasPassword = false;
   bool _showVerificationHint = false;
+  double _rating = 5.0;
+  int _totalRides = 0;
 
   @override
   void initState() {
@@ -69,6 +71,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileImageUrl = profile['profile_image_url'];
         _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
         _hasPassword = profile['has_password'] == true;
+        _rating = (profile['rating'] as num?)?.toDouble() ?? 5.0;
+        _totalRides = profile['rating_count'] as int? ?? 0;
         
         if (profile['vehicles'] != null && profile['vehicles'].isNotEmpty) {
           final v = profile['vehicles'][0];
@@ -333,14 +337,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _saveProfile() async {
+    final fullName = _nameController.text.trim();
+    final phoneNumber = _phoneController.text.trim();
+    final plateNumber = _plateController.text.trim();
+
+    if (fullName.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name must be at least 2 characters')));
+      return;
+    }
+
     setState(() => _isSaving = true);
     try {
-      await UserService.updateProfile({
-        'full_name': _nameController.text.trim(),
-        'phone_number': _phoneController.text.trim(),
-        if (_selectedVehicleId != null) 'vehicle_id': _selectedVehicleId,
-        'license_plate_number': _plateController.text.trim(),
-      });
+      final Map<String, dynamic> updateData = {
+        'full_name': fullName,
+      };
+      
+      if (phoneNumber.isNotEmpty) {
+        updateData['phone_number'] = phoneNumber;
+      }
+      
+      if (_selectedVehicleId != null) {
+        updateData['vehicle_id'] = _selectedVehicleId;
+      }
+      
+      if (plateNumber.isNotEmpty) {
+        updateData['license_plate_number'] = plateNumber;
+      }
+
+      await UserService.updateProfile(updateData);
 
       setState(() {
         _isSaving = false;
@@ -515,17 +539,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 24),
                   _buildSectionCard(
-                    title: 'Support',
-                    children: [
-                      _buildMenuTile(
-                        icon: Icons.support_agent_rounded,
-                        title: 'Customer Support',
-                        onTap: _handleSupport,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
                     title: 'Settings',
                     children: [
                       _buildMenuTile(
@@ -538,17 +551,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 40),
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: _handleLogout,
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        foregroundColor: const Color(0xFFC65A5A),
+                  const SizedBox(height: 24),
+                  _buildSectionCard(
+                    title: 'Support',
+                    children: [
+                      _buildMenuTile(
+                        icon: Icons.support_agent_rounded,
+                        title: 'Customer Support',
+                        onTap: _handleSupport,
                       ),
-                      child: const Text('Logout', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  _buildSectionCard(
+                    title: 'Account',
+                    children: [
+                      _buildMenuTile(
+                        icon: Icons.logout_rounded,
+                        title: 'Sign Out',
+                        onTap: _handleLogout,
+                        textColor: const Color(0xFFC65A5A),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -593,7 +617,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.star_rounded, color: Color(0xFFC79A4A), size: 20),
+              const SizedBox(width: 4),
+              Text(
+                _rating.toStringAsFixed(1),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '($_totalRides rides)',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF2F3A32).withOpacity(0.4)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           GestureDetector(
             onTap: () {
               if (!_isVerified) {

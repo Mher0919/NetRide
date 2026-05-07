@@ -395,8 +395,7 @@ class _TripScreenState extends State<TripScreen> {
                           driverProvider.pickUpRider(trip.id);
                           _fetchRoute(); 
                         } else {
-                          driverProvider.completeTrip(trip.id);
-                          Navigator.pop(context);
+                          _showRiderRatingDialog();
                         }
                       },
                       child: Text(trip.status == models.TripStatus.ACCEPTED ? 'PICK UP RIDER' : 'FINISH RIDE'),
@@ -415,6 +414,98 @@ class _TripScreenState extends State<TripScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showRiderRatingDialog() {
+    int selectedRating = 5;
+    final reviewController = TextEditingController();
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Text(
+            'Rate your Rider',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20, color: Color(0xFF2F3A32)),
+            textAlign: TextAlign.center,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'How was your experience with this rider?',
+                style: TextStyle(fontSize: 14, color: const Color(0xFF2F3A32).withOpacity(0.7)),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  return IconButton(
+                    icon: Icon(
+                      index < selectedRating ? Icons.star : Icons.star_border,
+                      color: const Color(0xFFC79A4A),
+                      size: 32,
+                    ),
+                    onPressed: () => setState(() => selectedRating = index + 1),
+                  );
+                }),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: reviewController,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Add a comment (optional)',
+                  hintStyle: TextStyle(fontSize: 13, color: const Color(0xFF2F3A32).withOpacity(0.4)),
+                  filled: true,
+                  fillColor: const Color(0xFFF7F4EF),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: isSubmitting ? null : () async {
+                  setState(() => isSubmitting = true);
+                  final driverProvider = Provider.of<DriverProvider>(context, listen: false);
+                  try {
+                    if (driverProvider.currentTrip != null) {
+                      await driverProvider.rateRide(
+                        driverProvider.currentTrip!.id,
+                        selectedRating,
+                        reviewController.text.trim(),
+                      );
+                      await driverProvider.completeTrip(driverProvider.currentTrip!.id);
+                    }
+                    if (mounted) Navigator.pop(context);
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to submit rating: $e')));
+                      setState(() => isSubmitting = false);
+                    }
+                  }
+                },
+                child: isSubmitting 
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text('SUBMIT & FINISH'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

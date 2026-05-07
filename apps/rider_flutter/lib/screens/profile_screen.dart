@@ -32,6 +32,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isVerified = false;
   bool _hasPassword = false;
   bool _showVerificationHint = false;
+  double _rating = 5.0;
+  int _ratingCount = 0;
 
   @override
   void initState() {
@@ -53,6 +55,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileImageUrl = profile['profile_image_url'];
         _isVerified = profile['is_verified'] == true || profile['is_verified'] == 'true';
         _hasPassword = profile['has_password'] == true;
+        _rating = (profile['rating'] as num?)?.toDouble() ?? 5.0;
+        _ratingCount = profile['rating_count'] as int? ?? 0;
         _isLoading = false;
       });
     } catch (e) {
@@ -308,12 +312,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _saveProfile() async {
+    final fullName = _nameController.text.trim();
+    final phoneNumber = _phoneController.text.trim();
+
+    if (fullName.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name must be at least 2 characters')));
+      return;
+    }
+
     setState(() => _isSaving = true);
     try {
-      await UserService.updateProfile({
-        'full_name': _nameController.text.trim(),
-        'phone_number': _phoneController.text.trim(),
-      });
+      final Map<String, dynamic> updateData = {'full_name': fullName};
+      if (phoneNumber.isNotEmpty) {
+        updateData['phone_number'] = phoneNumber;
+      }
+
+      await UserService.updateProfile(updateData);
       
       setState(() {
         _isSaving = false;
@@ -435,17 +449,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 24),
                   _buildSectionCard(
-                    title: 'Support',
-                    children: [
-                      _buildMenuTile(
-                        icon: Icons.support_agent_rounded,
-                        title: 'Customer Support',
-                        onTap: _handleSupport,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
                     title: 'Settings',
                     children: [
                       _buildMenuTile(
@@ -458,17 +461,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 40),
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: _handleLogout,
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        foregroundColor: const Color(0xFFC65A5A),
+                  const SizedBox(height: 24),
+                  _buildSectionCard(
+                    title: 'Support',
+                    children: [
+                      _buildMenuTile(
+                        icon: Icons.support_agent_rounded,
+                        title: 'Customer Support',
+                        onTap: _handleSupport,
                       ),
-                      child: const Text('Logout', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  _buildSectionCard(
+                    title: 'Account',
+                    children: [
+                      _buildMenuTile(
+                        icon: Icons.logout_rounded,
+                        title: 'Sign Out',
+                        onTap: _handleLogout,
+                        textColor: const Color(0xFFC65A5A),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -513,7 +527,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.star_rounded, color: Color(0xFFC79A4A), size: 20),
+              const SizedBox(width: 4),
+              Text(
+                _rating.toStringAsFixed(1),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           GestureDetector(
             onTap: () {
               if (!_isVerified) {

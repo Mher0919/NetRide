@@ -10,7 +10,7 @@ import { pool } from '../../config/database';
 export class RideService {
   static async rateRide(data: {
     ride_id: string;
-    rider_id: string;
+    rater_id: string;
     rating: number;
     review_text?: string;
   }) {
@@ -24,28 +24,67 @@ export class RideService {
 
       if (!ride) throw new Error('Ride not found');
       if (ride.status !== 'COMPLETED') throw new Error('Ride is not completed');
-      if (ride.rider_id !== data.rider_id) throw new Error('Unauthorized');
-      if (!ride.driver_id) throw new Error('No driver assigned to this ride');
 
-      // 2. Create Rating
+      // Determine roles
+      let target_id: string;
+      let target_role: string;
+
+      if (ride.rider_id === data.rater_id) {
+        // Rider is rating Driver
+        if (!ride.driver_id) throw new Error('No driver assigned to this ride');
+        target_id = ride.driver_id;
+        target_role = 'DRIVER';
+      } else if (ride.driver_id === data.rater_id) {
+        // Driver is rating Rider
+        target_id = ride.rider_id;
+        target_role = 'RIDER';
+      } else {
+        throw new Error('Unauthorized');
+      }
+
+      // 2. Check if already rated by this person for this ride
+      const existingRating = await client.query(
+        'SELECT id FROM ratings WHERE ride_id = $1 AND rater_id = $2',
+        [data.ride_id, data.rater_id]
+      );
+      if (existingRating.rows.length > 0) throw new Error('You have already rated this ride');
+
+      // 3. Create Rating
       const ratingRes = await client.query(
-        `INSERT INTO ratings (ride_id, rider_id, driver_id, rating, review_text)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO ratings (ride_id, rater_id, target_id, target_role, rating, review_text)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [data.ride_id, data.rider_id, ride.driver_id, data.rating, data.review_text]
+        [data.ride_id, data.rater_id, target_id, target_role, data.rating, data.review_text]
       );
 
-      // 3. Update Driver Rating
-      const driverRes = await client.query('SELECT * FROM drivers WHERE user_id = $1', [ride.driver_id]);
-      const driver = driverRes.rows[0];
+      // 4. Update Target Rating (Moving Average of last 100)
+      const lastRatings = await client.query(
+        `SELECT rating FROM ratings WHERE target_id = $1 ORDER BY created_at DESC LIMIT 100`,
+        [target_id]
+      );
 
-      if (driver) {
-        const newTotalRides = parseInt(driver.total_rides) + 1;
-        const newRating = ((parseFloat(driver.rating) * driver.total_rides) + data.rating) / newTotalRides;
+      const totalRatingsCount = parseInt((await client.query(
+        'SELECT COUNT(*) FROM ratings WHERE target_id = $1',
+        [target_id]
+      )).rows[0].count);
 
+      let newRating = 5.0;
+      if (totalRatingsCount >= 100) {
+        const sum = lastRatings.rows.reduce((acc: number, curr: any) => acc + curr.rating, 0);
+        newRating = parseFloat((sum / lastRatings.rows.length).toFixed(1));
+      }
+
+      // Update User table rating for everyone
+      await client.query(
+        'UPDATE users SET rating = $1, rating_count = $2 WHERE id = $3',
+        [newRating, totalRatingsCount, target_id]
+      );
+
+      // If target is a driver, also update drivers table for redundancy/legacy compatibility
+      if (target_role === 'DRIVER') {
         await client.query(
-          `UPDATE drivers SET total_rides = $1, rating = $2 WHERE user_id = $3`,
-          [newTotalRides, parseFloat(newRating.toFixed(1)), ride.driver_id]
+          'UPDATE drivers SET rating = $1, total_rides = total_rides + 1 WHERE user_id = $2',
+          [newRating, target_id]
         );
       }
 
@@ -61,7 +100,7 @@ export class RideService {
 
   static async requestRide(riderId: string, pickup: Location & { address: string }, destination: Location & { address: string }): Promise<Trip> {
     console.log(`[RIDE] New request from rider ${riderId}. Pickup: ${pickup.lat}, ${pickup.lng}`);
-    const trip = await RideRepository.create({
+    await RideRepository.create({
       rider_id: riderId,
       pickup_lat: pickup.lat,
       pickup_lng: pickup.lng,
@@ -70,6 +109,9 @@ export class RideService {
       destination_lng: destination.lng,
       destination_address: destination.address,
     });
+
+    const trip = await RideRepository.findCurrentByRiderId(riderId);
+    if (!trip) throw new Error('Failed to create trip');
 
     // ... rest of method remains same as before Prisma refactor
     const route = await GeospatialService.getRoute(

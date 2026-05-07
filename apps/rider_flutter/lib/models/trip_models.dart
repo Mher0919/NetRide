@@ -37,6 +37,8 @@ class DriverInfo {
   final String name;
   final String vehicle;
   final String plate;
+  final double rating;
+  final int totalRides;
   final Location? location;
 
   DriverInfo({
@@ -44,6 +46,8 @@ class DriverInfo {
     required this.name,
     required this.vehicle,
     required this.plate,
+    this.rating = 5.0,
+    this.totalRides = 0,
     this.location,
   });
 
@@ -53,33 +57,55 @@ class DriverInfo {
       name: json['name'] ?? 'Driver',
       vehicle: json['vehicle'] ?? 'Sedan',
       plate: json['plate'] as String? ?? '',
+      rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
+      totalRides: json['totalRides'] as int? ?? 0,
       location: json['location'] != null ? Location.fromJson(json['location']) : null,
-      );
-      }
-      }
+    );
+  }
+}
 
-      class ChatMessage {
-      final String senderId;
-      final String role;
-      final String message;
-      final DateTime timestamp;
+class RiderInfo {
+  final String name;
+  final double rating;
+  final int totalRides;
 
-      ChatMessage({
-      required this.senderId,
-      required this.role,
-      required this.message,
-      required this.timestamp,
-      });
+  RiderInfo({
+    required this.name,
+    this.rating = 5.0,
+    this.totalRides = 0,
+  });
 
-      factory ChatMessage.fromJson(Map<String, dynamic> json) {
-      return ChatMessage(
+  factory RiderInfo.fromJson(Map<String, dynamic> json) {
+    return RiderInfo(
+      name: json['name'] ?? 'Rider',
+      rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
+      totalRides: json['total_rides'] as int? ?? 0,
+    );
+  }
+}
+
+class ChatMessage {
+  final String senderId;
+  final String role;
+  final String message;
+  final DateTime timestamp;
+
+  ChatMessage({
+    required this.senderId,
+    required this.role,
+    required this.message,
+    required this.timestamp,
+  });
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    return ChatMessage(
       senderId: json['senderId'],
       role: json['role'],
       message: json['message'],
       timestamp: DateTime.parse(json['timestamp']),
-      );
-      }
-      }
+    );
+  }
+}
 
 class Trip {
   final String id;
@@ -89,6 +115,8 @@ class Trip {
   final Location pickup;
   final Location destination;
   final double? fareAmount;
+  final RiderInfo? riderInfo;
+  final DriverInfo? driverInfo;
 
   Trip({
     required this.id,
@@ -98,6 +126,8 @@ class Trip {
     required this.pickup,
     required this.destination,
     this.fareAmount,
+    this.riderInfo,
+    this.driverInfo,
   });
 
   factory Trip.fromJson(Map<String, dynamic> json) {
@@ -112,6 +142,8 @@ class Trip {
       pickup: Location.fromJson(json['pickup']),
       destination: Location.fromJson(json['destination']),
       fareAmount: (json['fare_amount'] as num?)?.toDouble(),
+      riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
+      driverInfo: json['driver_info'] != null ? DriverInfo.fromJson(json['driver_info']) : null,
     );
   }
 }

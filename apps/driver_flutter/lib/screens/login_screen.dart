@@ -106,11 +106,14 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else {
-          final hasPhone = res['user']['phone_number'] != null && res['user']['phone_number'].toString().isNotEmpty;
+          final hasPhone = res['user']['phone_number'] != null && 
+                          res['user']['phone_number'].toString().isNotEmpty &&
+                          res['phone_number_required'] != true;
+          
           Navigator.pushReplacementNamed(
             context, 
             '/splash', 
-            arguments: {'targetRoute': hasPhone ? '/' : '/'}
+            arguments: {'targetRoute': hasPhone ? '/' : '/onboarding'}
           );
         }
       }

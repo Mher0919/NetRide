@@ -7,9 +7,9 @@ import { AuthService } from '../auth/auth.service';
 
 export const updateProfileSchema = z.object({
   body: z.object({
-    phone_number: z.string().min(10).optional(),
-    full_name: z.string().min(2).optional(),
-    profile_image_url: z.string().url().optional(),
+    phone_number: z.string().optional(),
+    full_name: z.string().optional(),
+    profile_image_url: z.string().optional(),
     date_of_birth: z.string().optional(),
   }),
 });

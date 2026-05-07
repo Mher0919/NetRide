@@ -152,6 +152,16 @@ async function runMigrations() {
       await pool.query(schema);
       console.log('✅ User schema (006) patched successfully');
     }
+
+    // Add Ratings and Moving Average
+    const hasRating = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'rating'");
+    if (hasRating.rowCount === 0) {
+      console.log('⚡ Patching ratings schema (007)...');
+      const schemaPath = path.join(__dirname, '../migrations/007_add_ratings_and_moving_average.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Ratings schema (007) patched successfully');
+    }
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);
   }

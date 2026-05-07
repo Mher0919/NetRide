@@ -33,6 +33,46 @@ class Location {
   }
 }
 
+class RiderInfo {
+  final String name;
+  final double rating;
+  final int totalRides;
+
+  RiderInfo({
+    required this.name,
+    this.rating = 5.0,
+    this.totalRides = 0,
+  });
+
+  factory RiderInfo.fromJson(Map<String, dynamic> json) {
+    return RiderInfo(
+      name: json['name'] ?? 'Rider',
+      rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
+      totalRides: json['total_rides'] as int? ?? 0,
+    );
+  }
+}
+
+class DriverInfo {
+  final String name;
+  final double rating;
+  final int totalRides;
+
+  DriverInfo({
+    required this.name,
+    this.rating = 5.0,
+    this.totalRides = 0,
+  });
+
+  factory DriverInfo.fromJson(Map<String, dynamic> json) {
+    return DriverInfo(
+      name: json['name'] ?? 'Driver',
+      rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
+      totalRides: json['total_rides'] as int? ?? 0,
+    );
+  }
+}
+
 class Trip {
   final String id;
   final String riderId;
@@ -41,6 +81,8 @@ class Trip {
   final Location pickup;
   final Location destination;
   final double? fareAmount;
+  final RiderInfo? riderInfo;
+  final DriverInfo? driverInfo;
 
   Trip({
     required this.id,
@@ -50,6 +92,8 @@ class Trip {
     required this.pickup,
     required this.destination,
     this.fareAmount,
+    this.riderInfo,
+    this.driverInfo,
   });
 
   factory Trip.fromJson(Map<String, dynamic> json) {
@@ -64,6 +108,8 @@ class Trip {
       pickup: Location.fromJson(json['pickup']),
       destination: Location.fromJson(json['destination']),
       fareAmount: (json['fare_amount'] as num?)?.toDouble(),
+      riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
+      driverInfo: json['driver_info'] != null ? DriverInfo.fromJson(json['driver_info']) : null,
     );
   }
 }

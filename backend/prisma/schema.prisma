@@ -47,14 +47,16 @@ model User {
   profile_image_url String?
   is_verified       Boolean  @default(false)
   is_active         Boolean  @default(true)
+  rating            Float    @default(5.0)
+  rating_count      Int      @default(0)
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
 
   driver_profile    Driver?
   rides_as_rider    Ride[]   @relation("RiderRides")
   rides_as_driver    Ride[]   @relation("DriverRides")
-  ratings_given     Rating[] @relation("RiderRatings")
-  ratings_received  Rating[] @relation("DriverRatings")
+  ratings_given     Rating[] @relation("RaterRatings")
+  ratings_received  Rating[] @relation("TargetRatings")
 }
 
 model Driver {
@@ -106,17 +108,18 @@ model Ride {
   status     TripStatus @default(REQUESTED)
   created_at DateTime   @default(now())
   
-  rating     Rating?
+  ratings    Rating[]
 }
 
 model Rating {
   id          String   @id @default(uuid())
-  ride_id     String   @unique
+  ride_id     String
   ride        Ride     @relation(fields: [ride_id], references: [id])
-  rider_id    String
-  rider       User     @relation("RiderRatings", fields: [rider_id], references: [id])
-  driver_id   String
-  driver      User     @relation("DriverRatings", fields: [driver_id], references: [id])
+  rater_id    String
+  rater       User     @relation("RaterRatings", fields: [rater_id], references: [id])
+  target_id   String
+  target      User     @relation("TargetRatings", fields: [target_id], references: [id])
+  target_role UserRole
   rating      Int      // 1-5
   review_text String?
   created_at  DateTime @default(now())

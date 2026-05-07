@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/trip_models.dart';
+import '../services/api_service.dart';
 
 class RideProvider with ChangeNotifier {
   TripStatus _status = TripStatus.IDLE;
@@ -159,6 +160,14 @@ class RideProvider with ChangeNotifier {
 
   void updateLocation(double lat, double lng) {
     _socket?.emit('updateLocation', {'lat': lat, 'lng': lng});
+  }
+
+  Future<void> rateRide(String rideId, int rating, String reviewText) async {
+    await ApiService.rateRide(
+      rideId: rideId,
+      rating: rating,
+      reviewText: reviewText,
+    );
   }
 
   @override

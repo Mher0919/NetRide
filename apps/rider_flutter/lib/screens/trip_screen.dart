@@ -452,36 +452,93 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   void _showArrivalDialog() {
+    int selectedRating = 5;
+    final reviewController = TextEditingController();
+    bool isSubmitting = false;
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text(
-          'Arrived',
-          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 22, color: Color(0xFF2F3A32)),
-          textAlign: TextAlign.center,
-        ),
-        content: Text(
-          'You have reached your destination. We hope you enjoyed your NetRide experience.',
-          style: TextStyle(fontSize: 15, color: const Color(0xFF2F3A32).withOpacity(0.7)),
-          textAlign: TextAlign.center,
-        ),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                final rideProvider = Provider.of<RideProvider>(context, listen: false);
-                rideProvider.reset();
-                Navigator.popUntil(context, (route) => route.isFirst);
-              },
-              child: const Text('DONE'),
-            ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Text(
+            'How was your ride?',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20, color: Color(0xFF2F3A32)),
+            textAlign: TextAlign.center,
           ),
-        ],
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Please rate your experience with the driver.',
+                style: TextStyle(fontSize: 14, color: const Color(0xFF2F3A32).withOpacity(0.7)),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  return IconButton(
+                    icon: Icon(
+                      index < selectedRating ? Icons.star : Icons.star_border,
+                      color: const Color(0xFFC79A4A),
+                      size: 32,
+                    ),
+                    onPressed: () => setState(() => selectedRating = index + 1),
+                  );
+                }),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: reviewController,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Add a comment (optional)',
+                  hintStyle: TextStyle(fontSize: 13, color: const Color(0xFF2F3A32).withOpacity(0.4)),
+                  filled: true,
+                  fillColor: const Color(0xFFF7F4EF),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: isSubmitting ? null : () async {
+                  setState(() => isSubmitting = true);
+                  final rideProvider = Provider.of<RideProvider>(context, listen: false);
+                  try {
+                    if (rideProvider.currentTrip != null) {
+                      await rideProvider.rateRide(
+                        rideProvider.currentTrip!.id,
+                        selectedRating,
+                        reviewController.text.trim(),
+                      );
+                    }
+                    rideProvider.reset();
+                    if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to submit rating: $e')));
+                      setState(() => isSubmitting = false);
+                    }
+                  }
+                },
+                child: isSubmitting 
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text('SUBMIT RATING'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
