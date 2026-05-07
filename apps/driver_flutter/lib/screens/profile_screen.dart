@@ -102,16 +102,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _handleSupport() async {
-    final Uri smsLaunchUri = Uri(
-      scheme: 'sms',
-      path: '7477245408',
-    );
-    if (await canLaunchUrl(smsLaunchUri)) {
-      await launchUrl(smsLaunchUri);
-    } else {
+    final String body = Uri.encodeComponent('Hello NetRide Support, I am a driver and I need help with...');
+    final Uri smsLaunchUri = Uri.parse('sms:7477245408?body=$body');
+    try {
+      if (!await launchUrl(smsLaunchUri)) {
+        throw 'Could not launch SMS';
+      }
+    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not launch SMS app')),
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Contact Support'),
+            content: const Text('Please send an SMS to:\n\n747-724-5408\n\nSample text:\n"Hello NetRide Support, I need help with..."'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
         );
       }
     }
