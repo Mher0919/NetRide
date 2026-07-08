@@ -1,0 +1,140 @@
+version: '3.9'
+
+# Scale configuration for 100k concurrent user load.
+# Adds OSRM load balancer + multi-instance OSRM + match/cron workers.
+# Usage: docker compose -f infra/docker-compose.scale.yml up -d
+
+services:
+  osrm-lb:
+    image: nginx:alpine
+    ports:
+      - '5000:5000'
+    volumes:
+      - ./nginx/osrm.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - osrm-1
+      - osrm-2
+      - osrm-3
+    restart: unless-stopped
+
+  osrm-1:
+    image: osrm/osrm-backend
+    command: osrm-routed --algorithm mld /data/map.osrm
+    volumes:
+      - ../osrm-data:/data
+    restart: unless-stopped
+
+  osrm-2:
+    image: osrm/osrm-backend
+    command: osrm-routed --algorithm mld /data/map.osrm
+    volumes:
+      - ../osrm-data:/data
+    restart: unless-stopped
+
+  osrm-3:
+    image: osrm/osrm-backend
+    command: osrm-routed --algorithm mld /data/map.osrm
+    volumes:
+      - ../osrm-data:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_DB: ridehail
+      POSTGRES_USER: ridehail
+      POSTGRES_PASSWORD: secret
+    ports:
+      - '5432:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ../backend/migrations:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build: ../backend
+    command: npm run dev
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://ridehail:secret@postgres:5432/ridehail
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-32-char-secret-replace-in-prod
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      OSRM_URL: http://osrm-lb:5000/route/v1/driving
+      DRIVER_MATCH_RADIUS_KM: 5
+      DRIVER_ACCEPT_TIMEOUT_MS: 15000
+      FACE_SERVICE_URL: http://face-service:8000
+      FACE_CHECK_INTERVAL_HOURS: 12
+      FACE_LOCATION_JUMP_MILES: 5
+      MATCH_WORKER_CONCURRENCY: 4
+      DISPATCH_FANOUT_SIZE: 5
+      DRIVER_SCORE_CACHE_TTL_S: 300
+    depends_on:
+      - postgres
+      - redis
+      - osrm-lb
+      - face-service
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+
+  match-worker:
+    build: ../backend
+    command: npm run match-worker
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://ridehail:secret@postgres:5432/ridehail
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-32-char-secret-replace-in-prod
+      OSRM_URL: http://osrm-lb:5000/route/v1/driving
+      DRIVER_MATCH_RADIUS_KM: 5
+      DRIVER_ACCEPT_TIMEOUT_MS: 15000
+      MATCH_WORKER_CONCURRENCY: 4
+      DISPATCH_FANOUT_SIZE: 5
+    depends_on:
+      - postgres
+      - redis
+      - osrm-lb
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+
+  cron-worker:
+    build: ../backend
+    command: npm run cron-worker
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://ridehail:secret@postgres:5432/ridehail
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-32-char-secret-replace-in-prod
+      DRIVER_SCORE_CACHE_TTL_S: 300
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+
+  face-service:
+    build: ../backend/face_service
+    restart: unless-stopped
+    ports:
+      - '8000:8000'
+    environment:
+      FACE_MATCH_THRESHOLD: 0.45
+      FACE_MIN_MOTION_PX: 15
+      FACE_MIN_BLINK_COUNT: 1
+      FACE_MIN_LAPLACIAN_VAR: 80
+
+volumes:
+  pg_data:
+  redis_data:

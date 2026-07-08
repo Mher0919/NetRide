@@ -45,53 +45,56 @@ export class UserController {
       res.json(user);
     } catch (error: any) {
       console.error(`[USER] ❌ Error in getProfile: ${error.message}`);
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ error: 'Failed to retrieve profile information. Please try again.' });
     }
   }
 
   static async updateProfile(req: AuthRequest, res: Response) {
     try {
       const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
       const user = await UserService.updateProfile(userId, req.body);
-      if (!user) return res.status(404).json({ message: 'User not found' });
+      if (!user) return res.status(404).json({ error: 'User profile not found.' });
 
       res.json(user);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      console.error(`[USER] ❌ Update profile error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to update profile. Please try again later.' });
     }
   }
 
   static async verifyIdentity(req: AuthRequest, res: Response) {
     try {
       const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
       const { id_photo_front_url, id_photo_back_url, date_of_birth } = req.body;
       
       if (!id_photo_front_url || !id_photo_back_url) {
-        return res.status(400).json({ message: 'Both front and back ID photos are required' });
+        return res.status(400).json({ error: 'Both front and back ID photos are required for verification.' });
       }
 
       await UserService.requestVerification(userId, id_photo_front_url, id_photo_back_url, date_of_birth);
 
       res.json({ message: 'Verification request sent to admin' });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      console.error(`[USER] ❌ Identity verification error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to submit verification request. Please try again.' });
     }
   }
 
   static async requestEmailChange(req: AuthRequest, res: Response) {
     try {
       const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
       const { newEmail } = RequestEmailChangeSchema.parse(req.body);
       const result = await AuthService.requestEmailChange(userId, newEmail);
       res.json(result);
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      console.error(`[USER] ❌ Email change request error: ${error.message}`);
+      res.status(400).json({ error: 'Failed to request email change. Please ensure the email is valid and try again.' });
     }
   }
 

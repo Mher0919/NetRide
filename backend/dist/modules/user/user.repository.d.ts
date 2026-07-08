@@ -16,6 +16,8 @@ export declare class UserRepository {
         full_name: string;
         is_verified: boolean;
         profile_image_url: string;
+        id_photo_front_url: string;
+        id_photo_back_url: string;
         date_of_birth: string;
     }>): Promise<User | null>;
 }

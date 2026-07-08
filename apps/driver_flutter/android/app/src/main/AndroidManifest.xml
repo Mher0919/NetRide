@@ -41,6 +41,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Google Maps SDK API key. The key is read from local.properties
+             (which is gitignored) so production secrets never land in
+             the repo. For local dev, place the key in
+             android/local.properties as:
+               MAPS_API_KEY=AIza...
+             The default fallback string is harmless (Google Maps just
+             shows a tile watermark + no Places results), so dev builds
+             still render the navigation view. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${MAPS_API_KEY}" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

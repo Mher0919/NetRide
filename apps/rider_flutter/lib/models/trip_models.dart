@@ -1,3 +1,5 @@
+import '../utils/test_user.dart';
+
 enum TripStatus {
   REQUESTED,
   ACCEPTED,
@@ -6,6 +8,12 @@ enum TripStatus {
   COMPLETED,
   CANCELLED,
   IDLE // Added for UI state
+}
+
+enum VehicleClass {
+  CORE,
+  ELITE,
+  PRESTIGE
 }
 
 class Location {
@@ -35,6 +43,7 @@ class Location {
 class DriverInfo {
   final String id;
   final String name;
+  final String? email;
   final String vehicle;
   final String plate;
   final double rating;
@@ -44,6 +53,7 @@ class DriverInfo {
   DriverInfo({
     required this.id,
     required this.name,
+    this.email,
     required this.vehicle,
     required this.plate,
     this.rating = 5.0,
@@ -55,6 +65,7 @@ class DriverInfo {
     return DriverInfo(
       id: json['id'] ?? '',
       name: json['name'] ?? 'Driver',
+      email: json['email'],
       vehicle: json['vehicle'] ?? 'Sedan',
       plate: json['plate'] as String? ?? '',
       rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
@@ -66,11 +77,13 @@ class DriverInfo {
 
 class RiderInfo {
   final String name;
+  final String? email;
   final double rating;
   final int totalRides;
 
   RiderInfo({
     required this.name,
+    this.email,
     this.rating = 5.0,
     this.totalRides = 0,
   });
@@ -78,6 +91,7 @@ class RiderInfo {
   factory RiderInfo.fromJson(Map<String, dynamic> json) {
     return RiderInfo(
       name: json['name'] ?? 'Rider',
+      email: json['email'],
       rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
       totalRides: json['total_rides'] as int? ?? 0,
     );
@@ -115,6 +129,8 @@ class Trip {
   final Location pickup;
   final Location destination;
   final double? fareAmount;
+  final double? initialMaxFare;
+  final int? savingLikelihood;
   final RiderInfo? riderInfo;
   final DriverInfo? driverInfo;
 
@@ -126,9 +142,13 @@ class Trip {
     required this.pickup,
     required this.destination,
     this.fareAmount,
+    this.initialMaxFare,
+    this.savingLikelihood,
     this.riderInfo,
     this.driverInfo,
   });
+
+  bool get isTestTrip => isTestTripFor(riderInfo?.email, driverInfo?.email);
 
   factory Trip.fromJson(Map<String, dynamic> json) {
     return Trip(
@@ -142,6 +162,8 @@ class Trip {
       pickup: Location.fromJson(json['pickup']),
       destination: Location.fromJson(json['destination']),
       fareAmount: (json['fare_amount'] as num?)?.toDouble(),
+      initialMaxFare: (json['initial_max_fare'] as num?)?.toDouble(),
+      savingLikelihood: (json['saving_likelihood'] as num?)?.toInt(),
       riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
       driverInfo: json['driver_info'] != null ? DriverInfo.fromJson(json['driver_info']) : null,
     );

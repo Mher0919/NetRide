@@ -1,4 +1,5 @@
 enum DriverStatus { offline, online, onTrip }
+import '../utils/test_user.dart';
 
 enum TripStatus {
   REQUESTED,
@@ -7,6 +8,12 @@ enum TripStatus {
   IN_PROGRESS,
   COMPLETED,
   CANCELLED
+}
+
+enum VehicleClass {
+  CORE,
+  ELITE,
+  PRESTIGE
 }
 
 class Location {
@@ -35,11 +42,13 @@ class Location {
 
 class RiderInfo {
   final String name;
+  final String? email;
   final double rating;
   final int totalRides;
 
   RiderInfo({
     required this.name,
+    this.email,
     this.rating = 5.0,
     this.totalRides = 0,
   });
@@ -47,6 +56,7 @@ class RiderInfo {
   factory RiderInfo.fromJson(Map<String, dynamic> json) {
     return RiderInfo(
       name: json['name'] ?? 'Rider',
+      email: json['email'],
       rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
       totalRides: json['total_rides'] as int? ?? 0,
     );
@@ -55,11 +65,13 @@ class RiderInfo {
 
 class DriverInfo {
   final String name;
+  final String? email;
   final double rating;
   final int totalRides;
 
   DriverInfo({
     required this.name,
+    this.email,
     this.rating = 5.0,
     this.totalRides = 0,
   });
@@ -67,6 +79,7 @@ class DriverInfo {
   factory DriverInfo.fromJson(Map<String, dynamic> json) {
     return DriverInfo(
       name: json['name'] ?? 'Driver',
+      email: json['email'],
       rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
       totalRides: json['total_rides'] as int? ?? 0,
     );
@@ -81,8 +94,19 @@ class Trip {
   final Location pickup;
   final Location destination;
   final double? fareAmount;
+  final double? initialMaxFare;
+  final int? savingLikelihood;
   final RiderInfo? riderInfo;
   final DriverInfo? driverInfo;
+  
+  // Custom fields for driver request screen
+  final double? calculatedPrice;
+  final double? tripDistanceMeters;
+  final double? tripDurationSeconds;
+  final Map<String, dynamic>? routeGeometry;
+  final double? driverToPickupEta;
+  final double? driverToPickupDistance;
+  final double? driverPricePerMile;
 
   Trip({
     required this.id,
@@ -92,9 +116,20 @@ class Trip {
     required this.pickup,
     required this.destination,
     this.fareAmount,
+    this.initialMaxFare,
+    this.savingLikelihood,
     this.riderInfo,
     this.driverInfo,
+    this.calculatedPrice,
+    this.tripDistanceMeters,
+    this.tripDurationSeconds,
+    this.routeGeometry,
+    this.driverToPickupEta,
+    this.driverToPickupDistance,
+    this.driverPricePerMile,
   });
+
+  bool get isTestTrip => isTestTripFor(riderInfo?.email, driverInfo?.email);
 
   factory Trip.fromJson(Map<String, dynamic> json) {
     return Trip(
@@ -108,8 +143,17 @@ class Trip {
       pickup: Location.fromJson(json['pickup']),
       destination: Location.fromJson(json['destination']),
       fareAmount: (json['fare_amount'] as num?)?.toDouble(),
+      initialMaxFare: (json['initial_max_fare'] as num?)?.toDouble(),
+      savingLikelihood: (json['saving_likelihood'] as num?)?.toInt(),
       riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
       driverInfo: json['driver_info'] != null ? DriverInfo.fromJson(json['driver_info']) : null,
+      calculatedPrice: (json['calculated_price'] as num?)?.toDouble(),
+      tripDistanceMeters: (json['trip_distance_meters'] as num?)?.toDouble(),
+      tripDurationSeconds: (json['trip_duration_seconds'] as num?)?.toDouble(),
+      routeGeometry: json['route_geometry'] != null ? Map<String, dynamic>.from(json['route_geometry']) : null,
+      driverToPickupEta: (json['driver_to_pickup_eta'] as num?)?.toDouble(),
+      driverToPickupDistance: (json['driver_to_pickup_distance'] as num?)?.toDouble(),
+      driverPricePerMile: (json['driver_price_per_mile'] as num?)?.toDouble(),
     );
   }
 }

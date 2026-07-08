@@ -6,9 +6,9 @@ const zod_1 = require("zod");
 const auth_service_1 = require("../auth/auth.service");
 exports.updateProfileSchema = zod_1.z.object({
     body: zod_1.z.object({
-        phone_number: zod_1.z.string().min(10).optional(),
-        full_name: zod_1.z.string().min(2).optional(),
-        profile_image_url: zod_1.z.string().url().optional(),
+        phone_number: zod_1.z.string().optional(),
+        full_name: zod_1.z.string().optional(),
+        profile_image_url: zod_1.z.string().optional(),
         date_of_birth: zod_1.z.string().optional(),
     }),
 });
@@ -40,50 +40,53 @@ class UserController {
         }
         catch (error) {
             console.error(`[USER] ❌ Error in getProfile: ${error.message}`);
-            res.status(500).json({ message: error.message });
+            res.status(500).json({ error: 'Failed to retrieve profile information. Please try again.' });
         }
     }
     static async updateProfile(req, res) {
         try {
             const userId = req.user?.id;
             if (!userId)
-                return res.status(401).json({ message: 'Unauthorized' });
+                return res.status(401).json({ error: 'Unauthorized' });
             const user = await user_service_1.UserService.updateProfile(userId, req.body);
             if (!user)
-                return res.status(404).json({ message: 'User not found' });
+                return res.status(404).json({ error: 'User profile not found.' });
             res.json(user);
         }
         catch (error) {
-            res.status(500).json({ message: error.message });
+            console.error(`[USER] ❌ Update profile error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to update profile. Please try again later.' });
         }
     }
     static async verifyIdentity(req, res) {
         try {
             const userId = req.user?.id;
             if (!userId)
-                return res.status(401).json({ message: 'Unauthorized' });
+                return res.status(401).json({ error: 'Unauthorized' });
             const { id_photo_front_url, id_photo_back_url, date_of_birth } = req.body;
             if (!id_photo_front_url || !id_photo_back_url) {
-                return res.status(400).json({ message: 'Both front and back ID photos are required' });
+                return res.status(400).json({ error: 'Both front and back ID photos are required for verification.' });
             }
             await user_service_1.UserService.requestVerification(userId, id_photo_front_url, id_photo_back_url, date_of_birth);
             res.json({ message: 'Verification request sent to admin' });
         }
         catch (error) {
-            res.status(500).json({ message: error.message });
+            console.error(`[USER] ❌ Identity verification error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to submit verification request. Please try again.' });
         }
     }
     static async requestEmailChange(req, res) {
         try {
             const userId = req.user?.id;
             if (!userId)
-                return res.status(401).json({ message: 'Unauthorized' });
+                return res.status(401).json({ error: 'Unauthorized' });
             const { newEmail } = RequestEmailChangeSchema.parse(req.body);
             const result = await auth_service_1.AuthService.requestEmailChange(userId, newEmail);
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            console.error(`[USER] ❌ Email change request error: ${error.message}`);
+            res.status(400).json({ error: 'Failed to request email change. Please ensure the email is valid and try again.' });
         }
     }
     static async verifyEmailChange(req, res) {

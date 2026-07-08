@@ -23,9 +23,8 @@ class EmailService {
      */
     static async sendEmail(options) {
         if (!env_1.env.GMAIL_USER_EMAIL || !env_1.env.GMAIL_REFRESH_TOKEN || !env_1.env.GMAIL_CLIENT_ID || !env_1.env.GMAIL_CLIENT_SECRET) {
-            console.warn('⚠️ [GMAIL API] Gmail credentials missing in .env. Email will NOT be sent.');
-            console.info('💡 TIP: Check your backend console logs for the verification code in development mode.');
-            throw new Error('Email service not configured');
+            console.error('❌ [GMAIL API] Cannot send email. Gmail credentials (USER_EMAIL, REFRESH_TOKEN, CLIENT_ID, CLIENT_SECRET) are missing in .env.');
+            throw new Error('Email service not configured. Please check backend .env file.');
         }
         try {
             const gmail = await this.getGmailClient();
@@ -138,49 +137,27 @@ class EmailService {
     }
     static async sendDriverRegistrationNotice(data) {
         try {
-            const verifyUrl = `${env_1.env.APP_URL}/api/admin/verify-driver/${data.personalInfo.userId}`;
-            const attachments = [];
-            const profileAtt = this.getAttachment(data.personalInfo.profile_image_url, 'profile.jpg', 'profile_image');
-            if (profileAtt)
-                attachments.push(profileAtt);
-            const licenseFrontAtt = this.getAttachment(data.identity.license_photo_url, 'license_front.jpg', 'license_front_image');
-            if (licenseFrontAtt)
-                attachments.push(licenseFrontAtt);
-            const licenseBackAtt = this.getAttachment(data.identity.license_photo_back_url, 'license_back.jpg', 'license_back_image');
-            if (licenseBackAtt)
-                attachments.push(licenseBackAtt);
+            const verifyUrl = `${env_1.env.ADMIN_URL}/users/${data.personalInfo.userId}`;
             await this.sendEmail({
                 to: env_1.env.GMAIL_USER_EMAIL,
                 subject: `New Driver Application: ${data.personalInfo.full_name}`,
-                attachments,
                 html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
             <h2 style="color: #333;">New Driver Application</h2>
             <hr>
-            <h3>Personal Info</h3>
-            <p><strong>Name:</strong> ${data.personalInfo.full_name}</p>
+            <p>A new driver application has been submitted and is pending verification.</p>
+            <p><strong>Applicant:</strong> ${data.personalInfo.full_name}</p>
             <p><strong>Email:</strong> ${data.personalInfo.email}</p>
-            <p><strong>Phone:</strong> ${data.personalInfo.phone_number}</p>
-            <p><strong>DOB:</strong> ${data.personalInfo.date_of_birth}</p>
-            ${profileAtt ? '<img src="cid:profile_image" style="width: 150px; height: 150px; border-radius: 75px; object-fit: cover;">' : ''}
-
-            <h3>Identity</h3>
-            <p><strong>License #:</strong> ${data.identity.license_number}</p>
-            <p><strong>Expiry:</strong> ${data.identity.license_expiry_date}</p>
-            <div style="display: flex; gap: 10px;">
-              <div style="flex: 1;">
-                <p><strong>Front:</strong></p>
-                ${licenseFrontAtt ? '<img src="cid:license_front_image" style="max-width: 100%; border-radius: 8px;">' : '<p>(Missing)</p>'}
-              </div>
-              <div style="flex: 1;">
-                <p><strong>Back:</strong></p>
-                ${licenseBackAtt ? '<img src="cid:license_back_image" style="max-width: 100%; border-radius: 8px;">' : '<p>(Missing)</p>'}
-              </div>
-            </div>
+            
+            <p style="margin-top: 20px;">Please log in to the Admin Dashboard to review the documents and verify the driver.</p>
 
             <div style="margin-top: 30px; text-align: center;">
-              <a href="${verifyUrl}" style="background-color: #28a745; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">VERIFY DRIVER</a>
+              <a href="${verifyUrl}" style="background-color: #28a745; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">REVIEW APPLICATION</a>
             </div>
+            
+            <p style="margin-top: 30px; font-size: 12px; color: #777; text-align: center;">
+              For security reasons, full application details and document photos are only available within the secure Admin Dashboard.
+            </p>
           </div>
         `,
             });
@@ -192,43 +169,27 @@ class EmailService {
     }
     static async sendRiderVerificationNotice(user, idFrontUrl, idBackUrl) {
         try {
-            const verifyUrl = `${env_1.env.APP_URL}/api/admin/verify-rider/${user.id}`;
-            const dobFormatted = user.date_of_birth ? new Date(user.date_of_birth).toLocaleDateString('en-US') : 'Not provided';
-            const attachments = [];
-            const idFrontAtt = this.getAttachment(idFrontUrl, 'id_front.jpg', 'id_front_image');
-            if (idFrontAtt)
-                attachments.push(idFrontAtt);
-            const idBackAtt = this.getAttachment(idBackUrl, 'id_back.jpg', 'id_back_image');
-            if (idBackAtt)
-                attachments.push(idBackAtt);
+            const verifyUrl = `${env_1.env.ADMIN_URL}/users/${user.id}`;
             await this.sendEmail({
                 to: env_1.env.GMAIL_USER_EMAIL,
                 subject: `Rider Verification Request: ${user.full_name}`,
-                attachments,
                 html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
             <h2 style="color: #333;">Rider Verification Request</h2>
             <hr>
-            <p><strong>Name:</strong> ${user.full_name}</p>
+            <p>A rider has requested identity verification.</p>
+            <p><strong>Rider:</strong> ${user.full_name}</p>
             <p><strong>Email:</strong> ${user.email}</p>
-            <p><strong>Phone:</strong> ${user.phone_number || 'Not provided'}</p>
-            <p><strong>Date of Birth:</strong> ${dobFormatted}</p>
             
-            <h3>ID Photos</h3>
-            <div style="display: flex; gap: 10px;">
-              <div style="flex: 1;">
-                <p><strong>Front:</strong></p>
-                ${idFrontAtt ? '<img src="cid:id_front_image" style="max-width: 100%; border-radius: 8px;">' : '<p>(Missing)</p>'}
-              </div>
-              <div style="flex: 1;">
-                <p><strong>Back:</strong></p>
-                ${idBackAtt ? '<img src="cid:id_back_image" style="max-width: 100%; border-radius: 8px;">' : '<p>(Missing)</p>'}
-              </div>
-            </div>
+            <p style="margin-top: 20px;">Please log in to the Admin Dashboard to review the ID photos and verify the rider.</p>
 
             <div style="margin-top: 30px; text-align: center;">
-              <a href="${verifyUrl}" style="background-color: #007bff; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">VERIFY RIDER</a>
+              <a href="${verifyUrl}" style="background-color: #007bff; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">REVIEW REQUEST</a>
             </div>
+
+            <p style="margin-top: 30px; font-size: 12px; color: #777; text-align: center;">
+              For security reasons, ID photos and personal details are only available within the secure Admin Dashboard.
+            </p>
           </div>
         `,
             });
@@ -283,6 +244,193 @@ class EmailService {
         }
         catch (error) {
             console.error('❌ [GMAIL API] Error sending email verification:', error);
+        }
+    }
+    // ============================================================
+    // Profile-change approval emails (020)
+    // ============================================================
+    static async sendProfileChangeNotice(admin, driver, request) {
+        if (!admin.email)
+            return;
+        try {
+            const reviewUrl = `${env_1.env.ADMIN_URL}/profile-changes/${request.id}`;
+            const cardLine = request.card_last4
+                ? `<p><strong>Payout card queued:</strong> ${request.card_brand?.toUpperCase() ?? 'Card'} ending in ${request.card_last4}</p>`
+                : '';
+            const fieldsLine = Object.keys(request.requested_changes || {})
+                .filter(k => k !== 'payout_card_id')
+                .map(k => `<li>${k}</li>`).join('');
+            await this.sendEmail({
+                to: admin.email,
+                subject: `Profile change request — ${driver.full_name ?? 'Driver'}`,
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #333;">Profile change awaiting review</h2>
+            <p>Driver <strong>${driver.full_name ?? 'Unknown'}</strong> (${driver.email ?? ''}) has submitted a profile change.</p>
+            <p><strong>Requested fields:</strong></p>
+            <ul>${fieldsLine}</ul>
+            ${cardLine}
+            <div style="margin-top: 24px; text-align: center;">
+              <a href="${reviewUrl}" style="background-color: #5B7760; color: white; padding: 14px 22px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">REVIEW REQUEST</a>
+            </div>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending profile-change admin notice:', error);
+        }
+    }
+    static async sendProfileChangeSubmittedEmail(driver, request) {
+        if (!driver.email)
+            return;
+        try {
+            const fieldsLine = Object.keys(request.requested_changes || {})
+                .filter(k => k !== 'payout_card_id')
+                .map(k => `<li>${k}</li>`).join('');
+            await this.sendEmail({
+                to: driver.email,
+                subject: "We've received your profile changes",
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #333;">Your changes are under review</h2>
+            <p>Hi ${driver.full_name ?? 'Driver'},</p>
+            <p>We've received your profile changes and our team will review them shortly. While your request is being reviewed, you will not be able to go online. We'll notify you by email and in-app when the review is complete.</p>
+            <p><strong>Requested fields:</strong></p>
+            <ul>${fieldsLine}</ul>
+            <p style="color: #888; font-size: 12px;">Reference: ${request.id}</p>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending profile-change submitted email:', error);
+        }
+    }
+    static async sendProfileChangeApprovedEmail(driver) {
+        if (!driver.email)
+            return;
+        try {
+            await this.sendEmail({
+                to: driver.email,
+                subject: 'Your profile changes are live',
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #5B7760;">All set — you're cleared to drive again</h2>
+            <p>Hi ${driver.full_name ?? 'Driver'},</p>
+            <p>Great news — your recent profile changes have been approved and are now live. You can go online and start driving again whenever you're ready.</p>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending profile-change approved email:', error);
+        }
+    }
+    static async sendProfileChangeRejectedEmail(driver, reason) {
+        if (!driver.email)
+            return;
+        try {
+            await this.sendEmail({
+                to: driver.email,
+                subject: 'Your profile changes need a revision',
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #C65A5A;">Update needed</h2>
+            <p>Hi ${driver.full_name ?? 'Driver'},</p>
+            <p>Unfortunately your recent profile changes couldn't be approved as submitted. The good news: you're still cleared to drive. Please review the note below, make the suggested adjustments, and submit a new change request when you're ready.</p>
+            <div style="margin: 16px 0; padding: 14px; border-left: 4px solid #C65A5A; background: #f9f4f4;">
+              <strong>Reviewer note:</strong> ${reason}
+            </div>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending profile-change rejected email:', error);
+        }
+    }
+    // ============================================================
+    // Payout-card + payout emails (020)
+    // ============================================================
+    static async sendPayoutCardNotice(admin, driver, card) {
+        if (!admin.email)
+            return;
+        try {
+            const url = `${env_1.env.ADMIN_URL}/payout-cards`;
+            await this.sendEmail({
+                to: admin.email,
+                subject: `Payout card added — ${driver.full_name ?? 'Driver'}`,
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #333;">Payout card awaiting review</h2>
+            <p>Driver <strong>${driver.full_name ?? 'Unknown'}</strong> (${driver.email ?? ''}) added a new payout card.</p>
+            <p><strong>Card:</strong> ${card.brand.toUpperCase()} ending in ${card.last4}</p>
+            <div style="margin-top: 24px; text-align: center;">
+              <a href="${url}" style="background-color: #5B7760; color: white; padding: 14px 22px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">REVIEW CARDS</a>
+            </div>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending payout-card notice:', error);
+        }
+    }
+    static async sendPayoutRequestedNotice(admin, driver, payout) {
+        if (!admin.email)
+            return;
+        try {
+            const dollars = (cents) => `$${(cents / 100).toFixed(2)}`;
+            const url = `${env_1.env.ADMIN_URL}/payouts`;
+            await this.sendEmail({
+                to: admin.email,
+                subject: `Payout requested — ${dollars(payout.net_cents)} to ${driver.full_name ?? 'Driver'}`,
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #333;">On-demand payout awaiting processing</h2>
+            <p>Driver <strong>${driver.full_name ?? 'Unknown'}</strong> (${driver.email ?? ''}) requested a payout.</p>
+            <p>
+              Amount: <strong>${dollars(payout.amount_cents)}</strong><br/>
+              Fee (5%): ${dollars(payout.fee_cents)}<br/>
+              Net: <strong>${dollars(payout.net_cents)}</strong><br/>
+              Method: ${payout.method}
+            </p>
+            <div style="margin-top: 24px; text-align: center;">
+              <a href="${url}" style="background-color: #5B7760; color: white; padding: 14px 22px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">PROCESS PAYOUT</a>
+            </div>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending payout-requested notice:', error);
+        }
+    }
+    static async sendPayoutReceiptEmail(driver, payout) {
+        if (!driver.email)
+            return;
+        try {
+            const dollars = (cents) => `$${(cents / 100).toFixed(2)}`;
+            await this.sendEmail({
+                to: driver.email,
+                subject: 'Your payout has been sent',
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #5B7760;">Payout sent</h2>
+            <p>Hi ${driver.full_name ?? 'Driver'},</p>
+            <p>Your recent payout has been processed.</p>
+            <p>
+              Net amount: <strong>${dollars(payout.net_cents)}</strong><br/>
+              ${payout.reference ? `Reference: ${payout.reference}<br/>` : ''}
+            </p>
+            <p style="color: #888; font-size: 12px;">If you don't see the funds in 1–3 business days, please reply to this email.</p>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending payout receipt email:', error);
         }
     }
 }

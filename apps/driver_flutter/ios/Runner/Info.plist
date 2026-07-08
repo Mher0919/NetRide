@@ -82,5 +82,11 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Google Maps SDK API key. The build substitutes
+	     $(MAPS_API_KEY) from xcconfig at compile time. For dev builds
+	     without a configured key the SDK still renders tiles but
+	     displays a watermark; the navigation view stays usable. -->
+	<key>GMSApiKey</key>
+	<string>$(MAPS_API_KEY)</string>
 </dict>
 </plist>

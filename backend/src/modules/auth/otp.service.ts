@@ -17,7 +17,6 @@ export class OTPService {
     );
 
     // Send code via email
-    console.log(`\n📧 [VERIFICATION] Code for ${email}: ${code}\n`);
     await EmailService.sendOTP(email, code);
     
     return code;

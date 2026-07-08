@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'map_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
@@ -12,12 +13,33 @@ class MainWrapper extends StatefulWidget {
 
 class _MainWrapperState extends State<MainWrapper> {
   int _selectedIndex = 0;
+  bool _isChecking = true;
 
   final List<Widget> _screens = [
     const MapScreen(),
     const ActivityScreen(),
     const ProfileScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  Future<void> _checkAuth() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('jwt_token');
+    if (token == null) {
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+      }
+      return;
+    }
+    if (mounted) {
+      setState(() => _isChecking = false);
+    }
+  }
 
   void _onItemTapped(int index) {
     setState(() {
@@ -27,8 +49,12 @@ class _MainWrapperState extends State<MainWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
+    if (_isChecking) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       body: IndexedStack(
         index: _selectedIndex,

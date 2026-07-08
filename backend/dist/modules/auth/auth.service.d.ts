@@ -1,5 +1,16 @@
 import { UserRole } from '../../types';
 export declare class AuthService {
+    static requestPhoneOTP(phoneNumber: string): Promise<{
+        status: string;
+        message: string;
+    } | {
+        status: string;
+        message?: undefined;
+    }>;
+    static verifyPhoneOTP(userId: string, phoneNumber: string, code: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
     static signupWithPassword(data: {
         email: string;
         full_name: string;
@@ -7,14 +18,29 @@ export declare class AuthService {
         role: UserRole;
     }): Promise<{
         otp_required: boolean;
+        phone_number_required: boolean;
         message: string;
     }>;
     static loginWithPassword(data: {
         email: string;
         password?: string;
+        trusted_device_token?: string | null;
     }): Promise<{
+        otp_required: boolean;
+        email: any;
+        message: string;
+        user?: undefined;
+        token?: undefined;
+        phone_number_required?: undefined;
+        password_expired?: undefined;
+    } | {
         user: any;
         token: string;
+        phone_number_required: boolean;
+        password_expired: boolean;
+        otp_required?: undefined;
+        email?: undefined;
+        message?: undefined;
     }>;
     static changePassword(userId: string, data: {
         currentPassword?: string;
@@ -37,11 +63,13 @@ export declare class AuthService {
     static handleOAuth(data: {
         email: string;
         full_name: string;
-        profile_image_url?: string;
+        profile_image_url?: string | null;
         role: string;
+        token?: string | null;
     }): Promise<{
         user: any;
         token: string;
+        phone_number_required: boolean;
     }>;
     static requestOTP(email: string): Promise<{
         message: string;
@@ -54,6 +82,7 @@ export declare class AuthService {
     }): Promise<{
         user: any;
         token: string;
+        phone_number_required: boolean;
     }>;
     static requestPasswordChange(userId: string, currentPassword: string): Promise<{
         message: string;
@@ -66,6 +95,13 @@ export declare class AuthService {
     }>;
     static deactivateAccount(userId: string): Promise<{
         message: string;
+    }>;
+    static requestAdmin2FA(email: string): Promise<{
+        message: string;
+    }>;
+    static verifyAdmin2FA(email: string, code: string): Promise<{
+        user: any;
+        token: string;
     }>;
     static generateToken(user: any): string;
     static verifyToken(token: string): any;

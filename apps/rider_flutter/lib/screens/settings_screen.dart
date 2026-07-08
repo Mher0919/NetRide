@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/sound_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool hasPassword;
@@ -11,6 +12,22 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    SoundService.instance.addListener(_onSoundChanged);
+  }
+
+  @override
+  void dispose() {
+    SoundService.instance.removeListener(_onSoundChanged);
+    super.dispose();
+  }
+
+  void _onSoundChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _showChangePasswordDialog() async {
     final currentPasswordController = TextEditingController();
     bool obscure = true;
@@ -85,6 +102,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          _buildSectionCard(
+            title: 'Preferences',
+            children: [
+              _buildSwitchTile(
+                icon: Icons.volume_up_rounded,
+                title: 'Button sound effects',
+                subtitle: 'Play a soft click when buttons are tapped',
+                value: SoundService.instance.enabled,
+                onChanged: (v) => SoundService.instance.setEnabled(v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           _buildSectionCard(
             title: 'Security',
             children: [
@@ -175,6 +205,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Toggle row used for the "sound effects" preference. The whole row is
+  /// tappable so the user doesn't have to precisely hit the switch.
+  Widget _buildSwitchTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.6)),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF2F3A32),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF6B6B6B),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: const Color(0xFF5B7760),
+          ),
+        ],
       ),
     );
   }

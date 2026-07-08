@@ -10,5 +10,22 @@ router.patch('/profile', auth_middleware_1.authMiddleware, driver_controller_1.D
 router.post('/verify-identity', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.verifyIdentity);
 router.post('/onboard', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.onboard);
 router.get('/vehicles', driver_controller_1.DriverController.getVehicles);
+router.patch('/operating-class', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.updateOperatingClass);
+router.get('/pricing', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getPricing);
+router.post('/pricing/update', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.updatePrice);
+router.get('/recommendations', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getRecommendations);
+// Vehicle Model Search
+router.get('/vehicle-models/search', driver_controller_1.DriverController.searchVehicleModels);
+router.get('/vehicle-models/years', driver_controller_1.DriverController.getVehicleYears);
+router.get('/vehicle-models/makes', driver_controller_1.DriverController.getVehicleMakes);
+router.get('/vehicle-models/models', driver_controller_1.DriverController.getVehicleModelsByMake);
+// Profile-change approval queue
+router.post('/profile-changes', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.submitProfileChange);
+router.get('/profile-changes/current', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getCurrentProfileChange);
+// Wallet + payouts
+router.post('/payout-cards', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.addPayoutCard);
+router.get('/wallet', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getWallet);
+router.post('/wallet/request-payout', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.requestOnDemandPayout);
+router.get('/payouts', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.listMyPayouts);
 exports.default = router;
 //# sourceMappingURL=driver.routes.js.map

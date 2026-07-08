@@ -5,7 +5,7 @@ import 'package:latlong2/latlong.dart';
 
 class RoutingService {
   final Dio _dio = Dio();
-  
+
   // API Gateway URL
   final String _baseUrl = Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://127.0.0.1:3000';
 
@@ -35,14 +35,10 @@ class RoutingService {
             points = coords.map((c) => LatLng(c[1] as double, c[0] as double)).toList();
           }
 
-          return {
+          return _hydrate({
+            ...data,
             'points_list': points,
-            'distance': (data['distance'] as num).toDouble(),
-            'duration': (data['eta'] as num).toDouble(), // Use ML-corrected ETA
-            'osrm_duration': (data['osrm_duration'] as num).toDouble(),
-            'engine': data['engine'] ?? 'Backend-Gateway',
-            'cache_hit': data['cache_hit'] ?? false,
-          };
+          });
         }
       }
     } catch (e) {
@@ -53,13 +49,103 @@ class RoutingService {
     return calculateLocalFallback(start, end);
   }
 
+  /**
+   * Ask the server for a manual reroute. The backend re-runs OSRM
+   * from the supplied start, replaces the cached leg, and emits the
+   * navigationRouteUpdated / navigationRerouteRequested events. Returns
+   * the fresh route payload so the caller can rehydrate its local
+   * NavigationRoute immediately (without waiting for the socket).
+   */
+  Future<Map<String, dynamic>?> requestReroute({
+    required String tripId,
+    required String leg, // 'pickup' | 'destination'
+    required LatLng from,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '$_baseUrl/api/navigation/reroute',
+        data: {
+          'tripId': tripId,
+          'leg': leg,
+          'lat': from.latitude,
+          'lng': from.longitude,
+        },
+        options: Options(
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      );
+      if (response.statusCode == 200 && response.data is Map) {
+        final body = response.data as Map<String, dynamic>;
+        final route = body['route'] as Map<String, dynamic>?;
+        if (route != null) return _hydrate(route);
+      }
+    } catch (e) {
+      print('[ROUTING] Manual reroute failed: $e');
+    }
+    return null;
+  }
+
+  /**
+   * Read the cached leg for the trip from the backend's per-leg cache.
+   * The driver app calls this on socket rehydrate so we don't make a
+   * second OSRM round-trip after a navigationStarted event.
+   */
+  Future<Map<String, dynamic>?> getCachedLeg({
+    required String tripId,
+    required String leg,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$_baseUrl/api/navigation/cached',
+        queryParameters: {'tripId': tripId, 'leg': leg},
+        options: Options(
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      );
+      if (response.statusCode == 200 && response.data is Map) {
+        final m = response.data as Map<String, dynamic>;
+        if (m['route'] == null) return null;
+        return _hydrate(m['route'] as Map<String, dynamic>);
+      }
+    } catch (e) {
+      print('[ROUTING] Cached-leg fetch failed: $e');
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _hydrate(Map<String, dynamic> data) {
+    final geometry = data['geometry'];
+    List<LatLng> points = [];
+    if (geometry is Map &&
+        geometry['type'] == 'LineString' &&
+        geometry['coordinates'] != null) {
+      final coords = geometry['coordinates'] as List;
+      points = coords
+          .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
+          .toList();
+    }
+    return {
+      'points_list': points,
+      'distance': (data['distance'] as num?)?.toDouble() ?? 0.0,
+      'duration': (data['eta'] as num?)?.toDouble() ?? 0.0,
+      'osrm_duration': (data['osrm_duration'] as num?)?.toDouble() ?? 0.0,
+      'engine': data['engine'] ?? 'Backend-Gateway',
+      'cache_hit': data['cache_hit'] ?? false,
+      'steps': (data['steps'] as List?) ?? const [],
+      'speedLimitsByRoad': (data['speedLimitsByRoad'] as Map?) ?? const {},
+      'cachedAt': data['cachedAt'],
+    };
+  }
+
   Map<String, dynamic> calculateLocalFallback(LatLng start, LatLng end) {
     const double urbanSpeedMps = 5.5; // ~20 km/h
     const double detourFactor = 1.4;
 
     double directDistance = const Distance().as(LengthUnit.Meter, start, end);
     double streetDist = directDistance * detourFactor;
-    
+
     // Create a "Premium Staircase" path (mimics urban grid)
     List<LatLng> points = [
       start,
@@ -72,6 +158,8 @@ class RoutingService {
       'distance': streetDist,
       'duration': streetDist / urbanSpeedMps,
       'engine': 'Local-Premium-Fallback',
+      'steps': const [],
+      'speedLimitsByRoad': const {},
     };
   }
 }

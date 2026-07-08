@@ -50,6 +50,30 @@ dependencies:
   supabase_flutter: ^2.8.0
   url_launcher: ^6.3.0
   app_links: ^6.3.3
+  camera: ^0.11.0
+  uuid: ^4.5.1
+  path_provider: ^2.1.4
+  permission_handler: ^11.3.1
+  path: ^1.9.0
+  # Google Maps SDK for the in-trip navigation view. Used for tile
+  # rendering + heading-up camera only; routing/ETA remain OSRM via
+  # the backend. No billable Directions API calls are made from the
+  # client (see NavigationService.getCachedRouteLeg).
+  google_maps_flutter: ^2.9.0
+
+  # Audio playback for app-level sound effects (online, offline, accept,
+  # cancel, tip, completed, countdown tick). Cached per asset inside
+  # SoundService; MP3s are bundled under assets/sounds/.
+  audioplayers: ^6.1.0
+
+  # Spoken turn-by-turn navigation voice for the driver app. Set to
+  # en-US and a female voice (with graceful fallback) in
+  # NavigationVoiceService.
+  flutter_tts: ^4.2.0
+
+  # Uber-style congrats animation shown when a trip completes. Used by
+  # showTripCompletedDialog on both rider and driver apps.
+  confetti: ^0.8.0
 
 dev_dependencies:
   flutter_test:
@@ -74,6 +98,14 @@ flutter:
     - .env
     - assets/images/logo.png
     - assets/images/logo-noBackground.png
+    - assets/sounds/countdown_tick.mp3
+    - assets/sounds/incoming_request.mp3
+    - assets/sounds/online.mp3
+    - assets/sounds/offline.mp3
+    - assets/sounds/order_accepted.mp3
+    - assets/sounds/order_cancelled.mp3
+    - assets/sounds/trip_completed.mp3
+    - assets/sounds/tip_received.mp3
 
   # To add assets to your application, add an assets section, like this:
   # assets:

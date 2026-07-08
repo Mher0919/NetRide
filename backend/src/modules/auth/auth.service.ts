@@ -7,10 +7,30 @@ import { env } from '../../config/env';
 import { pool } from '../../config/database';
 import { redis } from '../../config/redis';
 import { EmailService } from '../../services/email.service';
+import { SmsService } from '../../services/sms.service';
 import { OTPService } from './otp.service';
 import { UserRole } from '../../types';
 
 export class AuthService {
+  static async requestPhoneOTP(phoneNumber: string) {
+    // 1. Check if phone number is already registered
+    const existingRes = await pool.query('SELECT id FROM users WHERE phone_number = $1', [phoneNumber]);
+    if (existingRes.rows.length > 0) {
+      throw new Error('This phone number is already associated with another account');
+    }
+
+    return SmsService.sendVerificationCode(phoneNumber);
+  }
+
+  static async verifyPhoneOTP(userId: string, phoneNumber: string, code: string) {
+    const result = await SmsService.verifyCode(phoneNumber, code);
+    if (result.status === 'approved') {
+      await pool.query('UPDATE users SET phone_number = $1, is_verified = true WHERE id = $2', [phoneNumber, userId]);
+      return { success: true, message: 'Phone number verified' };
+    }
+    throw new Error('Invalid or expired verification code');
+  }
+
   static async signupWithPassword(data: {
     email: string;
     full_name: string;
@@ -24,8 +44,8 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(data.password, 10);
     const createRes = await pool.query(
-      `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
        RETURNING *`,
       [data.email, data.full_name, passwordHash, data.role, false, true]
     );
@@ -39,7 +59,7 @@ export class AuthService {
     return { otp_required: true, phone_number_required: true, message: 'Verification code sent to email' };
   }
 
-  static async loginWithPassword(data: { email: string; password?: string }) {
+  static async loginWithPassword(data: { email: string; password?: string; trusted_device_token?: string | null }) {
     const userRes = await pool.query('SELECT * FROM users WHERE email = $1', [data.email]);
     const user = userRes.rows[0];
 
@@ -67,7 +87,41 @@ export class AuthService {
 
     const token = this.generateToken(user);
     const phoneNumberRequired = !user.phone_number;
-    return { user, token, phone_number_required: phoneNumberRequired };
+
+    // ADMIN 2FA Check
+    if (user.role === UserRole.ADMIN) {
+      // Check if device is trusted
+      let isTrusted = false;
+      if (data.trusted_device_token) {
+        try {
+          const decoded = this.verifyToken(data.trusted_device_token);
+          if (decoded.email === user.email && decoded.role === UserRole.ADMIN) {
+            isTrusted = true;
+          }
+        } catch (e) {
+          // Token invalid or expired, ignore
+        }
+      }
+
+      if (!isTrusted) {
+        await OTPService.generateOTP(env.GMAIL_USER_EMAIL || user.email);
+        return { 
+          otp_required: true, 
+          email: env.GMAIL_USER_EMAIL || user.email,
+          message: 'Admin 2FA required. Code sent to trusted email.' 
+        };
+      }
+    }
+
+    // Check password expiration (90 days)
+    const expirationDays = 90;
+    const passwordChangedAt = user.password_changed_at ? new Date(user.password_changed_at) : new Date(0);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - passwordChangedAt.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const passwordExpired = diffDays > expirationDays;
+
+    return { user, token, phone_number_required: phoneNumberRequired, password_expired: passwordExpired };
   }
 
   static async changePassword(userId: string, data: { currentPassword?: string, newPassword: string }) {
@@ -83,7 +137,7 @@ export class AuthService {
     }
 
     const newHash = await bcrypt.hash(data.newPassword, 10);
-    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
+    await pool.query('UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2', [newHash, userId]);
     return { message: 'Password updated successfully' };
   }
 
@@ -104,7 +158,7 @@ export class AuthService {
     if (!userId) throw new Error('Invalid or expired reset token');
 
     const newHash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, userId]);
+    await pool.query('UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2', [newHash, userId]);
     await redis.del(`reset_token:${token}`);
     return { message: 'Password reset successfully' };
   }
@@ -135,15 +189,17 @@ export class AuthService {
   static async handleOAuth(data: {
     email: string;
     full_name: string;
-    profile_image_url?: string;
+    profile_image_url?: string | null;
     role: string;
-    token?: string;
+    token?: string | null;
   }) {
     let email = data.email;
 
     // 1. Verify Supabase Token if provided (Mandatory for security)
     if (data.token) {
       try {
+        if (!env.SUPABASE_URL) throw new Error('SUPABASE_URL not configured');
+        
         // Sanitize URL to avoid double slashes
         const baseUrl = env.SUPABASE_URL.replace(/\/$/, '');
         const verifyUrl = `${baseUrl}/auth/v1/user`;
@@ -179,8 +235,8 @@ export class AuthService {
     if (!user) {
       // 3. Create User - Default to UNVERIFIED (is_verified = false) even for OAuth
       const createRes = await pool.query(
-        `INSERT INTO users (email, full_name, profile_image_url, role, is_verified, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO users (email, full_name, profile_image_url, role, is_verified, is_active, password_changed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
          RETURNING *`,
         [email, data.full_name, data.profile_image_url, data.role, false, true]
       );
@@ -230,8 +286,8 @@ export class AuthService {
 
       // Create User (Signup) - Default to UNVERIFIED
       const createRes = await pool.query(
-        `INSERT INTO users (email, full_name, role, is_verified, is_active)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO users (email, full_name, role, is_verified, is_active, password_changed_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
          RETURNING *`,
         [data.email, data.full_name, data.role, false, true]
       );
@@ -285,6 +341,33 @@ export class AuthService {
   static async deactivateAccount(userId: string) {
     await pool.query('UPDATE users SET is_active = false WHERE id = $1', [userId]);
     return { message: 'Account deactivated successfully' };
+  }
+
+  static async requestAdmin2FA(email: string) {
+    const userRes = await pool.query('SELECT role FROM users WHERE email = $1', [email]);
+    const user = userRes.rows[0];
+    if (!user || user.role !== UserRole.ADMIN) {
+      throw new Error('Unauthorized');
+    }
+
+    await OTPService.generateOTP(env.GMAIL_USER_EMAIL || email);
+    return { message: 'Verification code sent' };
+  }
+
+  static async verifyAdmin2FA(email: string, code: string) {
+    const isValid = await OTPService.verifyOTP(env.GMAIL_USER_EMAIL || email, code);
+    if (!isValid) {
+      throw new Error('Invalid or expired verification code');
+    }
+
+    const userRes = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = userRes.rows[0];
+    if (!user || user.role !== UserRole.ADMIN) {
+      throw new Error('Unauthorized');
+    }
+
+    const token = this.generateToken(user);
+    return { user, token };
   }
 
   static generateToken(user: any): string {

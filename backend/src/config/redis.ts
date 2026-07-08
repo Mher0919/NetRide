@@ -19,3 +19,4 @@ redis.on('connect', () => {
 });
 
 export const DRIVER_LOCATIONS_KEY = 'driver_locations';
+export const DRIVER_HEARTBEAT_PREFIX = 'driver:heartbeat:';

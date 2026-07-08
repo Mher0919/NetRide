@@ -1,0 +1,79 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider, CssBaseline, Box, CircularProgress } from '@mui/material';
+import { theme } from './theme';
+import { AuthProvider, useAuth } from './context/AuthContext';
+
+// Pages
+import Login from './pages/Login';
+import ChangePassword from './pages/ChangePassword';
+import Dashboard from './pages/Dashboard';
+import UserDetail from './pages/UserDetail';
+import AuditLogs from './pages/AuditLogs';
+import Rides from './pages/Rides';
+import LiveMonitoring from './pages/LiveMonitoring';
+import RideDetail from './pages/RideDetail';
+import RideAudit from './pages/RideAudit';
+import SpeedingViolations from './pages/SpeedingViolations';
+import ProfileChanges from './pages/ProfileChanges';
+import ProfileChangeDetail from './pages/ProfileChangeDetail';
+import PayoutCards from './pages/PayoutCards';
+import Payouts from './pages/Payouts';
+import UserTable from './components/UserTable';
+import MainLayout from './components/MainLayout';
+
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+  
+  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
+};
+
+const App: React.FC = () => {
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <AuthProvider>
+        <Router>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/change-password" element={<ChangePassword />} />
+            
+            <Route path="/" element={
+              <ProtectedRoute>
+                <MainLayout />
+              </ProtectedRoute>
+            }>
+              <Route index element={<Dashboard />} />
+              <Route path="rides/active" element={<Rides status="ACTIVE" title="Live Active Rides" />} />
+              <Route path="rides/completed" element={<Rides status="COMPLETED" title="Historical Completed Rides" />} />
+              <Route path="rides/:id" element={<RideDetail />} />
+              <Route path="rides/:id/audit" element={<RideAudit />} />
+              <Route path="monitoring" element={<LiveMonitoring />} />
+              <Route path="riders" element={<UserTable role="RIDER" title="Riders Management" />} />
+              <Route path="drivers" element={<UserTable role="DRIVER" title="Drivers Management" />} />
+              <Route path="users/:id" element={<UserDetail />} />
+              <Route path="logs" element={<AuditLogs />} />
+              <Route path="speeding" element={<SpeedingViolations />} />
+              <Route path="profile-changes" element={<ProfileChanges />} />
+              <Route path="profile-changes/:id" element={<ProfileChangeDetail />} />
+              <Route path="payout-cards" element={<PayoutCards />} />
+              <Route path="payouts" element={<Payouts />} />
+            </Route>
+
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
+    </ThemeProvider>
+  );
+};
+
+export default App;

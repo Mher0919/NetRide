@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../components/state_container.dart';
 
 class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
@@ -11,7 +12,8 @@ class ActivityScreen extends StatefulWidget {
 }
 
 class _ActivityScreenState extends State<ActivityScreen> {
-  bool _isLoading = true;
+  ViewState _state = ViewState.loading;
+  String? _errorMessage;
   List<dynamic> _history = [];
 
   @override
@@ -21,19 +23,28 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _fetchHistory() async {
+    setState(() => _state = ViewState.loading);
     try {
-      final response = await ApiService.dio.get('ride/history');
+      final prefs = await SharedPreferences.getInstance();
+      if (!prefs.containsKey('jwt_token')) {
+        setState(() {
+          _state = ViewState.success;
+          _history = [];
+        });
+        return;
+      }
+
+      final response = await ApiService.dio.get('/ride/history');
+
       setState(() {
         _history = response.data;
-        _isLoading = false;
+        _state = ViewState.success;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load activity: $e')),
-        );
-      }
+      setState(() {
+        _state = ViewState.failure;
+        _errorMessage = 'Unable to fetch your activity history. Please check your connection and try again.';
+      });
     }
   }
 
@@ -89,18 +100,21 @@ class _ActivityScreenState extends State<ActivityScreen> {
         ),
         centerTitle: false,
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _history.isEmpty
-              ? _buildEmptyState()
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  itemCount: _history.length,
-                  itemBuilder: (context, index) {
-                    final ride = _history[index];
-                    return _buildRideCard(ride, theme);
-                  },
-                ),
+      body: StateContainer(
+        state: _state,
+        errorMessage: _errorMessage,
+        onRetry: _fetchHistory,
+        successWidget: _history.isEmpty
+            ? _buildEmptyState()
+            : ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                itemCount: _history.length,
+                itemBuilder: (context, index) {
+                  final ride = _history[index];
+                  return _buildRideCard(ride, theme);
+                },
+              ),
+      ),
     );
   }
 

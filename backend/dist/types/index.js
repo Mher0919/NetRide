@@ -1,11 +1,12 @@
 "use strict";
 // backend/src/types/index.ts
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VehicleCategory = exports.TripStatus = exports.UserRole = void 0;
+exports.VehicleCategory = exports.VehicleClass = exports.TripStatus = exports.UserRole = void 0;
 var UserRole;
 (function (UserRole) {
     UserRole["RIDER"] = "RIDER";
     UserRole["DRIVER"] = "DRIVER";
+    UserRole["ADMIN"] = "ADMIN";
 })(UserRole || (exports.UserRole = UserRole = {}));
 var TripStatus;
 (function (TripStatus) {
@@ -16,6 +17,12 @@ var TripStatus;
     TripStatus["COMPLETED"] = "COMPLETED";
     TripStatus["CANCELLED"] = "CANCELLED";
 })(TripStatus || (exports.TripStatus = TripStatus = {}));
+var VehicleClass;
+(function (VehicleClass) {
+    VehicleClass["CORE"] = "CORE";
+    VehicleClass["ELITE"] = "ELITE";
+    VehicleClass["PRESTIGE"] = "PRESTIGE";
+})(VehicleClass || (exports.VehicleClass = VehicleClass = {}));
 var VehicleCategory;
 (function (VehicleCategory) {
     VehicleCategory["ECONOMY"] = "ECONOMY";

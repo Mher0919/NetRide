@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../components/state_container.dart';
 
 class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
@@ -12,7 +13,8 @@ class ActivityScreen extends StatefulWidget {
 }
 
 class _ActivityScreenState extends State<ActivityScreen> {
-  bool _isLoading = true;
+  ViewState _state = ViewState.loading;
+  String? _errorMessage;
   List<dynamic> _history = [];
 
   @override
@@ -22,26 +24,28 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _fetchHistory() async {
+    setState(() => _state = ViewState.loading);
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('jwt_token');
       if (token == null) {
-        if (mounted) setState(() => _isLoading = false);
+        setState(() {
+          _history = [];
+          _state = ViewState.success;
+        });
         return;
       }
 
       final response = await ApiService.dio.get('/ride/history');
       setState(() {
         _history = response.data;
-        _isLoading = false;
+        _state = ViewState.success;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load activity: $e')),
-        );
-      }
+      setState(() {
+        _state = ViewState.failure;
+        _errorMessage = 'Unable to synchronize your driving data. Please check your connection.';
+      });
     }
   }
 
@@ -92,25 +96,28 @@ class _ActivityScreenState extends State<ActivityScreen> {
         elevation: 0,
         title: Text('Earnings & Activity', style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold)),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.black))
-          : _history.isEmpty
-              ? _buildEmptyState()
-              : Column(
-                  children: [
-                    _buildEarningsSummary(),
-                    Expanded(
-                      child: ListView.builder(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _history.length,
-                        itemBuilder: (context, index) {
-                          final ride = _history[index];
-                          return _buildRideCard(ride);
-                        },
-                      ),
+      body: StateContainer(
+        state: _state,
+        errorMessage: _errorMessage,
+        onRetry: _fetchHistory,
+        successWidget: _history.isEmpty
+            ? _buildEmptyState()
+            : Column(
+                children: [
+                  _buildEarningsSummary(),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _history.length,
+                      itemBuilder: (context, index) {
+                        final ride = _history[index];
+                        return _buildRideCard(ride);
+                      },
                     ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
+      ),
     );
   }
 

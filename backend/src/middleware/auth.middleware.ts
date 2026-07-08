@@ -30,3 +30,24 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
     return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
 };
+
+export const adminMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
+  }
+  next();
+};
+
+export const riderMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user || req.user.role !== 'RIDER') {
+    return res.status(403).json({ error: 'Access denied. Rider account required.' });
+  }
+  next();
+};
+
+export const driverMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user || req.user.role !== 'DRIVER') {
+    return res.status(403).json({ error: 'Access denied. Driver account required.' });
+  }
+  next();
+};

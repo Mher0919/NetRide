@@ -5,11 +5,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../components/state_container.dart';
 import 'settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -26,7 +27,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _emailController = TextEditingController();
   String _email = '';
   String? _profileImageUrl;
-  bool _isLoading = true;
+  ViewState _state = ViewState.loading;
+  String? _errorMessage;
   bool _isSaving = false;
   bool _isEditing = false;
   bool _isVerified = false;
@@ -42,7 +44,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _fetchProfile() async {
+    setState(() => _state = ViewState.loading);
     try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!prefs.containsKey('jwt_token')) {
+        setState(() => _state = ViewState.success);
+        return;
+      }
+      
       final profile = await UserService.getProfile();
       setState(() {
         _nameController.text = profile['full_name'] ?? '';
@@ -57,7 +66,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _hasPassword = profile['has_password'] == true;
         _rating = (profile['rating'] as num?)?.toDouble() ?? 5.0;
         _ratingCount = profile['rating_count'] as int? ?? 0;
-        _isLoading = false;
+        _state = ViewState.success;
       });
     } catch (e) {
       if (e is DioException && e.response?.statusCode == 404) {
@@ -69,11 +78,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load profile: $e')),
-        );
-      }
+      setState(() {
+        _state = ViewState.failure;
+        _errorMessage = 'We could not synchronize your profile data. Please check your connection.';
+      });
     }
   }
 
@@ -397,7 +405,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           style: theme.textTheme.headlineMedium?.copyWith(fontSize: 24),
         ),
         actions: [
-          if (!_isLoading)
+          if (_state == ViewState.success)
             Padding(
               padding: const EdgeInsets.only(right: 12.0),
               child: IconButton(
@@ -413,90 +421,93 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      body: StateContainer(
+        state: _state,
+        errorMessage: _errorMessage,
+        onRetry: _fetchProfile,
+        successWidget: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildProfileHeader(theme),
+              const SizedBox(height: 32),
+              _buildSectionCard(
+                title: 'Personal Details',
                 children: [
-                  _buildProfileHeader(theme),
-                  const SizedBox(height: 32),
-                  _buildSectionCard(
-                    title: 'Personal Details',
-                    children: [
-                      _buildProfileItem(
-                        icon: Icons.person_outline_rounded,
-                        label: 'Full Name',
-                        controller: _nameController,
-                        enabled: _isEditing,
-                      ),
-                      const Divider(height: 32),
-                      _buildProfileItem(
-                        icon: Icons.email_outlined,
-                        label: 'Email Address',
-                        controller: _emailController,
-                        enabled: false,
-                        onAction: _isEditing ? _showEmailChangeDialog : null,
-                      ),
-                      const Divider(height: 32),
-                      _buildProfileItem(
-                        icon: Icons.phone_outlined,
-                        label: 'Phone Number',
-                        controller: _phoneController,
-                        enabled: _isEditing,
-                        keyboardType: TextInputType.phone,
-                      ),
-                      const Divider(height: 32),
-                      _buildProfileItem(
-                        icon: Icons.cake_outlined,
-                        label: 'Date of Birth',
-                        controller: _dobController,
-                        enabled: false,
-                        onAction: _isEditing ? _updateAgeAndVerify : null,
-                      ),
-                    ],
+                  _buildProfileItem(
+                    icon: Icons.person_outline_rounded,
+                    label: 'Full Name',
+                    controller: _nameController,
+                    enabled: _isEditing,
                   ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
-                    title: 'Settings',
-                    children: [
-                      _buildMenuTile(
-                        icon: Icons.settings_outlined,
-                        title: 'App Settings',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => SettingsScreen(hasPassword: _hasPassword)),
-                        ),
-                      ),
-                    ],
+                  const Divider(height: 32),
+                  _buildProfileItem(
+                    icon: Icons.email_outlined,
+                    label: 'Email Address',
+                    controller: _emailController,
+                    enabled: false,
+                    onAction: _isEditing ? _showEmailChangeDialog : null,
                   ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
-                    title: 'Support',
-                    children: [
-                      _buildMenuTile(
-                        icon: Icons.support_agent_rounded,
-                        title: 'Customer Support',
-                        onTap: _handleSupport,
-                      ),
-                    ],
+                  const Divider(height: 32),
+                  _buildProfileItem(
+                    icon: Icons.phone_outlined,
+                    label: 'Phone Number',
+                    controller: _phoneController,
+                    enabled: _isEditing,
+                    keyboardType: TextInputType.phone,
                   ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
-                    title: 'Account',
-                    children: [
-                      _buildMenuTile(
-                        icon: Icons.logout_rounded,
-                        title: 'Sign Out',
-                        onTap: _handleLogout,
-                        textColor: const Color(0xFFC65A5A),
-                      ),
-                    ],
+                  const Divider(height: 32),
+                  _buildProfileItem(
+                    icon: Icons.cake_outlined,
+                    label: 'Date of Birth',
+                    controller: _dobController,
+                    enabled: false,
+                    onAction: _isEditing ? _updateAgeAndVerify : null,
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'Settings',
+                children: [
+                  _buildMenuTile(
+                    icon: Icons.settings_outlined,
+                    title: 'App Settings',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => SettingsScreen(hasPassword: _hasPassword)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'Support',
+                children: [
+                  _buildMenuTile(
+                    icon: Icons.support_agent_rounded,
+                    title: 'Customer Support',
+                    onTap: _handleSupport,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'Account',
+                children: [
+                  _buildMenuTile(
+                    icon: Icons.logout_rounded,
+                    title: 'Sign Out',
+                    onTap: _handleLogout,
+                    textColor: const Color(0xFFC65A5A),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -709,7 +720,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF2F3A32)),
               ),
             ),
-            if (trailing != null) trailing,
+            ?trailing,
             const SizedBox(width: 8),
             Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.2)),
           ],

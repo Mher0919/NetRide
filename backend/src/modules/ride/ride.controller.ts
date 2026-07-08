@@ -2,22 +2,104 @@
 import { Response } from 'express';
 import { RideService } from './ride.service';
 import { z } from 'zod';
+import { VehicleClass, TripStatus } from '../../types';
+import { prisma } from '../../services/prisma.service';
+
+import { fareService } from '../../services/fare.service';
+import { GeospatialService } from '../geospatial/geospatial.service';
+import { RideMessagesRepository } from './ride_messages.repository';
+import { TwilioService } from '../../services/twilio.service';
+import { pool } from '../../config/database';
+
+const RequestRideSchema = z.object({
+  pickup: z.object({
+    lat: z.number(),
+    lng: z.number(),
+    address: z.string(),
+  }),
+  destination: z.object({
+    lat: z.number(),
+    lng: z.number(),
+    address: z.string(),
+  }),
+  requestedClass: z.nativeEnum(VehicleClass).optional(),
+  scheduledAt: z.string().datetime().optional(),
+  isScheduled: z.boolean().optional(),
+});
+
+const EstimateRideSchema = z.object({
+  pickup: z.object({
+    lat: z.number(),
+    lng: z.number(),
+  }),
+  destination: z.object({
+    lat: z.number(),
+    lng: z.number(),
+  }),
+  requestedClass: z.nativeEnum(VehicleClass).optional(),
+});
 
 const RateRideSchema = z.object({
   ride_id: z.string().uuid(),
   rating: z.number().int().min(1).max(5),
   review_text: z.string().optional(),
+  favorite: z.boolean().optional(), // Added for favorite logic
 });
 
 export class RideController {
   static async requestRide(req: any, res: Response) {
     try {
       const riderId = req.user?.id;
-      const { pickup, destination } = req.body;
-      const trip = await RideService.requestRide(riderId, pickup, destination);
+      const validatedData = RequestRideSchema.parse(req.body);
+
+      // Compliance Lock: Prevent requests if PENDING
+      const user = await prisma.user.findUnique({ where: { id: riderId } });
+      if (user?.verification_status === 'PENDING') {
+        return res.status(403).json({ error: 'Your account is undergoing age verification. Requests are restricted until completed.' });
+      }
+
+      const trip = await RideService.requestRide(
+        riderId, 
+        validatedData.pickup, 
+        validatedData.destination,
+        validatedData.requestedClass,
+        validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined,
+        validatedData.isScheduled
+      );
       res.status(201).json(trip);
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      console.error(`[RIDE] ❌ Request error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Unable to process your ride request.' });
+    }
+  }
+
+  static async estimateRide(req: any, res: Response) {
+    try {
+      const validatedData = EstimateRideSchema.parse(req.body);
+
+      // Calculate distance using OSRM routing
+      const route = await GeospatialService.getRoute(
+        [validatedData.pickup.lat, validatedData.pickup.lng],
+        [validatedData.destination.lat, validatedData.destination.lng]
+      ).catch(() => null);
+
+      const distanceKm = route ? (route.distance / 1000) : 10.0; // fallback to 10km
+
+      const estimate = await fareService.calculateRiderPriceEstimate(
+        validatedData.pickup.lat,
+        validatedData.pickup.lng,
+        validatedData.requestedClass || VehicleClass.CORE,
+        distanceKm
+      );
+
+      res.json({
+        distance_km: distanceKm,
+        duration_seconds: route ? route.eta : 600,
+        ...estimate
+      });
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Estimate error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to calculate ride estimate.' });
     }
   }
 
@@ -28,23 +110,46 @@ export class RideController {
       const trip = await RideService.acceptTrip(tripId, driverId);
       res.json(trip);
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      console.error(`[RIDE] ❌ Accept error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to accept trip.' });
     }
   }
 
   static async rateRide(req: any, res: Response) {
     try {
-      const riderId = req.user?.id;
-      if (!riderId) return res.status(401).json({ error: 'Unauthorized' });
+      const raterId = req.user?.id;
+      if (!raterId) return res.status(401).json({ error: 'Unauthorized' });
 
       const validatedData = RateRideSchema.parse(req.body);
+      
+      // Handle Favorite Driver Logic
+      if (validatedData.favorite) {
+        const ride = await prisma.ride.findUnique({ where: { id: validatedData.ride_id } });
+        if (ride?.driver_id) {
+          await (prisma as any).favoriteDriver.upsert({
+            where: {
+              rider_id_driver_id: {
+                rider_id: raterId,
+                driver_id: ride.driver_id
+              }
+            },
+            create: {
+              rider_id: raterId,
+              driver_id: ride.driver_id
+            },
+            update: {} // No change needed if already favorite
+          });
+        }
+      }
+
       const result = await RideService.rateRide({
         ...validatedData,
-        rider_id: riderId,
+        rater_id: raterId,
       });
       res.json(result);
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      console.error(`[RIDE] ❌ Rating error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to submit rating.' });
     }
   }
 
@@ -54,16 +159,11 @@ export class RideController {
       const role = req.user?.role;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-      console.log(`[RIDE] 📜 Fetching history for user ${userId} [Role: ${role}]`);
-      const start = Date.now();
       const history = await RideService.getHistory(userId, role);
-      const duration = Date.now() - start;
-      console.log(`[RIDE] ✅ History fetched in ${duration}ms (${history.length} records)`);
-      
       res.json(history);
     } catch (error: any) {
       console.error(`[RIDE] ❌ Error fetching history: ${error.message}`);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to retrieve ride history.' });
     }
   }
 
@@ -77,10 +177,167 @@ export class RideController {
       if (success) {
         res.json({ message: 'Activity deleted successfully' });
       } else {
-        res.status(404).json({ error: 'Activity not found or unauthorized' });
+        res.status(404).json({ error: 'Activity record not found.' });
       }
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error(`[RIDE] ❌ Delete history error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to delete activity record.' });
+    }
+  }
+
+  // ---- In-trip chat + masked call ---------------------------------------
+
+  /**
+   * Verify the caller is a party to the trip. Throws nothing — returns
+   * a discriminated response shape so the caller can decide between
+   * 403 (not a party), 404 (no such trip), and 200 (allowed).
+   *
+   * `role` is optional: the Twilio webhook path doesn't have a JWT
+   * (the access token IS the auth) and we want to do a row-level
+   * "is this user on this trip at all" check rather than reject
+   * because the caller didn't say which role they are.
+   */
+  private static async assertTripParty(
+    tripId: string,
+    userId: string,
+    role: string | null,
+  ) {
+    const res = await pool.query(
+      `SELECT id, rider_id, driver_id, status FROM rides WHERE id = $1`,
+      [tripId],
+    );
+    if (res.rows.length === 0) {
+      return { ok: false as const, code: 404, error: 'Trip not found.' };
+    }
+    const trip = res.rows[0];
+    if (role != null) {
+      const roleLower = role.toLowerCase();
+      const isRider = roleLower === 'rider' && trip.rider_id === userId;
+      const isDriver = roleLower === 'driver' && trip.driver_id === userId;
+      if (!isRider && !isDriver) {
+        return { ok: false as const, code: 403, error: 'You are not a party to this trip.' };
+      }
+    } else {
+      // No role provided — accept if the user is either party.
+      if (trip.rider_id !== userId && trip.driver_id !== userId) {
+        return { ok: false as const, code: 403, error: 'You are not a party to this trip.' };
+      }
+    }
+    return { ok: true as const, trip };
+  }
+
+  static async getTripMessages(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const role = req.user?.role;
+      const tripId = req.params.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const party = await RideController.assertTripParty(tripId, userId, role);
+      if (!party.ok) return res.status(party.code).json({ error: party.error });
+
+      const sinceRaw = (req.query.since as string | undefined) ?? null;
+      const since = sinceRaw ? new Date(sinceRaw) : undefined;
+      if (since && Number.isNaN(since.getTime())) {
+        return res.status(400).json({ error: 'Invalid `since` timestamp.' });
+      }
+
+      const rows = await RideMessagesRepository.listByTrip(tripId, { since });
+      res.json({
+        tripId,
+        messages: rows.map((m) => ({
+          id: m.id,
+          tripId: m.trip_id,
+          senderId: m.sender_id,
+          role: m.sender_role,
+          message: m.body,
+          timestamp: m.created_at,
+        })),
+      });
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Fetch messages error: ${error.message}`);
+      res.status(500).json({ error: 'Unable to fetch messages.' });
+    }
+  }
+
+  static async mintCallToken(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const role = req.user?.role;
+      const tripId = req.params.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const party = await RideController.assertTripParty(tripId, userId, role);
+      if (!party.ok) return res.status(party.code).json({ error: party.error });
+      const liveStatuses = [TripStatus.ACCEPTED as string, TripStatus.IN_PROGRESS as string];
+      if (!liveStatuses.includes(String(party.trip.status))) {
+        return res.status(409).json({ error: 'Calls are only available during an active trip.' });
+      }
+      if (!TwilioService.isConfigured()) {
+        return res.status(503).json({
+          error: 'Calls are not enabled in this environment. Please use chat to contact your counterpart.',
+        });
+      }
+
+      const callToken = TwilioService.mintAccessToken(userId, tripId);
+      res.json({
+        ...callToken,
+        tripId,
+      });
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Mint call token error: ${error.message}`);
+      res.status(500).json({ error: 'Unable to start a call right now.' });
+    }
+  }
+
+  /**
+   * Twilio Voice SDK calls into this endpoint (the TwiML App URL) to
+   * learn how to route the outbound leg. We always answer with a
+   * <Dial><Conference> pointing at the trip's conference room. The
+   * SDK-supplied "To" parameter is ignored — security lives in the
+   * access-token grant.
+   */
+  static async callConnectTwiML(req: any, res: Response) {
+    try {
+      const tripId = (req.body?.tripId ?? req.query?.tripId) as string | undefined;
+      const userId = (req.body?.userId ?? req.query?.userId) as string | undefined;
+      if (!tripId || !userId) {
+        res.status(400).type('text/xml').send(
+          '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Missing call context.</Say></Response>',
+        );
+        return;
+      }
+      const party = await RideController.assertTripParty(tripId, userId, null);
+      if (!party.ok) {
+        res.status(party.code).type('text/xml').send(
+          '<?xml version="1.0" encoding="UTF-8"?><Response><Say>You are not authorized for this call.</Say></Response>',
+        );
+        return;
+      }
+      const xml = TwilioService.conferenceTwiML(TwilioService.conferenceNameFor(tripId));
+      res.type('text/xml').send(xml);
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ TwiML error: ${error.message}`);
+      res.status(500).type('text/xml').send(
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Call setup failed.</Say></Response>',
+      );
+    }
+  }
+
+  /**
+   * Webhook for Twilio status callbacks. We log but don't act on them
+   * here — billing-side metrics live in the Twilio console. Endpoint
+   * exists so Twilio's request signature validation can succeed.
+   */
+  static async callStatusCallback(req: any, res: Response) {
+    try {
+      const sid = (req.body?.CallSid as string | undefined) ?? '';
+      const status = (req.body?.CallStatus as string | undefined) ?? '';
+      console.log(`[CALL] Twilio callback sid=${sid} status=${status}`);
+      res.status(204).end();
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Call status callback error: ${error.message}`);
+      res.status(204).end();
     }
   }
 }

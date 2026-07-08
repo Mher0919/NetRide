@@ -35,7 +35,7 @@ export class UserRepository {
     return res.rows[0];
   }
 
-  static async update(id: string, data: Partial<{ phone_number: string; full_name: string; is_verified: boolean; profile_image_url: string; date_of_birth: string }>): Promise<User | null> {
+  static async update(id: string, data: Partial<{ phone_number: string; full_name: string; is_verified: boolean; profile_image_url: string; id_photo_front_url: string; id_photo_back_url: string; date_of_birth: string }>): Promise<User | null> {
     const fields = [];
     const values = [];
     let i = 1;
@@ -56,6 +56,14 @@ export class UserRepository {
       fields.push(`profile_image_url = $${i++}`);
       values.push(data.profile_image_url);
     }
+    if (data.id_photo_front_url) {
+      fields.push(`id_photo_front_url = $${i++}`);
+      values.push(data.id_photo_front_url);
+    }
+    if (data.id_photo_back_url) {
+      fields.push(`id_photo_back_url = $${i++}`);
+      values.push(data.id_photo_back_url);
+    }
     if (data.date_of_birth) {
       fields.push(`date_of_birth = $${i++}`);
       values.push(data.date_of_birth);
@@ -65,7 +73,7 @@ export class UserRepository {
 
     values.push(id);
     const res = await pool.query(
-      `UPDATE users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING id, email, phone_number, full_name, role, is_verified, profile_image_url, date_of_birth, created_at`,
+      `UPDATE users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING id, email, phone_number, full_name, role, is_verified, profile_image_url, id_photo_front_url, id_photo_back_url, date_of_birth, created_at`,
       values
     );
     return res.rows[0] || null;

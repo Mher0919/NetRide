@@ -8,6 +8,8 @@ export declare class RideRepository {
         destination_lat: number;
         destination_lng: number;
         destination_address: string;
+        requested_class?: string;
+        snapshot_rider_rating?: number;
     }): Promise<Trip>;
     static findById(id: string): Promise<Trip | null>;
     static updateStatus(id: string, status: TripStatus, extra?: any): Promise<Trip>;

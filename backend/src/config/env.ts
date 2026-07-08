@@ -14,14 +14,83 @@ const envSchema = z.object({
   OSRM_URL: z.string().default('http://localhost:5000/route/v1/driving'),
   DRIVER_MATCH_RADIUS_KM: z.union([z.string(), z.number()]).transform(Number).default(5),
   DRIVER_ACCEPT_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(15000),
+  DRIVER_PICKUP_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(15),
+  DRIVER_DESTINATION_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(30),
+
+  // ---- Face verification --------------------------------------------------
+  // Distance threshold for the dlib 128-d embedding. Lower = stricter.
+  FACE_MATCH_THRESHOLD: z.union([z.string(), z.number()]).transform(Number).default(0.45),
+  // Minimum bounding-box motion (px) inside the captured clip — rules out
+  // a printed photo.
+  FACE_MIN_MOTION_PX: z.union([z.string(), z.number()]).transform(Number).default(15),
+  // Minimum number of blinks (eye aspect ratio dips) detected in the clip.
+  FACE_MIN_BLINK_COUNT: z.union([z.string(), z.number()]).transform(Number).default(1),
+  // Minimum Laplacian variance of the face region — rules out screen replays
+  // at low resolution.
+  FACE_MIN_LAPLACIAN_VAR: z.union([z.string(), z.number()]).transform(Number).default(80),
+  // How often a driver must re-verify while online.
+  FACE_CHECK_INTERVAL_HOURS: z.union([z.string(), z.number()]).transform(Number).default(12),
+  // Location jump threshold that triggers re-verify on offline→online.
+  FACE_LOCATION_JUMP_MILES: z.union([z.string(), z.number()]).transform(Number).default(5),
+  // Base URL for the Python face microservice.
+  FACE_SERVICE_URL: z.string().default('http://localhost:8000'),
   GMAIL_CLIENT_ID: z.string().optional(),
   GMAIL_CLIENT_SECRET: z.string().optional(),
   GMAIL_REFRESH_TOKEN: z.string().optional(),
   GMAIL_USER_EMAIL: z.string().optional(),
   EMAIL_FROM: z.string().default('NetRide <noreply@netride.com>'),
   APP_URL: z.string().default('http://localhost:3000'),
+  ADMIN_URL: z.string().default('http://localhost:5173'),
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
+  // ---- Masked-call credentials (Programmable Voice + Client SDK) ----
+  // The Voice Client SDK uses a separate API key/secret pair from the
+  // account auth token. Twilio generates them under Account → API keys.
+  TWILIO_API_KEY: z.string().optional(),
+  TWILIO_API_SECRET: z.string().optional(),
+  // TwiML App SID that points at our /api/ride/:id/call/connect endpoint
+  // (returns <Client><Conference> TwiML when the SDK dials the app).
+  TWILIO_TWIML_APP_SID: z.string().optional(),
+  // Verified outbound caller ID for the conference bridge fallback.
+  TWILIO_CALLER_ID: z.string().optional(),
+
+  // ---- Navigation & safety -------------------------------------------------
+  // Continuous over-limit seconds before a single speeding violation is
+  // recorded on the current trip.
+  SPEEDING_VIOLATION_DURATION_S: z.union([z.string(), z.number()]).transform(Number).default(45),
+  // Distinct trips inside the window that contain a violation before the
+  // driver is auto-flagged `is_dangerous = TRUE`.
+  SPEEDING_DANGER_TRIP_COUNT: z.union([z.string(), z.number()]).transform(Number).default(3),
+  // Window over which prior violations count toward the danger threshold.
+  SPEEDING_WINDOW_DAYS: z.union([z.string(), z.number()]).transform(Number).default(90),
+  // Distance from the planned polyline that counts as "off route" when
+  // sustained for `SPEEDING_OFFROUTE_CONSECUTIVE_TICKS` consecutive GPS
+  // updates. Triggers a single reroute per incident.
+  NAV_OFFROUTE_THRESHOLD_M: z.union([z.string(), z.number()]).transform(Number).default(60),
+  SPEEDING_OFFROUTE_CONSECUTIVE_TICKS: z.union([z.string(), z.number()]).transform(Number).default(3),
+
+  // ---- Observability & scaling -------------------------------------------
+  PINO_LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  SENTRY_DSN: z.string().optional(),
+  // Comma-separated OSRM URLs for the internal load balancer. Falls back
+  // to single OSRM_URL when unset so the dev docker-compose keeps working.
+  OSRM_URLS: z.string().optional(),
+  MATCH_WORKER_CONCURRENCY: z.union([z.string(), z.number()]).transform(Number).default(4),
+  DISPATCH_FANOUT_SIZE: z.union([z.string(), z.number()]).transform(Number).default(5),
+  DRIVER_SCORE_CACHE_TTL_S: z.union([z.string(), z.number()]).transform(Number).default(300),
+
+  // ---- Kill switches / legacy flags ---------------------------------------
+  LOAD_TEST: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  LEGACY_RATE_LIMIT: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  LEGACY_SYNC_MATCHING: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  LEGACY_SEQUENTIAL_DISPATCH: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  LEGACY_DB_SCORE: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  LEGACY_INLINE_PG: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  DIRECT_DATABASE_URL: z.string().optional(),
+  DATABASE_REPLICA_URL: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

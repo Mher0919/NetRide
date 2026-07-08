@@ -14,14 +14,14 @@ export const validate = (schema: AnyZodObject) => {
     } catch (error) {
       if (error instanceof ZodError) {
         return res.status(400).json({
-          message: 'Validation failed',
-          errors: error.errors.map(err => ({
-            path: err.path.join('.'),
+          error: 'Validation failed. Please ensure all required fields are provided and correctly formatted.',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
             message: err.message,
           })),
         });
       }
-      return res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ error: 'An internal error occurred during request validation.' });
     }
   };
 };

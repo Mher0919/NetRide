@@ -2,19 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/ride_provider.dart';
+import 'services/communication_service.dart';
 import 'screens/map_screen.dart';
 import 'screens/ride_request_screen.dart';
 import 'screens/trip_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/signup_screen.dart';
-import 'screens/verification_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/main_wrapper.dart';
 import 'screens/splash_screen.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
+import 'services/sound_service.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -31,13 +32,30 @@ void main() async {
   );
 
   await ApiService.init();
+  await SoundService.instance.init();
 
   final prefs = await SharedPreferences.getInstance();
   String? token = prefs.getString('jwt_token');
   
-  // SYNC LOGIC: If we have a Supabase session but no backend token, sync now
   final supabase = Supabase.instance.client;
-  if (supabase.auth.currentSession != null && token == null) {
+  if (token != null && AuthService.isJwtExpired(token)) {
+    debugPrint('[MAIN] ⚠️ Stored backend JWT token has expired.');
+    if (supabase.auth.currentSession != null) {
+      debugPrint('[MAIN] 🔄 Active Supabase session found. Attempting backend sync...');
+      final success = await AuthService.syncWithBackend();
+      if (success) {
+        token = prefs.getString('jwt_token');
+      } else {
+        debugPrint('[MAIN] ❌ Sync failed. Clearing expired session...');
+        await AuthService.logout();
+        token = null;
+      }
+    } else {
+      debugPrint('[MAIN] ❌ No active session. Clearing expired token...');
+      await AuthService.logout();
+      token = null;
+    }
+  } else if (token == null && supabase.auth.currentSession != null) {
     debugPrint('[MAIN] 💡 Supabase session found but no backend token. Syncing...');
     final success = await AuthService.syncWithBackend();
     if (success) {
@@ -57,6 +75,11 @@ void main() async {
           }
           return provider;
         }),
+        // Communication service is shared across the trip screens for
+        // chat + masked calls. The service is attached lazily once a
+        // trip is active so it doesn't burn listeners on the splash
+        // screen or login flow.
+        ChangeNotifierProvider(create: (_) => CommunicationService()),
       ],
       child: const NetRideRider(),
     ),
@@ -103,6 +126,8 @@ class _NetRideRiderState extends State<NetRideRider> {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           initialRoute: '/splash',
+          builder: (context, child) =>
+              GlobalClickSoundListener(child: child ?? const SizedBox.shrink()),
           onGenerateRoute: (settings) {
             Widget page;
             switch (settings.name) {

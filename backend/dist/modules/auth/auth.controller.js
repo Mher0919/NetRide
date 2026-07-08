@@ -7,8 +7,9 @@ const types_1 = require("../../types");
 const OAuthSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     full_name: zod_1.z.string(),
-    profile_image_url: zod_1.z.string().optional(),
+    profile_image_url: zod_1.z.string().nullable().optional(),
     role: zod_1.z.nativeEnum(types_1.UserRole),
+    token: zod_1.z.string().nullable().optional(),
 });
 const SignupPasswordSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
@@ -19,6 +20,7 @@ const SignupPasswordSchema = zod_1.z.object({
 const LoginPasswordSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string(),
+    trusted_device_token: zod_1.z.string().nullable().optional(),
 });
 const ChangePasswordSchema = zod_1.z.object({
     currentPassword: zod_1.z.string().optional(),
@@ -42,30 +44,48 @@ class AuthController {
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            if (error instanceof zod_1.z.ZodError) {
+                return res.status(400).json({ error: 'Invalid input data. Please check all fields.' });
+            }
+            console.error(`[AUTH] ❌ Signup error:`, error.message);
+            const message = error.message.includes('already exists')
+                ? 'An account with this email already exists.'
+                : 'Sign up failed. Please try again later.';
+            res.status(400).json({ error: message });
         }
     }
     static async loginPassword(req, res) {
         try {
-            const validatedData = LoginPasswordSchema.parse(req.body);
-            const result = await auth_service_1.AuthService.loginWithPassword(validatedData);
+            const { email, password, trusted_device_token } = LoginPasswordSchema.parse(req.body);
+            const result = await auth_service_1.AuthService.loginWithPassword({ email, password, trusted_device_token });
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            if (error instanceof zod_1.z.ZodError) {
+                return res.status(400).json({ error: 'Email and password are required.' });
+            }
+            console.error(`[AUTH] ❌ Login error:`, error.message);
+            const message = (error.message.includes('not found') || error.message.includes('Invalid password'))
+                ? 'Incorrect email or password.'
+                : 'Login failed. Please try again.';
+            res.status(401).json({ error: message });
         }
     }
     static async changePassword(req, res) {
         try {
             const userId = req.user?.id;
             if (!userId)
-                return res.status(401).json({ error: 'Unauthorized' });
+                return res.status(401).json({ error: 'Session expired. Please login again.' });
             const validatedData = ChangePasswordSchema.parse(req.body);
             const result = await auth_service_1.AuthService.changePassword(userId, validatedData);
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            console.error(`[AUTH] ❌ Change password error:`, error.message);
+            const message = error.message.includes('incorrect')
+                ? 'The current password you entered is incorrect.'
+                : 'Failed to update password. Please try again.';
+            res.status(400).json({ error: message });
         }
     }
     static async forgotPassword(req, res) {
@@ -75,7 +95,10 @@ class AuthController {
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            // For security, we always return success even if user not found, 
+            // but we'll log it for admin awareness
+            console.log(`[AUTH] ℹ️ Forgot password attempt for: ${req.body.email}`);
+            res.json({ message: 'If an account exists with this email, you will receive a reset link.' });
         }
     }
     static async resetPassword(req, res) {
@@ -85,7 +108,8 @@ class AuthController {
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            console.error(`[AUTH] ❌ Reset password error:`, error.message);
+            res.status(400).json({ error: 'This link has expired or is invalid.' });
         }
     }
     static async requestPasswordChange(req, res) {
@@ -98,7 +122,11 @@ class AuthController {
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            console.error(`[AUTH] ❌ Request password change error:`, error.message);
+            const message = error.message.includes('incorrect')
+                ? 'The password you entered is incorrect.'
+                : 'Failed to send verification email.';
+            res.status(400).json({ error: message });
         }
     }
     static async deleteAccount(req, res) {
@@ -201,11 +229,13 @@ class AuthController {
     }
     static async oauth(req, res) {
         try {
+            console.log(`[AUTH] 📥 Incoming OAuth request:`, req.body);
             const validatedData = OAuthSchema.parse(req.body);
             const result = await auth_service_1.AuthService.handleOAuth(validatedData);
             res.json(result);
         }
         catch (error) {
+            console.error(`[AUTH] ❌ OAuth error:`, error.message || error);
             res.status(400).json({ error: error.message });
         }
     }
@@ -216,7 +246,8 @@ class AuthController {
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            console.error(`[AUTH] ❌ OTP request error: ${error.message}`);
+            res.status(400).json({ error: 'Failed to send verification code. Please try again.' });
         }
     }
     static async verifyOTP(req, res) {
@@ -231,7 +262,61 @@ class AuthController {
             res.json(result);
         }
         catch (error) {
-            res.status(400).json({ error: error.message });
+            console.error(`[AUTH] ❌ OTP verification error: ${error.message}`);
+            res.status(400).json({ error: 'Invalid or expired verification code.' });
+        }
+    }
+    static async requestPhoneOTP(req, res) {
+        try {
+            const { phone_number } = zod_1.z.object({ phone_number: zod_1.z.string() }).parse(req.body);
+            const result = await auth_service_1.AuthService.requestPhoneOTP(phone_number);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[AUTH] ❌ Phone OTP request error: ${error.message}`);
+            res.status(400).json({ error: 'Failed to send SMS code.' });
+        }
+    }
+    static async verifyPhoneOTP(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const { phone_number, code } = zod_1.z.object({
+                phone_number: zod_1.z.string(),
+                code: zod_1.z.string().min(4).max(10),
+            }).parse(req.body);
+            const result = await auth_service_1.AuthService.verifyPhoneOTP(userId, phone_number, code);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[AUTH] ❌ Phone OTP verification error: ${error.message}`);
+            res.status(400).json({ error: 'Invalid SMS verification code.' });
+        }
+    }
+    static async requestAdmin2FA(req, res) {
+        try {
+            const { email } = zod_1.z.object({ email: zod_1.z.string().email() }).parse(req.body);
+            const result = await auth_service_1.AuthService.requestAdmin2FA(email);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[AUTH] ❌ Admin 2FA request error: ${error.message}`);
+            res.status(400).json({ error: 'Failed to send administrative verification code.' });
+        }
+    }
+    static async verifyAdmin2FA(req, res) {
+        try {
+            const { email, code } = zod_1.z.object({
+                email: zod_1.z.string().email(),
+                code: zod_1.z.string().length(6),
+            }).parse(req.body);
+            const result = await auth_service_1.AuthService.verifyAdmin2FA(email, code);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[AUTH] ❌ Admin 2FA verification error: ${error.message}`);
+            res.status(401).json({ error: 'Invalid administrative security code.' });
         }
     }
 }

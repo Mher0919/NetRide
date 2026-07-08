@@ -3,6 +3,8 @@ export interface RouteResponse {
     osrm_duration: number;
     eta: number;
     geometry: any;
+    steps?: any[];
+    speedLimitsByRoad?: Record<string, number>;
     cache_hit: boolean;
     model_multiplier: number;
     engine: string;
@@ -12,6 +14,7 @@ export declare class GeospatialService {
     private static isOsrmOnline;
     private static axiosClient;
     static getRoute(start: [number, number], end: [number, number], isPreCache?: boolean): Promise<RouteResponse>;
+    static searchPlaces(query: string, userLat?: number, userLon?: number): Promise<any[]>;
     private static fetchAndProcessRoute;
     private static generateCacheKey;
     private static calculateSyntheticRoute;

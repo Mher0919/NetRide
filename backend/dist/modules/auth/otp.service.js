@@ -13,7 +13,6 @@ class OTPService {
         // Save new code
         await database_1.pool.query('INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)', [email, code, expiresAt]);
         // Send code via email
-        console.log(`\n📧 [VERIFICATION] Code for ${email}: ${code}\n`);
         await email_service_1.EmailService.sendOTP(email, code);
         return code;
     }

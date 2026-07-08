@@ -13,8 +13,13 @@ export class UserService {
   }
 
   static async requestVerification(userId: string, idFrontUrl: string, idBackUrl: string, dob?: string) {
-    // 1. Update DOB and reset verification status in DB
-    const updateData: any = { is_verified: false };
+    // 1. Update DOB and set verification status to PENDING in DB
+    const updateData: any = { 
+      is_verified: false,
+      verification_status: 'PENDING',
+      id_photo_front_url: idFrontUrl,
+      id_photo_back_url: idBackUrl
+    };
     if (dob) updateData.date_of_birth = dob;
     
     await UserRepository.update(userId, updateData);

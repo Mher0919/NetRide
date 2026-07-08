@@ -1,11 +1,43 @@
-// backend/src/modules/admin/admin.routes.ts
 import { Router } from 'express';
 import { AdminController } from './admin.controller';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth.middleware';
 
 const router = Router();
 
-// These are public GET links for the email
-router.get('/verify-driver/:userId', AdminController.verifyDriver);
-router.get('/verify-rider/:userId', AdminController.verifyRider);
+// Protect all admin routes
+router.use(authMiddleware);
+router.use(adminMiddleware);
+
+router.get('/stats', AdminController.getStats);
+router.get('/users', AdminController.getUsers);
+router.get('/users/:id', AdminController.getUserById);
+router.get('/users/:id/speeding', AdminController.getDriverSpeeding);
+router.patch('/users/:id/verify', AdminController.verifyUser);
+router.patch('/users/:id/reject', AdminController.rejectUser);
+router.patch('/users/:id/pending', AdminController.setPending);
+router.patch('/users/:id/clear-dangerous', AdminController.clearDangerousFlag);
+router.get('/rides', AdminController.getRides);
+router.get('/rides/:id', AdminController.getRideById);
+router.get('/rides/:id/audit', AdminController.getRideAudit);
+router.get('/drivers/live', AdminController.getLiveDrivers);
+router.get('/drivers/dangerous', AdminController.getDangerousDrivers);
+router.get('/speeding/violations', AdminController.getSpeedingViolations);
+router.patch('/vehicles/:vehicleId/inspection', AdminController.verifyInspection);
+router.get('/logs', AdminController.getLogs);
+
+// Profile-change approval queue
+router.get('/profile-changes', AdminController.listProfileChanges);
+router.get('/profile-changes/:id', AdminController.getProfileChange);
+router.post('/profile-changes/:id/approve', AdminController.approveProfileChange);
+router.post('/profile-changes/:id/reject', AdminController.rejectProfileChange);
+
+// Payout cards
+router.get('/payout-cards', AdminController.listPayoutCards);
+router.post('/payout-cards/:id/approve', AdminController.approvePayoutCard);
+router.post('/payout-cards/:id/reject', AdminController.rejectPayoutCard);
+
+// Payouts
+router.get('/payouts', AdminController.listPayouts);
+router.post('/payouts/:id/mark-paid', AdminController.markPayoutPaid);
 
 export default router;

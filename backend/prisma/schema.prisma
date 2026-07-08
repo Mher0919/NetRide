@@ -1,23 +1,36 @@
-// backend/prisma/schema.prisma
-
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL") // optional — overrides for writes
 }
 
 enum UserRole {
   RIDER
   DRIVER
+  ADMIN
+
+  @@map("user_role")
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+
+  @@map("verification_status")
 }
 
 enum BackgroundCheckStatus {
   PENDING
   APPROVED
   REJECTED
+
+  @@map("background_check_status")
 }
 
 enum TripStatus {
@@ -27,100 +40,371 @@ enum TripStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+
+  @@map("trip_status")
+}
+
+enum ComplianceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+
+  @@map("compliance_status")
 }
 
 enum VehicleCategory {
   ECONOMY
-  EXTRA
-  LUX
-  SUV_LUX
-  PREMIER
+  PREMIUM
+  SUV
+  VAN
+
+  @@map("vehicle_category")
+}
+
+enum VehicleClass {
+  CORE
+  ELITE
+  PRESTIGE
+
+  @@map("vehicle_class")
 }
 
 model User {
-  id                String   @id @default(uuid())
-  role              UserRole
-  email             String   @unique
-  phone_number      String?  @unique
-  full_name         String
-  date_of_birth     DateTime?
-  profile_image_url String?
-  is_verified       Boolean  @default(false)
-  is_active         Boolean  @default(true)
-  rating            Float    @default(5.0)
-  rating_count      Int      @default(0)
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+  id                  String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  role                UserRole
+  email               String              @unique
+  phone_number        String?             @unique
+  full_name           String
+  password_hash       String?
+  date_of_birth       DateTime?           @db.Timestamptz(6)
+  profile_image_url   String?
+  id_photo_front_url  String?
+  id_photo_back_url   String?
+  is_verified         Boolean?            @default(false)
+  verification_status VerificationStatus? @default(PENDING)
+  is_active           Boolean?            @default(true)
+  rating              Float?              @default(5.0)
+  rating_count        Int?                @default(0)
+  password_changed_at DateTime?           @default(now()) @db.Timestamptz(6)
+
+  rejection_reason           String?
+  verification_feedback_seen Boolean? @default(false)
+
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
 
   driver_profile    Driver?
-  rides_as_rider    Ride[]   @relation("RiderRides")
-  rides_as_driver    Ride[]   @relation("DriverRides")
-  ratings_given     Rating[] @relation("RaterRatings")
-  ratings_received  Rating[] @relation("TargetRatings")
+  rides_as_rider    Ride[]           @relation("RiderRides")
+  rides_as_driver   Ride[]           @relation("DriverRides")
+  admin_actions     AuditLog[]       @relation("AdminActions")
+  audit_logs_target AuditLog[]       @relation("TargetLogs")
+  favorite_drivers  FavoriteDriver[] @relation("RiderFavorites")
+
+  profile_changes  ProfileChangeRequest[] @relation("DriverProfileChanges")
+  reviewed_changes ProfileChangeRequest[] @relation("AdminProfileReviews")
+  payout_cards     PayoutCard[]           @relation("DriverPayoutCards")
+  wallet           DriverWallet?          @relation("DriverWallet")
+  payouts          Payout[]               @relation("DriverPayouts")
+
+  @@map("users")
 }
 
 model Driver {
-  user_id                 String                @id
-  user                    User                  @relation(fields: [user_id], references: [id])
+  user_id                 String                 @id @db.Uuid
   license_number          String?
-  license_expiry_date     DateTime?
+  license_expiry_date     DateTime?              @db.Timestamptz(6)
   license_photo_url       String?
   license_photo_back_url  String?
   insurance_photo_url     String?
   registration_photo_url  String?
-  background_check_status BackgroundCheckStatus @default(PENDING)
-  rating                  Float                 @default(5.0)
-  total_rides             Int                   @default(0)
-  is_active               Boolean               @default(false)
-  
-  vehicles                DriverVehicle[]
+  background_check_status BackgroundCheckStatus? @default(PENDING)
+  rating                  Decimal?               @default(5.00) @db.Decimal(3, 2)
+  total_rides             Int?                   @default(0)
+  is_active               Boolean?               @default(false)
+
+  active_class         VehicleClass? @default(CORE)
+  cancellation_count   Int?          @default(0)
+  acceptance_count     Int?          @default(0)
+  last_cancellation_at DateTime?     @db.Timestamptz(6)
+
+  rejection_reason           String?
+  verification_feedback_seen Boolean? @default(false)
+
+  price_per_mile     Decimal?  @db.Decimal(10, 2)
+  price_range_min    Decimal?  @db.Decimal(10, 2)
+  price_range_max    Decimal?  @db.Decimal(10, 2)
+  recommended_price  Decimal?  @db.Decimal(10, 2)
+  price_last_changed DateTime? @db.Timestamptz(6)
+  is_dangerous       Boolean?  @default(false)
+  is_flagged         Boolean?  @default(false)
+
+  user         User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  vehicles     DriverVehicle[]
+  favorited_by FavoriteDriver[] @relation("DriverFavorited")
+
+  @@index([is_active, active_class])
+  @@map("drivers")
+}
+
+model FavoriteDriver {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  rider_id   String    @db.Uuid
+  driver_id  String    @db.Uuid
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  rider  User   @relation("RiderFavorites", fields: [rider_id], references: [id], onDelete: Cascade)
+  driver Driver @relation("DriverFavorited", fields: [driver_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([rider_id, driver_id])
+  @@map("favorite_drivers")
 }
 
 model Vehicle {
-  id       String          @id @default(uuid())
-  make     String
-  model    String
-  year     Int
-  category VehicleCategory
-  
-  drivers  DriverVehicle[]
+  id            String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  make          String
+  model         String
+  year          Int
+  category      VehicleCategory
+  service_class VehicleClass?   @default(CORE)
+
+  drivers DriverVehicle[]
+
+  @@map("vehicles")
 }
 
 model DriverVehicle {
-  id                        String  @id @default(uuid())
-  driver_id                 String
-  driver                    Driver  @relation(fields: [driver_id], references: [user_id])
-  vehicle_id                String
-  vehicle                   Vehicle @relation(fields: [vehicle_id], references: [id])
-  license_plate_number      String
-  license_plate_photo_url   String?
-  car_photo_urls            String[] // Prisma supports String[] in PostgreSQL
-  color                     String?
-  interior_color            String?
+  id                      String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  driver_id               String?  @db.Uuid
+  vehicle_id              String?  @db.Uuid
+  license_plate_number    String
+  license_plate_photo_url String?
+  car_photo_urls          String[]
+  make                    String?
+  model                   String?
+  year                    Int?
+  color                   String?
+  interior_color          String?
+
+  inspection_photo_url   String?
+  inspection_expiry_date DateTime?         @db.Timestamptz(6)
+  inspection_status      ComplianceStatus? @default(PENDING)
+  inspection_notes       String?
+
+  driver  Driver?  @relation(fields: [driver_id], references: [user_id], onDelete: Cascade)
+  vehicle Vehicle? @relation(fields: [vehicle_id], references: [id], onDelete: Cascade)
+
+  @@map("driver_vehicles")
+}
+
+model AuditLog {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  admin_id   String    @db.Uuid
+  target_id  String    @db.Uuid
+  action     String
+  details    String?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  admin  User @relation("AdminActions", fields: [admin_id], references: [id], onDelete: Cascade)
+  target User @relation("TargetLogs", fields: [target_id], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
 }
 
 model Ride {
-  id         String     @id @default(uuid())
-  rider_id   String
-  rider      User       @relation("RiderRides", fields: [rider_id], references: [id])
-  driver_id  String?
-  driver     User?      @relation("DriverRides", fields: [driver_id], references: [id])
-  status     TripStatus @default(REQUESTED)
-  created_at DateTime   @default(now())
-  
-  ratings    Rating[]
+  id                    String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  rider_id              String?       @db.Uuid
+  driver_id             String?       @db.Uuid
+  status                TripStatus?   @default(REQUESTED)
+  requested_class       VehicleClass? @default(CORE)
+  snapshot_rider_rating Decimal?      @db.Decimal(3, 2)
+  compliance_snapshot   Json?         @default("{}")
+
+  pickup_lat          Float?
+  pickup_lng          Float?
+  pickup_address      String?
+  destination_lat     Float?
+  destination_lng     Float?
+  destination_address String?
+
+  accepted_at  DateTime? @db.Timestamptz(6)
+  started_at   DateTime? @db.Timestamptz(6)
+  completed_at DateTime? @db.Timestamptz(6)
+  cancelled_at DateTime? @db.Timestamptz(6)
+
+  scheduled_at DateTime? @db.Timestamptz(6)
+  is_scheduled Boolean?  @default(false)
+  tip_amount   Decimal?  @default(0) @db.Decimal(10, 2)
+
+  distance_meters   Int?
+  duration_seconds  Int?
+  fare_amount       Decimal? @db.Decimal(10, 2)
+  initial_max_fare  Decimal? @db.Decimal(10, 2)
+  saving_likelihood Int?
+  trajectory        Json?    @default("[]")
+
+  estimated_distance_meters  Int?
+  estimated_duration_seconds Int?
+
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  rider   User?    @relation("RiderRides", fields: [rider_id], references: [id])
+  driver  User?    @relation("DriverRides", fields: [driver_id], references: [id])
+  rating  Rating?
+  payouts Payout[] @relation("RidePayouts")
+
+  @@index([status, created_at(sort: Desc)])
+  @@index([rider_id, created_at(sort: Desc)])
+  @@index([driver_id, created_at(sort: Desc)])
+  @@map("rides")
 }
 
 model Rating {
-  id          String   @id @default(uuid())
-  ride_id     String
-  ride        Ride     @relation(fields: [ride_id], references: [id])
-  rater_id    String
-  rater       User     @relation("RaterRatings", fields: [rater_id], references: [id])
-  target_id   String
-  target      User     @relation("TargetRatings", fields: [target_id], references: [id])
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ride_id     String    @unique @db.Uuid
+  rater_id    String    @db.Uuid
+  target_id   String    @db.Uuid
   target_role UserRole
-  rating      Int      // 1-5
+  rating      Int
   review_text String?
-  created_at  DateTime @default(now())
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+
+  ride Ride @relation(fields: [ride_id], references: [id], onDelete: Cascade)
+
+  @@map("ratings")
+}
+
+model VehicleModel {
+  id    String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  make  String
+  model String
+  year  Int
+
+  @@unique([make, model, year])
+  @@map("vehicle_models")
+}
+
+// ---------- 020: Profile-change approval + wallet + payouts ---------------
+
+enum ProfileChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("profile_change_status")
+}
+
+enum PayoutCardStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("payout_card_status")
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+
+  @@map("payout_status")
+}
+
+enum PayoutMethod {
+  WEEKLY_AUTO
+  ON_DEMAND
+  RIDE_CREDIT
+
+  @@map("payout_method")
+}
+
+enum CardBrand {
+  visa
+  mastercard
+  amex
+  discover
+  unknown
+
+  @@map("card_brand")
+}
+
+model ProfileChangeRequest {
+  id                   String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  driver_id            String                 @db.Uuid
+  requested_changes    Json
+  status               ProfileChangeStatus    @default(PENDING)
+  created_at           DateTime?              @default(now()) @db.Timestamptz(6)
+  reviewed_at          DateTime?              @db.Timestamptz(6)
+  reviewed_by_admin_id String?                @db.Uuid
+  rejection_reason     String?
+  card_last4           String?
+  card_brand           CardBrand?
+  prev_is_active       Boolean?
+  prev_bg_status       BackgroundCheckStatus?
+
+  driver   User  @relation("DriverProfileChanges", fields: [driver_id], references: [id], onDelete: Cascade)
+  reviewer User? @relation("AdminProfileReviews", fields: [reviewed_by_admin_id], references: [id], onDelete: SetNull)
+
+  @@index([status, created_at(sort: Desc)])
+  @@index([driver_id, created_at(sort: Desc)])
+  @@map("profile_change_requests")
+}
+
+model PayoutCard {
+  id               String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  driver_id        String           @db.Uuid
+  brand            CardBrand
+  last4            String           @db.Char(4)
+  exp_month        Int
+  exp_year         Int
+  cardholder_name  String
+  zip              String
+  status           PayoutCardStatus @default(PENDING)
+  created_at       DateTime?        @default(now()) @db.Timestamptz(6)
+  approved_at      DateTime?        @db.Timestamptz(6)
+  rejected_at      DateTime?        @db.Timestamptz(6)
+  rejection_reason String?
+
+  driver  User           @relation("DriverPayoutCards", fields: [driver_id], references: [id], onDelete: Cascade)
+  wallets DriverWallet[] @relation("WalletCard")
+
+  @@index([driver_id, status])
+  @@index([status, created_at(sort: Desc)])
+  @@map("payout_cards")
+}
+
+model DriverWallet {
+  driver_id               String    @id @db.Uuid
+  balance_cents           BigInt    @default(0)
+  lifetime_earnings_cents BigInt    @default(0)
+  payout_card_id          String?   @db.Uuid
+  updated_at              DateTime? @default(now()) @db.Timestamptz(6)
+
+  driver      User        @relation("DriverWallet", fields: [driver_id], references: [id], onDelete: Cascade)
+  payout_card PayoutCard? @relation("WalletCard", fields: [payout_card_id], references: [id], onDelete: SetNull)
+
+  @@map("driver_wallets")
+}
+
+model Payout {
+  id           String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  driver_id    String       @db.Uuid
+  amount_cents BigInt
+  fee_cents    BigInt       @default(0)
+  net_cents    BigInt
+  status       PayoutStatus @default(PENDING)
+  method       PayoutMethod
+  ride_id      String?      @db.Uuid
+  requested_at DateTime?    @default(now()) @db.Timestamptz(6)
+  processed_at DateTime?    @db.Timestamptz(6)
+  reference    String?
+  notes        String?
+
+  driver User  @relation("DriverPayouts", fields: [driver_id], references: [id], onDelete: Cascade)
+  ride   Ride? @relation("RidePayouts", fields: [ride_id], references: [id], onDelete: SetNull)
+
+  @@index([driver_id, status, requested_at(sort: Desc)])
+  @@index([status, requested_at(sort: Desc)])
+  @@map("payouts")
 }

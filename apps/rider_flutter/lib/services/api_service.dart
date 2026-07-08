@@ -38,7 +38,7 @@ class ApiService {
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
           // debugPrint('[API DEBUG] ✅ Token attached');
-        } else {
+        } else if (!options.path.startsWith('auth/')) {
           debugPrint('[API DEBUG] ⚠️ NO TOKEN FOUND IN PREFS for ${options.path}');
         }
         return handler.next(options);
@@ -46,6 +46,14 @@ class ApiService {
       onError: (DioException e, handler) async {
         if (e.response?.statusCode == 401) {
           debugPrint('[API] 401 Unauthorized detected for ${e.requestOptions.path}');
+
+          // ONLY attempt sync/logout if we actually sent a token. 
+          // If we didn't send a token, the 401 is expected and should be handled by the caller.
+          final sentToken = e.requestOptions.headers['Authorization'];
+          if (sentToken == null || sentToken.toString().isEmpty) {
+            debugPrint('[API] ⚠️ 401 received but no token was sent. Not performing auto-logout.');
+            return handler.next(e);
+          }
 
           final hasSupabaseSession = Supabase.instance.client.auth.currentSession != null;
 
@@ -78,11 +86,13 @@ class ApiService {
     required String rideId,
     required int rating,
     String? reviewText,
+    bool? favorite,
   }) async {
     return await dio.post('ride/rate', data: {
       'ride_id': rideId,
       'rating': rating,
       'review_text': reviewText,
+      'favorite': favorite ?? false,
     });
   }
 }

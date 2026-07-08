@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../components/state_container.dart';
 import 'settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -32,7 +33,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _profileImageUrl;
   String? _selectedVehicleId;
   List<dynamic> _vehicles = [];
-  bool _isLoading = true;
+  ViewState _state = ViewState.loading;
+  String? _errorMessage;
   bool _isSaving = false;
   bool _isEditing = false;
   bool _isVerified = false;
@@ -48,11 +50,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _fetchProfile() async {
+    setState(() => _state = ViewState.loading);
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('jwt_token');
       if (token == null) {
-        if (mounted) setState(() => _isLoading = false);
+        setState(() => _state = ViewState.success);
         return;
       }
 
@@ -81,8 +84,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
         
         _vehicles = vehicles;
-        _isLoading = false;
+        _state = ViewState.success;
       });
+
+      // Snapshot originals for the diff in _saveProfile. Capture the
+      // fields the admin queue cares about so we can detect real changes.
+      _originals = {
+        'full_name': profile['full_name'],
+        'phone_number': profile['phone_number'],
+        'date_of_birth': profile['date_of_birth'],
+        'license_number': profile['license_number'],
+        'profile_image_url': profile['profile_image_url'],
+        'license_plate_number': (profile['vehicles'] is List &&
+                (profile['vehicles'] as List).isNotEmpty)
+            ? (profile['vehicles'][0])['license_plate_number']
+            : null,
+      };
+      _hasPendingChange = profile['has_pending_profile_change'] == true;
     } catch (e) {
       if (e is DioException && e.response?.statusCode == 404) {
         debugPrint('User not found (404), logging out...');
@@ -93,11 +111,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load profile: $e')),
-        );
-      }
+      setState(() {
+        _state = ViewState.failure;
+        _errorMessage = 'We were unable to load your driver credentials. Please verify your connection.';
+      });
     }
   }
 
@@ -346,54 +363,136 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Submits a diff of the currently-edited fields to the admin approval
+  /// queue. Every sensitive edit (name, photo, DOB, phone, license, vehicle,
+  /// plate, photos, payout card) requires admin approval before going live.
   Future<void> _saveProfile() async {
     final fullName = _nameController.text.trim();
     final phoneNumber = _phoneController.text.trim();
+    final dob = _dobController.text.trim();
+    final licenseNumber = _licenseController.text.trim();
     final plateNumber = _plateController.text.trim();
 
     if (fullName.length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name must be at least 2 characters')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Name must be at least 2 characters')),
+      );
       return;
     }
 
     setState(() => _isSaving = true);
     try {
-      final Map<String, dynamic> updateData = {
-        'full_name': fullName,
-      };
-      
-      if (phoneNumber.isNotEmpty) {
-        updateData['phone_number'] = phoneNumber;
-      }
-      
-      if (_selectedVehicleId != null) {
-        updateData['vehicle_id'] = _selectedVehicleId;
-      }
-      
-      if (plateNumber.isNotEmpty) {
-        updateData['license_plate_number'] = plateNumber;
+      // Build the diff against the loaded profile. Only include fields the
+      // driver actually changed so the admin queue stays focused.
+      final Map<String, dynamic> original = await _loadOriginals();
+      final Map<String, dynamic> changes = {};
+
+      void pushIfChanged(String key, dynamic current, dynamic originalValue) {
+        final cur = current is String ? current.trim() : current;
+        if (cur == null || (cur is String && cur.isEmpty)) return;
+        if (cur != originalValue) changes[key] = cur;
       }
 
-      await UserService.updateProfile(updateData);
+      pushIfChanged('full_name', fullName, original['full_name']);
+      pushIfChanged('phone_number', phoneNumber, original['phone_number']);
+      pushIfChanged(
+        'date_of_birth',
+        _parseDob(dob),
+        original['date_of_birth'],
+      );
+      pushIfChanged('license_number', licenseNumber, original['license_number']);
+      pushIfChanged(
+        'profile_image_url',
+        _profileImageUrl,
+        original['profile_image_url'],
+      );
+      pushIfChanged(
+        'license_plate_number',
+        plateNumber,
+        original['license_plate_number'],
+      );
+
+      // Payout card is handled separately via the Wallet section — do
+      // not bundle it here.
+
+      if (changes.isEmpty) {
+        setState(() {
+          _isSaving = false;
+          _isEditing = false;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No changes to submit')),
+          );
+        }
+        return;
+      }
+
+      await UserService.submitProfileChange(changes);
 
       setState(() {
         _isSaving = false;
         _isEditing = false;
+        _hasPendingChange = true;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated successfully')),
+          const SnackBar(
+            content: Text(
+              'Submitted for review — you\'ll be notified once an admin approves.',
+            ),
+            backgroundColor: Color(0xFF5B7760),
+            duration: Duration(seconds: 4),
+          ),
         );
         _fetchProfile();
       }
     } catch (e) {
       setState(() => _isSaving = false);
+      final msg = _friendlyError(e.toString());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update profile: $e')),
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: const Color(0xFFC65A5A),
+          ),
         );
       }
     }
+  }
+
+  /// Cache of the last-fetched profile values used to compute the diff
+  /// in `_saveProfile`. Loaded once per `_fetchProfile` call.
+  Map<String, dynamic> _originals = const {};
+  bool _hasPendingChange = false;
+
+  Future<Map<String, dynamic>> _loadOriginals() async {
+    return _originals;
+  }
+
+  String? _parseDob(String text) {
+    if (text.isEmpty) return null;
+    try {
+      return DateFormat('yyyy-MM-dd').format(DateFormat('MM-dd-yyyy').parse(text));
+    } catch (_) {
+      return text;
+    }
+  }
+
+  String _friendlyError(String raw) {
+    if (raw.contains('PROFILE_CHANGE_PENDING')) {
+      return 'You already have a change awaiting review. Wait for it to be approved before submitting a new one.';
+    }
+    if (raw.contains('RATE_LIMITED')) {
+      return 'You can only submit one change request every 24 hours. Try again later.';
+    }
+    if (raw.contains('PHONE_NOT_VERIFIED')) {
+      return 'Verify the new phone number via OTP before submitting this change.';
+    }
+    if (raw.contains('INVALID_CARD')) {
+      return 'That card number isn\'t valid. Check the digits and try again.';
+    }
+    return 'Could not submit your changes: $raw';
   }
 
   Future<void> _handleLogout() async {
@@ -434,7 +533,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           style: theme.textTheme.headlineMedium?.copyWith(fontSize: 24),
         ),
         actions: [
-          if (!_isLoading)
+          if (_state == ViewState.success)
             Padding(
               padding: const EdgeInsets.only(right: 12.0),
               child: IconButton(
@@ -450,143 +549,149 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      body: StateContainer(
+        state: _state,
+        errorMessage: _errorMessage,
+        onRetry: _fetchProfile,
+        successWidget: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_hasPendingChange) _buildPendingChangeBanner(),
+              _buildProfileHeader(theme),
+              const SizedBox(height: 32),
+              _buildSectionCard(
+                title: 'Personal Details',
                 children: [
-                  _buildProfileHeader(theme),
-                  const SizedBox(height: 32),
-                  _buildSectionCard(
-                    title: 'Personal Details',
-                    children: [
-                      _buildProfileItem(
-                        icon: Icons.person_outline_rounded,
-                        label: 'Full Name',
-                        controller: _nameController,
-                        enabled: _isEditing,
-                      ),
-                      const Divider(height: 32),
-                      _buildProfileItem(
-                        icon: Icons.email_outlined,
-                        label: 'Email Address',
-                        controller: _emailController,
-                        enabled: false,
-                        onAction: _isEditing ? _showEmailChangeDialog : null,
-                      ),
-                      const Divider(height: 32),
-                      _buildProfileItem(
-                        icon: Icons.phone_outlined,
-                        label: 'Phone Number',
-                        controller: _phoneController,
-                        enabled: _isEditing,
-                        keyboardType: TextInputType.phone,
-                      ),
-                      const Divider(height: 32),
-                      _buildProfileItem(
-                        icon: Icons.cake_outlined,
-                        label: 'Date of Birth',
-                        controller: _dobController,
-                        enabled: false,
-                        onAction: _isEditing ? _updateAgeAndLicense : null,
-                      ),
-                    ],
+                  _buildProfileItem(
+                    icon: Icons.person_outline_rounded,
+                    label: 'Full Name',
+                    controller: _nameController,
+                    enabled: _isEditing,
                   ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
-                    title: 'License & Vehicle',
-                    children: [
-                      _buildProfileItem(
-                        icon: Icons.badge_outlined,
-                        label: 'License Number',
-                        controller: _licenseController,
-                        enabled: _isEditing,
-                      ),
-                      const Divider(height: 32),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Vehicle Model',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: const Color(0xFF2F3A32).withOpacity(0.4),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            value: _selectedVehicleId,
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero,
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              filled: false,
-                            ),
-                            items: _vehicles.map((v) {
-                              return DropdownMenuItem<String>(
-                                value: v['id'],
-                                child: Text('${v['year']} ${v['make']} ${v['model']}'),
-                              );
-                            }).toList(),
-                            onChanged: _isEditing ? (val) => setState(() => _selectedVehicleId = val) : null,
-                          ),
-                        ],
-                      ),
-                      const Divider(height: 32),
-                      _buildProfileItem(
-                        icon: Icons.vpn_key_outlined,
-                        label: 'License Plate',
-                        controller: _plateController,
-                        enabled: _isEditing,
-                      ),
-                    ],
+                  const Divider(height: 32),
+                  _buildProfileItem(
+                    icon: Icons.email_outlined,
+                    label: 'Email Address',
+                    controller: _emailController,
+                    enabled: false,
+                    onAction: _isEditing ? _showEmailChangeDialog : null,
                   ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
-                    title: 'Settings',
-                    children: [
-                      _buildMenuTile(
-                        icon: Icons.settings_outlined,
-                        title: 'App Settings',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => SettingsScreen(hasPassword: _hasPassword)),
-                        ),
-                      ),
-                    ],
+                  const Divider(height: 32),
+                  _buildProfileItem(
+                    icon: Icons.phone_outlined,
+                    label: 'Phone Number',
+                    controller: _phoneController,
+                    enabled: _isEditing,
+                    keyboardType: TextInputType.phone,
                   ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
-                    title: 'Support',
-                    children: [
-                      _buildMenuTile(
-                        icon: Icons.support_agent_rounded,
-                        title: 'Customer Support',
-                        onTap: _handleSupport,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  _buildSectionCard(
-                    title: 'Account',
-                    children: [
-                      _buildMenuTile(
-                        icon: Icons.logout_rounded,
-                        title: 'Sign Out',
-                        onTap: _handleLogout,
-                        textColor: const Color(0xFFC65A5A),
-                      ),
-                    ],
+                  const Divider(height: 32),
+                  _buildProfileItem(
+                    icon: Icons.cake_outlined,
+                    label: 'Date of Birth',
+                    controller: _dobController,
+                    enabled: false,
+                    onAction: _isEditing ? _updateAgeAndLicense : null,
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'License & Vehicle',
+                children: [
+                  _buildProfileItem(
+                    icon: Icons.badge_outlined,
+                    label: 'License Number',
+                    controller: _licenseController,
+                    enabled: _isEditing,
+                  ),
+                  const Divider(height: 32),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Vehicle Model',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: const Color(0xFF2F3A32).withOpacity(0.4),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: _selectedVehicleId,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                        ),
+                        items: _vehicles.map((v) {
+                          return DropdownMenuItem<String>(
+                            value: v['id'],
+                            child: Text('${v['year']} ${v['make']} ${v['model']}'),
+                          );
+                        }).toList(),
+                        onChanged: _isEditing ? (val) => setState(() => _selectedVehicleId = val) : null,
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 32),
+                  _buildProfileItem(
+                    icon: Icons.vpn_key_outlined,
+                    label: 'License Plate',
+                    controller: _plateController,
+                    enabled: _isEditing,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'Settings',
+                children: [
+                  _buildMenuTile(
+                    icon: Icons.settings_outlined,
+                    title: 'App Settings',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => SettingsScreen(hasPassword: _hasPassword)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'Support',
+                children: [
+                  _buildMenuTile(
+                    icon: Icons.support_agent_rounded,
+                    title: 'Customer Support',
+                    onTap: _handleSupport,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _buildWalletCard(),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'Account',
+                children: [
+                  _buildMenuTile(
+                    icon: Icons.logout_rounded,
+                    title: 'Sign Out',
+                    onTap: _handleLogout,
+                    textColor: const Color(0xFFC65A5A),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -810,6 +915,520 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // ==========================================================================
+  // Pending-change banner + Wallet section
+  // ==========================================================================
+
+  Widget _buildPendingChangeBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFCE9E9),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFEFCFCF)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.pending_actions_rounded, color: Color(0xFFC65A5A), size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  'Profile change under review',
+                  style: TextStyle(
+                    color: Color(0xFF7A2A2A),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'An admin is reviewing your recent edit. You can keep editing — new submissions queue after the current one is reviewed.',
+                  style: TextStyle(color: Color(0xFF7A2A2A), fontSize: 12, height: 1.35),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Wallet summary card: balance, lifetime earnings, current payout card,
+  /// recent payouts. Matches the existing theme (sage primary, terracotta
+  /// accents).
+  Widget _buildWalletCard() {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: UserService.getWallet(),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return _buildSectionCard(
+            title: 'Wallet',
+            children: const [
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 18),
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+            ],
+          );
+        }
+        final w = snap.data ?? const {};
+        final balanceCents = (w['balance_cents'] as num?)?.toInt() ?? 0;
+        final lifetimeCents = (w['lifetime_earnings_cents'] as num?)?.toInt() ?? 0;
+        final balance = NumberFormat.simpleCurrency(name: 'USD').format(balanceCents / 100);
+        final lifetime = NumberFormat.simpleCurrency(name: 'USD').format(lifetimeCents / 100);
+        final card = w['payout_card'] as Map<String, dynamic>?;
+        final cardLast4 = card?['last4']?.toString();
+        final cardBrand = card?['brand']?.toString().toUpperCase() ?? '';
+        final payouts = (w['recent_payouts'] as List?) ?? const [];
+        return _buildSectionCard(
+          title: 'Wallet',
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Available balance',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text(balance,
+                          style: const TextStyle(
+                              fontSize: 28, fontWeight: FontWeight.w800, color: Color(0xFF2F3A32))),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text('Lifetime',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Text(lifetime,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32))),
+                  ],
+                ),
+              ],
+            ),
+            const Divider(height: 32),
+            _buildProfileRow(
+              icon: Icons.credit_card_rounded,
+              title: cardLast4 != null && cardLast4.isNotEmpty
+                  ? 'Payout card · $cardBrand •••• $cardLast4'
+                  : 'No payout card',
+              trailing: cardLast4 != null
+                  ? TextButton(
+                      onPressed: _showPayoutCardDialog,
+                      child: const Text('Replace', style: TextStyle(fontWeight: FontWeight.w700)),
+                    )
+                  : TextButton(
+                      onPressed: _showPayoutCardDialog,
+                      child: const Text('Add card', style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+            ),
+            const Divider(height: 32),
+            _buildProfileRow(
+              icon: Icons.account_balance_wallet_rounded,
+              title: 'Request payout',
+              trailing: TextButton(
+                onPressed: balanceCents > 0 ? _showRequestPayoutDialog : null,
+                child: const Text('Withdraw', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ),
+            if (payouts.isNotEmpty) ...[
+              const Divider(height: 32),
+              const Text('Recent payouts',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              ...payouts.map((p) {
+                final cents = ((p as Map)['net_cents'] as num?)?.toInt() ?? 0;
+                final status = (p['status'] ?? '').toString();
+                final requestedAt = p['requested_at']?.toString();
+                final method = (p['method'] ?? '').toString();
+                String when = '';
+                if (requestedAt != null) {
+                  try {
+                    final dt = DateTime.parse(requestedAt).toLocal();
+                    when = DateFormat('MMM d').format(dt);
+                  } catch (_) {}
+                }
+                final amt = NumberFormat.simpleCurrency(name: 'USD').format(cents / 100);
+                final isAuto = method == 'WEEKLY_AUTO';
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: status == 'PAID' ? const Color(0xFFE5F0EB) : const Color(0xFFFCE9E9),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          isAuto ? Icons.event_repeat_rounded : Icons.payments_rounded,
+                          size: 16,
+                          color: status == 'PAID' ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(isAuto ? 'Weekly auto-payout' : 'On-demand payout',
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                            Text(when, style: const TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                          ],
+                        ),
+                      ),
+                      Text(amt,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: status == 'PAID' ? const Color(0xFFE5F0EB) : const Color(0xFFFCE9E9),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          status,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: status == 'PAID' ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  // ----- Payout card dialog (Luhn-checked, then discarded on server) ------
+
+  Future<void> _showPayoutCardDialog() async {
+    final cardNum = TextEditingController();
+    final expM = TextEditingController();
+    final expY = TextEditingController();
+    final name = TextEditingController(text: _nameController.text);
+    final zip = TextEditingController();
+    final cvc = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setStateDialog) {
+          String? brand;
+          final digits = cardNum.text.replaceAll(RegExp(r'\D'), '');
+          if (digits.startsWith('4')) {
+            brand = 'Visa';
+          } else if (digits.startsWith(RegExp(r'^(5[1-5]|2(2[2-9]|[3-6]\d|7[01])|720)'))) {
+            brand = 'Mastercard';
+          } else if (digits.startsWith(RegExp(r'^3[47]'))) {
+            brand = 'Amex';
+          } else if (digits.startsWith(RegExp(r'^(6011|65|64[4-9]|622)'))) {
+            brand = 'Discover';
+          }
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Add payout card', style: TextStyle(fontWeight: FontWeight.w800)),
+            content: SingleChildScrollView(
+              child: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Your card is only used to receive payouts. We never store the full card number or security code.',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), height: 1.35),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: cardNum,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'Card number',
+                        suffixText: brand,
+                      ),
+                      onChanged: (_) => setStateDialog(() {}),
+                      validator: (v) {
+                        final d = (v ?? '').replaceAll(RegExp(r'\D'), '');
+                        if (d.length < 13 || d.length > 19) return 'Enter a valid card number';
+                        if (!_luhnOk(d)) return 'That card number isn\'t valid';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: expM,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Exp. MM'),
+                            validator: (v) {
+                              final n = int.tryParse((v ?? '').trim());
+                              if (n == null || n < 1 || n > 12) return '1-12';
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            controller: expY,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Exp. YYYY'),
+                            validator: (v) {
+                              final n = int.tryParse((v ?? '').trim());
+                              if (n == null || n < 2025 || n > 2099) return '2025-2099';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: name,
+                      decoration: const InputDecoration(labelText: 'Cardholder name'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: zip,
+                      decoration: const InputDecoration(labelText: 'ZIP / Postal code'),
+                      validator: (v) => (v == null || v.trim().length < 3) ? 'Required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: cvc,
+                      keyboardType: TextInputType.number,
+                      obscureText: true,
+                      decoration: const InputDecoration(labelText: 'Security code (CVC)'),
+                      validator: (v) {
+                        final d = (v ?? '').trim();
+                        if (d.length < 3 || d.length > 4) return '3-4 digits';
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () async {
+                  if (!(formKey.currentState?.validate() ?? false)) return;
+                  try {
+                    await UserService.addPayoutCard({
+                      'card_number': cardNum.text.replaceAll(RegExp(r'\D'), ''),
+                      'exp_month': int.parse(expM.text.trim()),
+                      'exp_year': int.parse(expY.text.trim()),
+                      'cardholder_name': name.text.trim(),
+                      'zip': zip.text.trim(),
+                      'cvc': cvc.text.trim(),
+                    });
+                    if (mounted) {
+                      Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Card submitted — awaiting admin approval.'),
+                          backgroundColor: Color(0xFF5B7760),
+                        ),
+                      );
+                      setState(() {});
+                    }
+                  } catch (e) {
+                    final msg = _friendlyError(e.toString());
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
+                      );
+                    }
+                  }
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF5B7760),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Submit for review'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
+  // ----- On-demand payout dialog (5% fee preview) -------------------------
+
+  Future<void> _showRequestPayoutDialog() async {
+    final amount = TextEditingController();
+    final w = await UserService.getWallet();
+    final balanceCents = (w['balance_cents'] as num?)?.toInt() ?? 0;
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setStateDialog) {
+          final rawCents = ((double.tryParse(amount.text.replaceAll(',', '').replaceAll('\$', '')) ?? 0) * 100).round();
+          final feeCents = (rawCents * 0.05).round();
+          final netCents = rawCents - feeCents;
+          final tooSmall = rawCents < 500; // $5 minimum
+          final tooLarge = rawCents > balanceCents;
+          final canSubmit = rawCents > 0 && !tooSmall && !tooLarge;
+          String? validation;
+          if (rawCents > 0 && tooSmall) validation = 'Minimum payout is \$5.00';
+          if (rawCents > 0 && tooLarge) validation = 'Amount exceeds your balance';
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Request payout', style: TextStyle(fontWeight: FontWeight.w800)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Available: ${NumberFormat.simpleCurrency(name: 'USD').format(balanceCents / 100)}',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF6B6B6B))),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: amount,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: 'Amount (USD)',
+                    prefixText: '\$ ',
+                    errorText: validation,
+                  ),
+                  onChanged: (_) => setStateDialog(() {}),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF6F7F4),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      _kv('Amount', NumberFormat.simpleCurrency(name: 'USD').format(rawCents / 100)),
+                      const SizedBox(height: 4),
+                      _kv('On-demand fee (5%)', '- ${NumberFormat.simpleCurrency(name: 'USD').format(feeCents / 100)}',
+                          color: const Color(0xFFC65A5A)),
+                      const Divider(height: 18),
+                      _kv('You\'ll receive', NumberFormat.simpleCurrency(name: 'USD').format(netCents / 100),
+                          bold: true),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Tip: weekly auto-payouts on Mondays have no fee.',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: !canSubmit
+                    ? null
+                    : () async {
+                        try {
+                          await UserService.requestOnDemandPayout(rawCents);
+                          if (mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Payout requested. An admin will process it shortly.'),
+                                backgroundColor: Color(0xFF5B7760),
+                              ),
+                            );
+                            setState(() {});
+                          }
+                        } catch (e) {
+                          final msg = _friendlyError(e.toString());
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
+                            );
+                          }
+                        }
+                      },
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF5B7760),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Request payout'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
+  Widget _kv(String k, String v, {bool bold = false, Color? color}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(k, style: TextStyle(fontSize: 13, color: color ?? const Color(0xFF2F3A32), fontWeight: bold ? FontWeight.w800 : FontWeight.w500)),
+        Text(v,
+            style: TextStyle(fontSize: 13, color: color ?? const Color(0xFF2F3A32), fontWeight: bold ? FontWeight.w800 : FontWeight.w700)),
+      ],
+    );
+  }
+
+  /// Standard Luhn check for client-side validation. Server re-validates
+  /// and discards the PAN immediately; this is purely a UX gate.
+  bool _luhnOk(String digits) {
+    if (digits.length < 13 || digits.length > 19) return false;
+    int sum = 0;
+    bool alt = false;
+    for (int i = digits.length - 1; i >= 0; i--) {
+      int d = int.parse(digits[i]);
+      if (alt) {
+        d *= 2;
+        if (d > 9) d -= 9;
+      }
+      sum += d;
+      alt = !alt;
+    }
+    return sum % 10 == 0;
+  }
+
+  /// Tiny helper reused for rows inside the Wallet card so we don't have
+  /// to invent a new component for this section.
+  Widget _buildProfileRow({
+    required IconData icon,
+    required String title,
+    Widget? trailing,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.6)),
+        const SizedBox(width: 12),
+        Expanded(child: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+        if (trailing != null) trailing,
+      ],
     );
   }
 }

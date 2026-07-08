@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_service.dart';
+import 'device_fingerprint.dart';
 
 class ApiService {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -38,14 +39,34 @@ class ApiService {
 
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
-        } else {
+        } else if (!options.path.startsWith('auth/')) {
           debugPrint('[API DEBUG] ⚠️ NO TOKEN FOUND IN PREFS for ${options.path}');
         }
+
+        // Tag every request with our stable device id so the backend can
+        // detect new-device sign-ins and force a fresh face verification.
+        if (options.headers['X-Device-Id'] == null) {
+          try {
+            final did = await DeviceFingerprint.getOrCreate();
+            options.headers['X-Device-Id'] = did;
+          } catch (_) {
+            // SharedPreferences unavailable — leave header unset.
+          }
+        }
+
         return handler.next(options);
       },
       onError: (DioException e, handler) async {
         if (e.response?.statusCode == 401) {
           debugPrint('[API] 401 Unauthorized detected for ${e.requestOptions.path}');
+
+          // ONLY attempt sync/logout if we actually sent a token. 
+          // If we didn't send a token, the 401 is expected and should be handled by the caller.
+          final sentToken = e.requestOptions.headers['Authorization'];
+          if (sentToken == null || sentToken.toString().isEmpty) {
+            debugPrint('[API] ⚠️ 401 received but no token was sent. Not performing auto-logout.');
+            return handler.next(e);
+          }
 
           final hasSupabaseSession = Supabase.instance.client.auth.currentSession != null;
 

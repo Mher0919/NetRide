@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/trip_models.dart';
 import '../services/api_service.dart';
+import '../services/sound_service.dart';
 
 class RideProvider with ChangeNotifier {
   TripStatus _status = TripStatus.IDLE;
@@ -13,6 +14,7 @@ class RideProvider with ChangeNotifier {
   bool _isConnected = false;
   Trip? _currentTrip;
   List<ChatMessage> _messages = [];
+  final Map<String, Location> _nearbyDrivers = {};
 
   TripStatus get status => _status;
   String? get tripId => _tripId;
@@ -21,6 +23,16 @@ class RideProvider with ChangeNotifier {
   bool get isConnected => _isConnected;
   Trip? get currentTrip => _currentTrip;
   List<ChatMessage> get messages => _messages;
+  Map<String, Location> get nearbyDrivers => _nearbyDrivers;
+
+  /// Exposed so the CommunicationService can hook into the same socket
+  /// the rest of the ride flow uses. Returns null if the socket hasn't
+  /// been initialised yet (e.g. user is still on the splash screen).
+  IO.Socket? get socket => _socket;
+
+  void subscribeToNearbyDrivers(Location loc) {
+    _socket?.emit('subscribeToNearbyDrivers', loc.toJson());
+  }
 
   void initSocket(String token) {
     // 10.0.2.2 is the special alias to your host loopback interface (127.0.0.1 on your development machine)
@@ -59,10 +71,21 @@ class RideProvider with ChangeNotifier {
     });
 
     _socket!.on('tripUpdate', (data) {
+      final oldStatus = _status;
       final trip = Trip.fromJson(data);
       _currentTrip = trip;
       _status = trip.status;
       _tripId = trip.id;
+      
+      if (oldStatus == TripStatus.REQUESTED && trip.status == TripStatus.ACCEPTED) {
+        SoundService.instance.play(SoundEffect.orderAccepted);
+      }
+      if (oldStatus != TripStatus.CANCELLED && trip.status == TripStatus.CANCELLED) {
+        SoundService.instance.play(SoundEffect.orderCancelled);
+      }
+      if (oldStatus != TripStatus.COMPLETED && trip.status == TripStatus.COMPLETED) {
+        SoundService.instance.play(SoundEffect.tripCompleted);
+      }
       
       if (trip.status == TripStatus.ACCEPTED || trip.status == TripStatus.IN_PROGRESS) {
         Location? initialLoc;
@@ -92,22 +115,36 @@ class RideProvider with ChangeNotifier {
     });
 
     _socket!.on('driverLocationUpdate', (data) {
-      if (_driver != null) {
+      final driverId = data['driverId'];
+      final loc = Location.fromJson(data);
+
+      if (_driver != null && _driver!.id == driverId) {
         _driver = DriverInfo(
           id: _driver!.id,
           name: _driver!.name,
           vehicle: _driver!.vehicle,
           plate: _driver!.plate,
-          location: Location.fromJson(data),
+          location: loc,
         );
-        notifyListeners();
+      } else {
+        // It's a nearby available driver
+        _nearbyDrivers[driverId!] = loc;
       }
+      notifyListeners();
     });
 
     _socket!.on('messageReceived', (data) {
       final msg = ChatMessage.fromJson(data);
       _messages.add(msg);
       notifyListeners();
+    });
+
+    _socket!.on('tipReceived', (data) {
+      try {
+        SoundService.instance.play(SoundEffect.tipReceived);
+      } catch (e) {
+        print('Error playing tip sound: $e');
+      }
     });
 
     _socket!.on('error', (data) => print('Socket Error: $data'));
@@ -129,12 +166,24 @@ class RideProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void requestRide(Location pickup, Location destination) {
+  void requestRide(Location pickup, Location destination, {
+    VehicleClass requestedClass = VehicleClass.CORE,
+    bool isScheduled = false,
+    DateTime? scheduledAt,
+    bool favoritePriority = false
+  }) {
     _socket?.emit('requestRide', {
       'pickup': pickup.toJson(),
       'destination': destination.toJson(),
+      'requestedClass': requestedClass.toString().split('.').last,
+      'isScheduled': isScheduled,
+      'scheduledAt': scheduledAt?.toIso8601String(),
+      'favoritePriority': favoritePriority
     });
-    _status = TripStatus.REQUESTED;
+    
+    if (!isScheduled) {
+      _status = TripStatus.REQUESTED;
+    }
     notifyListeners();
   }
 
@@ -162,12 +211,17 @@ class RideProvider with ChangeNotifier {
     _socket?.emit('updateLocation', {'lat': lat, 'lng': lng});
   }
 
-  Future<void> rateRide(String rideId, int rating, String reviewText) async {
+  Future<void> rateRide(String rideId, int rating, String reviewText, {bool favorite = false}) async {
     await ApiService.rateRide(
       rideId: rideId,
       rating: rating,
       reviewText: reviewText,
+      favorite: favorite
     );
+  }
+
+  Future<void> submitTip(String rideId, double amount) async {
+    await ApiService.dio.post('/ride/$rideId/tip', data: {'amount': amount});
   }
 
   @override

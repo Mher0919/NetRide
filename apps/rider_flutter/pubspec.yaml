@@ -51,6 +51,13 @@ dependencies:
   url_launcher: ^6.3.0
   app_links: ^6.3.3
 
+  # Audio playback for app-level sound effects (accept, cancel, tip,
+  # completed). MP3s are bundled under assets/sounds/.
+  audioplayers: ^6.1.0
+
+  # Uber-style congrats animation shown when a trip completes.
+  confetti: ^0.8.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -74,6 +81,10 @@ flutter:
     - .env
     - assets/images/logo.png
     - assets/images/logo-noBackground.png
+    - assets/sounds/order_accepted.mp3
+    - assets/sounds/order_cancelled.mp3
+    - assets/sounds/trip_completed.mp3
+    - assets/sounds/tip_received.mp3
 
   # To add assets to your application, add an assets section, like this:
   # assets:

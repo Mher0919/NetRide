@@ -19,6 +19,50 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
 
+  bool _hasMinLength = false;
+  bool _hasCapitalLetter = false;
+  bool _hasNumber = false;
+  bool _hasSpecialChar = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _passwordController.addListener(_onPasswordChanged);
+    _confirmPasswordController.addListener(_onConfirmPasswordChanged);
+  }
+
+  @override
+  void dispose() {
+    _passwordController.removeListener(_onPasswordChanged);
+    _confirmPasswordController.removeListener(_onConfirmPasswordChanged);
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  void _onPasswordChanged() {
+    final password = _passwordController.text;
+    final hasMinLength = password.length >= 8;
+    final hasCapitalLetter = password.contains(RegExp(r'[A-Z]'));
+    final hasNumber = password.contains(RegExp(r'[0-9]'));
+    final hasSpecialChar = password.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>\-_+=~`|\\\[\]]'));
+
+    setState(() {
+      _hasMinLength = hasMinLength;
+      _hasCapitalLetter = hasCapitalLetter;
+      _hasNumber = hasNumber;
+      _hasSpecialChar = hasSpecialChar;
+    });
+  }
+
+  void _onConfirmPasswordChanged() {
+    setState(() {});
+  }
+
+  bool get _allCheckpointsMet => _hasMinLength && _hasCapitalLetter && _hasNumber && _hasSpecialChar;
+
   Future<void> _handleSignup() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -143,22 +187,34 @@ class _SignupScreenState extends State<SignupScreen> {
                     icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
                     onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                   ),
-                  validator: (val) => val!.length < 6 ? 'Password must be at least 6 characters' : null,
+                  validator: (val) {
+                    if (val == null || val.isEmpty) return 'Please enter a password';
+                    if (!_allCheckpointsMet) return 'Password does not meet all checkpoints';
+                    return null;
+                  },
                 ),
+                _buildPasswordCheckpoints(),
                 const SizedBox(height: 16),
                 _buildTextField(
                   label: 'Confirm Password',
                   controller: _confirmPasswordController,
                   icon: Icons.lock_reset_rounded,
                   obscureText: _obscurePassword,
-                  validator: (val) => val != _passwordController.text ? 'Passwords do not match' : null,
+                  enabled: _allCheckpointsMet,
+                  validator: (val) {
+                    if (val == null || val.isEmpty) return 'Please confirm your password';
+                    if (val != _passwordController.text) return 'Passwords do not match';
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 40),
                 SizedBox(
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
-                    onPressed: _isLoading ? null : _handleSignup,
+                    onPressed: (_isLoading || !_allCheckpointsMet || _passwordController.text != _confirmPasswordController.text)
+                        ? null
+                        : _handleSignup,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.black,
                       foregroundColor: Colors.white,
@@ -191,6 +247,45 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
+  Widget _buildPasswordCheckpoints() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0, left: 4.0, right: 4.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildCheckpointRow('At least 8 characters', _hasMinLength),
+          const SizedBox(height: 6),
+          _buildCheckpointRow('One capital letter', _hasCapitalLetter),
+          const SizedBox(height: 6),
+          _buildCheckpointRow('One number', _hasNumber),
+          const SizedBox(height: 6),
+          _buildCheckpointRow('One special character', _hasSpecialChar),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckpointRow(String text, bool isMet) {
+    return Row(
+      children: [
+        Icon(
+          isMet ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+          color: isMet ? Colors.green : Colors.grey[400],
+          size: 16,
+        ),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            color: isMet ? Colors.green[700] : Colors.grey[500],
+            fontWeight: isMet ? FontWeight.w500 : FontWeight.normal,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildTextField({
     required String label,
     required TextEditingController controller,
@@ -199,7 +294,9 @@ class _SignupScreenState extends State<SignupScreen> {
     bool obscureText = false,
     Widget? suffixIcon,
     String? Function(String?)? validator,
+    bool? enabled,
   }) {
+    final isFieldEnabled = enabled ?? true;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -208,7 +305,7 @@ class _SignupScreenState extends State<SignupScreen> {
           style: GoogleFonts.poppins(
             fontSize: 14,
             fontWeight: FontWeight.w500,
-            color: Colors.grey[700],
+            color: isFieldEnabled ? Colors.grey[700] : Colors.grey[400],
           ),
         ),
         const SizedBox(height: 8),
@@ -218,13 +315,14 @@ class _SignupScreenState extends State<SignupScreen> {
           obscureText: obscureText,
           validator: validator,
           cursorColor: Colors.black,
+          enabled: enabled,
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: Colors.grey[400], size: 22),
+            prefixIcon: Icon(icon, color: isFieldEnabled ? Colors.grey[400] : Colors.grey[300], size: 22),
             suffixIcon: suffixIcon,
             hintText: 'Enter your $label',
             hintStyle: GoogleFonts.poppins(color: Colors.grey[400], fontSize: 15),
             filled: true,
-            fillColor: Colors.grey[50],
+            fillColor: isFieldEnabled ? Colors.grey[50] : Colors.grey[200],
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
@@ -236,6 +334,10 @@ class _SignupScreenState extends State<SignupScreen> {
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Colors.redAccent, width: 1),
+            ),
+            disabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
             ),
           ),
         ),

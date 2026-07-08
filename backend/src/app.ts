@@ -12,6 +12,15 @@ import { pool } from './config/database';
 import { AuthService } from './modules/auth/auth.service';
 import { setupSocketGateway } from './gateway/socket.gateway';
 import { rateLimitMiddleware } from './middleware/rateLimit.middleware';
+import { initSentry } from './observability/sentry';
+import { logger } from './observability/logger';
+import { requestContext, requestLogger } from './middleware/pinoHttp';
+import healthRouter from './health/health.controller';
+import { register } from './observability/metrics';
+
+// Sentry must initialize before any other module that may throw at
+// import time so it can capture those errors.
+initSentry();
 
 // Route Imports
 import authRoutes from './modules/auth/auth.routes';
@@ -19,9 +28,13 @@ import userRoutes from './modules/user/user.routes';
 import driverRoutes from './modules/driver/driver.routes';
 import rideRoutes from './modules/ride/ride.routes';
 import geospatialRoutes from './modules/geospatial/geospatial.routes';
+import navigationRoutes from './modules/navigation/navigation.routes';
 import adminRoutes from './modules/admin/admin.routes';
+import faceRoutes from './modules/face/face.routes';
 import { GeospatialService } from './modules/geospatial/geospatial.service';
 import { UploadService } from './services/upload.service';
+import { SpeedingDetector } from './services/speeding_detector';
+import { trajectoryEvents } from './modules/location/locations.service';
 
 const app = express();
 const httpServer = createServer(app);
@@ -32,27 +45,49 @@ const io = new Server(httpServer, {
   },
 });
 
+// Step 10: Socket.IO redis adapter for multi-instance support.
+// Uses separate pub/sub clients so regular Redis commands don't
+// conflict with socket message broadcasting.
+import { createAdapter } from '@socket.io/redis-adapter';
+import { pubClient, subClient } from './config/redisPubSub';
+io.adapter(createAdapter(pubClient, subClient));
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Request-id + child logger context. Mount BEFORE rate-limit so even
+// 429s get a log line and a metric.
+app.use(requestContext);
+app.use(requestLogger);
 app.use(rateLimitMiddleware);
 
 // Serve static files from the uploads directory
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Health Check
+// Backwards-compatible health endpoint (same shape as before).
+// New load-balancer-friendly endpoints live at /health/live and
+// /health/ready (see health.controller.ts).
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
     res.json({ status: 'OK', database: 'connected' });
   } catch (err: any) {
-    console.error('❌ Database connection failed:', err.message);
-    res.status(500).json({ 
-      status: 'ERROR', 
-      database: 'disconnected', 
-      message: err.message 
+    logger.error({ err: err.message }, 'health_check_db_failed');
+    res.status(500).json({
+      status: 'ERROR',
+      database: 'disconnected',
+      message: err.message
     });
   }
+});
+
+app.use(healthRouter);
+
+// Prometheus scrape endpoint. Exposed unauthenticated on the assumption
+// the network policy (or reverse proxy) restricts it to the metrics scraper.
+app.get('/metrics', async (_req, res) => {
+  res.setHeader('Content-Type', register.contentType);
+  res.send(await register.metrics());
 });
 
 // Diagnostic Ping
@@ -88,8 +123,20 @@ app.use('/api/user', userRoutes);
 app.use('/api/driver', driverRoutes);
 app.use('/api/ride', rideRoutes);
 app.use('/api/geospatial', geospatialRoutes);
+app.use('/api/navigation', navigationRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/face', faceRoutes);
 app.post('/api/upload', UploadService.upload);
+
+// Global Error Handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[SERVER] 💥 Unhandled Error:', err);
+  
+  // Don't expose internal error details in production-like responses
+  res.status(err.status || 500).json({
+    error: 'An unexpected error occurred on our end. Our team has been notified.'
+  });
+});
 
 async function runMigrations() {
   try {
@@ -162,23 +209,216 @@ async function runMigrations() {
       await pool.query(schema);
       console.log('✅ Ratings schema (007) patched successfully');
     }
+
+    // Add Vehicle Models
+    const hasVehicleModels = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'vehicle_models'");
+    if (hasVehicleModels.rowCount === 0) {
+      console.log('⚡ Patching vehicle models schema (008)...');
+      const schemaPath = path.join(__dirname, '../migrations/008_add_vehicle_models.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Vehicle models schema (008) patched successfully');
+    }
+
+    // Add Admin and Audit Logs
+    const hasAuditLogs = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'audit_logs'");
+    if (hasAuditLogs.rowCount === 0) {
+      console.log('⚡ Patching admin schema (009)...');
+      const schemaPath = path.join(__dirname, '../migrations/009_admin_and_audit_logs.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Admin schema (009) patched successfully');
+    }
+
+    // Add ID Photos to users (010)
+    const hasUserIdPhotos = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'id_photo_front_url'");
+    if (hasUserIdPhotos.rowCount === 0) {
+      console.log('⚡ Patching user schema (010)...');
+      const schemaPath = path.join(__dirname, '../migrations/010_add_user_id_photos.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ User schema (010) patched successfully');
+    }
+
+    // Add Password Expiration (011)
+    const hasPasswordChangedAt = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'password_changed_at'");
+    if (hasPasswordChangedAt.rowCount === 0) {
+      console.log('⚡ Patching user schema (011)...');
+      const schemaPath = path.join(__dirname, '../migrations/011_add_password_expiration.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ User schema (011) patched successfully');
+    }
+
+    // Upgrade Ride Schema (012)
+    const hasTrajectory = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'rides' AND column_name = 'trajectory'");
+    if (hasTrajectory.rowCount === 0) {
+      console.log('⚡ Patching ride schema (012)...');
+      const schemaPath = path.join(__dirname, '../migrations/012_upgrade_ride_schema.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Ride schema (012) patched successfully');
+    }
+
+    // Upgrade Vehicle Classes (013)
+    const hasServiceClass = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'vehicles' AND column_name = 'service_class'");
+    if (hasServiceClass.rowCount === 0) {
+      console.log('⚡ Patching vehicle classes schema (013)...');
+      const schemaPath = path.join(__dirname, '../migrations/013_upgrade_vehicle_classes.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Vehicle classes schema (013) patched successfully');
+    }
+
+    // Add Vehicle Inspection and Compliance Snapshot (014)
+    const hasComplianceSnapshot = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'rides' AND column_name = 'compliance_snapshot'");
+    if (hasComplianceSnapshot.rowCount === 0) {
+      console.log('⚡ Patching compliance schema (014)...');
+      const schemaPath = path.join(__dirname, '../migrations/014_add_vehicle_inspection_and_compliance.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Compliance schema (014) patched successfully');
+    }
+
+    // Add Favorites, Scheduling, and Tipping (015)
+    const hasFavoriteDrivers = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'favorite_drivers'");
+    if (hasFavoriteDrivers.rowCount === 0) {
+      console.log('⚡ Patching features schema (015)...');
+      const schemaPath = path.join(__dirname, '../migrations/015_add_favorites_scheduling_tipping.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Features schema (015) patched successfully');
+    }
+
+    // Enable RLS and Policies (016)
+    // Check if RLS is enabled on 'users' table as a proxy for this migration
+    const isRlsEnabled = await pool.query("SELECT relrowsecurity FROM pg_class WHERE relname = 'users'");
+    if (isRlsEnabled.rows[0]?.relrowsecurity === false) {
+      console.log('⚡ Securing database with RLS and Policies (016)...');
+      const schemaPath = path.join(__dirname, '../migrations/016_enable_rls_and_policies.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Database security (016) applied successfully');
+    }
+
+    // Face verification schema (018)
+    const hasFaceEnrollment = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'face_enrollment_url'");
+    if (hasFaceEnrollment.rowCount === 0) {
+      console.log('⚡ Patching face verification schema (018)...');
+      const schemaPath = path.join(__dirname, '../migrations/018_add_face_verification.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Face verification schema (018) applied successfully');
+    }
+
+    // Navigation + safety schema (019): route_metadata on rides and
+    // the speeding_violations ledger for the dangerous-driver flag.
+    const hasRouteMetadata = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'rides' AND column_name = 'route_metadata'");
+    if (hasRouteMetadata.rowCount === 0) {
+      console.log('⚡ Patching navigation + safety schema (019)...');
+      const schemaPath = path.join(__dirname, '../migrations/019_navigation_safety.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Navigation + safety schema (019) applied successfully');
+    }
+
+    // Profile-change approval + wallet + payouts (020).
+    const hasProfileChangeRequests = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'profile_change_requests'");
+    if (hasProfileChangeRequests.rowCount === 0) {
+      console.log('⚡ Patching profile-change + wallet + payouts schema (020)...');
+      const schemaPath = path.join(__dirname, '../migrations/020_profile_changes_wallet_payouts.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Profile-change + wallet + payouts schema (020) applied successfully');
+    }
+
+    // Scaling indexes (021).
+    const hasIdxDriversActive = await pool.query(
+      "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_drivers_active_class'"
+    );
+    if (hasIdxDriversActive.rowCount === 0) {
+      console.log('⚡ Applying scaling indexes (021)...');
+      const schemaPath = path.join(__dirname, '../migrations/021_scaling_indexes.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Scaling indexes (021) applied');
+    }
+
+    console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);
   }
 }
 
+// Safety pipeline: every buffered trajectory point fans out to the
+// SpeedingDetector. The detector itself is dormant under NODE_ENV=test
+// so unit tests can drive the location stream without writing to PG.
+trajectoryEvents.on('point', (payload) => {
+  SpeedingDetector.onTrajectoryPoint(payload.driverId, payload.tripId, payload.point)
+    .catch((err) => logger.error({ err: err.message, driverId: payload.driverId }, 'speeding_detector_threw'));
+});
+logger.info('[SAFETY] SpeedingDetector subscribed to trajectory events');
+
 const PORT = process.env.PORT || 3000;
 httpServer.listen(Number(PORT), '0.0.0.0', async () => {
   await runMigrations();
-  console.log(`🚀 Server is listening on 0.0.0.0:${PORT} [MODE: ${env.NODE_ENV}]`);
+  logger.info({ port: Number(PORT), env: env.NODE_ENV }, 'server_listening');
+  logger.info({ set: !!env.JWT_SECRET, length: env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
 
-  // Trigger Predictive Pre-caching for LA Hot Zones
+  // Pre-cache OSRM routes for the launch market (Hollywood / UCLA /
+  // Beverly Hills / Westwood). The coords are landmarks, not
+  // pre-cached OD pairs — preCacheHotZones computes the full grid.
   GeospatialService.preCacheHotZones([
-    [33.9416, -118.4085], // LAX
-    [34.0195, -118.4912], // Santa Monica
     [34.0928, -118.3287], // Hollywood
-    [34.0407, -118.2468], // Downtown LA
+    [34.0639, -118.4455], // Westwood / UCLA
+    [34.0736, -118.4004], // Beverly Hills
+    [34.1019, -118.3387], // Runyon Canyon
   ]);
+
+  // Periodic Maintenance (Every 2 minutes)
+  import('./services/cleanup.service').then(({ CleanupService }) => {
+    setInterval(() => {
+      CleanupService.performMaintenance();
+    }, 2 * 60 * 1000);
+
+    // Initial run
+    CleanupService.performMaintenance();
+  });
+
+  // Scheduled Rides Job (Every 1 minute)
+  import('./services/scheduler.service').then(({ SchedulerService }) => {
+    setInterval(() => {
+      SchedulerService.checkScheduledRides();
+    }, 60 * 1000);
+  });
+
+  // Recalculate Driver Pricing Ranges (Every 30 minutes)
+  import('./services/fare.service').then(({ fareService }) => {
+    setInterval(() => {
+      fareService.recalculateDriverRanges();
+    }, 30 * 60 * 1000);
+
+    // Initial run on start
+    fareService.recalculateDriverRanges();
+  });
+
+  // Vehicle Data Background Sync (Once on start)
+  import('./services/vehicleData.service').then(({ VehicleDataService }) => {
+    VehicleDataService.syncCommonVehicles();
+  });
+
+  // Weekly auto-payout sweep — checks once per minute, only fires on
+  // Monday 09:00 UTC. Idempotent via Redis lock + partial UNIQUE INDEX.
+  import('./services/weeklyPayouts.service').then(({ WeeklyPayoutsService }) => {
+    setInterval(() => {
+      WeeklyPayoutsService.tick()
+        .then((r) => {
+          if (r.fired) logger.info({ processed: r.processed }, 'cron_weekly_payouts_fired');
+          else if (r.skipped.length) logger.info({ skipped: r.skipped }, 'cron_weekly_payouts_skipped');
+        })
+        .catch((err) => logger.error({ err: err.message }, 'cron_weekly_payouts_error'));
+    }, 60 * 1000);
+  });
 });
 
 export { io };

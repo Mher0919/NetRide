@@ -3,8 +3,12 @@ import { Router } from 'express';
 import { UserController, updateProfileSchema, verifyIdentitySchema } from './user.controller';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { validate } from '../../middleware/validate.middleware';
+import favoriteRoutes from './favorite.routes';
 
 const router = Router();
+
+// Mount Favorite Routes
+router.use('/', favoriteRoutes);
 
 router.get('/profile', authMiddleware, UserController.getProfile);
 router.patch('/profile', authMiddleware, validate(updateProfileSchema), UserController.updateProfile);
