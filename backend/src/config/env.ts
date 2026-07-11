@@ -90,6 +90,7 @@ const envSchema = z.object({
   LEGACY_DB_SCORE: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
   LEGACY_INLINE_PG: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
   DIRECT_DATABASE_URL: z.string().optional(),
+  GEOAPIFY_API_KEY: z.string().optional(),
   DATABASE_REPLICA_URL: z.string().optional(),
 });
 

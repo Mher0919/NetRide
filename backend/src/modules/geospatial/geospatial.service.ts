@@ -193,65 +193,120 @@ export class GeospatialService {
   }
 
   private static async fetchAndProcessRoute(start: [number, number], end: [number, number], cacheKey: string, retries = 0): Promise<RouteResponse> {
-    // If OSRM is not known to be online, skip the attempt and fallback immediately
     if (!this.isOsrmOnline && retries === 0) {
       return this.calculateSyntheticRoute(start, end);
     }
 
     try {
-      const url = `${env.OSRM_URL}/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true&annotations=true`;
-      const response = await this.throttledGet(url);
-
-      if (response.status === 200 && response.data.routes?.length > 0) {
-        this.isOsrmOnline = true;
-        const route = response.data.routes[0];
-        const multiplier = MLEtaService.predictMultiplier(start[0], start[1], route.distance);
-
-        const rawSteps = route.legs?.[0]?.steps ?? [];
-        const enrichedSteps = enrichSteps(rawSteps);
-
-        // Build a { road_name | ref → speed_limit_mph } map the speeding
-        // detector can resolve a road's limit from in O(1) without
-        // re-parsing the steps on every GPS tick.
-        const speedLimitsByRoad: Record<string, number> = {};
-        for (const step of enrichedSteps) {
-          const limit = step.speedLimitMph;
-          if (!limit) continue;
-          const keys = [step.name, step.ref].filter(k => typeof k === 'string' && k.length > 0);
-          for (const k of keys) {
-            speedLimitsByRoad[k] = limit;
-          }
-        }
-
-        const result: RouteResponse = {
-          distance: route.distance,
-          osrm_duration: route.duration,
-          eta: Math.round(route.duration * multiplier),
-          geometry: route.geometry,
-          steps: enrichedSteps,
-          speedLimitsByRoad,
-          cache_hit: false,
-          model_multiplier: multiplier,
-          engine: 'OSRM-ML'
-        };
-
-        await redis.set(cacheKey, JSON.stringify(result), 'EX', 600);
-        return result;
+      if (env.GEOAPIFY_API_KEY) {
+        const result = await this.fetchGeoapifyRoute(start, end, cacheKey);
+        if (result) return result;
+      } else {
+        const result = await this.fetchOsrmRoute(start, end, cacheKey);
+        if (result) return result;
       }
     } catch (err: any) {
       if (retries > 0) {
         await new Promise(resolve => setTimeout(resolve, 3000));
         return this.fetchAndProcessRoute(start, end, cacheKey, retries - 1);
       }
-      
-      // If we previously thought it was online but it failed
       if (this.isOsrmOnline) {
-        console.error(`[GEOSPATIAL] ❌ OSRM connection lost: ${err.message}`);
+        console.error(`[GEOSPATIAL] ❌ Router connection lost: ${err.message}`);
         this.isOsrmOnline = false;
       }
     }
 
     return this.calculateSyntheticRoute(start, end);
+  }
+
+  private static async fetchOsrmRoute(start: [number, number], end: [number, number], cacheKey: string): Promise<RouteResponse | null> {
+    const url = `${env.OSRM_URL}/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true&annotations=true`;
+    const response = await this.throttledGet(url);
+
+    if (response.status !== 200 || !response.data.routes?.length) return null;
+
+    this.isOsrmOnline = true;
+    const route = response.data.routes[0];
+    const multiplier = MLEtaService.predictMultiplier(start[0], start[1], route.distance);
+    const rawSteps = route.legs?.[0]?.steps ?? [];
+    const enrichedSteps = enrichSteps(rawSteps);
+    const speedLimitsByRoad = this.buildSpeedMap(enrichedSteps);
+
+    const result: RouteResponse = {
+      distance: route.distance,
+      osrm_duration: route.duration,
+      eta: Math.round(route.duration * multiplier),
+      geometry: route.geometry,
+      steps: enrichedSteps,
+      speedLimitsByRoad,
+      cache_hit: false,
+      model_multiplier: multiplier,
+      engine: 'OSRM-ML'
+    };
+
+    await redis.set(cacheKey, JSON.stringify(result), 'EX', 600);
+    return result;
+  }
+
+  private static async fetchGeoapifyRoute(start: [number, number], end: [number, number], cacheKey: string): Promise<RouteResponse | null> {
+    const url = `https://api.geoapify.com/v1/routing?waypoints=${start[0]},${start[1]}|${end[0]},${end[1]}&mode=drive&apiKey=${env.GEOAPIFY_API_KEY}`;
+    const response = await this.throttledGet(url);
+
+    if (response.status !== 200 || !response.data.features?.length) return null;
+
+    this.isOsrmOnline = true;
+    const feature = response.data.features[0];
+    const props = feature.properties;
+    const distance = props.distance.value;
+    const duration = props.time;
+    const multiplier = MLEtaService.predictMultiplier(start[0], start[1], distance);
+    const rawSteps = this.geoapifyStepsToOsrm(props.legs?.[0]?.steps ?? []);
+    const enrichedSteps = enrichSteps(rawSteps);
+    const speedLimitsByRoad = this.buildSpeedMap(enrichedSteps);
+
+    const result: RouteResponse = {
+      distance,
+      osrm_duration: duration,
+      eta: Math.round(duration * multiplier),
+      geometry: feature.geometry,
+      steps: enrichedSteps,
+      speedLimitsByRoad,
+      cache_hit: false,
+      model_multiplier: multiplier,
+      engine: 'Geoapify'
+    };
+
+    await redis.set(cacheKey, JSON.stringify(result), 'EX', 600);
+    return result;
+  }
+
+  private static geoapifyStepsToOsrm(steps: any[]): any[] {
+    if (!Array.isArray(steps)) return [];
+    return steps.map((s: any) => {
+      const name = s.instruction?.text?.split(' onto ').pop()?.split('.')[0]?.trim()
+        || s.street_info?.name
+        || 'unknown';
+      return {
+        name,
+        distance: s.distance || 0,
+        duration: s.duration || 0,
+        mode: s.mode || 'driving',
+        geometry: null,
+        intersections: [],
+        maneuver: { type: s.type || 'unknown', modifier: null },
+      };
+    });
+  }
+
+  private static buildSpeedMap(steps: any[]): Record<string, number> {
+    const map: Record<string, number> = {};
+    for (const step of steps) {
+      const limit = step.speedLimitMph;
+      if (!limit) continue;
+      const keys = [step.name, step.ref].filter(k => typeof k === 'string' && k.length > 0);
+      for (const k of keys) map[k] = limit;
+    }
+    return map;
   }
 
   private static generateCacheKey(start: [number, number], end: [number, number]): string {
@@ -288,19 +343,25 @@ export class GeospatialService {
   }
 
   static async preCacheHotZones(zones: [number, number][]) {
-    console.log('[GEOSPATIAL] OSRM health check started in background...');
+    console.log('[GEOSPATIAL] Router health check started in background...');
     
     let checks = 0;
-    const maxChecks = 12; // 1 minute at 5s intervals
+    const maxChecks = 12;
     
-    // Background health check loop
     const checkInterval = setInterval(async () => {
       checks++;
       try {
-        const url = `${env.OSRM_URL.replace('/route/v1/driving', '/nearest/v1/driving')}/${zones[0][1]},${zones[0][0]}?number=1`;
-        await this.axiosClient.get(url);
+        if (env.GEOAPIFY_API_KEY) {
+          await this.axiosClient.get(
+            `https://api.geoapify.com/v1/routing?waypoints=${zones[0][0]},${zones[0][1]}|${zones[0][0] + 0.01},${zones[0][1] + 0.01}&mode=drive&apiKey=${env.GEOAPIFY_API_KEY}`,
+            { timeout: 2000 }
+          );
+        } else {
+          const url = `${env.OSRM_URL.replace('/route/v1/driving', '/nearest/v1/driving')}/${zones[0][1]},${zones[0][0]}?number=1`;
+          await this.axiosClient.get(url);
+        }
         
-        console.log('[GEOSPATIAL] 🟢 OSRM is ready. Triggering LA pre-cache...');
+        console.log('[GEOSPATIAL] 🟢 Router is ready. Triggering LA pre-cache...');
         this.isOsrmOnline = true;
         clearInterval(checkInterval);
 
@@ -312,7 +373,7 @@ export class GeospatialService {
         }
       } catch (e) {
         if (checks >= maxChecks) {
-          console.log('[GEOSPATIAL] ℹ️ OSRM still offline. Continuing with synthetic fallback. Pre-caching disabled.');
+          console.log('[GEOSPATIAL] ℹ️ Router still offline. Continuing with synthetic fallback. Pre-caching disabled.');
           clearInterval(checkInterval);
         }
       }

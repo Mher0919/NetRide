@@ -62,13 +62,18 @@ async function probePostgres(): Promise<DependencyStatus> {
   }
 }
 
-async function probeOsrm(): Promise<DependencyStatus> {
+async function probeRouter(): Promise<DependencyStatus> {
   const start = Date.now();
   try {
-    // OSRM `/nearest` is a single cheap call; same one the
-    // GeospatialService health check uses.
-    const base = env.OSRM_URL.replace('/route/v1/driving', '/nearest/v1/driving');
-    await axios.get(`${base}/-118.4455,34.0639?number=1`, { timeout: 2000 });
+    if (env.GEOAPIFY_API_KEY) {
+      await axios.get(
+        `https://api.geoapify.com/v1/routing?waypoints=34.0639,-118.4455|34.0700,-118.4400&mode=drive&apiKey=${env.GEOAPIFY_API_KEY}`,
+        { timeout: 2000 }
+      );
+    } else {
+      const base = env.OSRM_URL.replace('/route/v1/driving', '/nearest/v1/driving');
+      await axios.get(`${base}/-118.4455,34.0639?number=1`, { timeout: 2000 });
+    }
     dependencyUp.set({ dependency: 'osrm' }, 1);
     return { name: 'osrm', up: true, latencyMs: Date.now() - start };
   } catch (err: any) {
@@ -114,7 +119,7 @@ router.get('/health/ready', async (_req: Request, res: Response) => {
     probeRedisPubSub(),
     probePostgres(),
     probePostgresReplica(),
-    probeOsrm(),
+    probeRouter(),
     probeQueue('match:ride', matchQueue),
     probeQueue('match:dispatch', dispatchQueue),
     probeQueue('score:driver:refresh', scoreQueue),
