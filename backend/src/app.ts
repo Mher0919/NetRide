@@ -50,7 +50,12 @@ const io = new Server(httpServer, {
 // conflict with socket message broadcasting.
 import { createAdapter } from '@socket.io/redis-adapter';
 import { pubClient, subClient } from './config/redisPubSub';
-io.adapter(createAdapter(pubClient, subClient));
+try {
+  io.adapter(createAdapter(pubClient, subClient));
+} catch (adapterErr: any) {
+  console.warn(`[SERVER] ⚠️ Socket.IO Redis adapter failed (non-fatal): ${adapterErr.message}`);
+  console.warn('[SERVER] ⚠️ Multi-instance Socket.IO scaling disabled. Running in single-instance mode.');
+}
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
