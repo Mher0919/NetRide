@@ -344,6 +344,18 @@ async function runMigrations() {
       console.log('✅ Scaling indexes (021) applied');
     }
 
+    // Onboarding step tracking + phone verification flag + plate state + zip (022).
+    const hasOnboardingStep = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'onboarding_step'"
+    );
+    if (hasOnboardingStep.rowCount === 0) {
+      console.log('⚡ Applying onboarding + phone fields schema (022)...');
+      const schemaPath = path.join(__dirname, '../migrations/022_onboarding_phone_fields.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Onboarding + phone fields schema (022) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);

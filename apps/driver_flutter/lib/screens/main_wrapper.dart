@@ -42,7 +42,7 @@ class _MainWrapperState extends State<MainWrapper> {
 
     try {
       final profile = await UserService.getProfile();
-      if (profile['user_id'] == null || profile['license_number'] == null || profile['license_photo_url'] == null) {
+      if (profile['user_id'] == null || (profile['onboarding_step'] ?? 0) < 5) {
         if (mounted) {
           Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
         }

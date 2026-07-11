@@ -251,6 +251,15 @@ export class AuthService {
         await pool.query('UPDATE users SET is_active = true WHERE id = $1', [user.id]);
         user.is_active = true;
       }
+
+      // Dual-role support: create a driver profile for the existing user
+      // so they can complete driver onboarding without losing their rider account.
+      if (data.role === 'DRIVER') {
+        const driverCheck = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [user.id]);
+        if (driverCheck.rows.length === 0) {
+          await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
+        }
+      }
     }
 
     const token = this.generateToken(user);
@@ -301,6 +310,14 @@ export class AuthService {
       if (!user.is_active) {
         await pool.query('UPDATE users SET is_active = true WHERE id = $1', [user.id]);
         user.is_active = true;
+      }
+
+      // Dual-role support: create a driver profile for the existing user
+      if (data.role === 'DRIVER') {
+        const driverCheck = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [user.id]);
+        if (driverCheck.rows.length === 0) {
+          await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
+        }
       }
     }
 

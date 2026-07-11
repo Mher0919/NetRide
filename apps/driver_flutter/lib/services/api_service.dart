@@ -11,10 +11,10 @@ class ApiService {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   static final String _baseUrl = kIsWeb 
-      ? 'http://localhost:3000/api/'
+      ? 'http://localhost:3000/api'
       : Platform.isAndroid 
-          ? 'http://10.0.2.2:3000/api/' 
-          : 'http://localhost:3000/api/';
+          ? 'http://10.0.2.2:3000/api' 
+          : 'http://localhost:3000/api';
 
   static final Dio dio = Dio(
     BaseOptions(

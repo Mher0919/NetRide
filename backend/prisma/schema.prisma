@@ -91,6 +91,10 @@ model User {
   rejection_reason           String?
   verification_feedback_seen Boolean? @default(false)
 
+  onboarding_step     Int?
+  phone_verified      Boolean? @default(false)
+  headshot_uploaded   Boolean? @default(false)
+
   created_at DateTime? @default(now()) @db.Timestamptz(6)
   updated_at DateTime? @default(now()) @db.Timestamptz(6)
 
@@ -185,6 +189,8 @@ model DriverVehicle {
   year                    Int?
   color                   String?
   interior_color          String?
+  license_plate_state     String?
+  zip_code                String?
 
   inspection_photo_url   String?
   inspection_expiry_date DateTime?         @db.Timestamptz(6)

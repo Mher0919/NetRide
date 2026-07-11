@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
             
             if (mounted) {
               // Initialize socket with the backend token
-              Provider.of<DriverProvider>(context, listen: false).initSocket(res['token']);
+              Provider.of<DriverProvider>(context, listen: false).updateToken(res['token']);
 
               Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
             }

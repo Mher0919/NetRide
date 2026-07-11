@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@mapbox/polyline": "^1.2.1",
+    "@prisma/client": "^6.19.3",
     "@sentry/node": "^7.99.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "axios": "^1.6.2",
@@ -42,7 +43,6 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@prisma/client": "^6.19.3",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",

@@ -21,7 +21,7 @@ class VerificationBanner extends StatelessWidget {
       return _buildBanner(
         color: const Color(0xFFF9A825),
         icon: Icons.hourglass_empty_rounded,
-        message: 'Driver background check in progress. Document verification is mandatory.',
+        message: 'We\'re reviewing your documents. You\'ll be able to drive once it\'s approved.',
       );
     }
 

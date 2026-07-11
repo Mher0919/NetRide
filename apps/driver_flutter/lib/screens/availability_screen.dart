@@ -660,7 +660,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                             value: _isVerified && isOnline && driverProvider.canGoOnline,
                             onChanged: (val) async {
                               if (!_isVerified) {
-                                _showError('Account pending admin approval.');
+                                _showError('Your account is under review. We\'re reviewing your documents.');
                                 return;
                               }
                               if (driverProvider.hasPendingProfileChange) {

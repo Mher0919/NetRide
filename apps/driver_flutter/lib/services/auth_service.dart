@@ -292,6 +292,45 @@ class AuthService {
     return 'image/jpeg';
   }
 
+  static Future<Map<String, dynamic>> getDriverProfile() async {
+    try {
+      final response = await ApiService.dio.get('/driver/profile');
+      return response.data;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getOnboardingProgress() async {
+    try {
+      final response = await ApiService.dio.get('/driver/onboarding/progress');
+      return response.data;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> saveOnboardingStep(int step, Map<String, dynamic> data) async {
+    try {
+      final response = await ApiService.dio.post('/driver/onboarding/step', data: {
+        'step': step,
+        'data': data,
+      });
+      return response.data;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> completeOnboarding() async {
+    try {
+      final response = await ApiService.dio.post('/driver/onboarding/complete');
+      return response.data;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   static Future<void> onboardDriver(Map<String, dynamic> data) async {
     try {
       await ApiService.dio.post('/driver/onboard', data: data);

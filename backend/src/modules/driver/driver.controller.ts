@@ -12,19 +12,15 @@ const OnboardSchema = z.object({
     profile_image_url: z.string().url(),
   }),
   identity: z.object({
-    license_number: z.string(),
-    license_expiry_date: z.string(),
     license_photo_url: z.string().url(),
     license_photo_back_url: z.string().url(),
     insurance_photo_url: z.string().url(),
     registration_photo_url: z.string().url(),
   }),
   vehicle: z.object({
-    vehicle_id: z.string().uuid().optional(),
     license_plate_number: z.string(),
-    license_plate_photo_url: z.string().url().optional(),
-    car_photo_urls: z.array(z.string().url()).min(2).max(4),
-    inspection_photo_url: z.string().url(),
+    license_plate_state: z.string().optional(),
+    zip_code: z.string().optional(),
     make: z.string().optional(),
     model: z.string().optional(),
     year: z.number().optional(),
@@ -99,6 +95,53 @@ const PayoutRequestSchema = z.object({
 });
 
 export class DriverController {
+  static async getOnboardingProgress(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Please log in to view your onboarding progress.' });
+
+      const progress = await DriverService.getOnboardingProgress(userId);
+      res.json(progress);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Onboarding progress error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to load onboarding progress.' });
+    }
+  }
+
+  static async saveOnboardingStep(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { step, data } = req.body;
+      if (typeof step !== 'number' || step < 0 || step > 5) {
+        return res.status(400).json({ error: 'Invalid onboarding step.' });
+      }
+      if (!data || typeof data !== 'object') {
+        return res.status(400).json({ error: 'Step data is required.' });
+      }
+
+      const result = await DriverService.saveOnboardingStep(userId, step, data);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Save step error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to save onboarding step.' });
+    }
+  }
+
+  static async completeOnboarding(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const result = await DriverService.completeOnboarding(userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Complete onboarding error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to complete onboarding. Please ensure all steps are finished.' });
+    }
+  }
+
   static async getProfile(req: any, res: Response) {
     try {
       const userId = req.user?.id;

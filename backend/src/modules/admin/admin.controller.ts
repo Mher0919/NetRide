@@ -11,7 +11,7 @@ export class AdminController {
     try {
       const [totalRiders, totalDrivers, pendingVerifications, verifiedUsers, rejectedUsers] = await Promise.all([
         prisma.user.count({ where: { role: UserRole.RIDER } }),
-        prisma.user.count({ where: { role: UserRole.DRIVER } }),
+        prisma.user.count({ where: { driver_profile: { isNot: null } } }),
         prisma.user.count({ where: { verification_status: VerificationStatus.PENDING } }),
         prisma.user.count({ where: { verification_status: VerificationStatus.VERIFIED } }),
         prisma.user.count({ where: { verification_status: VerificationStatus.REJECTED } }),
@@ -35,7 +35,15 @@ export class AdminController {
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: any = {};
-    if (role) where.role = role as UserRole;
+    if (role) {
+      // Support dual-role users: "DRIVER" means has a driver profile,
+      // "RIDER" means the original sign-up role.
+      if (role === 'DRIVER') {
+        where.driver_profile = { isNot: null };
+      } else {
+        where.role = role as UserRole;
+      }
+    }
     if (status) where.verification_status = status as VerificationStatus;
     if (search) {
       where.OR = [
@@ -112,7 +120,8 @@ export class AdminController {
         },
       });
 
-      if (user.role === UserRole.DRIVER) {
+      const hasDriverProfile = await prisma.driver.findUnique({ where: { user_id: id } });
+      if (hasDriverProfile) {
         await (prisma.driver as any).update({
           where: { user_id: id },
           data: {
@@ -157,7 +166,8 @@ export class AdminController {
         },
       });
 
-      if (user.role === UserRole.DRIVER) {
+      const hasDriverProfile = await prisma.driver.findUnique({ where: { user_id: id } });
+      if (hasDriverProfile) {
         await (prisma.driver as any).update({
           where: { user_id: id },
           data: {
@@ -197,7 +207,8 @@ export class AdminController {
         },
       });
 
-      if (user.role === UserRole.DRIVER) {
+      const hasDriverProfile = await prisma.driver.findUnique({ where: { user_id: id } });
+      if (hasDriverProfile) {
         await prisma.driver.update({
           where: { user_id: id },
           data: {

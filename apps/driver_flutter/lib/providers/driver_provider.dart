@@ -83,10 +83,6 @@ class DriverProvider with ChangeNotifier {
       _faceCheckStatus != FaceCheckStatus.needsCheck;
 
   void updateToken(String token) {
-    if (_socket != null) {
-      _socket!.disconnect();
-      _socket!.dispose();
-    }
     initSocket(token);
     _fetchOperatingClass();
     _fetchRecommendations();
@@ -168,6 +164,12 @@ class DriverProvider with ChangeNotifier {
   }
 
   void initSocket(String token) {
+    if (_socket != null) {
+      _socket!.off('');
+      _socket!.disconnect();
+      _socket!.dispose();
+      _socket = null;
+    }
     // 10.0.2.2 is the special alias to your host loopback interface (127.0.0.1 on your development machine)
     final url = Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://127.0.0.1:3000';
     print('--- DRIVER SOCKET INIT ---');
@@ -547,7 +549,12 @@ class DriverProvider with ChangeNotifier {
 
   @override
   void dispose() {
-    _socket?.disconnect();
+    if (_socket != null) {
+      _socket!.off('');
+      _socket!.disconnect();
+      _socket!.dispose();
+      _socket = null;
+    }
     super.dispose();
   }
 }

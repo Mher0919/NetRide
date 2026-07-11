@@ -18,6 +18,10 @@ RUN npx prisma generate
 # Build TypeScript
 RUN npm run build
 
+# Create uploads directory for Render persistent disk
+RUN mkdir -p /app/uploads
+
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# Use compiled output (dist/app.js), NOT ts-node for production
+CMD ["node", "dist/app.js"]

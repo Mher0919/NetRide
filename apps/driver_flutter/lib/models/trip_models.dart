@@ -1,5 +1,6 @@
-enum DriverStatus { offline, online, onTrip }
 import '../utils/test_user.dart';
+
+enum DriverStatus { offline, online, onTrip }
 
 enum TripStatus {
   REQUESTED,

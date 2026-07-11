@@ -57,6 +57,216 @@ export class DriverService {
     return profile;
   }
 
+  static async getOnboardingProgress(userId: string) {
+    const res = await pool.query(
+      `SELECT onboarding_step, phone_verified, headshot_uploaded, 
+              profile_image_url, full_name, date_of_birth, phone_number,
+              is_verified
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (!res.rowCount) throw new Error('User not found');
+    const u = res.rows[0];
+    return {
+      onboarding_step: u.onboarding_step ?? 0,
+      phone_verified: u.phone_verified || false,
+      headshot_uploaded: u.headshot_uploaded || false,
+      profile_image_url: u.profile_image_url,
+      full_name: u.full_name,
+      date_of_birth: u.date_of_birth,
+      phone_number: u.phone_number,
+    };
+  }
+
+  static async saveOnboardingStep(userId: string, step: number, data: any) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Validate required data per step
+      switch (step) {
+        case 0: // Headshot
+          if (!data.profile_image_url) throw new Error('Please upload a headshot photo.');
+          await client.query(
+            `UPDATE users SET profile_image_url = $1, headshot_uploaded = true, 
+             onboarding_step = GREATEST(onboarding_step, 1), updated_at = NOW() WHERE id = $2`,
+            [data.profile_image_url, userId]
+          );
+          break;
+
+        case 1: // Personal Info
+          if (!data.full_name || !data.full_name.trim()) throw new Error('Full name is required.');
+          if (!data.date_of_birth) throw new Error('Date of birth is required.');
+          const dob = new Date(data.date_of_birth);
+          if (isNaN(dob.getTime())) throw new Error('Invalid date of birth format.');
+          const age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+          if (age < 21) throw new Error('You must be at least 21 years old to drive with NetRide.');
+          if (dob > new Date()) throw new Error('Date of birth cannot be in the future.');
+          await client.query(
+            `UPDATE users SET full_name = $1, date_of_birth = $2,
+             onboarding_step = GREATEST(onboarding_step, 2), updated_at = NOW() WHERE id = $3`,
+            [data.full_name.trim(), data.date_of_birth, userId]
+          );
+          break;
+
+        case 2: // Phone Verification (handled by auth endpoints, just mark step)
+          const phoneCheck = await client.query(
+            `SELECT phone_verified, phone_number FROM users WHERE id = $1`, [userId]
+          );
+          if (!phoneCheck.rows[0]?.phone_verified) throw new Error('Please verify your phone number first.');
+          await client.query(
+            `UPDATE users SET onboarding_step = GREATEST(onboarding_step, 3), updated_at = NOW() WHERE id = $1`,
+            [userId]
+          );
+          break;
+
+        case 3: // Identity Documents
+          if (!data.license_photo_url) throw new Error('Front of license photo is required.');
+          if (!data.license_photo_back_url) throw new Error('Back of license photo is required.');
+          if (!data.insurance_photo_url) throw new Error('Insurance certificate is required.');
+          if (!data.registration_photo_url) throw new Error('Vehicle registration is required.');
+          await client.query(
+            `UPDATE drivers SET license_photo_url = $1, license_photo_back_url = $2,
+             insurance_photo_url = $3, registration_photo_url = $4
+             WHERE user_id = $5`,
+            [data.license_photo_url, data.license_photo_back_url,
+             data.insurance_photo_url, data.registration_photo_url, userId]
+          );
+          await client.query(
+            `UPDATE users SET onboarding_step = GREATEST(onboarding_step, 4), updated_at = NOW() WHERE id = $1`,
+            [userId]
+          );
+          break;
+
+        case 4: // Vehicle Info
+          if (!data.license_plate_number || !data.license_plate_number.trim()) throw new Error('License plate number is required.');
+          if (!data.license_plate_state || !data.license_plate_state.trim()) throw new Error('License plate state is required.');
+          if (!data.zip_code || !data.zip_code.trim()) throw new Error('ZIP code is required.');
+
+          const driverExists = await client.query('SELECT 1 FROM drivers WHERE user_id = $1', [userId]);
+          if (driverExists.rows.length === 0) {
+            await client.query('INSERT INTO drivers (user_id) VALUES ($1)', [userId]);
+          }
+
+          const existingVeh = await client.query(
+            'SELECT id FROM driver_vehicles WHERE driver_id = $1', [userId]
+          );
+          if (existingVeh.rows.length > 0) {
+            await client.query(
+              `UPDATE driver_vehicles SET 
+               license_plate_number = $1, license_plate_state = $2, zip_code = $3,
+               make = $4, model = $5, year = $6, color = $7, interior_color = $8
+               WHERE driver_id = $9`,
+              [data.license_plate_number.trim(), data.license_plate_state.trim(),
+               data.zip_code.trim(), data.make || null, data.model || null,
+               data.year || null, data.color || null, data.interior_color || null, userId]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO driver_vehicles (driver_id, license_plate_number, license_plate_state, zip_code, make, model, year, color, interior_color)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+              [userId, data.license_plate_number.trim(), data.license_plate_state.trim(),
+               data.zip_code.trim(), data.make || null, data.model || null,
+               data.year || null, data.color || null, data.interior_color || null]
+            );
+          }
+          await client.query(
+            `UPDATE users SET onboarding_step = GREATEST(onboarding_step, 5), updated_at = NOW() WHERE id = $1`,
+            [userId]
+          );
+          break;
+
+        default:
+          throw new Error('Invalid step number.');
+      }
+
+      await client.query('COMMIT');
+      return this.getOnboardingProgress(userId);
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  static async completeOnboarding(userId: string) {
+    // Verify all steps are complete before allowing final submission
+    const progress = await this.getOnboardingProgress(userId);
+    if (progress.onboarding_step < 5) {
+      throw new Error('Please complete all onboarding steps before submitting.');
+    }
+
+    const userRes = await pool.query(
+      'SELECT profile_image_url, full_name, date_of_birth, phone_number FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userRes.rows[0];
+    if (!user) throw new Error('User not found');
+
+    const driverRes = await pool.query(
+      'SELECT license_photo_url, license_photo_back_url, insurance_photo_url, registration_photo_url FROM drivers WHERE user_id = $1',
+      [userId]
+    );
+    const driver = driverRes.rows[0];
+    if (!driver) throw new Error('Driver record not found');
+
+    const vehRes = await pool.query(
+      `SELECT license_plate_number, make, model, year, color 
+       FROM driver_vehicles WHERE driver_id = $1`,
+      [userId]
+    );
+    const vehicle = vehRes.rows[0];
+
+    // Set background check to PENDING, mark user verification as pending
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE drivers SET background_check_status = 'PENDING', is_active = false
+         WHERE user_id = $1`,
+        [userId]
+      );
+      await client.query(
+        `UPDATE users SET verification_status = 'PENDING'::verification_status WHERE id = $1`,
+        [userId]
+      );
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // Notify admin via email (fire-and-forget after confirmed persistence)
+    try {
+      const userEmail = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+      await EmailService.sendDriverRegistrationNotice({
+        personalInfo: {
+          userId,
+          full_name: user.full_name,
+          email: userEmail.rows[0]?.email,
+          phone_number: user.phone_number,
+          date_of_birth: user.date_of_birth,
+          profile_image_url: user.profile_image_url,
+        },
+        identity: {
+          license_photo_url: driver.license_photo_url,
+          license_photo_back_url: driver.license_photo_back_url,
+          insurance_photo_url: driver.insurance_photo_url,
+          registration_photo_url: driver.registration_photo_url,
+        },
+        vehicle: vehicle || {},
+      });
+    } catch (emailErr) {
+      console.error(`[DRIVER] ❌ Onboarding email notification failed (non-fatal):`, emailErr);
+    }
+
+    return { success: true, message: 'Onboarding complete. Your background check is now in progress.' };
+  }
+
   static async onboard(userId: string, data: any) {
     const client = await pool.connect();
     try {
@@ -107,15 +317,12 @@ export class DriverService {
 
       const driverRes = await client.query(
         `UPDATE drivers 
-         SET license_number = $1, license_expiry_date = $2, 
-             license_photo_url = $3, license_photo_back_url = $4,
-             insurance_photo_url = $5, registration_photo_url = $6,
+         SET license_photo_url = $1, license_photo_back_url = $2,
+             insurance_photo_url = $3, registration_photo_url = $4,
              background_check_status = 'PENDING', is_active = false 
-         WHERE user_id = $7
+         WHERE user_id = $5
          RETURNING *`,
         [
-          data.identity.license_number, 
-          data.identity.license_expiry_date, 
           data.identity.license_photo_url, 
           data.identity.license_photo_back_url,
           data.identity.insurance_photo_url,
@@ -127,23 +334,20 @@ export class DriverService {
       // 3. Create DriverVehicle
       await client.query(
         `INSERT INTO driver_vehicles (
-          driver_id, vehicle_id, license_plate_number, license_plate_photo_url,
-          car_photo_urls, color, interior_color, make, model, year,
-          inspection_photo_url, inspection_status
+          driver_id, license_plate_number, license_plate_state, zip_code,
+          color, interior_color, make, model, year
         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PENDING')`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           userId,
-          data.vehicle.vehicle_id ?? null,
           data.vehicle.license_plate_number,
-          data.vehicle.license_plate_photo_url ?? null,
-          data.vehicle.car_photo_urls,
-          data.vehicle.color,
-          data.vehicle.interior_color,
-          data.vehicle.make,
-          data.vehicle.model,
-          data.vehicle.year,
-          data.vehicle.inspection_photo_url
+          data.vehicle.license_plate_state ?? null,
+          data.vehicle.zip_code ?? null,
+          data.vehicle.color || null,
+          data.vehicle.interior_color || null,
+          data.vehicle.make || null,
+          data.vehicle.model || null,
+          data.vehicle.year || null,
         ]
       );
 

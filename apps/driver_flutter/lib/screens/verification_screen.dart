@@ -41,7 +41,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
         // For drivers, onboarding is more complex (license, etc), but we can check if it's completed
         // For now, check if user has license_number which is set during onboarding
         final bool needsOnboarding = user['role'] == 'DRIVER' 
-            ? (user['license_number'] == null || user['license_number'].toString().isEmpty)
+            ? (user['onboarding_step'] == null || (user['onboarding_step'] as int?)! < 5)
             : (user['phone_number'] == null || user['phone_number'].toString().isEmpty);
 
         Navigator.pushNamedAndRemoveUntil(
