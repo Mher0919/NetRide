@@ -29,7 +29,7 @@ class AuthService {
     String? token,
   }) async {
     try {
-      final response = await ApiService.dio.post('auth/oauth', data: {
+      final response = await ApiService.dio.post('/auth/oauth', data: {
         'email': email,
         'full_name': fullName,
         'profile_image_url': profileImageUrl,
