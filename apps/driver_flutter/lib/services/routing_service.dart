@@ -7,7 +7,7 @@ class RoutingService {
   final Dio _dio = Dio();
 
   // API Gateway URL
-  final String _baseUrl = Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://127.0.0.1:3000';
+  final String _baseUrl = 'https://netride.onrender.com';
 
   Future<Map<String, dynamic>> getRoute(LatLng start, LatLng end) async {
     try {

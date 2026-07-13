@@ -170,8 +170,7 @@ class DriverProvider with ChangeNotifier {
       _socket!.dispose();
       _socket = null;
     }
-    // 10.0.2.2 is the special alias to your host loopback interface (127.0.0.1 on your development machine)
-    final url = Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://127.0.0.1:3000';
+    final url = 'https://netride.onrender.com';
     print('--- DRIVER SOCKET INIT ---');
     print('URL: $url');
     print('Token: $token');

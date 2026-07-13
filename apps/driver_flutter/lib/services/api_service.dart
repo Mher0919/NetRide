@@ -11,10 +11,10 @@ class ApiService {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   static final String _baseUrl = kIsWeb 
-      ? 'http://localhost:3000/api/'
+      ? 'https://netride.onrender.com/api'
       : Platform.isAndroid 
-          ? 'http://10.0.2.2:3000/api/' 
-          : 'http://localhost:3000/api/';
+          ? 'https://netride.onrender.com/api' 
+          : 'https://netride.onrender.com/api';
 
   static final Dio dio = Dio(
     BaseOptions(
@@ -39,7 +39,7 @@ class ApiService {
 
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
-        } else if (!options.path.startsWith('auth/')) {
+        } else if (!options.path.startsWith('/auth/')) {
           debugPrint('[API DEBUG] ⚠️ NO TOKEN FOUND IN PREFS for ${options.path}');
         }
 
@@ -101,7 +101,7 @@ class ApiService {
     required int rating,
     String? reviewText,
   }) async {
-    return await dio.post('ride/rate', data: {
+      return await dio.post('/ride/rate', data: {
       'ride_id': rideId,
       'rating': rating,
       'review_text': reviewText,

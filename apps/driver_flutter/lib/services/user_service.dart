@@ -10,7 +10,7 @@ class UserService {
 
   static Future<Map<String, dynamic>> getProfile() async {
     try {
-      final response = await ApiService.dio.get('driver/profile');
+      final response = await ApiService.dio.get('/driver/profile');
       return (response.data is Map)
           ? Map<String, dynamic>.from(response.data as Map)
           : <String, dynamic>{};
@@ -24,7 +24,7 @@ class UserService {
   /// the admin approval queue.
   static Future<void> updateProfile(Map<String, dynamic> data) async {
     try {
-      await ApiService.dio.patch('driver/profile', data: data);
+      await ApiService.dio.patch('/driver/profile', data: data);
     } catch (e) {
       rethrow;
     }
@@ -32,7 +32,7 @@ class UserService {
 
   static Future<List<dynamic>> getVehicles() async {
     try {
-      final response = await ApiService.dio.get('driver/vehicles');
+      final response = await ApiService.dio.get('/driver/vehicles');
       return response.data is List
           ? List<dynamic>.from(response.data as List)
           : <dynamic>[];
@@ -54,7 +54,7 @@ class UserService {
       Map<String, dynamic> changes) async {
     try {
       final response = await ApiService.dio.post(
-        'driver/profile-changes',
+        '/driver/profile-changes',
         data: {'changes': changes},
       );
       return (response.data is Map)
@@ -70,7 +70,7 @@ class UserService {
   static Future<Map<String, dynamic>?> getCurrentProfileChange() async {
     try {
       final response = await ApiService.dio.get(
-        'driver/profile-changes/current',
+        '/driver/profile-changes/current',
       );
       if (response.data == null) return null;
       if (response.data is Map) {
@@ -90,7 +90,7 @@ class UserService {
   /// payouts.
   static Future<Map<String, dynamic>> getWallet() async {
     try {
-      final response = await ApiService.dio.get('driver/wallet');
+      final response = await ApiService.dio.get('/driver/wallet');
       return (response.data is Map)
           ? Map<String, dynamic>.from(response.data as Map)
           : <String, dynamic>{};
@@ -106,7 +106,7 @@ class UserService {
       Map<String, dynamic> card) async {
     try {
       final response = await ApiService.dio.post(
-        'driver/payout-cards',
+        '/driver/payout-cards',
         data: card,
       );
       return (response.data is Map)
@@ -124,7 +124,7 @@ class UserService {
       int amountCents) async {
     try {
       final response = await ApiService.dio.post(
-        'driver/wallet/request-payout',
+        '/driver/wallet/request-payout',
         data: {'amount_cents': amountCents},
       );
       return (response.data is Map)
@@ -138,7 +138,7 @@ class UserService {
   static Future<List<dynamic>> listMyPayouts({int limit = 20}) async {
     try {
       final response = await ApiService.dio.get(
-        'driver/payouts',
+        '/driver/payouts',
         queryParameters: {'limit': limit},
       );
       return response.data is List
