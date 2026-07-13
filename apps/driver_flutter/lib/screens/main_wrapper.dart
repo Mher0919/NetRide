@@ -42,7 +42,12 @@ class _MainWrapperState extends State<MainWrapper> {
 
     try {
       final profile = await UserService.getProfile();
-      if (profile['user_id'] == null || (profile['onboarding_step'] ?? 0) < 5) {
+      final onboardingStep = profile['onboarding_step'] ?? 0;
+      final verificationStatus = profile['verification_status'] as String?;
+      final isSubmitted = onboardingStep >= 5 ||
+          verificationStatus == 'PENDING' ||
+          verificationStatus == 'VERIFIED';
+      if (profile['user_id'] == null || !isSubmitted) {
         if (mounted) {
           Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
         }

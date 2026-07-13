@@ -282,7 +282,7 @@ export class AuthController {
       res.json(result);
     } catch (error: any) {
       console.error(`[AUTH] ❌ Phone OTP request error: ${error.message}`);
-      res.status(400).json({ error: 'Failed to send SMS code.' });
+      res.status(400).json({ error: error.message || 'Failed to send SMS code.' });
     }
   }
 

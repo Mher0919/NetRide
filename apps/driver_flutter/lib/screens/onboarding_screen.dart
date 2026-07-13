@@ -478,10 +478,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             hint: 'John Doe',
           ),
           const SizedBox(height: 16),
-          _buildTextField(
-            label: 'Date of Birth',
-            controller: _dobController,
-            hint: 'YYYY-MM-DD',
+          GestureDetector(
+            onTap: _pickDate,
+            child: AbsorbPointer(
+              child: _buildTextField(
+                label: 'Date of Birth',
+                controller: _dobController,
+                hint: 'YYYY-MM-DD',
+              ),
+            ),
           ),
         ],
       ),
@@ -624,22 +629,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
+  String _normalizePhone(String raw) {
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('1')) return '+$digits';
+    return '+1$digits';
+  }
+
   Future<void> _sendPhoneCode() async {
-    if (_phoneController.text.trim().isEmpty) {
+    final raw = _phoneController.text.trim();
+    if (raw.isEmpty) {
       _showError('Please enter your phone number.');
       return;
     }
+    final normalized = _normalizePhone(raw);
+    _phoneController.text = normalized;
     setState(() => _isSendingCode = true);
     try {
-      await AuthService.requestPhoneOTP(_phoneController.text.trim());
+      await AuthService.requestPhoneOTP(normalized);
       setState(() {
         _codeSent = true;
         _isSendingCode = false;
       });
-      _showSuccess('Verification code sent to ${_phoneController.text.trim()}');
+      _showSuccess('Verification code sent to $normalized');
     } catch (e) {
       setState(() => _isSendingCode = false);
-      _showError('Failed to send code: $e');
+      final msg = e.toString();
+      if (msg.contains('already') || msg.contains('associated')) {
+        _showError('This phone number already exists.');
+      } else {
+        _showError('Failed to send code.');
+      }
     }
   }
 
@@ -662,6 +681,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } catch (e) {
       setState(() => _isSendingCode = false);
       _showError('Invalid code. Please try again.');
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year - 25),
+      firstDate: DateTime(now.year - 100),
+      lastDate: DateTime(now.year - 21),
+      helpText: 'Select your date of birth',
+    );
+    if (picked != null) {
+      _dobController.text =
+          '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
     }
   }
 
@@ -1114,27 +1148,41 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 24),
-          Text(
-            'Profile',
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
+          if (_profileImageUrl != null) ...[
+            Center(
+              child: CircleAvatar(
+                radius: 40,
+                backgroundImage: NetworkImage(_profileImageUrl!),
+              ),
             ),
-          ),
+            const SizedBox(height: 16),
+          ],
+          _sectionHeader('Profile'),
           const SizedBox(height: 8),
           _ReviewItem(label: 'Name', value: _nameController.text),
           _ReviewItem(label: 'DOB', value: _dobController.text),
           _ReviewItem(label: 'Phone', value: _phoneController.text),
           const Divider(height: 32),
-          Text(
-            'Vehicle',
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
-            ),
+          _sectionHeader('Identity Documents'),
+          const SizedBox(height: 8),
+          _ReviewItem(
+            label: 'License (Front)',
+            value: _licensePhotoFrontUrl != null ? 'Uploaded' : 'Missing',
           ),
+          _ReviewItem(
+            label: 'License (Back)',
+            value: _licensePhotoBackUrl != null ? 'Uploaded' : 'Missing',
+          ),
+          _ReviewItem(
+            label: 'Insurance',
+            value: _insurancePhotoUrl != null ? 'Uploaded' : 'Missing',
+          ),
+          _ReviewItem(
+            label: 'Registration',
+            value: _registrationPhotoUrl != null ? 'Uploaded' : 'Missing',
+          ),
+          const Divider(height: 32),
+          _sectionHeader('Vehicle'),
           const SizedBox(height: 8),
           _ReviewItem(
             label: 'Vehicle',
@@ -1171,6 +1219,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String text) {
+    return Text(
+      text,
+      style: GoogleFonts.poppins(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: Colors.grey[700],
       ),
     );
   }
@@ -1245,15 +1304,33 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _submit() async {
+    if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
     try {
       await AuthService.completeOnboarding();
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/success');
+        Navigator.of(context).pop();
+        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
       }
     } catch (e) {
-      _showError('Onboarding failed: $e');
-    } finally {
+      if (mounted) Navigator.of(context).pop();
+      final errMsg = e.toString();
+      if (errMsg.contains('already') || errMsg.contains('Duplicate')) {
+        _showError('Application already submitted. You can check status on the home screen.');
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+        }
+      } else {
+        _showError('Connection error. Please try again.');
+      }
       if (mounted) setState(() => _isSubmitting = false);
     }
   }
