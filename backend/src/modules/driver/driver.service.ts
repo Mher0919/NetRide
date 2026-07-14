@@ -19,8 +19,8 @@ export class DriverService {
       const vehicleRes = await pool.query(
         `SELECT dv.*, v.*
          FROM driver_vehicles dv
-         JOIN vehicles v ON dv.vehicle_id = v.id
-         WHERE dv.driver_id = $1`,
+         LEFT JOIN vehicles v ON dv.vehicle_id = v.id
+          WHERE dv.driver_id = $1`,
         [userId]
       );
       profile.vehicles = vehicleRes.rows;

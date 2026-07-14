@@ -226,7 +226,7 @@ const UserDetail: React.FC = () => {
               
               <Box>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PLATFORM ROLE</Typography>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>{user.role}</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>{user.driver_profile ? 'DRIVER' : user.role}</Typography>
               </Box>
               
               <Box>
@@ -324,50 +324,46 @@ const UserDetail: React.FC = () => {
                       </Grid>
                     </Grid>
 
-                    <Divider sx={{ my: 3, borderStyle: 'dashed' }} />
-
-                    <Typography variant="caption" sx={{ fontWeight: 800, mb: 2, display: 'block', color: 'text.secondary' }}>VEHICLE INSPECTION CERTIFICATE</Typography>
-                    <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                      <Card sx={{ maxWidth: 350, border: '1px solid #eee', boxShadow: 'none' }}>
-                        {v.inspection_photo_url ? (
-                          <CardMedia
-                            component="img"
-                            height="200"
-                            image={v.inspection_photo_url}
-                            alt="Inspection Certificate"
-                            sx={{ objectFit: 'cover', cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 0.9 } }}
-                            onClick={() => window.open(v.inspection_photo_url, '_blank')}
-                          />
-                        ) : (
-                          <Box sx={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', width: 280 }}>
-                            <Typography variant="caption" color="text.disabled" sx={{ fontWeight: 700 }}>CERTIFICATE NOT UPLOADED</Typography>
+                    {v.inspection_photo_url && (
+                      <>
+                        <Divider sx={{ my: 3, borderStyle: 'dashed' }} />
+                        <Typography variant="caption" sx={{ fontWeight: 800, mb: 2, display: 'block', color: 'text.secondary' }}>VEHICLE INSPECTION CERTIFICATE</Typography>
+                        <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                          <Card sx={{ maxWidth: 350, border: '1px solid #eee', boxShadow: 'none' }}>
+                            <CardMedia
+                              component="img"
+                              height="200"
+                              image={v.inspection_photo_url}
+                              alt="Inspection Certificate"
+                              sx={{ objectFit: 'cover', cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 0.9 } }}
+                              onClick={() => window.open(v.inspection_photo_url, '_blank')}
+                            />
+                          </Card>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: 1 }}>
+                            <Button 
+                              variant="contained" 
+                              color="success" 
+                              size="small"
+                              onClick={() => handleVerifyInspection(v.id, 'APPROVED')}
+                              disabled={actionLoading || v.inspection_status === 'APPROVED'}
+                              sx={{ borderRadius: '10px', height: 40, px: 3 }}
+                            >
+                              Approve Inspection
+                            </Button>
+                            <Button 
+                              variant="outlined" 
+                              color="error" 
+                              size="small"
+                              onClick={() => handleVerifyInspection(v.id, 'REJECTED')}
+                              disabled={actionLoading || v.inspection_status === 'REJECTED'}
+                              sx={{ borderRadius: '10px', height: 40, px: 3 }}
+                            >
+                              Flag Documents
+                            </Button>
                           </Box>
-                        )}
-                      </Card>
-                      
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: 1 }}>
-                        <Button 
-                          variant="contained" 
-                          color="success" 
-                          size="small"
-                          onClick={() => handleVerifyInspection(v.id, 'APPROVED')}
-                          disabled={actionLoading || v.inspection_status === 'APPROVED'}
-                          sx={{ borderRadius: '10px', height: 40, px: 3 }}
-                        >
-                          Approve Inspection
-                        </Button>
-                        <Button 
-                          variant="outlined" 
-                          color="error" 
-                          size="small"
-                          onClick={() => handleVerifyInspection(v.id, 'REJECTED')}
-                          disabled={actionLoading || v.inspection_status === 'REJECTED'}
-                          sx={{ borderRadius: '10px', height: 40, px: 3 }}
-                        >
-                          Flag Documents
-                        </Button>
-                      </Box>
-                    </Box>
+                        </Box>
+                      </>
+                    )}
                   </Paper>
                 ))}
 
@@ -548,7 +544,7 @@ const UserDetail: React.FC = () => {
               </>
             )}
 
-            {user.role === 'RIDER' && (
+            {user.role === 'RIDER' && !user.driver_profile && (
               <Box>
                 <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 800 }}>Identity Verification (KYC)</Typography>
                 <Grid container spacing={2} {...({ component: 'div' } as any)}>
