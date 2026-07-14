@@ -95,6 +95,20 @@ const PayoutRequestSchema = z.object({
   amount_cents: z.number().int().positive().max(100_000_00),
 });
 
+const SubmitNewVehicleSchema = z.object({
+  make: z.string().min(1, 'Vehicle make is required'),
+  model: z.string().min(1, 'Vehicle model is required'),
+  year: z.number().int().min(2011, 'Vehicle must be 2011 or newer'),
+  color: z.string().min(1, 'Color is required'),
+  interior_color: z.string().optional(),
+  license_plate_number: z.string().min(1, 'License plate is required'),
+  license_plate_state: z.string().min(1, 'License plate state is required'),
+  zip_code: z.string().min(1, 'ZIP code is required'),
+  registration_photo_url: z.string().url('Valid registration photo URL is required'),
+  insurance_photo_url: z.string().url('Valid insurance photo URL is required'),
+  inspection_photo_url: z.string().url('Valid inspection photo URL is required'),
+});
+
 export class DriverController {
   static async getOnboardingProgress(req: any, res: Response) {
     try {
@@ -447,6 +461,36 @@ export class DriverController {
     } catch (error: any) {
       console.error(`[DRIVER] ❌ Document resubmission error: ${error.message}`);
       res.status(400).json({ error: error.message || 'Failed to resubmit document.' });
+    }
+  }
+
+  static async submitNewVehicle(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const validated = SubmitNewVehicleSchema.parse(req.body);
+      const result = await DriverService.submitNewVehicle(userId, validated);
+      res.status(201).json(result);
+    } catch (error: any) {
+      if (error?.name === 'ZodError') {
+        return res.status(400).json({ error: 'Invalid vehicle data.', details: error.errors });
+      }
+      console.error(`[DRIVER] ❌ Submit new vehicle error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to submit new vehicle.' });
+    }
+  }
+
+  static async getPendingVehicleSubmissions(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const result = await DriverService.getPendingVehicleSubmissions(userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Pending vehicle error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to retrieve pending vehicle submissions.' });
     }
   }
 }

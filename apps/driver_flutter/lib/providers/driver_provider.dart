@@ -8,6 +8,37 @@ import '../services/face_verification_service.dart';
 import '../services/sound_service.dart';
 import '../components/tip_received_dialog.dart';
 
+/// Ordered compliance status for the driver's current blocker (if any).
+/// Priority decreases from top to bottom.
+enum DriverComplianceStatus {
+  /// Driver has submitted profile edits awaiting admin review.
+  profileChangePending,
+
+  /// Profile change was recently approved; ephemeral toast.
+  profileChangeApproved,
+
+  /// Background check was rejected by admin.
+  backgroundCheckRejected,
+
+  /// Background check is pending admin review.
+  backgroundCheckPending,
+
+  /// Background check approved but feedback not yet dismissed.
+  backgroundCheckApproved,
+
+  /// Face check flagged — under review.
+  faceFlagged,
+
+  /// Face check is required before going online.
+  faceCheckNeeded,
+
+  /// Admin has requested document resubmission.
+  documentActionRequired,
+
+  /// Driver has resubmitted documents; awaiting admin review.
+  documentSubmitted,
+}
+
 class DriverProvider with ChangeNotifier {
   models.DriverStatus _status = models.DriverStatus.offline;
   models.VehicleClass _activeClass = models.VehicleClass.CORE;
@@ -48,6 +79,12 @@ class DriverProvider with ChangeNotifier {
   bool _hasDocumentSubmitted = false;
   List<Map<String, dynamic>> _documentRequirements = [];
 
+  // Verification & compliance state (pulled from profile).
+  bool _isVerified = false;
+  String _verificationStatus = 'PENDING';
+  String? _rejectionReason;
+  bool _feedbackSeen = true;
+
   bool get hasDocumentActionRequired => _hasDocumentActionRequired;
   bool get hasDocumentSubmitted => _hasDocumentSubmitted;
   List<Map<String, dynamic>> get documentRequirements => _documentRequirements;
@@ -87,10 +124,47 @@ class DriverProvider with ChangeNotifier {
   /// True when the driver is free of all blockers and may flip the offline
   /// switch on. The avatar/switch goes disabled otherwise.
   bool get canGoOnline =>
+      _isVerified &&
       !_hasPendingProfileChange &&
       !_hasDocumentActionRequired &&
       _faceCheckStatus != FaceCheckStatus.flagged &&
       _faceCheckStatus != FaceCheckStatus.needsCheck;
+
+  /// Resolves the highest-priority blocking status for the driver.
+  /// Only returns a non-null status when there is something that
+  /// prevents the driver from going online. The caller can use this
+  /// to render status cards in priority order.
+  DriverComplianceStatus? buildDriverComplianceStatus() {
+    // 1. Profile change pending — highest priority
+    if (_hasPendingProfileChange) return DriverComplianceStatus.profileChangePending;
+
+    // 2. Background check rejected
+    if (_verificationStatus == 'REJECTED') return DriverComplianceStatus.backgroundCheckRejected;
+
+    // 3. Background check pending
+    if (_verificationStatus == 'PENDING') return DriverComplianceStatus.backgroundCheckPending;
+
+    // 4. Background check approved but feedback not yet dismissed
+    if (_verificationStatus == 'APPROVED' && !_feedbackSeen) return DriverComplianceStatus.backgroundCheckApproved;
+
+    // 5. Face check flagged
+    if (_faceCheckStatus == FaceCheckStatus.flagged) return DriverComplianceStatus.faceFlagged;
+
+    // 6. Face check required
+    if (_faceCheckStatus == FaceCheckStatus.needsCheck && _faceCheckPending) return DriverComplianceStatus.faceCheckNeeded;
+
+    // 7. Document action required
+    if (_hasDocumentActionRequired) return DriverComplianceStatus.documentActionRequired;
+
+    // 8. Document submitted for review (informational, not a blocker)
+    if (_hasDocumentSubmitted) return DriverComplianceStatus.documentSubmitted;
+
+    // 9. No blockers — profile-change approved toast (informational, ephemeral)
+    if (_showApprovedToast) return DriverComplianceStatus.profileChangeApproved;
+
+    // No blockers, driver is ready
+    return null;
+  }
 
   void updateToken(String token) {
     initSocket(token);
@@ -450,6 +524,12 @@ class DriverProvider with ChangeNotifier {
       _pendingSince = null;
       _pendingChangesSummary = null;
     }
+
+    // Store verification state from profile
+    _verificationStatus = (profile['background_check_status'] ?? 'PENDING').toString();
+    _rejectionReason = profile['rejection_reason']?.toString();
+    _feedbackSeen = profile['verification_feedback_seen'] == true;
+    _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
 
     // Also refresh document requirements state
     try {

@@ -959,6 +959,66 @@ export class DriverService {
   }
 
   // ============================================================
+  // New vehicle submission (025)
+  // ============================================================
+
+  static async submitNewVehicle(userId: string, data: any) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const ins = await client.query(
+        `INSERT INTO driver_vehicle_submissions
+         (driver_id, status, make, model, year, color, interior_color,
+          license_plate_number, license_plate_state, zip_code,
+          registration_photo_url, insurance_photo_url, inspection_photo_url)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING *`,
+        [userId, data.make, data.model, data.year, data.color,
+         data.interior_color || null, data.license_plate_number,
+         data.license_plate_state, data.zip_code,
+         data.registration_photo_url, data.insurance_photo_url,
+         data.inspection_photo_url]
+      );
+
+      // Also create a new driver_vehicles row for the pending vehicle so
+      // the profile can distinguish it from the active vehicle.
+      await client.query(
+        `INSERT INTO driver_vehicles
+         (driver_id, vehicle_status, make, model, year, color, interior_color,
+          license_plate_number, license_plate_state, zip_code,
+          registration_photo_url, insurance_photo_url, inspection_photo_url,
+          submitted_at)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+         ON CONFLICT DO NOTHING`,
+        [userId, data.make, data.model, data.year, data.color,
+         data.interior_color || null, data.license_plate_number,
+         data.license_plate_state, data.zip_code,
+         data.registration_photo_url, data.insurance_photo_url,
+         data.inspection_photo_url]
+      );
+
+      await client.query('COMMIT');
+      return { success: true, submission: ins.rows[0] };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  static async getPendingVehicleSubmissions(userId: string) {
+    const res = await pool.query(
+      `SELECT * FROM driver_vehicle_submissions
+       WHERE driver_id = $1
+       ORDER BY submitted_at DESC`,
+      [userId]
+    );
+    return { submissions: res.rows };
+  }
+
+  // ============================================================
   // Document resubmission requirements (024)
   // ============================================================
 

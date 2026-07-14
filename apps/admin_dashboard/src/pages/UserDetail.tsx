@@ -326,18 +326,10 @@ const UserDetail: React.FC = () => {
                   <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 800, mb: 3 }}>
                     Driver Identity
                   </Typography>
-                  <Grid container spacing={3} {...({ component: 'div' } as any)}>
-                    <Grid item xs={12} sm={6} {...({ component: 'div' } as any)}>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>LICENSE NUMBER</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 700 }}>{user.driver_profile.license_number || '---'}</Typography>
-                    </Grid>
-                    <Grid item xs={12} sm={6} {...({ component: 'div' } as any)}>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>VALID UNTIL</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 700 }}>
-                        {user.driver_profile.license_expiry_date ? format(new Date(user.driver_profile.license_expiry_date), 'PPP') : '---'}
-                      </Typography>
-                    </Grid>
-                  </Grid>
+                  <Typography variant="body2" color="text.secondary">
+                    License on file — expiry:
+                    {' '}{user.driver_profile.license_expiry_date ? format(new Date(user.driver_profile.license_expiry_date), 'PPP') : '---'}
+                  </Typography>
                 </Paper>
 
                 {user.driver_profile.vehicles && user.driver_profile.vehicles.map((v: any, vIdx: number) => (
@@ -414,12 +406,18 @@ const UserDetail: React.FC = () => {
                 <Box>
                   <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 800 }}>General Compliance Documents</Typography>
                   <Grid container spacing={2} {...({ component: 'div' } as any)}>
-                    {[
-                      { title: 'Driver License (Front)', key: 'license_photo_url', url: user.driver_profile.license_photo_url },
-                      { title: 'Driver License (Back)', key: 'license_photo_back_url', url: user.driver_profile.license_photo_back_url },
-                      { title: 'Commercial Insurance', key: 'insurance_photo_url', url: user.driver_profile.insurance_photo_url },
-                      { title: 'Vehicle Registration', key: 'registration_photo_url', url: user.driver_profile.registration_photo_url }
-                    ].map((doc, idx) => (
+                    {(() => {
+                      const firstVeh = user.driver_profile.vehicles?.[0];
+                      return [
+                        { title: 'Driver License (Front)', key: 'license_photo_url', url: user.driver_profile.license_photo_url },
+                        { title: 'Driver License (Back)', key: 'license_photo_back_url', url: user.driver_profile.license_photo_back_url },
+                        { title: 'Commercial Insurance', key: 'insurance_photo_url', url: user.driver_profile.insurance_photo_url },
+                        { title: 'Vehicle Registration', key: 'registration_photo_url', url: user.driver_profile.registration_photo_url },
+                        { title: 'Vehicle Inspection', key: 'inspection_photo_url', url: firstVeh?.inspection_photo_url },
+                      ];
+                    })()}
+                    .filter(Boolean)
+                    .map((doc: any, idx: number) => (
                       <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
                         <Card sx={{ border: '1px solid #eee', boxShadow: 'none' }}>
                           <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

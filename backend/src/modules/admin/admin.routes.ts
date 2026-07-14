@@ -45,4 +45,11 @@ router.post('/users/:id/request-docs', AdminController.requestDocumentResubmissi
 router.get('/users/:id/document-requirements', AdminController.getDriverDocumentRequirements);
 router.patch('/document-requirements/:id/review', AdminController.reviewDocumentRequirement);
 
+// Vehicle submission review (025)
+router.get('/vehicles/submissions', AdminController.listVehicleSubmissions);
+router.get('/vehicles/submissions/:id', AdminController.getVehicleSubmission);
+router.post('/vehicles/submissions/:id/approve', AdminController.approveVehicleSubmission);
+router.post('/vehicles/submissions/:id/reject', AdminController.rejectVehicleSubmission);
+router.post('/vehicles/submissions/:id/request-changes', AdminController.requestVehicleChanges);
+
 export default router;

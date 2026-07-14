@@ -12,6 +12,7 @@ import 'screens/verification_screen.dart';
 import 'screens/success_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/document_resubmission_screen.dart';
+import 'screens/replace_vehicle_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/main_wrapper.dart';
 import 'screens/splash_screen.dart';
@@ -162,6 +163,9 @@ class _NetRideDriverState extends State<NetRideDriver> {
             break;
           case '/documents':
             page = const DocumentResubmissionScreen();
+            break;
+          case '/replace-vehicle':
+            page = const ReplaceVehicleScreen();
             break;
           case '/reset-password':
             final args = settings.arguments as Map<String, dynamic>?;

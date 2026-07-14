@@ -180,4 +180,35 @@ class UserService {
       rethrow;
     }
   }
+
+  // ============================================================
+  // New vehicle submission (025)
+  // ============================================================
+
+  static Future<Map<String, dynamic>> submitNewVehicle(
+      Map<String, dynamic> data) async {
+    try {
+      final response = await ApiService.dio.post(
+        '/driver/vehicles/submit',
+        data: data,
+      );
+      return (response.data is Map)
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getPendingVehicleSubmissions() async {
+    try {
+      final response =
+          await ApiService.dio.get('/driver/vehicles/submissions/pending');
+      return (response.data is Map)
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

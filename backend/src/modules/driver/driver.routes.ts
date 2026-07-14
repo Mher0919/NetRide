@@ -38,4 +38,8 @@ router.get('/payouts', authMiddleware, DriverController.listMyPayouts);
 router.get('/documents/requirements', authMiddleware, DriverController.getDocumentRequirements);
 router.post('/documents/resubmit', authMiddleware, DriverController.resubmitDocument);
 
+// New vehicle submission (025)
+router.post('/vehicles/submit', authMiddleware, DriverController.submitNewVehicle);
+router.get('/vehicles/submissions/pending', authMiddleware, DriverController.getPendingVehicleSubmissions);
+
 export default router;

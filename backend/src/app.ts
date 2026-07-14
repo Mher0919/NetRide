@@ -385,6 +385,18 @@ async function runMigrations() {
       console.log('✅ Document resubmissions schema (024) applied');
     }
 
+    // Vehicle submissions + pending-review status (025).
+    const hasVehicleSubmissions = await pool.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_name = 'driver_vehicle_submissions'"
+    );
+    if (hasVehicleSubmissions.rowCount === 0) {
+      console.log('⚡ Applying vehicle submissions schema (025)...');
+      const schemaPath = path.join(__dirname, '../migrations/025_vehicle_submissions.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Vehicle submissions schema (025) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);

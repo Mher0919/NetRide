@@ -165,10 +165,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  bool _uploadInProgress = false;
+
   Future<void> _changeProfilePicture() async {
+    if (_uploadInProgress) return; // guard against double-tap / auto-retry
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
     if (pickedFile != null) {
+      _uploadInProgress = true;
       setState(() => _isSaving = true);
       try {
         final url = await AuthService.uploadImage(File(pickedFile.path));
@@ -176,17 +180,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() {
           _profileImageUrl = url;
           _isSaving = false;
+          _uploadInProgress = false;
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated')));
         }
-      } catch (e) {
+      } on Exception catch (e) {
+        _uploadInProgress = false;
         setState(() => _isSaving = false);
+        final message = _friendlyUploadError(e);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to upload image: $e')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
         }
       }
     }
+  }
+
+  /// Maps common upload errors to user-friendly messages.
+  String _friendlyUploadError(Exception e) {
+    final s = e.toString().toLowerCase();
+    if (s.contains('429') || s.contains('too many') || s.contains('rate limit')) {
+      return 'Too many uploads — please wait a moment and try again.';
+    }
+    if (s.contains('413') || s.contains('too large')) {
+      return 'Image is too large — please choose a smaller one.';
+    }
+    if (s.contains('network') || s.contains('timeout') || s.contains('socket')) {
+      return 'Network error — please check your connection and try again.';
+    }
+    return 'Failed to upload image. Please try again.';
   }
 
   Future<void> _updateAgeAndLicense() async {
@@ -582,7 +604,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_hasPendingChange) _buildPendingChangeBanner(),
-              if (_hasDocumentActionRequired) _buildDocActionBanner(),
+              // Document-action banner removed — handled by availability_screen
               _buildProfileHeader(theme),
               const SizedBox(height: 32),
               _buildSectionCard(
@@ -624,45 +646,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildSectionCard(
                 title: 'License & Vehicle',
                 children: [
+                  const Divider(height: 32),
                   _buildProfileItem(
                     icon: Icons.badge_outlined,
                     label: 'License Number',
                     controller: _licenseController,
-                    enabled: _isEditing,
-                  ),
-                  const Divider(height: 32),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Vehicle Model',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: const Color(0xFF2F3A32).withOpacity(0.4),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: _selectedVehicleId,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          contentPadding: EdgeInsets.zero,
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          filled: false,
-                        ),
-                        items: _vehicles.map((v) {
-                          return DropdownMenuItem<String>(
-                            value: v['id'],
-                            child: Text('${v['year']} ${v['make']} ${v['model']}'),
-                          );
-                        }).toList(),
-                        onChanged: _isEditing ? (val) => setState(() => _selectedVehicleId = val) : null,
-                      ),
-                    ],
+                    enabled: false,
                   ),
                   const Divider(height: 32),
                   _buildProfileItem(
@@ -670,6 +659,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     label: 'License Plate',
                     controller: _plateController,
                     enabled: _isEditing,
+                  ),
+                  const Divider(height: 16),
+                  _buildMenuTile(
+                    icon: Icons.directions_car_outlined,
+                    title: 'Replace Vehicle',
+                    onTap: () => Navigator.pushNamed(context, '/replace-vehicle'),
                   ),
                 ],
               ),
@@ -945,49 +940,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ==========================================================================
   // Pending-change banner + Wallet section
   // ==========================================================================
-
-  Widget _buildDocActionBanner() {
-    return GestureDetector(
-      onTap: () => Navigator.pushNamed(context, '/documents'),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFCE9E9),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFEFCFCF)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.description_outlined, color: Color(0xFFC65A5A), size: 22),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text(
-                    'Action required: document resubmission',
-                    style: TextStyle(
-                      color: Color(0xFF7A2A2A),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'An admin has requested updated documents. Tap to review and resubmit.',
-                    style: TextStyle(color: Color(0xFF7A2A2A), fontSize: 12, height: 1.35),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: Color(0xFF7A2A2A), size: 20),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildPendingChangeBanner() {
     return Container(

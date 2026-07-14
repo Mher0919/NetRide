@@ -33,11 +33,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   ViewState _state = ViewState.loading;
   String? _errorMessage;
   bool _isMapReady = false;
-  bool _isVerified = false;
   String _firstName = "";
-  String _verificationStatus = "PENDING";
-  String? _rejectionReason;
-  bool _feedbackSeen = true;
   double? _tempPrice;
   bool _isDragging = false;
   String? _lastIncomingRequestId;
@@ -59,10 +55,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         setState(() {
           final fullName = profile['full_name'] ?? 'Driver';
           _firstName = fullName.split(' ')[0];
-          _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
-          _verificationStatus = profile['background_check_status'] ?? "PENDING";
-          _rejectionReason = profile['rejection_reason'];
-          _feedbackSeen = profile['verification_feedback_seen'] == true;
         });
       }
 
@@ -105,13 +97,17 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   Future<void> _dismissFeedback() async {
     try {
       await ApiService.dio.patch('/ride/verification/dismiss');
-      setState(() => _feedbackSeen = true);
+      final provider = Provider.of<DriverProvider>(context, listen: false);
+      // The provider will pick up the updated feedback_seen on next refreshProfile
+      await provider.refreshProfile();
     } catch (e) {
       debugPrint('Error dismissing feedback: $e');
     }
   }
 
   void _showRejectionDetails() {
+    final provider = Provider.of<DriverProvider>(context, listen: false);
+    final reason = provider.rejectionReason;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -127,7 +123,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(color: Colors.red.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.withOpacity(0.1))),
               child: Text(
-                _rejectionReason ?? 'No specific reason provided. Please contact support.',
+                reason ?? 'No specific reason provided. Please contact support.',
                 style: const TextStyle(fontWeight: FontWeight.w600, height: 1.5),
               ),
             ),
@@ -259,83 +255,84 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     return '${diff.inDays}d ago';
   }
 
-  /// Build the stacked status cards that sit at the top of the map. The
-  /// order is fixed so the driver always reads them top-to-bottom in
-  /// priority: profile-change pending (highest — locks the offline
-  /// switch) → background check → face check → approved-toast → ready.
+  /// Build the stacked status cards at the top of the map. Driven by the
+  /// single authoritative [DriverProvider.buildDriverComplianceStatus] so
+  /// that every card renders with the same priority ordering.
   Widget _buildStatusCards(DriverProvider provider) {
-    final cards = <Widget>[];
+    final status = provider.buildDriverComplianceStatus();
 
-    // Profile change: highest-priority gate. Renders a red card while
-    // pending and a brief green card right after approval.
-    if (provider.hasPendingProfileChange) {
-      cards.add(DriverStatusCard(
-        state: DriverStatus.profileChangePending,
-        onAction: _showPendingChangeDetails,
-      ));
-    } else if (provider.showApprovedToast) {
-      cards.add(DriverStatusCard(
-        state: DriverStatus.profileChangeApproved,
-        onDismiss: () => provider.markProfileChangeApprovedShown(),
-      ));
+    // When there is no blocker and the driver is verified, show ready-to-drive.
+    if (status == null) {
+      if (provider.isVerified) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: DriverStatusCard(state: DriverStatus.readyToDrive),
+            ),
+          ],
+        );
+      }
+      return const SizedBox.shrink();
     }
 
-    if (_verificationStatus == 'REJECTED') {
-      cards.add(DriverStatusCard(
-        state: DriverStatus.backgroundRejected,
-        rejectionReason: _rejectionReason,
-        onAction: _showRejectionDetails,
-      ));
-    } else if (_verificationStatus == 'PENDING') {
-      cards.add(const DriverStatusCard(state: DriverStatus.backgroundPending));
-    } else if (_verificationStatus == 'APPROVED' && !_feedbackSeen) {
-      cards.add(DriverStatusCard(
-        state: DriverStatus.backgroundApproved,
-        onDismiss: _dismissFeedback,
-      ));
+    // Map the compliance status to the corresponding DriverStatusCard.
+    // The enum ordering already enforces priority; we render the
+    // SINGLE highest-priority card only (no stacking).
+    Widget card;
+    switch (status) {
+      case DriverComplianceStatus.profileChangePending:
+        card = DriverStatusCard(
+          state: DriverStatus.profileChangePending,
+          onAction: _showPendingChangeDetails,
+        );
+      case DriverComplianceStatus.profileChangeApproved:
+        card = DriverStatusCard(
+          state: DriverStatus.profileChangeApproved,
+          onDismiss: () => provider.markProfileChangeApprovedShown(),
+        );
+      case DriverComplianceStatus.backgroundCheckRejected:
+        card = DriverStatusCard(
+          state: DriverStatus.backgroundRejected,
+          rejectionReason: provider.rejectionReason,
+          onAction: () => _showRejectionDetails(),
+        );
+      case DriverComplianceStatus.backgroundCheckPending:
+        card = const DriverStatusCard(state: DriverStatus.backgroundPending);
+      case DriverComplianceStatus.backgroundCheckApproved:
+        card = DriverStatusCard(
+          state: DriverStatus.backgroundApproved,
+          onDismiss: _dismissFeedback,
+        );
+      case DriverComplianceStatus.faceFlagged:
+        card = const DriverStatusCard(state: DriverStatus.faceFlagged);
+      case DriverComplianceStatus.faceCheckNeeded:
+        final reason = provider.faceCheckReason;
+        card = DriverStatusCard(
+          state: reason != null
+              ? DriverStatus.faceRequired(reason)
+              : DriverStatus.faceRequired('first_time'),
+          onStartFaceCheck: () => _runFaceCheck(reason: reason ?? 'first_time'),
+        );
+      case DriverComplianceStatus.documentActionRequired:
+        card = DriverStatusCard(
+          state: DriverStatus.documentActionRequired,
+          onAction: () => Navigator.pushNamed(context, '/documents'),
+        );
+      case DriverComplianceStatus.documentSubmitted:
+        card = const DriverStatusCard(
+          state: DriverStatus.documentSubmittedForReview,
+        );
     }
-
-    final face = provider.faceCheckStatus;
-    final reason = provider.faceCheckReason;
-    if (face == FaceCheckStatus.flagged) {
-      cards.add(const DriverStatusCard(state: DriverStatus.faceFlagged));
-    } else if (face == FaceCheckStatus.needsCheck && provider.faceCheckPending) {
-      cards.add(DriverStatusCard(
-        state: reason != null
-            ? DriverStatus.faceRequired(reason)
-            : DriverStatus.faceRequired('first_time'),
-        onStartFaceCheck: () => _runFaceCheck(reason: reason ?? 'first_time'),
-      ));
-    }
-
-    // Document requirements: admin-requested resubmissions.
-    if (provider.hasDocumentActionRequired) {
-      cards.add(DriverStatusCard(
-        state: DriverStatus.documentActionRequired,
-        onAction: () => Navigator.pushNamed(context, '/documents'),
-      ));
-    } else if (provider.hasDocumentSubmitted) {
-      cards.add(const DriverStatusCard(
-        state: DriverStatus.documentSubmittedForReview,
-      ));
-    }
-
-    // Only show the green "ready to drive" card when nothing else is
-    // blocking — that's the whole point of the priority stacking above.
-    if (cards.isEmpty && _isVerified) {
-      cards.add(const DriverStatusCard(state: DriverStatus.readyToDrive));
-    }
-
-    if (cards.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final c in cards)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: c,
-          ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: card,
+        ),
       ],
     );
   }
@@ -674,22 +671,31 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                             ),
                           ),
                           Switch(
-                            value: _isVerified && isOnline && driverProvider.canGoOnline,
+                            value: isOnline && driverProvider.canGoOnline,
                             onChanged: (val) async {
-                              if (!_isVerified) {
-                                _showError('Your account is under review. We\'re reviewing your documents.');
-                                return;
-                              }
-                              if (driverProvider.hasPendingProfileChange) {
-                                _showError('Your profile change is awaiting admin review.');
-                                _showPendingChangeDetails();
-                                return;
-                              }
                               if (!driverProvider.canGoOnline) {
-                                // Server already told us a face check is
-                                // pending — route the user straight into
-                                // the capture screen.
-                                _runFaceCheck(reason: driverProvider.faceCheckReason ?? 'first_time');
+                                final cs = driverProvider.buildDriverComplianceStatus();
+                                if (cs == DriverComplianceStatus.backgroundCheckRejected ||
+                                    cs == DriverComplianceStatus.backgroundCheckPending) {
+                                  _showError('Your account is under review. We\'re reviewing your documents.');
+                                  return;
+                                }
+                                if (cs == DriverComplianceStatus.profileChangePending) {
+                                  _showError('Your profile change is awaiting admin review.');
+                                  _showPendingChangeDetails();
+                                  return;
+                                }
+                                // Face check or document requirements — route
+                                // the user into the capture screen or documents.
+                                if (cs == DriverComplianceStatus.faceCheckNeeded) {
+                                  _runFaceCheck(reason: driverProvider.faceCheckReason ?? 'first_time');
+                                  return;
+                                }
+                                if (cs == DriverComplianceStatus.documentActionRequired) {
+                                  Navigator.pushNamed(context, '/documents');
+                                  return;
+                                }
+                                _showError('You\'re not eligible to go online at this time.');
                                 return;
                               }
                               if (val) {
