@@ -63,8 +63,18 @@ export class DriverService {
         profile.pending_card_last4 = row.card_last4;
         profile.pending_card_brand = row.card_brand;
         profile.pending_changes_summary = Object.keys(changes).filter(k => k !== 'payout_card');
+        // Include pending change values so the frontend can distinguish
+        // approved values from pending-submitted values.
+        const values: Record<string, any> = {};
+        for (const [k, v] of Object.entries(changes)) {
+          if (k !== '_reason' && k !== 'payout_card' && k !== 'payout_card_id') {
+            values[k] = v;
+          }
+        }
+        profile.pending_changes_values = values;
       } else {
         profile.has_pending_profile_change = false;
+        profile.pending_changes_values = {};
       }
     } catch (_err: any) {
       // Table may not exist yet on first boot; treat as no pending change.
@@ -681,14 +691,7 @@ export class DriverService {
   // ============================================================
 
   static async submitProfileChange(userId: string, changes: any, reason?: string) {
-    // Reject if the driver already has an open PENDING request.
-    const open = await pool.query(
-      `SELECT id FROM profile_change_requests WHERE driver_id = $1 AND status = 'PENDING' LIMIT 1`,
-      [userId]
-    );
-    if (open.rowCount && open.rowCount > 0) {
-      throw new Error('PROFILE_CHANGE_PENDING: A previous change is still awaiting admin review.');
-    }
+    // ---- Validate incoming changes first ----
 
     // Reject DOB changes if the field is locked (approved by admin already).
     if (changes.date_of_birth) {
@@ -749,6 +752,47 @@ export class DriverService {
       }
     }
 
+    // ---- Check for conflicts with existing pending request ----
+    // Only overlapping fields are blocked; non-conflicting fields are merged
+    // into the existing pending request (one open change per driver).
+    const open = await pool.query(
+      `SELECT id, requested_changes FROM profile_change_requests WHERE driver_id = $1 AND status = 'PENDING' LIMIT 1`,
+      [userId]
+    );
+    if (open.rowCount && open.rowCount > 0) {
+      const existingChanges: Record<string, any> = open.rows[0].requested_changes ?? {};
+      const newKeys = new Set(Object.keys(sanitizedChanges).filter(k => k !== '_reason'));
+      const existingKeys = new Set(
+        Object.keys(existingChanges).filter(k => k !== '_reason' && k !== 'payout_card' && k !== 'payout_card_id')
+      );
+      const overlapping = [...newKeys].filter(k => existingKeys.has(k));
+      if (overlapping.length > 0) {
+        // Clean up the just-inserted card if any
+        if (payoutCardId) await pool.query(`DELETE FROM payout_cards WHERE id = $1`, [payoutCardId]);
+        throw new Error(
+          `PROFILE_CHANGE_PENDING: A change for "${overlapping[0]}" is already awaiting admin review.`
+        );
+      }
+      // Non-overlapping fields: merge into the existing pending request.
+      const mergedReason = reason?.trim()
+        ? (existingChanges._reason ? `${existingChanges._reason}; ${reason.trim()}` : reason.trim())
+        : existingChanges._reason;
+      const mergedChanges = { ...existingChanges, ...sanitizedChanges };
+      if (mergedReason) mergedChanges._reason = mergedReason;
+      await pool.query(
+        `UPDATE profile_change_requests SET requested_changes = $1 WHERE id = $2`,
+        [mergedChanges, open.rows[0].id]
+      );
+      return {
+        request_id: open.rows[0].id,
+        status: 'PENDING',
+        has_pending: true,
+        queued_changes: Object.keys(sanitizedChanges).filter(k => k !== '_reason'),
+        card_last4: cardLast4,
+        card_brand: cardBrand,
+      };
+    }
+
     // Snapshot the driver state so a future rejection can restore it.
     const driverRes = await pool.query(
       `SELECT is_active, background_check_status FROM drivers WHERE user_id = $1`,
@@ -779,7 +823,7 @@ export class DriverService {
       await client.query('ROLLBACK');
       // Race: another PENDING row won the EXCLUDE constraint
       if (err.message?.includes('one_open_change_per_driver')) {
-        throw new Error('PROFILE_CHANGE_PENDING: A previous change is still awaiting admin review.');
+        throw new Error('PROFILE_CHANGE_PENDING: A profile change is already awaiting admin review.');
       }
       throw err;
     } finally {

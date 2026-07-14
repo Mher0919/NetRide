@@ -52,6 +52,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isSendingPhoneCode = false;
   String? _pendingPhoneNumber;
 
+  // ============================================================
+  // Field classification policy
+  // ============================================================
+  // Fields that can be saved directly via PATCH (no admin review required)
+  // All other editable fields (profile_image_url, date_of_birth, phone_number)
+  // require admin approval review and are submitted through dedicated flows.
+  static const Set<String> _directEditFields = {'full_name', 'license_plate_number'};
+
+  /// Baseline snapshot of the authoritative approved profile values captured
+  /// when fetching the profile. Compared against current values to detect
+  /// which fields have locally unsaved changes.
+  Map<String, dynamic> _editingBaseline = const {};
+
+  /// Reviewed-field values that have been successfully submitted for admin
+  /// review. These fields are NOT considered locally dirty, even if they
+  /// differ from _editingBaseline.
+  Map<String, dynamic> _pendingSubmittedValues = const {};
+
   @override
   void initState() {
     super.initState();
@@ -109,9 +127,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _state = ViewState.success;
       });
 
-      // Snapshot originals for the diff in _saveProfile. Capture the
-      // fields the admin queue cares about so we can detect real changes.
-      _originals = {
+      // Capture baseline of the authoritative approved profile values.
+      // This snapshot is used to detect which fields have locally unsaved
+      // changes. Reviewed-field changes that have already been submitted
+      // for admin review are tracked separately in _pendingSubmittedValues.
+      _editingBaseline = {
         'full_name': profile['full_name'],
         'phone_number': profile['phone_number'],
         'date_of_birth': profile['date_of_birth'],
@@ -123,6 +143,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 : null),
       };
       _hasPendingChange = profile['has_pending_profile_change'] == true;
+      // Track reviewed-field values that have already been submitted pending.
+      // The backend returns pending_changes_values when has_pending_profile_change
+      // is true. These fields are not considered locally dirty.
+      if (_hasPendingChange) {
+        final pendingValues = profile['pending_changes_values'];
+        if (pendingValues is Map) {
+          _pendingSubmittedValues = Map<String, dynamic>.from(pendingValues);
+        } else {
+          _pendingSubmittedValues = {};
+        }
+      } else {
+        _pendingSubmittedValues = {};
+      }
 
       try {
         final docReqs = await UserService.getDocumentRequirements();
@@ -211,6 +244,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() {
         _isSaving = false;
         _hasPendingChange = true;
+        // Track the pending URL so the green confirmation button knows
+        // this field no longer has an unsaved local change.
+        _pendingSubmittedValues = {
+          ..._pendingSubmittedValues,
+          'profile_image_url': url,
+        };
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -237,19 +276,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (data is Map<String, dynamic>) {
         final err = data['error']?.toString() ?? '';
         if (err.contains('RATE_LIMITED')) {
-          return 'You\'ve already submitted a profile change recently. Please wait 24 hours.';
+          return 'You can only submit one change request every 24 hours. Please try again later.';
         }
         if (err.contains('PROFILE_CHANGE_PENDING')) {
-          return 'You already have a change awaiting review.';
+          return 'Your profile photo change is already being reviewed. Please wait for the current request to be completed before submitting another photo.';
         }
       }
       final code = e.response?.statusCode;
-      if (code == 429) return 'Too many requests — please wait and try again.';
+      if (code == 429) return 'Too many requests. Please wait and try again later.';
       if (code == 413) return 'Image is too large — please choose a smaller one.';
     }
     final s = e.toString().toLowerCase();
     if (s.contains('429') || s.contains('too many') || s.contains('rate limit')) {
-      return 'Too many requests — please wait and try again.';
+      return 'Too many requests. Please wait and try again later.';
     }
     if (s.contains('413') || s.contains('too large')) {
       return 'Image is too large — please choose a smaller one.';
@@ -584,12 +623,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// Submits a diff of the currently-edited fields to the admin approval
-  /// queue. Every sensitive edit (name, photo, DOB, phone, license, vehicle,
-  /// plate, photos, payout card) requires admin approval before going live.
+  /// Intelligent save behavior for the green confirmation button.
+  ///
+  /// The logic distinguishes three types of fields:
+  ///   - Directly editable fields (saved via PATCH, no review needed)
+  ///   - Admin-reviewed fields (handled by their own dedicated submission
+  ///     flows, e.g. _changeProfilePicture)
+  ///   - Fields already submitted pending (skipped to avoid re-submission)
+  ///
+  /// See the class-level field policy (_directEditFields, _adminReviewFields)
+  /// for the exact classification.
   Future<void> _saveProfile() async {
     final fullName = _nameController.text.trim();
-    final dob = _dobController.text.trim();
     final plateNumber = _plateController.text.trim();
 
     if (fullName.length < 2) {
@@ -601,79 +646,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _isSaving = true);
     try {
-      // Build the diff against the loaded profile. Only include fields the
-      // driver actually changed so the admin queue stays focused.
-      final Map<String, dynamic> original = await _loadOriginals();
-      final Map<String, dynamic> changes = {};
+      final Map<String, dynamic> directChanges = {};
 
-      void pushIfChanged(String key, dynamic current, dynamic originalValue) {
+      // Detect locally-unsaved changes for direct-edit fields.
+      // Fields that have already been submitted for admin review
+      // (_pendingSubmittedValues) are skipped entirely — they are
+      // tracked separately and must not be re-submitted here.
+      void checkField(String key, dynamic current) {
+        if (_pendingSubmittedValues.containsKey(key)) return;
         final cur = current is String ? current.trim() : current;
         if (cur == null || (cur is String && cur.isEmpty)) return;
-        if (cur != originalValue) changes[key] = cur;
+        final baseline = _editingBaseline[key];
+        if (cur == baseline) return;
+        if (_directEditFields.contains(key)) {
+          directChanges[key] = cur;
+        }
+        // Admin-reviewed fields are NOT handled by the green button.
+        // They are submitted through their own dedicated flows
+        // (e.g. _changeProfilePicture for profile photos).
       }
 
-      pushIfChanged('full_name', fullName, original['full_name']);
-      pushIfChanged(
-        'date_of_birth',
-        _parseDob(dob),
-        original['date_of_birth'],
-      );
-      // license_number is deliberately excluded — it is not shown on
-      // the profile page and should never be re-submitted as a change.
-      pushIfChanged(
-        'profile_image_url',
-        _profileImageUrl,
-        original['profile_image_url'],
-      );
-      pushIfChanged(
-        'license_plate_number',
-        plateNumber,
-        original['license_plate_number'],
-      );
+      checkField('full_name', fullName);
+      checkField('license_plate_number', plateNumber);
 
-      // Payout card is handled separately via the Wallet section — do
-      // not bundle it here.
-
-      if (changes.isEmpty) {
+      // CASE 1: No unsaved changes exist.
+      if (directChanges.isEmpty) {
         setState(() {
           _isEditing = false;
+          _isSaving = false;
         });
         if (mounted) _fetchProfile();
         return;
       }
 
-      // If the change touches name or photo, ask for a reason.
-      final touchesNameOrPhoto =
-          changes.containsKey('full_name') || changes.containsKey('profile_image_url');
-      if (touchesNameOrPhoto && mounted) {
-        final reason = await _showChangeReasonDialog(
-          changes.containsKey('full_name') ? 'name' : 'profile picture',
-        );
-        if (reason == null) {
-          setState(() {
-            _isSaving = false;
-            _isEditing = false;
-          });
-          return; // user cancelled
-        }
-        changes['_reason'] = reason;
-      }
-
-      await UserService.submitProfileChange(changes);
-
+      // CASE 2 / CASE 4: Only direct fields changed (possibly alongside
+      // a pending reviewed change, which is being ignored above).
+      // Save via PATCH — no admin approval needed, no conflict.
+      await UserService.updateProfile(directChanges);
       setState(() {
         _isSaving = false;
         _isEditing = false;
-        _hasPendingChange = true;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Submitted for review — you\'ll be notified once an admin approves.',
-            ),
+            content: Text('Profile updated successfully.'),
             backgroundColor: Color(0xFF5B7760),
-            duration: Duration(seconds: 4),
           ),
         );
         _fetchProfile();
@@ -694,23 +712,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _hasDocumentActionRequired = false;
 
-  /// Cache of the last-fetched profile values used to compute the diff
-  /// in `_saveProfile`. Loaded once per `_fetchProfile` call.
-  Map<String, dynamic> _originals = const {};
   bool _hasPendingChange = false;
-
-  Future<Map<String, dynamic>> _loadOriginals() async {
-    return _originals;
-  }
-
-  String? _parseDob(String text) {
-    if (text.isEmpty) return null;
-    try {
-      return DateFormat('yyyy-MM-dd').format(DateFormat('MM-dd-yyyy').parse(text));
-    } catch (_) {
-      return text;
-    }
-  }
 
   /// Shows a dialog asking the driver why they want to make a change.
   /// Returns the entered reason, or null if cancelled.
@@ -761,7 +763,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (data is Map<String, dynamic>) {
         final err = data['error']?.toString() ?? '';
         if (err.contains('PROFILE_CHANGE_PENDING')) {
-          return 'You already have a change awaiting review. Wait for it to be approved before submitting a new one.';
+          return 'Your profile change is already being reviewed. Please wait for the current request to be completed before submitting another change.';
         }
         if (err.contains('RATE_LIMITED')) {
           return 'You can only submit one change request every 24 hours. Try again later.';
@@ -776,13 +778,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           return 'Your date of birth has already been verified and cannot be changed.';
         }
       }
+      if (e.response?.statusCode == 400) {
+        final msg = data is Map ? data['error']?.toString() ?? '' : '';
+        if (msg.isNotEmpty) return msg;
+        return 'We couldn\'t save your profile changes. Please try again.';
+      }
+      if (e.response?.statusCode == 409) {
+        return 'Your profile change is already being reviewed. Please wait for the current request to be completed before submitting another change.';
+      }
       if (e.response?.statusCode == 429) {
         return 'Too many requests. Please wait and try again later.';
       }
     }
     final raw = e.toString();
     if (raw.contains('PROFILE_CHANGE_PENDING')) {
-      return 'You already have a change awaiting review. Wait for it to be approved before submitting a new one.';
+      return 'Your profile change is already being reviewed. Please wait for the current request to be completed before submitting another change.';
     }
     if (raw.contains('RATE_LIMITED')) {
       return 'You can only submit one change request every 24 hours. Try again later.';
@@ -796,7 +806,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (raw.contains('DOB_LOCKED')) {
       return 'Your date of birth has already been verified and cannot be changed.';
     }
-    return 'Could not submit your changes: $raw';
+    if (e is DioException) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        return 'Network error. Please check your connection and try again.';
+      }
+    }
+    return 'We couldn\'t save your profile changes. Please try again.';
   }
 
   Future<void> _handleLogout() async {
@@ -1053,6 +1070,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              if (_hasPendingChange && _pendingSubmittedValues.containsKey('profile_image_url'))
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFC79A4A),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'PENDING',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
                     ),
                   ),
                 ),
