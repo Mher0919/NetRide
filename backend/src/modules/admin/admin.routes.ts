@@ -46,6 +46,10 @@ router.post('/users/:id/request-docs', AdminController.requestDocumentResubmissi
 router.get('/users/:id/document-requirements', AdminController.getDriverDocumentRequirements);
 router.patch('/document-requirements/:id/review', AdminController.reviewDocumentRequirement);
 
+// Admin image/document management
+router.post('/users/:id/upload-document', AdminController.uploadUserDocument);
+router.delete('/users/:id/document', AdminController.deleteUserDocument);
+
 // Vehicle submission review (025 / 026)
 router.get('/vehicles/submissions', AdminController.listVehicleSubmissions);
 router.get('/vehicles/submissions/:id', AdminController.getVehicleSubmission);

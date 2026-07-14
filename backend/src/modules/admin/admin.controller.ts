@@ -5,6 +5,11 @@ import { VerificationStatus, UserRole } from '@prisma/client';
 import { pool } from '../../config/database';
 import { SpeedingDetector } from '../../services/speeding_detector';
 import { EmailService } from '../../services/email.service';
+import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
+import path from 'path';
+import { env } from '../../config/env';
+import { uploadToSupabase } from '../../config/supabase';
 
 export class AdminController {
   static async getStats(req: AuthRequest, res: Response) {
@@ -1723,6 +1728,90 @@ export class AdminController {
       res.status(code).json({ error: error.message || 'Failed to mark payout paid.' });
     } finally {
       client.release();
+    }
+  }
+
+  // ==========================================================================
+  // Admin image/document management
+  // ==========================================================================
+
+  /** Allowed document fields and which table+column they map to. */
+  private static readonly DOCUMENT_FIELDS: Record<string, { table: string; column: string }> = {
+    profile_image_url:      { table: 'users',   column: 'profile_image_url' },
+    license_photo_url:      { table: 'drivers', column: 'license_photo_url' },
+    license_photo_back_url: { table: 'drivers', column: 'license_photo_back_url' },
+    insurance_photo_url:    { table: 'drivers', column: 'insurance_photo_url' },
+    registration_photo_url: { table: 'drivers', column: 'registration_photo_url' },
+    id_photo_front_url:     { table: 'users',   column: 'id_photo_front_url' },
+    id_photo_back_url:      { table: 'users',   column: 'id_photo_back_url' },
+  };
+
+  static async uploadUserDocument(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const { field, image, mimetype } = req.body;
+
+    if (!field || !image || !mimetype) {
+      return res.status(400).json({ error: 'Missing required fields: field, image, mimetype' });
+    }
+
+    const mapping = AdminController.DOCUMENT_FIELDS[field as string];
+    if (!mapping) {
+      return res.status(400).json({ error: `Unknown document field: ${field}` });
+    }
+
+    try {
+      const extension = mimetype.split('/')[1] || 'jpg';
+      const filename = `${uuidv4()}.${extension}`;
+      const buffer = Buffer.from(image, 'base64');
+
+      // Try Supabase first
+      let url: string | null = await uploadToSupabase(buffer, filename, mimetype);
+      if (!url) {
+        // Fallback to local disk
+        const uploadDir = path.join(__dirname, '../../uploads');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        fs.writeFileSync(path.join(uploadDir, filename), buffer);
+        url = `${env.APP_URL}/uploads/${filename}`;
+      }
+
+      // Update the database
+      await pool.query(
+        `UPDATE ${mapping.table} SET ${mapping.column} = $1 WHERE ${mapping.table === 'users' ? 'id' : 'user_id'} = $2`,
+        [url, id]
+      );
+
+      console.log(`[ADMIN] Uploaded ${field} for user ${id} -> ${url}`);
+      res.json({ url });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Upload document error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to upload document.' });
+    }
+  }
+
+  static async deleteUserDocument(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const { field } = req.body;
+
+    if (!field) {
+      return res.status(400).json({ error: 'Missing required field: field' });
+    }
+
+    const mapping = AdminController.DOCUMENT_FIELDS[field as string];
+    if (!mapping) {
+      return res.status(400).json({ error: `Unknown document field: ${field}` });
+    }
+
+    try {
+      await pool.query(
+        `UPDATE ${mapping.table} SET ${mapping.column} = NULL WHERE ${mapping.table === 'users' ? 'id' : 'user_id'} = $1`,
+        [id]
+      );
+
+      console.log(`[ADMIN] Deleted ${field} for user ${id}`);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Delete document error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to delete document.' });
     }
   }
 }

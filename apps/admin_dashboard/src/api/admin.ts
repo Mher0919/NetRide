@@ -157,6 +157,18 @@ export const updateLicense = async (userId: string, data: { license_number?: str
   return response.data;
 };
 
+// ----- Admin image/document management ---------------------------------------
+
+export const uploadUserDocument = async (userId: string, field: string, image: string, mimetype: string) => {
+  const response = await api.post(`/admin/users/${userId}/upload-document`, { field, image, mimetype });
+  return response.data as { url: string };
+};
+
+export const deleteUserDocument = async (userId: string, field: string) => {
+  const response = await api.delete(`/admin/users/${userId}/document`, { data: { field } });
+  return response.data as { success: boolean };
+};
+
 // ----- Payouts --------------------------------------------------------------
 
 export const listPayouts = async (status: 'PENDING' | 'PAID' | 'ALL' = 'PENDING') => {

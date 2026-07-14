@@ -25,10 +25,13 @@ export class UploadService {
         return res.json({ url: supabaseUrl });
       }
 
+      console.warn(`⚠️ [UPLOAD] Supabase upload failed or not configured, falling back to local filesystem for ${safeFilename}`);
+
       // Fall back to local filesystem
       const uploadDir = path.join(__dirname, '../../uploads');
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
+        console.log(`📁 [UPLOAD] Created uploads directory: ${uploadDir}`);
       }
 
       const filePath = path.join(uploadDir, safeFilename);

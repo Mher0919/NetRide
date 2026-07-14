@@ -41,6 +41,8 @@ import {
   reviewDocumentRequirement,
   requestVehicleResubmission,
   updateLicense,
+  uploadUserDocument,
+  deleteUserDocument,
 } from '../api/admin';
 import { SpeedingBadge } from '../components/SpeedingBadge';
 import { format } from 'date-fns';
@@ -65,6 +67,7 @@ const UserDetail: React.FC = () => {
   const [licenseNumber, setLicenseNumber] = useState('');
   const [licenseExpiry, setLicenseExpiry] = useState('');
   const [licenseSaving, setLicenseSaving] = useState(false);
+  const [uploadingField, setUploadingField] = useState<string | null>(null);
   const isDriver = !!user?.driver_profile;
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
@@ -227,6 +230,45 @@ const UserDetail: React.FC = () => {
       console.error('Failed to clear dangerous flag', error);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleFileSelected = async (field: string, file: File) => {
+    if (!id) return;
+    setUploadingField(field);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        const mimetype = file.type || 'image/jpeg';
+        await uploadUserDocument(id, field, base64, mimetype);
+        fetchUser();
+      };
+      reader.onerror = () => {
+        console.error('Failed to read file');
+        setUploadingField(null);
+      };
+    } catch (error) {
+      console.error('Failed to upload document', error);
+    } finally {
+      // Will be cleared after reader.onload completes
+      setTimeout(() => setUploadingField(null), 1000);
+    }
+  };
+
+  const handleDeleteDocument = async (field: string) => {
+    if (!id) return;
+    if (!window.confirm(`Are you sure you want to remove this document?`)) return;
+    setUploadingField(field);
+    try {
+      await deleteUserDocument(id, field);
+      fetchUser();
+    } catch (error) {
+      console.error('Failed to delete document', error);
+    } finally {
+      setUploadingField(null);
     }
   };
 
@@ -598,15 +640,54 @@ const UserDetail: React.FC = () => {
                           <Card sx={{ border: '1px solid #eee', boxShadow: 'none' }}>
                             <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <Typography variant="caption" sx={{ fontWeight: 800 }}>{doc.title}</Typography>
-                              <Button
-                                size="small"
-                                variant="text"
-                                color="warning"
-                                onClick={() => { setRequestDocType(doc.key); setRequestDocReason(''); setRequestDocsOpen(true); }}
-                                sx={{ fontSize: '0.65rem', fontWeight: 700 }}
-                              >
-                                Request
-                              </Button>
+                              <Stack direction="row" spacing={0.5}>
+                                {doc.key === 'inspection_photo_url' ? (
+                                  <Button
+                                    size="small"
+                                    variant="text"
+                                    color="warning"
+                                    onClick={() => { setRequestDocType(doc.key); setRequestDocReason(''); setRequestDocsOpen(true); }}
+                                    sx={{ fontSize: '0.65rem', fontWeight: 700 }}
+                                  >
+                                    Request
+                                  </Button>
+                                ) : null}
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  id={`upload-${doc.key}`}
+                                  style={{ display: 'none' }}
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) handleFileSelected(doc.key, file);
+                                    e.target.value = '';
+                                  }}
+                                />
+                                <label htmlFor={`upload-${doc.key}`}>
+                                  <Button
+                                    size="small"
+                                    variant="text"
+                                    color="primary"
+                                    component="span"
+                                    disabled={uploadingField === doc.key}
+                                    sx={{ fontSize: '0.65rem', fontWeight: 700 }}
+                                  >
+                                    {uploadingField === doc.key ? '...' : 'Replace'}
+                                  </Button>
+                                </label>
+                                {doc.url ? (
+                                  <Button
+                                    size="small"
+                                    variant="text"
+                                    color="error"
+                                    disabled={uploadingField === doc.key}
+                                    onClick={() => handleDeleteDocument(doc.key)}
+                                    sx={{ fontSize: '0.65rem', fontWeight: 700 }}
+                                  >
+                                    Remove
+                                  </Button>
+                                ) : null}
+                              </Stack>
                             </CardContent>
                             {doc.url ? (
                               <CardMedia
@@ -882,13 +963,50 @@ const UserDetail: React.FC = () => {
                 <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 800 }}>Identity Verification (KYC)</Typography>
                 <Grid container spacing={2} {...({ component: 'div' } as any)}>
                   {[
-                    { title: 'Identity Card (Front)', url: user.id_photo_front_url },
-                    { title: 'Identity Card (Back)', url: user.id_photo_back_url }
+                    { title: 'Identity Card (Front)', key: 'id_photo_front_url', url: user.id_photo_front_url },
+                    { title: 'Identity Card (Back)', key: 'id_photo_back_url', url: user.id_photo_back_url }
                   ].map((doc, idx) => (
                     <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
                       <Card sx={{ border: '1px solid #eee', boxShadow: 'none' }}>
-                        <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee' }}>
+                        <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Typography variant="caption" sx={{ fontWeight: 800 }}>{doc.title}</Typography>
+                          <Stack direction="row" spacing={0.5}>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id={`upload-${doc.key}`}
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleFileSelected(doc.key, file);
+                                e.target.value = '';
+                              }}
+                            />
+                            <label htmlFor={`upload-${doc.key}`}>
+                              <Button
+                                size="small"
+                                variant="text"
+                                color="primary"
+                                component="span"
+                                disabled={uploadingField === doc.key}
+                                sx={{ fontSize: '0.65rem', fontWeight: 700 }}
+                              >
+                                {uploadingField === doc.key ? '...' : 'Replace'}
+                              </Button>
+                            </label>
+                            {doc.url ? (
+                              <Button
+                                size="small"
+                                variant="text"
+                                color="error"
+                                disabled={uploadingField === doc.key}
+                                onClick={() => handleDeleteDocument(doc.key)}
+                                sx={{ fontSize: '0.65rem', fontWeight: 700 }}
+                              >
+                                Remove
+                              </Button>
+                            ) : null}
+                          </Stack>
                         </CardContent>
                         {doc.url ? (
                           <CardMedia
@@ -896,7 +1014,8 @@ const UserDetail: React.FC = () => {
                             height="340"
                             image={doc.url}
                             alt={doc.title}
-                            sx={{ objectFit: 'cover', bgcolor: 'white' }}
+                            sx={{ objectFit: 'cover', bgcolor: 'white', cursor: 'pointer' }}
+                            onClick={() => window.open(doc.url, '_blank')}
                           />
                         ) : (
                           <Box sx={{ height: 340, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'white' }}>

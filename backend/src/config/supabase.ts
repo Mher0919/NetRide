@@ -22,13 +22,15 @@ export async function uploadToSupabase(
       headers: {
         'Authorization': `Bearer ${env.SUPABASE_ANON_KEY}`,
         'Content-Type': mimetype,
-        'x-upsert': 'false',
+        'x-upsert': 'true',
       },
       body: new Blob([new Uint8Array(buffer)], { type: mimetype }),
     });
 
     if (!res.ok) {
-      console.error(`[SUPABASE] Upload failed: ${res.status} ${res.statusText}`);
+      let body = '';
+      try { body = await res.text(); } catch { /* ignore */ }
+      console.error(`[SUPABASE] Upload failed: ${res.status} ${res.statusText} — ${body}`);
       return null;
     }
 
