@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -429,14 +428,6 @@ class AuthService {
       return false;
     } catch (e) {
       debugPrint('[AUTH SYNC] ❌ Sync failed: $e');
-      // If the backend rejects because this email is only a rider (no driver
-      // profile), sign the user out of Supabase so we don't keep retrying
-      // the sync on every app launch.
-      final msg = e.toString();
-      if (msg.contains('registered as a rider') || msg.contains('rider')) {
-        debugPrint('[AUTH SYNC] 🧹 Rider-only email — clearing Supabase session to stop retries.');
-        unawaited(Supabase.instance.client.auth.signOut());
-      }
       return false;
     }
   }
