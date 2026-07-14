@@ -508,6 +508,17 @@ export class DriverService {
   }
 
   static async requestVerification(userId: string, data: any) {
+    // Reject DOB changes if the field is locked.
+    if (data.date_of_birth) {
+      const user = await pool.query(
+        `SELECT dob_locked FROM users WHERE id = $1`,
+        [userId]
+      );
+      if (user.rows[0]?.dob_locked) {
+        throw new Error('DOB_LOCKED: Your date of birth has already been verified and cannot be changed.');
+      }
+    }
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -679,17 +690,15 @@ export class DriverService {
       throw new Error('PROFILE_CHANGE_PENDING: A previous change is still awaiting admin review.');
     }
 
-    // 24-hour rate limit per driver (any status). Uses Redis with a fallback
-    // to "fail closed" — if Redis is down we refuse rather than allow abuse.
-    const rateKey = `profile-change:rate:${userId}`;
-    try {
-      const count = await redis.incr(rateKey);
-      if (count === 1) await redis.expire(rateKey, 24 * 60 * 60);
-      if (count > 1) throw new Error('RATE_LIMITED: You can only submit a profile change once every 24 hours.');
-    } catch (err: any) {
-      if (err.message.startsWith('RATE_LIMITED')) throw err;
-      console.warn('[DRIVER] Redis unavailable, refusing rate-limit check:', err.message);
-      throw new Error('RATE_LIMITED: Rate-limit service unavailable. Please try again shortly.');
+    // Reject DOB changes if the field is locked (approved by admin already).
+    if (changes.date_of_birth) {
+      const user = await pool.query(
+        `SELECT dob_locked FROM users WHERE id = $1`,
+        [userId]
+      );
+      if (user.rows[0]?.dob_locked) {
+        throw new Error('DOB_LOCKED: Your date of birth has already been verified and cannot be changed.');
+      }
     }
 
     // If the request contains a payout_card, validate and pre-create the

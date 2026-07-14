@@ -220,6 +220,15 @@ export class AdminController {
     const { id } = req.params;
     const adminId = req.user!.id;
     try {
+      // Lock the DOB if it's set (identity verification includes DOB review).
+      const existing = await prisma.user.findUnique({ where: { id }, select: { date_of_birth: true } });
+      if (existing?.date_of_birth) {
+        await (prisma.user as any).update({
+          where: { id },
+          data: { dob_locked: true },
+        });
+      }
+
       const user = await (prisma.user as any).update({
         where: { id },
         data: {
@@ -810,7 +819,10 @@ export class AdminController {
         updatedFields.push('phone_number');
       }
       if (changes.date_of_birth) {
-        await client.query(`UPDATE users SET date_of_birth = $1 WHERE id = $2`, [changes.date_of_birth, driverId]);
+        await client.query(
+          `UPDATE users SET date_of_birth = $1, dob_locked = true WHERE id = $2`,
+          [changes.date_of_birth, driverId]
+        );
         updatedFields.push('date_of_birth');
       }
       if (changes.profile_image_url) {

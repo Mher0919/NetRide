@@ -78,6 +78,7 @@ model User {
   full_name           String
   password_hash       String?
   date_of_birth       DateTime?           @db.Timestamptz(6)
+  dob_locked          Boolean?            @default(false)
   profile_image_url   String?
   id_photo_front_url  String?
   id_photo_back_url   String?

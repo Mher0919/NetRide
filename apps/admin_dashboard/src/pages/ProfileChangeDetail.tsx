@@ -109,7 +109,7 @@ const ProfileChangeDetail: React.FC = () => {
 
   if (requested.full_name !== undefined) pushRow('Full Name', driver?.full_name ?? '—', requested.full_name);
   if (requested.phone_number !== undefined) pushRow('Phone', '—', requested.phone_number);
-  if (requested.date_of_birth !== undefined) pushRow('Date of Birth', '—', requested.date_of_birth, 'date');
+  if (requested.date_of_birth !== undefined) pushRow('Date of Birth', change?.date_of_birth ? new Date(change.date_of_birth).toISOString().split('T')[0] : 'Not set', requested.date_of_birth, 'date');
   if (requested.profile_image_url !== undefined) pushRow('Profile Photo', '—', requested.profile_image_url, 'image');
   if (requested.license_number !== undefined) pushRow('License #', driver?.license_number ?? '—', requested.license_number);
   if (requested.make !== undefined) pushRow('Vehicle Make', vehicle?.make ?? '—', requested.make);

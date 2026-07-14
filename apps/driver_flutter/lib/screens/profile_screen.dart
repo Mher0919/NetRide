@@ -41,8 +41,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isVerified = false;
   bool _hasPassword = false;
   bool _showVerificationHint = false;
+  bool _dobLocked = false;
   double _rating = 5.0;
   int _totalRides = 0;
+
+  // Phone OTP verification state
+  bool _isPhoneChangeDialogOpen = false;
+  final _phoneOtpController = TextEditingController();
+  bool _phoneCodeSent = false;
+  bool _isSendingPhoneCode = false;
+  String? _pendingPhoneNumber;
 
   @override
   void initState() {
@@ -82,6 +90,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileImageUrl = profile['profile_image_url'];
         _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
         _hasPassword = profile['has_password'] == true;
+        _dobLocked = profile['dob_locked'] == true;
         _rating = double.tryParse(profile['rating']?.toString() ?? '') ?? 5.0;
         _totalRides = int.tryParse(profile['rating_count']?.toString() ?? '') ?? 0;
         
@@ -404,6 +413,135 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _showPhoneChangeDialog() async {
+    if (_isPhoneChangeDialogOpen) return;
+    _isPhoneChangeDialogOpen = true;
+    final newPhoneController = TextEditingController();
+    _phoneOtpController.clear();
+    _phoneCodeSent = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text('Change Phone Number', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Enter your new phone number and verify it via SMS.',
+                    style: GoogleFonts.poppins(fontSize: 14)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: newPhoneController,
+                  keyboardType: TextInputType.phone,
+                  enabled: !_phoneCodeSent,
+                  decoration: const InputDecoration(
+                    labelText: 'New Phone Number',
+                    border: OutlineInputBorder(),
+                    hintText: '+1 (555) 123-4567',
+                  ),
+                ),
+                if (_phoneCodeSent) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _phoneOtpController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    decoration: const InputDecoration(
+                      labelText: 'Verification Code',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                if (_isSendingPhoneCode)
+                  const CircularProgressIndicator(strokeWidth: 2)
+                else if (!_phoneCodeSent)
+                  ElevatedButton(
+                    onPressed: () async {
+                      final phone = newPhoneController.text.trim();
+                      if (phone.isEmpty) return;
+                      setDialogState(() => _isSendingPhoneCode = true);
+                      try {
+                        await AuthService.requestPhoneOTP(phone);
+                        _pendingPhoneNumber = phone;
+                        setDialogState(() {
+                          _phoneCodeSent = true;
+                          _isSendingPhoneCode = false;
+                        });
+                      } catch (e) {
+                        setDialogState(() => _isSendingPhoneCode = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Failed to send code: $e')),
+                          );
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.black,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Send Code'),
+                  )
+                else
+                  ElevatedButton(
+                    onPressed: () async {
+                      final code = _phoneOtpController.text.trim();
+                      if (code.length != 6) return;
+                      setDialogState(() => _isSendingPhoneCode = true);
+                      try {
+                        await AuthService.verifyPhoneOTP(
+                          phoneNumber: _pendingPhoneNumber!,
+                          code: code,
+                        );
+                        _isPhoneChangeDialogOpen = false;
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Phone number updated successfully.'),
+                              backgroundColor: Color(0xFF5B7760),
+                            ),
+                          );
+                          _fetchProfile();
+                        }
+                      } catch (e) {
+                        setDialogState(() => _isSendingPhoneCode = false);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Verification failed: $e')),
+                          );
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5B7760),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Verify & Update'),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  _isPhoneChangeDialogOpen = false;
+                  Navigator.pop(ctx);
+                },
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    _isPhoneChangeDialogOpen = false;
+  }
+
   Future<void> _showEmailChangeDialog() async {
     final emailController = TextEditingController(text: _email);
     await showDialog(
@@ -451,7 +589,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// plate, photos, payout card) requires admin approval before going live.
   Future<void> _saveProfile() async {
     final fullName = _nameController.text.trim();
-    final phoneNumber = _phoneController.text.trim();
     final dob = _dobController.text.trim();
     final plateNumber = _plateController.text.trim();
 
@@ -476,7 +613,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       pushIfChanged('full_name', fullName, original['full_name']);
-      pushIfChanged('phone_number', phoneNumber, original['phone_number']);
       pushIfChanged(
         'date_of_birth',
         _parseDob(dob),
@@ -636,6 +772,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (err.contains('INVALID_CARD')) {
           return 'That card number isn\'t valid. Check the digits and try again.';
         }
+        if (err.contains('DOB_LOCKED')) {
+          return 'Your date of birth has already been verified and cannot be changed.';
+        }
       }
       if (e.response?.statusCode == 429) {
         return 'Too many requests. Please wait and try again later.';
@@ -653,6 +792,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     if (raw.contains('INVALID_CARD')) {
       return 'That card number isn\'t valid. Check the digits and try again.';
+    }
+    if (raw.contains('DOB_LOCKED')) {
+      return 'Your date of birth has already been verified and cannot be changed.';
     }
     return 'Could not submit your changes: $raw';
   }
@@ -759,8 +901,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     icon: Icons.phone_outlined,
                     label: 'Phone Number',
                     controller: _phoneController,
-                    enabled: _isEditing,
-                    keyboardType: TextInputType.phone,
+                    enabled: false,
+                    onAction: _isEditing ? _showPhoneChangeDialog : null,
                   ),
                   const Divider(height: 32),
                   _buildProfileItem(
@@ -768,7 +910,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     label: 'Date of Birth',
                     controller: _dobController,
                     enabled: false,
-                    onAction: _isEditing ? _updateAgeAndLicense : null,
+                    onAction: _isEditing && !_dobLocked ? _updateAgeAndLicense : null,
                   ),
                 ],
               ),
