@@ -222,10 +222,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   /// Maps common upload errors to user-friendly messages.
-  String _friendlyUploadError(Exception e) {
+  String _friendlyUploadError(dynamic e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map<String, dynamic>) {
+        final err = data['error']?.toString() ?? '';
+        if (err.contains('RATE_LIMITED')) {
+          return 'You\'ve already submitted a profile change recently. Please wait 24 hours.';
+        }
+        if (err.contains('PROFILE_CHANGE_PENDING')) {
+          return 'You already have a change awaiting review.';
+        }
+      }
+      final code = e.response?.statusCode;
+      if (code == 429) return 'Too many requests — please wait and try again.';
+      if (code == 413) return 'Image is too large — please choose a smaller one.';
+    }
     final s = e.toString().toLowerCase();
     if (s.contains('429') || s.contains('too many') || s.contains('rate limit')) {
-      return 'Too many uploads — please wait a moment and try again.';
+      return 'Too many requests — please wait and try again.';
     }
     if (s.contains('413') || s.contains('too large')) {
       return 'Image is too large — please choose a smaller one.';
@@ -485,14 +500,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (changes.isEmpty) {
         setState(() {
-          _isSaving = false;
           _isEditing = false;
         });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No changes to submit')),
-          );
-        }
+        if (mounted) _fetchProfile();
         return;
       }
 
@@ -534,7 +544,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       setState(() => _isSaving = false);
-      final msg = _friendlyError(e.toString());
+      final msg = _friendlyError(e);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -609,7 +619,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return result;
   }
 
-  String _friendlyError(String raw) {
+  String _friendlyError(dynamic e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map<String, dynamic>) {
+        final err = data['error']?.toString() ?? '';
+        if (err.contains('PROFILE_CHANGE_PENDING')) {
+          return 'You already have a change awaiting review. Wait for it to be approved before submitting a new one.';
+        }
+        if (err.contains('RATE_LIMITED')) {
+          return 'You can only submit one change request every 24 hours. Try again later.';
+        }
+        if (err.contains('PHONE_NOT_VERIFIED')) {
+          return 'Verify the new phone number via OTP before submitting this change.';
+        }
+        if (err.contains('INVALID_CARD')) {
+          return 'That card number isn\'t valid. Check the digits and try again.';
+        }
+      }
+      if (e.response?.statusCode == 429) {
+        return 'Too many requests. Please wait and try again later.';
+      }
+    }
+    final raw = e.toString();
     if (raw.contains('PROFILE_CHANGE_PENDING')) {
       return 'You already have a change awaiting review. Wait for it to be approved before submitting a new one.';
     }
@@ -664,19 +696,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         actions: [
           if (_state == ViewState.success)
-            Padding(
-              padding: const EdgeInsets.only(right: 12.0),
-              child: IconButton(
-                icon: Icon(_isEditing ? Icons.check_circle_outline : Icons.edit_outlined, color: const Color(0xFF5B7760)),
-                onPressed: () {
-                  if (_isEditing) {
-                    _saveProfile();
-                  } else {
-                    setState(() => _isEditing = true);
-                  }
-                },
+            ...[
+              if (_isEditing)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4.0),
+                  child: IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Color(0xFFC65A5A)),
+                    onPressed: () {
+                      setState(() => _isEditing = false);
+                      _fetchProfile();
+                    },
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(right: 12.0),
+                child: IconButton(
+                  icon: Icon(_isEditing ? Icons.check_circle : Icons.edit_outlined, color: const Color(0xFF5B7760)),
+                  onPressed: () {
+                    if (_isEditing) {
+                      _saveProfile();
+                    } else {
+                      setState(() => _isEditing = true);
+                    }
+                  },
+                ),
               ),
-            ),
+            ],
         ],
       ),
       body: StateContainer(
@@ -837,12 +882,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   shape: BoxShape.circle,
                   border: Border.all(color: const Color(0xFFD8D2CA), width: 1),
                 ),
-                child: CircleAvatar(
-                  radius: 50,
-                  backgroundColor: const Color(0xFFF7F4EF),
-                  backgroundImage: _profileImageUrl != null ? NetworkImage(_profileImageUrl!) : null,
-                  child: _profileImageUrl == null ? const Icon(Icons.person, size: 48, color: Color(0xFF5B7760)) : null,
-                ),
+                child: _profileImageUrl != null
+                    ? ClipOval(
+                        child: Image.network(
+                          _profileImageUrl!,
+                          width: 100,
+                          height: 100,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 48, color: Color(0xFF5B7760)),
+                        ),
+                      )
+                    : const CircleAvatar(
+                        radius: 50,
+                        backgroundColor: Color(0xFFF7F4EF),
+                        child: Icon(Icons.person, size: 48, color: Color(0xFF5B7760)),
+                      ),
               ),
               if (_isEditing)
                 Positioned(
