@@ -1,40 +1,41 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { env } from './env';
-
-let supabase: SupabaseClient | null = null;
-
-export function getSupabase(): SupabaseClient | null {
-  if (supabase) return supabase;
-  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
-  supabase = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
-  return supabase;
-}
 
 const BUCKET_NAME = 'uploads';
 
+/**
+ * Uploads a file to Supabase Storage using the REST API directly.
+ * Avoids @supabase/supabase-js WebSocket dependency (fails on Node.js <22).
+ * Falls back to null if Supabase is not configured.
+ */
 export async function uploadToSupabase(
   buffer: Buffer,
   filename: string,
   mimetype: string
 ): Promise<string | null> {
-  const client = getSupabase();
-  if (!client) return null;
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
 
-  const { data, error } = await client.storage
-    .from(BUCKET_NAME)
-    .upload(filename, buffer, {
-      contentType: mimetype,
-      upsert: false,
+  const storageUrl = `${env.SUPABASE_URL}/storage/v1/object/${BUCKET_NAME}/${filename}`;
+
+  try {
+    const res = await fetch(storageUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.SUPABASE_ANON_KEY}`,
+        'Content-Type': mimetype,
+        'x-upsert': 'false',
+      },
+      body: new Blob([new Uint8Array(buffer)], { type: mimetype }),
     });
 
-  if (error) {
-    console.error(`[SUPABASE] Upload error: ${error.message}`);
+    if (!res.ok) {
+      console.error(`[SUPABASE] Upload failed: ${res.status} ${res.statusText}`);
+      return null;
+    }
+
+    const publicUrl = `${env.SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}/${filename}`;
+    return publicUrl;
+  } catch (err) {
+    console.error('[SUPABASE] Upload error:', (err as Error).message);
     return null;
   }
-
-  const { data: urlData } = client.storage
-    .from(BUCKET_NAME)
-    .getPublicUrl(data.path);
-
-  return urlData?.publicUrl ?? null;
 }
