@@ -67,14 +67,21 @@ export class DriverService {
     );
     if (!res.rowCount) throw new Error('User not found');
     const u = res.rows[0];
+
+    // Driver-specific phone (separate from rider phone)
+    const driverPhone = await pool.query(
+      `SELECT phone_number, phone_verified FROM drivers WHERE user_id = $1`, [userId]
+    );
+    const dp = driverPhone.rows[0];
+
     return {
       onboarding_step: u.onboarding_step ?? 0,
-      phone_verified: u.phone_verified || false,
+      phone_verified: dp?.phone_verified || u.phone_verified || false,
       headshot_uploaded: u.headshot_uploaded || false,
       profile_image_url: u.profile_image_url,
       full_name: u.full_name,
       date_of_birth: u.date_of_birth,
-      phone_number: u.phone_number,
+      phone_number: dp?.phone_number || u.phone_number,
     };
   }
 
@@ -110,10 +117,17 @@ export class DriverService {
           break;
 
         case 2: // Phone Verification (handled by auth endpoints, just mark step)
-          const phoneCheck = await client.query(
+          const phoneUser = await client.query(
             `SELECT phone_verified, phone_number FROM users WHERE id = $1`, [userId]
           );
-          if (!phoneCheck.rows[0]?.phone_verified) throw new Error('Please verify your phone number first.');
+          const phoneDriver = await client.query(
+            `SELECT phone_verified, phone_number FROM drivers WHERE user_id = $1`, [userId]
+          );
+          const userVerified = phoneUser.rows[0]?.phone_verified;
+          const driverVerified = phoneDriver.rows[0]?.phone_verified;
+          if (!userVerified && !driverVerified) {
+            throw new Error('Please verify your phone number first.');
+          }
           await client.query(
             `UPDATE users SET onboarding_step = GREATEST(onboarding_step, 3), updated_at = NOW() WHERE id = $1`,
             [userId]
@@ -228,7 +242,12 @@ export class DriverService {
         [userId]
       );
       await client.query(
-        `UPDATE users SET verification_status = 'PENDING'::verification_status WHERE id = $1`,
+        `UPDATE users SET verification_status = 
+           CASE WHEN verification_status = 'VERIFIED' THEN 'VERIFIED'::verification_status
+                ELSE 'PENDING'::verification_status
+           END,
+           onboarding_step = GREATEST(onboarding_step, 5)
+         WHERE id = $1`,
         [userId]
       );
 

@@ -69,10 +69,15 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       // Pull the latest face-check gate so the banner reflects reality on
       // app open, not just on the offline-switch tap.
       final provider = Provider.of<DriverProvider>(context, listen: false);
-      await provider.refreshFaceCheck(
-        lat: _lastPosition?.latitude,
-        lng: _lastPosition?.longitude,
-      );
+      try {
+        await provider.refreshFaceCheck(
+          lat: _lastPosition?.latitude,
+          lng: _lastPosition?.longitude,
+        );
+      } catch (_) {
+        // Face-check failures are non-fatal — the gate stays in its last
+        // known state.
+      }
 
       // Also pull the latest profile-change gate (admin approval queue).
       // The provider ignores fields it already controls; calling this on

@@ -117,7 +117,7 @@ class FaceVerificationService {
   }) async {
     final deviceId = await DeviceFingerprint.getOrCreate();
     final response = await ApiService.dio.get(
-      'face/check-required',
+      '/face/check-required',
       queryParameters: {
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,
@@ -155,7 +155,7 @@ class FaceVerificationService {
     });
 
     final response = await ApiService.dio.post(
-      'face/verify',
+      '/face/verify',
       data: formData,
       options: Options(
         headers: {

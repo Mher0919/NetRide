@@ -51,7 +51,7 @@ const UserDetail: React.FC = () => {
   const [violations, setViolations] = useState<any[]>([]);
   const [clearDangerousOpen, setClearDangerousOpen] = useState(false);
   const [clearNotes, setClearNotes] = useState('');
-  const isDriver = user?.role === 'DRIVER';
+  const isDriver = !!user?.driver_profile;
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
   const fetchUser = async () => {
@@ -60,7 +60,7 @@ const UserDetail: React.FC = () => {
       const response = await api.get(`/admin/users/${id}`);
       setUser(response.data);
       // Drivers: pull recent speeding history for the safety panel.
-      if (response.data?.role === 'DRIVER') {
+      if (response.data?.driver_profile) {
         try {
           const v = await getDriverSpeeding(id, { limit: 10 });
           setViolations(v.violations ?? []);
@@ -175,8 +175,8 @@ const UserDetail: React.FC = () => {
             <Link component={RouterLink} underline="hover" color="inherit" to="/" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
               Admin
             </Link>
-            <Link component={RouterLink} underline="hover" color="inherit" to={user.role === 'RIDER' ? '/riders' : '/drivers'} sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
-              {user.role === 'RIDER' ? 'Riders' : 'Drivers'}
+            <Link component={RouterLink} underline="hover" color="inherit" to={user.driver_profile ? '/drivers' : '/riders'} sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
+              {user.driver_profile ? 'Drivers' : 'Riders'}
             </Link>
             <Typography color="text.primary" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>User Profile</Typography>
           </Breadcrumbs>
@@ -276,7 +276,7 @@ const UserDetail: React.FC = () => {
         {/* Detailed Info & Documents */}
         <Grid item xs={12} md={8} {...({ component: 'div' } as any)}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {user.role === 'DRIVER' && user.driver_profile && (
+            {user.driver_profile && (
               <>
                 <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
                   <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 800, mb: 3 }}>

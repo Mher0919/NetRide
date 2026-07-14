@@ -91,7 +91,7 @@ class DriverProvider with ChangeNotifier {
 
   Future<void> fetchPricing() async {
     try {
-      final response = await ApiService.dio.get('driver/pricing');
+      final response = await ApiService.dio.get('/driver/pricing');
       final data = response.data;
       _pricePerMile = (data['price_per_mile'] as num).toDouble();
       _priceRangeMin = (data['price_range_min'] as num).toDouble();
@@ -108,7 +108,7 @@ class DriverProvider with ChangeNotifier {
 
   Future<void> updatePrice(double newPrice) async {
     try {
-      final response = await ApiService.dio.post('driver/pricing/update', data: {
+      final response = await ApiService.dio.post('/driver/pricing/update', data: {
         'pricePerMile': newPrice,
       });
       final data = response.data;
@@ -144,7 +144,7 @@ class DriverProvider with ChangeNotifier {
   Future<void> updateOperatingClass(models.VehicleClass newClass) async {
     try {
       final className = newClass.toString().split('.').last;
-      await ApiService.dio.patch('driver/operating-class', data: {'activeClass': className});
+      await ApiService.dio.patch('/driver/operating-class', data: {'activeClass': className});
       _activeClass = newClass;
       notifyListeners();
     } catch (e) {
@@ -155,7 +155,7 @@ class DriverProvider with ChangeNotifier {
 
   Future<void> _fetchRecommendations() async {
     try {
-      final response = await ApiService.dio.get('driver/recommendations');
+      final response = await ApiService.dio.get('/driver/recommendations');
       _recommendation = response.data;
       notifyListeners();
     } catch (e) {

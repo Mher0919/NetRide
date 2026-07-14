@@ -46,7 +46,7 @@ class _LoginScreenState extends State<LoginScreen> {
               // Initialize socket with the backend token
               Provider.of<DriverProvider>(context, listen: false).updateToken(res['token']);
 
-              Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/onboarding'});
+              Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/'});
             }
           } catch (e) {
             debugPrint('Error during backend OAuth sync: $e');
@@ -106,15 +106,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else {
-          final hasPhone = res['user']['phone_number'] != null && 
-                          res['user']['phone_number'].toString().isNotEmpty &&
-                          res['phone_number_required'] != true;
-          
-          Navigator.pushReplacementNamed(
-            context, 
-            '/splash', 
-            arguments: {'targetRoute': hasPhone ? '/' : '/onboarding'}
-          );
+          Navigator.pushReplacementNamed(context, '/splash', arguments: {'targetRoute': '/'});
         }
       }
     } catch (e) {

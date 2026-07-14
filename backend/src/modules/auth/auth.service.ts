@@ -12,20 +12,68 @@ import { OTPService } from './otp.service';
 import { UserRole } from '../../types';
 
 export class AuthService {
-  static async requestPhoneOTP(phoneNumber: string) {
-    // 1. Check if phone number is already registered
-    const existingRes = await pool.query('SELECT id FROM users WHERE phone_number = $1', [phoneNumber]);
-    if (existingRes.rows.length > 0) {
+  static async requestPhoneOTP(userId: string, phoneNumber: string, role?: string) {
+    // 1. Check if this phone is already verified for the SAME user
+    //    (either on their rider profile via users table, or driver profile via drivers table)
+    const userRes = await pool.query(
+      `SELECT phone_number, phone_verified FROM users WHERE id = $1`, [userId]
+    );
+    if (userRes.rows[0]?.phone_number === phoneNumber && userRes.rows[0]?.phone_verified) {
+      // Same user, same phone, already verified on rider side → auto-verify for driver
+      if (role === 'DRIVER') {
+        await pool.query(
+          `UPDATE drivers SET phone_number = $1, phone_verified = true WHERE user_id = $2`,
+          [phoneNumber, userId]
+        );
+      }
+      return { auto_verified: true, message: 'Phone already verified on your account.' };
+    }
+
+    const driverRes = await pool.query(
+      `SELECT phone_number, phone_verified FROM drivers WHERE user_id = $1`, [userId]
+    );
+    if (driverRes.rows[0]?.phone_number === phoneNumber && driverRes.rows[0]?.phone_verified) {
+      return { auto_verified: true, message: 'Phone already verified on your account.' };
+    }
+
+    // 2. Check if phone belongs to a DIFFERENT user
+    const otherUser = await pool.query(
+      'SELECT id FROM users WHERE phone_number = $1 AND id != $2', [phoneNumber, userId]
+    );
+    if (otherUser.rows.length > 0) {
       throw new Error('This phone number is already associated with another account');
     }
 
+    const otherDriver = await pool.query(
+      'SELECT user_id FROM drivers WHERE phone_number = $1 AND user_id != $2', [phoneNumber, userId]
+    );
+    if (otherDriver.rows.length > 0) {
+      throw new Error('This phone number is already associated with another account');
+    }
+
+    // 3. Normal Twilio flow
     return SmsService.sendVerificationCode(phoneNumber);
   }
 
-  static async verifyPhoneOTP(userId: string, phoneNumber: string, code: string) {
+  static async verifyPhoneOTP(userId: string, phoneNumber: string, code: string, role?: string) {
     const result = await SmsService.verifyCode(phoneNumber, code);
     if (result.status === 'approved') {
-      await pool.query('UPDATE users SET phone_number = $1, is_verified = true WHERE id = $2', [phoneNumber, userId]);
+      if (role === 'DRIVER') {
+        // Ensure drivers row exists (dual-role safety)
+        const exists = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [userId]);
+        if (exists.rows.length === 0) {
+          await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [userId]);
+        }
+        await pool.query(
+          `UPDATE drivers SET phone_number = $1, phone_verified = true WHERE user_id = $2`,
+          [phoneNumber, userId]
+        );
+      } else {
+        await pool.query(
+          'UPDATE users SET phone_number = $1, is_verified = true, phone_verified = true WHERE id = $2',
+          [phoneNumber, userId]
+        );
+      }
       return { success: true, message: 'Phone number verified' };
     }
     throw new Error('Invalid or expired verification code');

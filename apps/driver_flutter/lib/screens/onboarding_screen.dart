@@ -122,11 +122,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         AuthService.getOnboardingProgress(),
       ]);
 
+      final progress = results[2] as Map<String, dynamic>;
+      final step = progress['onboarding_step'] as int? ?? 0;
+
+      if (step >= 5 && !mounted) return;
+      if (step >= 5) {
+        Navigator.pushReplacementNamed(context, '/');
+        return;
+      }
+
       setState(() {
         _allMakes = (results[0] as List<dynamic>).cast<String>();
         _filteredMakes = _allMakes;
         _availableYears = (results[1] as List<dynamic>).cast<int>();
-        final progress = results[2] as Map<String, dynamic>;
         _restoreProgress(progress);
         _state = ViewState.success;
       });
@@ -645,12 +653,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _phoneController.text = normalized;
     setState(() => _isSendingCode = true);
     try {
-      await AuthService.requestPhoneOTP(normalized);
-      setState(() {
-        _codeSent = true;
-        _isSendingCode = false;
-      });
-      _showSuccess('Verification code sent to $normalized');
+      final result = await AuthService.requestPhoneOTP(normalized);
+      if (result['auto_verified'] == true) {
+        setState(() {
+          _isPhoneVerified = true;
+          _isSendingCode = false;
+        });
+        _showSuccess('Phone number already verified on your account.');
+      } else {
+        setState(() {
+          _codeSent = true;
+          _isSendingCode = false;
+        });
+        _showSuccess('Verification code sent to $normalized');
+      }
     } catch (e) {
       setState(() => _isSendingCode = false);
       final msg = e.toString();

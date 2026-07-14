@@ -67,9 +67,13 @@ class AuthService {
     }
   }
 
-  static Future<void> requestPhoneOTP(String phoneNumber) async {
+  static Future<Map<String, dynamic>> requestPhoneOTP(String phoneNumber) async {
     try {
-      await ApiService.dio.post('/auth/request-phone-otp', data: {'phone_number': phoneNumber});
+      final response = await ApiService.dio.post('/auth/request-phone-otp', data: {
+        'phone_number': phoneNumber,
+        'role': 'DRIVER',
+      });
+      return response.data is Map ? Map<String, dynamic>.from(response.data as Map) : {};
     } catch (e) {
       rethrow;
     }
@@ -83,6 +87,7 @@ class AuthService {
       final response = await ApiService.dio.post('/auth/verify-phone-otp', data: {
         'phone_number': phoneNumber,
         'code': code,
+        'role': 'DRIVER',
       });
 
       if (response.statusCode == 200 || response.statusCode == 201) {

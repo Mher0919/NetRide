@@ -277,8 +277,15 @@ export class AuthController {
 
   static async requestPhoneOTP(req: AuthRequest, res: Response) {
     try {
-      const { phone_number } = z.object({ phone_number: z.string() }).parse(req.body);
-      const result = await AuthService.requestPhoneOTP(phone_number);
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { phone_number, role } = z.object({
+        phone_number: z.string(),
+        role: z.string().optional(),
+      }).parse(req.body);
+
+      const result = await AuthService.requestPhoneOTP(userId, phone_number, role);
       res.json(result);
     } catch (error: any) {
       console.error(`[AUTH] ❌ Phone OTP request error: ${error.message}`);
@@ -291,12 +298,13 @@ export class AuthController {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-      const { phone_number, code } = z.object({
+      const { phone_number, code, role } = z.object({
         phone_number: z.string(),
         code: z.string().min(4).max(10),
+        role: z.string().optional(),
       }).parse(req.body);
 
-      const result = await AuthService.verifyPhoneOTP(userId, phone_number, code);
+      const result = await AuthService.verifyPhoneOTP(userId, phone_number, code, role);
       res.json(result);
     } catch (error: any) {
       console.error(`[AUTH] ❌ Phone OTP verification error: ${error.message}`);
