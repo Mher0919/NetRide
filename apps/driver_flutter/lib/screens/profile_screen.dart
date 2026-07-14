@@ -118,6 +118,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
+      debugPrint('[PROFILE] ❌ _fetchProfile error: $e');
+      if (e is FormatException) {
+        debugPrint('[PROFILE]   ⚠️ FormatException details: ${e.message}');
+      }
+
       setState(() {
         _state = ViewState.failure;
         _errorMessage = 'We were unable to load your driver credentials. Please verify your connection.';

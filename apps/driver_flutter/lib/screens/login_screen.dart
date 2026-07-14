@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:google_fonts/google_fonts.dart';
@@ -50,6 +51,14 @@ class _LoginScreenState extends State<LoginScreen> {
             }
           } catch (e) {
             debugPrint('Error during backend OAuth sync: $e');
+            if (mounted && e is DioException) {
+              final msg = (e.response?.data is Map)
+                  ? ((e.response?.data as Map)['error'] ?? 'Authentication failed. Please try again.')
+                  : 'Authentication failed. Please try again.';
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(msg.toString())),
+              );
+            }
           }
         }
       });

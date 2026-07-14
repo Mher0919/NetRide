@@ -300,12 +300,13 @@ export class AuthService {
         user.is_active = true;
       }
 
-      // Dual-role support: create a driver profile for the existing user
-      // so they can complete driver onboarding without losing their rider account.
+      // Reject driver-role OAuth for existing users who don't already have a
+      // drivers row — they must sign up explicitly rather than getting an
+      // auto-created driver profile on login.
       if (data.role === 'DRIVER') {
         const driverCheck = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [user.id]);
         if (driverCheck.rows.length === 0) {
-          await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
+          throw new Error('This email is registered as a rider. Please sign up for a driver account with a different email, or log in with rider credentials and complete driver onboarding from your profile.');
         }
       }
     }
