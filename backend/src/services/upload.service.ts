@@ -1,14 +1,11 @@
-// backend/src/services/upload.service.ts
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { env } from '../config/env';
+import { uploadToSupabase } from '../config/supabase';
 
 export class UploadService {
-  /**
-   * Processes a base64 string, saves it to the filesystem, and returns a URL.
-   */
   static async upload(req: Request, res: Response) {
     try {
       const { image, mimetype, filename } = req.body;
@@ -17,27 +14,29 @@ export class UploadService {
         return res.status(400).json({ error: 'No image data or mimetype provided' });
       }
 
-      // 1. Generate unique filename
       const extension = mimetype.split('/')[1] || 'jpg';
       const safeFilename = `${uuidv4()}.${extension}`;
-      const uploadDir = path.join(__dirname, '../../uploads');
-      const filePath = path.join(uploadDir, safeFilename);
+      const buffer = Buffer.from(image, 'base64');
 
-      // 2. Ensure directory exists
+      // Try Supabase Storage first (persistent across deploys/instances)
+      const supabaseUrl = await uploadToSupabase(buffer, safeFilename, mimetype);
+      if (supabaseUrl) {
+        console.log(`📸 [UPLOAD] Uploaded to Supabase: ${safeFilename} (${buffer.length} bytes) -> ${supabaseUrl}`);
+        return res.json({ url: supabaseUrl });
+      }
+
+      // Fall back to local filesystem
+      const uploadDir = path.join(__dirname, '../../uploads');
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
 
-      // 3. Save buffer to file
-      const buffer = Buffer.from(image, 'base64');
+      const filePath = path.join(uploadDir, safeFilename);
       fs.writeFileSync(filePath, buffer);
 
-      // 4. Construct URL
-      // We use APP_URL from env, e.g., http://localhost:3000
       const fileUrl = `${env.APP_URL}/uploads/${safeFilename}`;
+      console.log(`📸 [UPLOAD] Saved locally: ${safeFilename} (${buffer.length} bytes) -> ${fileUrl}`);
 
-      console.log(`📸 [UPLOAD] File saved: ${safeFilename} (${buffer.length} bytes) -> ${fileUrl}`);
-      
       res.json({ url: fileUrl });
     } catch (error: any) {
       console.error('❌ Upload error:', error);

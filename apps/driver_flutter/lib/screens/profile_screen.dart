@@ -33,6 +33,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _profileImageUrl;
   String? _selectedVehicleId;
   List<dynamic> _vehicles = [];
+  Map<String, dynamic>? _activeVehicle;
   ViewState _state = ViewState.loading;
   String? _errorMessage;
   bool _isSaving = false;
@@ -85,6 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _totalRides = int.tryParse(profile['rating_count']?.toString() ?? '') ?? 0;
         
         final activeV = profile['active_vehicle'];
+        _activeVehicle = activeV is Map<String, dynamic> ? activeV : null;
         if (activeV != null) {
           _selectedVehicleId = activeV['id']?.toString() ?? activeV['vehicle_id']?.toString();
           _plateController.text = activeV['license_plate_number'] ?? '';
@@ -106,10 +108,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'date_of_birth': profile['date_of_birth'],
         'license_number': profile['license_number'],
         'profile_image_url': profile['profile_image_url'],
-        'license_plate_number': (profile['vehicles'] is List &&
-                (profile['vehicles'] as List).isNotEmpty)
-            ? (profile['vehicles'][0])['license_plate_number']
-            : null,
+        'license_plate_number': _activeVehicle?['license_plate_number']
+            ?? ((profile['vehicles'] is List && (profile['vehicles'] as List).isNotEmpty)
+                ? (profile['vehicles'][0])['license_plate_number']
+                : null),
       };
       _hasPendingChange = profile['has_pending_profile_change'] == true;
 
@@ -729,7 +731,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildSectionCard(
                 title: 'Vehicle',
                 children: [
-                  if (_vehicles.isNotEmpty)
+                  if (_activeVehicle != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Row(
@@ -748,12 +750,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '${_vehicles[0]['year']} ${_vehicles[0]['make']} ${_vehicles[0]['model']}',
+                                  '${_activeVehicle['year']} ${_activeVehicle['make']} ${_activeVehicle['model']}',
                                   style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${_vehicles[0]['color']}${_vehicles[0]['interior_color'] != null ? ' / ${_vehicles[0]['interior_color']} Int' : ''}',
+                                  '${_activeVehicle['color']}${_activeVehicle['interior_color'] != null ? ' / ${_activeVehicle['interior_color']} Int' : ''}',
                                   style: TextStyle(fontSize: 12, color: const Color(0xFF2F3A32).withOpacity(0.4)),
                                 ),
                               ],

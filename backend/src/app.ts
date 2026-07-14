@@ -12,6 +12,7 @@ import { pool } from './config/database';
 import { AuthService } from './modules/auth/auth.service';
 import { setupSocketGateway } from './gateway/socket.gateway';
 import { rateLimitMiddleware } from './middleware/rateLimit.middleware';
+import { identifyUser } from './middleware/identifyUser.middleware';
 import { initSentry } from './observability/sentry';
 import { logger } from './observability/logger';
 import { requestContext, requestLogger } from './middleware/pinoHttp';
@@ -68,6 +69,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // 429s get a log line and a metric.
 app.use(requestContext);
 app.use(requestLogger);
+// Optional auth — extracts user from JWT if present (no rejection).
+// Must run BEFORE rate-limit so authenticated requests use user-based keys.
+app.use(identifyUser);
 app.use(rateLimitMiddleware);
 
 // Serve static files from the uploads directory
