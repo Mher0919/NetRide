@@ -81,8 +81,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileImageUrl = profile['profile_image_url'];
         _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
         _hasPassword = profile['has_password'] == true;
-        _rating = (profile['rating'] as num?)?.toDouble() ?? 5.0;
-        _totalRides = profile['rating_count'] as int? ?? 0;
+        _rating = double.tryParse(profile['rating']?.toString() ?? '') ?? 5.0;
+        _totalRides = int.tryParse(profile['rating_count']?.toString() ?? '') ?? 0;
         
         if (profile['vehicles'] != null && profile['vehicles'].isNotEmpty) {
           final v = profile['vehicles'][0];
