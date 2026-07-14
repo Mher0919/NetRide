@@ -146,17 +146,45 @@ export class AdminController {
         last_action_required_at: row.last_action_required_at,
       };
 
-      // Fetch vehicles with submission info
+      // Fetch vehicles with submission info — ordered by status (APPROVED first),
+      // then by approval timestamp, then by submission timestamp.
       const vehiclesRes = await pool.query(
         `SELECT dv.*, v.make AS catalog_make, v.model AS catalog_model,
                 v.year AS catalog_year, v.category, v.service_class
          FROM driver_vehicles dv
          LEFT JOIN vehicles v ON dv.vehicle_id = v.id
          WHERE dv.driver_id = $1
-         ORDER BY dv.submitted_at DESC NULLS LAST, dv.id DESC`,
+         ORDER BY
+           CASE
+             WHEN dv.vehicle_status = 'APPROVED' OR dv.vehicle_status IS NULL THEN 0
+             ELSE 1
+           END,
+           dv.approved_at DESC NULLS LAST,
+           dv.submitted_at DESC NULLS LAST,
+           dv.id DESC`,
         [id]
       );
       driverProfile.vehicles = vehiclesRes.rows;
+
+      // Expose the active vehicle explicitly (for frontend to use directly)
+      const activeVeh = vehiclesRes.rows.find(
+        (r: any) => r.vehicle_status === 'APPROVED' || r.vehicle_status === null
+      );
+      driverProfile.active_vehicle = activeVeh || null;
+
+      // Expose the latest finalized vehicle submission (for admin review display)
+      const latestFinalized = await pool.query(
+        `SELECT s.*, u.full_name AS reviewed_by_admin_name
+         FROM driver_vehicle_submissions s
+         LEFT JOIN users u ON u.id = s.reviewed_by_admin_id
+         WHERE s.driver_id = $1
+           AND s.status IN ('APPROVED', 'REJECTED')
+         ORDER BY s.reviewed_at DESC NULLS LAST, s.submitted_at DESC
+         LIMIT 1`,
+        [id]
+      );
+      driverProfile.latest_finalized_vehicle_submission = latestFinalized.rows[0] || null;
+
       user.driver_profile = driverProfile;
 
       // Normalize phone: if driver-specific phone is set, prefer it at user level too.
@@ -1221,18 +1249,34 @@ export class AdminController {
   static async approveVehicleSubmission(req: AuthRequest, res: Response) {
     const { id } = req.params;
     const adminId = req.user!.id;
+    const client = await pool.connect();
     try {
-      const sub = await pool.query(
-        `SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW'`,
+      await client.query('BEGIN');
+
+      // Lock the submission row
+      const sub = await client.query(
+        `SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW' FOR UPDATE`,
         [id]
       );
       if (!sub.rowCount) {
+        await client.query('ROLLBACK');
+        client.release();
         return res.status(404).json({ error: 'Pending vehicle submission not found.' });
       }
       const row = sub.rows[0];
+      const driverId = row.driver_id;
 
-      // Update the driver_vehicles row for this submission
-      const existingVeh = await pool.query(
+      // 1. Mark the previous active/approved vehicle as INACTIVE
+      await client.query(
+        `UPDATE driver_vehicles
+         SET vehicle_status = 'INACTIVE', updated_at = NOW()
+         WHERE driver_id = $1
+           AND (vehicle_status = 'APPROVED' OR vehicle_status IS NULL)`,
+        [driverId]
+      );
+
+      // 2. Update or create the approved driver_vehicles row
+      const existingVeh = await client.query(
         `UPDATE driver_vehicles
          SET vehicle_status = 'APPROVED', make = $2, model = $3, year = $4,
              color = $5, interior_color = $6, license_plate_number = $7,
@@ -1241,15 +1285,16 @@ export class AdminController {
              inspection_photo_url = $12, approved_at = NOW(), updated_at = NOW()
          WHERE driver_id = $1 AND vehicle_status = 'PENDING_REVIEW'
          RETURNING id`,
-        [row.driver_id, row.make, row.model, row.year, row.color,
+        [driverId, row.make, row.model, row.year, row.color,
          row.interior_color, row.license_plate_number,
          row.license_plate_state, row.zip_code,
          row.registration_photo_url, row.insurance_photo_url,
          row.inspection_photo_url]
       );
+
       let vehId = existingVeh.rows[0]?.id;
       if (!vehId) {
-        const ins = await pool.query(
+        const ins = await client.query(
           `INSERT INTO driver_vehicles
            (driver_id, vehicle_status, make, model, year, color, interior_color,
             license_plate_number, license_plate_state, zip_code,
@@ -1257,7 +1302,7 @@ export class AdminController {
             approved_at, submitted_at)
            VALUES ($1, 'APPROVED', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
            RETURNING id`,
-          [row.driver_id, row.make, row.model, row.year, row.color,
+          [driverId, row.make, row.model, row.year, row.color,
            row.interior_color, row.license_plate_number,
            row.license_plate_state, row.zip_code,
            row.registration_photo_url, row.insurance_photo_url,
@@ -1266,24 +1311,38 @@ export class AdminController {
         vehId = ins.rows[0].id;
       }
 
-      await pool.query(
-        `UPDATE driver_vehicle_submissions SET status = 'APPROVED', reviewed_at = NOW(), reviewed_by = $2 WHERE id = $1`,
+      // 3. Mark the submission as APPROVED
+      await client.query(
+        `UPDATE driver_vehicle_submissions
+         SET status = 'APPROVED', reviewed_at = NOW(), reviewed_by_admin_id = $2
+         WHERE id = $1`,
         [id, adminId]
       );
+
+      // 4. Ensure driver is active
+      await client.query(
+        `UPDATE drivers SET is_active = true, verification_feedback_seen = false WHERE user_id = $1`,
+        [driverId]
+      );
+
+      await client.query('COMMIT');
 
       await prisma.auditLog.create({
         data: {
           admin_id: adminId,
-          target_id: row.driver_id,
+          target_id: driverId,
           action: 'VEHICLE_SUBMISSION_APPROVED',
-          details: `Vehicle submission ${id} approved.`,
+          details: `Vehicle submission ${id} approved. Previous active vehicle marked inactive.`,
         },
       });
 
       res.json({ success: true, vehicle_id: vehId });
     } catch (error: any) {
+      await client.query('ROLLBACK');
       console.error(`[ADMIN] ❌ Approve vehicle submission error: ${error.message}`);
       res.status(500).json({ error: 'Failed to approve vehicle submission.' });
+    } finally {
+      client.release();
     }
   }
 
@@ -1294,26 +1353,43 @@ export class AdminController {
     if (!reason || !String(reason).trim()) {
       return res.status(400).json({ error: 'Rejection reason is required.' });
     }
+    const client = await pool.connect();
     try {
-      const sub = await pool.query(
-        `SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW'`,
+      await client.query('BEGIN');
+
+      const sub = await client.query(
+        `SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW' FOR UPDATE`,
         [id]
       );
       if (!sub.rowCount) {
+        await client.query('ROLLBACK');
+        client.release();
         return res.status(404).json({ error: 'Pending vehicle submission not found.' });
       }
       const row = sub.rows[0];
 
       // Remove the pending driver_vehicles row
-      await pool.query(
+      await client.query(
         `DELETE FROM driver_vehicles WHERE driver_id = $1 AND vehicle_status = 'PENDING_REVIEW'`,
         [row.driver_id]
       );
 
-      await pool.query(
-        `UPDATE driver_vehicle_submissions SET status = 'REJECTED', rejection_reason = $2, reviewed_at = NOW(), reviewed_by = $3 WHERE id = $1`,
+      // Also remove the duplicate pending submission row if exists (created alongside driver_vehicles)
+      await client.query(
+        `DELETE FROM driver_vehicle_submissions
+         WHERE driver_id = $1 AND status = 'PENDING_REVIEW' AND id != $2`,
+        [row.driver_id, id]
+      );
+
+      await client.query(
+        `UPDATE driver_vehicle_submissions
+         SET status = 'REJECTED', rejection_reason = $2, reviewed_at = NOW(),
+             reviewed_by_admin_id = $3
+         WHERE id = $1`,
         [id, reason, adminId]
       );
+
+      await client.query('COMMIT');
 
       await prisma.auditLog.create({
         data: {
@@ -1326,8 +1402,11 @@ export class AdminController {
 
       res.json({ success: true });
     } catch (error: any) {
+      await client.query('ROLLBACK');
       console.error(`[ADMIN] ❌ Reject vehicle submission error: ${error.message}`);
       res.status(500).json({ error: 'Failed to reject vehicle submission.' });
+    } finally {
+      client.release();
     }
   }
 
@@ -1338,29 +1417,62 @@ export class AdminController {
     if (!reason || !String(reason).trim()) {
       return res.status(400).json({ error: 'Change request reason is required.' });
     }
+    const client = await pool.connect();
     try {
-      const sub = await pool.query(
-        `SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW'`,
+      await client.query('BEGIN');
+
+      const sub = await client.query(
+        `SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW' FOR UPDATE`,
         [id]
       );
       if (!sub.rowCount) {
+        await client.query('ROLLBACK');
+        client.release();
         return res.status(404).json({ error: 'Pending vehicle submission not found.' });
       }
       const row = sub.rows[0];
+      const driverId = row.driver_id;
 
-      await pool.query(
-        `UPDATE driver_vehicle_submissions SET status = 'CHANGES_REQUESTED', rejection_reason = $2, reviewed_at = NOW(), reviewed_by = $3 WHERE id = $1`,
+      // Update submission status with the admin note
+      await client.query(
+        `UPDATE driver_vehicle_submissions
+         SET status = 'RESUBMISSION_REQUIRED', rejection_reason = $2,
+             reviewed_at = NOW(), reviewed_by_admin_id = $3
+         WHERE id = $1`,
         [id, reason, adminId]
       );
-      await pool.query(
-        `UPDATE driver_vehicles SET vehicle_status = 'RESUBMISSION_REQUIRED' WHERE driver_id = $1 AND vehicle_status = 'PENDING_REVIEW'`,
-        [row.driver_id]
+
+      // Update the pending driver_vehicles row
+      await client.query(
+        `UPDATE driver_vehicles
+         SET vehicle_status = 'RESUBMISSION_REQUIRED'
+         WHERE driver_id = $1 AND vehicle_status = 'PENDING_REVIEW'`,
+        [driverId]
       );
+
+      // Mark driver as having vehicle action required
+      await client.query(
+        `UPDATE drivers
+         SET has_vehicle_action_required = TRUE,
+             last_vehicle_action_required_at = NOW()
+         WHERE user_id = $1`,
+        [driverId]
+      );
+
+      // Create a resubmission request record
+      await client.query(
+        `INSERT INTO driver_vehicle_resubmission_requests
+         (driver_id, submission_id, requested_by_admin_id, reason, status)
+         VALUES ($1, $2, $3, $4, 'resubmission_required')`,
+        [driverId, id, adminId, reason]
+      );
+
+      await client.query('COMMIT');
 
       await prisma.auditLog.create({
         data: {
           admin_id: adminId,
-          target_id: row.driver_id,
+          target_id: driverId,
           action: 'VEHICLE_SUBMISSION_CHANGES_REQUESTED',
           details: `Vehicle submission ${id} changes requested: ${reason}`,
         },
@@ -1368,8 +1480,95 @@ export class AdminController {
 
       res.json({ success: true });
     } catch (error: any) {
+      await client.query('ROLLBACK');
       console.error(`[ADMIN] ❌ Request vehicle changes error: ${error.message}`);
       res.status(500).json({ error: 'Failed to request vehicle changes.' });
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Request a full vehicle resubmission for the driver.
+   * Creates a resubmission request, marks action required on the driver,
+   * and sets the driver_vehicles row to RESUBMISSION_REQUIRED.
+   * Unlike requestVehicleChanges (which targets a specific pending submission),
+   * this can be used to request a completely new vehicle submission
+   * even for previously approved/rejected vehicles.
+   */
+  static async requestVehicleResubmission(req: AuthRequest, res: Response) {
+    const { id: driverId } = req.params;
+    const { reason } = req.body;
+    const adminId = req.user!.id;
+    if (!reason || !String(reason).trim()) {
+      return res.status(400).json({ error: 'Resubmission request reason is required.' });
+    }
+    if (reason.length > 2000) {
+      return res.status(400).json({ error: 'Reason must not exceed 2000 characters.' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verify the target is a driver
+      const driverCheck = await client.query(
+        `SELECT user_id FROM drivers WHERE user_id = $1`,
+        [driverId]
+      );
+      if (!driverCheck.rowCount) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(404).json({ error: 'Driver not found.' });
+      }
+
+      // Mark any existing driver_vehicles as needing resubmission
+      await client.query(
+        `UPDATE driver_vehicles
+         SET vehicle_status = 'RESUBMISSION_REQUIRED'
+         WHERE driver_id = $1 AND vehicle_status = 'APPROVED'`,
+        [driverId]
+      );
+
+      // Mark driver as having vehicle action required
+      await client.query(
+        `UPDATE drivers
+         SET has_vehicle_action_required = TRUE,
+             last_vehicle_action_required_at = NOW()
+         WHERE user_id = $1`,
+        [driverId]
+      );
+
+      // Create a resubmission request
+      const ins = await client.query(
+        `INSERT INTO driver_vehicle_resubmission_requests
+         (driver_id, requested_by_admin_id, reason, status)
+         VALUES ($1, $2, $3, 'resubmission_required')
+         RETURNING id`,
+        [driverId, adminId, reason]
+      );
+
+      await client.query('COMMIT');
+
+      await prisma.auditLog.create({
+        data: {
+          admin_id: adminId,
+          target_id: driverId,
+          action: 'VEHICLE_RESUBMISSION_REQUESTED',
+          details: `Vehicle resubmission requested for driver ${driverId}: ${reason}`,
+        },
+      });
+
+      res.json({
+        success: true,
+        resubmission_request_id: ins.rows[0].id,
+      });
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      console.error(`[ADMIN] ❌ Request vehicle resubmission error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to request vehicle resubmission.' });
+    } finally {
+      client.release();
     }
   }
 

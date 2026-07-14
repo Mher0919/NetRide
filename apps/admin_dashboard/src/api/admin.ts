@@ -128,6 +128,28 @@ export const reviewDocumentRequirement = async (requirementId: string, decision:
   return response.data;
 };
 
+// ----- Vehicle submissions --------------------------------------------------
+
+export const approveVehicleSubmission = async (submissionId: string) => {
+  const response = await api.post(`/admin/vehicles/submissions/${submissionId}/approve`);
+  return response.data;
+};
+
+export const rejectVehicleSubmission = async (submissionId: string, reason: string) => {
+  const response = await api.post(`/admin/vehicles/submissions/${submissionId}/reject`, { reason });
+  return response.data;
+};
+
+export const requestVehicleChanges = async (submissionId: string, reason: string) => {
+  const response = await api.post(`/admin/vehicles/submissions/${submissionId}/request-changes`, { reason });
+  return response.data;
+};
+
+export const requestVehicleResubmission = async (driverId: string, reason: string) => {
+  const response = await api.post(`/admin/users/${driverId}/request-vehicle-resubmission`, { reason });
+  return response.data;
+};
+
 // ----- Payouts --------------------------------------------------------------
 
 export const listPayouts = async (status: 'PENDING' | 'PAID' | 'ALL' = 'PENDING') => {

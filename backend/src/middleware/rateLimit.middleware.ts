@@ -78,11 +78,15 @@ export const rateLimitMiddleware = async (req: Request, res: Response, next: Nex
 
   if (!result.allowed) {
     rateLimitedTotal.inc({ bucket: userId ? 'user' : 'ip' });
-    res.setHeader('Retry-After', Math.ceil(result.retryAfterMs / 1000));
+    const retrySeconds = Math.ceil(result.retryAfterMs / 1000);
+    res.setHeader('Retry-After', retrySeconds);
     res.setHeader('X-RateLimit-Remaining', '0');
+    const friendlyMessage = retrySeconds > 60
+      ? `Too many requests. Please try again in ${Math.ceil(retrySeconds / 60)} minute(s).`
+      : `Too many requests. Please try again in ${retrySeconds} second(s).`;
     return res.status(429).json({
       error: 'Too many requests',
-      message: 'Rate limit exceeded. Please try again later.',
+      message: friendlyMessage,
     });
   }
 

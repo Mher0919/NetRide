@@ -16,14 +16,31 @@ export class DriverService {
     );
     const profile = res.rows[0];
     if (profile && profile.user_id) {
+      // Always return the authoritative active/approved vehicle first.
+      // Legacy vehicles with NULL vehicle_status are treated as APPROVED.
       const vehicleRes = await pool.query(
-        `SELECT dv.*, v.*
+        `SELECT dv.*, v.make AS catalog_make, v.model AS catalog_model,
+                v.year AS catalog_year, v.category, v.service_class
          FROM driver_vehicles dv
          LEFT JOIN vehicles v ON dv.vehicle_id = v.id
-          WHERE dv.driver_id = $1`,
+         WHERE dv.driver_id = $1
+         ORDER BY
+           CASE
+             WHEN dv.vehicle_status = 'APPROVED' OR dv.vehicle_status IS NULL THEN 0
+             ELSE 1
+           END,
+           dv.submitted_at DESC NULLS LAST,
+           dv.approved_at DESC NULLS LAST,
+           dv.id DESC`,
         [userId]
       );
       profile.vehicles = vehicleRes.rows;
+      // Expose the active approved vehicle explicitly so the frontend
+      // never has to guess which row to display.
+      const activeVeh = vehicleRes.rows.find(
+        (r: any) => r.vehicle_status === 'APPROVED' || r.vehicle_status === null
+      );
+      profile.active_vehicle = activeVeh || null;
     }
 
     // Surface any pending profile change so the driver app can render the
@@ -1017,6 +1034,156 @@ export class DriverService {
       [userId]
     );
     return { submissions: res.rows };
+  }
+
+  // ============================================================
+  // Vehicle resubmission requirements (026)
+  // ============================================================
+
+  static async getVehicleResubmissionRequirements(userId: string) {
+    const reqs = await pool.query(
+      `SELECT dvrr.id, dvrr.submission_id, dvrr.reason, dvrr.status,
+              dvrr.created_at, dvrr.updated_at,
+              COALESCE(dv.vehicle_status, 'APPROVED') AS current_vehicle_status,
+              dv.make, dv.model, dv.year, dv.color,
+              dv.license_plate_number, dv.license_plate_state, dv.zip_code
+       FROM driver_vehicle_resubmission_requests dvrr
+       LEFT JOIN driver_vehicles dv ON dv.driver_id = dvrr.driver_id
+         AND (dv.vehicle_status = 'RESUBMISSION_REQUIRED' OR dv.vehicle_status = 'PENDING_REVIEW')
+       WHERE dvrr.driver_id = $1
+       ORDER BY dvrr.created_at DESC`,
+      [userId]
+    );
+
+    const hasActionRequired = reqs.rows.some(
+      r => r.status === 'resubmission_required'
+    );
+
+    return {
+      requirements: reqs.rows,
+      has_action_required: hasActionRequired,
+    };
+  }
+
+  static async submitVehicleResubmission(userId: string, data: any, resubmissionRequestId?: string) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Insert the submission
+      const ins = await client.query(
+        `INSERT INTO driver_vehicle_submissions
+         (driver_id, status, make, model, year, color, interior_color,
+          license_plate_number, license_plate_state, zip_code,
+          registration_photo_url, insurance_photo_url, inspection_photo_url)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING *`,
+        [userId, data.make, data.model, data.year, data.color,
+         data.interior_color || null, data.license_plate_number,
+         data.license_plate_state, data.zip_code,
+         data.registration_photo_url, data.insurance_photo_url,
+         data.inspection_photo_url]
+      );
+
+      // Create/update the driver_vehicles row
+      await client.query(
+        `INSERT INTO driver_vehicles
+         (driver_id, vehicle_status, make, model, year, color, interior_color,
+          license_plate_number, license_plate_state, zip_code,
+          registration_photo_url, insurance_photo_url, inspection_photo_url,
+          submitted_at)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+         ON CONFLICT DO NOTHING`,
+        [userId, data.make, data.model, data.year, data.color,
+         data.interior_color || null, data.license_plate_number,
+         data.license_plate_state, data.zip_code,
+         data.registration_photo_url, data.insurance_photo_url,
+         data.inspection_photo_url]
+      );
+
+      // Update the resubmission request status if specified
+      if (resubmissionRequestId) {
+        await client.query(
+          `UPDATE driver_vehicle_resubmission_requests
+           SET status = 'submitted', updated_at = NOW()
+           WHERE id = $1 AND driver_id = $2`,
+          [resubmissionRequestId, userId]
+        );
+      }
+
+      // Clear vehicle action required flag
+      await client.query(
+        `UPDATE drivers
+         SET has_vehicle_action_required = FALSE
+         WHERE user_id = $1`,
+        [userId]
+      );
+
+      await client.query('COMMIT');
+      return { success: true, submission: ins.rows[0] };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  // ============================================================
+  // Active vehicle resolution helpers
+  // ============================================================
+
+  /**
+   * Returns the driver's authoritative active/approved vehicle.
+   * Legacy rows with NULL vehicle_status are treated as APPROVED.
+   * Returns null if no active vehicle exists.
+   */
+  static async getActiveVehicle(driverId: string) {
+    const res = await pool.query(
+      `SELECT dv.*, v.make AS catalog_make, v.model AS catalog_model,
+              v.year AS catalog_year, v.category, v.service_class
+       FROM driver_vehicles dv
+       LEFT JOIN vehicles v ON dv.vehicle_id = v.id
+       WHERE dv.driver_id = $1
+         AND (dv.vehicle_status = 'APPROVED' OR dv.vehicle_status IS NULL)
+       ORDER BY dv.approved_at DESC NULLS LAST, dv.id DESC
+       LIMIT 1`,
+      [driverId]
+    );
+    return res.rows[0] || null;
+  }
+
+  /**
+   * Returns the latest finalized vehicle submission (Approved or Rejected)
+   * for admin review purposes. This is distinct from the active vehicle.
+   */
+  static async getLatestFinalizedVehicleSubmission(driverId: string) {
+    const res = await pool.query(
+      `SELECT s.*, u.full_name AS reviewed_by_admin_name
+       FROM driver_vehicle_submissions s
+       LEFT JOIN users u ON u.id = s.reviewed_by_admin_id
+       WHERE s.driver_id = $1
+         AND s.status IN ('APPROVED', 'REJECTED')
+       ORDER BY s.reviewed_at DESC NULLS LAST, s.submitted_at DESC
+       LIMIT 1`,
+      [driverId]
+    );
+    return res.rows[0] || null;
+  }
+
+  /**
+   * Returns the latest vehicle submission (any status) for the driver.
+   */
+  static async getLatestVehicleSubmission(driverId: string) {
+    const res = await pool.query(
+      `SELECT s.*
+       FROM driver_vehicle_submissions s
+       WHERE s.driver_id = $1
+       ORDER BY s.submitted_at DESC
+       LIMIT 1`,
+      [driverId]
+    );
+    return res.rows[0] || null;
   }
 
   // ============================================================

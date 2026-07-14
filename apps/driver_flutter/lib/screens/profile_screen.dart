@@ -84,7 +84,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _rating = double.tryParse(profile['rating']?.toString() ?? '') ?? 5.0;
         _totalRides = int.tryParse(profile['rating_count']?.toString() ?? '') ?? 0;
         
-        if (profile['vehicles'] != null && profile['vehicles'].isNotEmpty) {
+        final activeV = profile['active_vehicle'];
+        if (activeV != null) {
+          _selectedVehicleId = activeV['id']?.toString() ?? activeV['vehicle_id']?.toString();
+          _plateController.text = activeV['license_plate_number'] ?? '';
+        } else if (profile['vehicles'] != null && profile['vehicles'].isNotEmpty) {
           final v = profile['vehicles'][0];
           _selectedVehicleId = v['vehicle_id'];
           _plateController.text = v['license_plate_number'] ?? '';
@@ -169,12 +173,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _changeProfilePicture() async {
     if (_uploadInProgress) return;
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile == null) return;
-
     _uploadInProgress = true;
     setState(() => _isSaving = true);
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) {
+      _uploadInProgress = false;
+      setState(() => _isSaving = false);
+      return;
+    }
+
     try {
       final url = await AuthService.uploadImage(File(pickedFile.path));
       _uploadInProgress = false;

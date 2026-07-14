@@ -58,6 +58,10 @@ try {
 }
 
 app.use(cors());
+// Trust Render proxy so req.ip resolves individual client IPs
+// instead of the proxy IP. This fixes rate-limit key collisions
+// where all users share one rate-limit bucket behind Render.
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Request-id + child logger context. Mount BEFORE rate-limit so even
@@ -395,6 +399,18 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ Vehicle submissions schema (025) applied');
+    }
+
+    // Vehicle active vehicle + resubmission workflow (026).
+    const hasVehicleResubmission = await pool.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_name = 'driver_vehicle_resubmission_requests'"
+    );
+    if (hasVehicleResubmission.rowCount === 0) {
+      console.log('⚡ Applying vehicle active + resubmission schema (026)...');
+      const schemaPath = path.join(__dirname, '../migrations/026_vehicle_active_and_resubmission.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Vehicle active + resubmission schema (026) applied');
     }
 
     console.log('🚀 All migrations completed');

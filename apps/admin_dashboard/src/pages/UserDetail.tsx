@@ -39,6 +39,7 @@ import {
   getDriverDocumentRequirements,
   requestDocumentResubmission,
   reviewDocumentRequirement,
+  requestVehicleResubmission,
 } from '../api/admin';
 import { SpeedingBadge } from '../components/SpeedingBadge';
 import { format } from 'date-fns';
@@ -58,6 +59,8 @@ const UserDetail: React.FC = () => {
   const [requestDocsOpen, setRequestDocsOpen] = useState(false);
   const [requestDocType, setRequestDocType] = useState('');
   const [requestDocReason, setRequestDocReason] = useState('');
+  const [vehicleResubmitOpen, setVehicleResubmitOpen] = useState(false);
+  const [vehicleResubmitReason, setVehicleResubmitReason] = useState('');
   const isDriver = !!user?.driver_profile;
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
@@ -169,6 +172,21 @@ const UserDetail: React.FC = () => {
       setDocRequirements(docs.requirements ?? []);
     } catch (error) {
       console.error('Failed to review document', error);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleVehicleResubmission = async () => {
+    if (!vehicleResubmitReason.trim()) return;
+    setActionLoading(true);
+    try {
+      await requestVehicleResubmission(id, vehicleResubmitReason);
+      setVehicleResubmitOpen(false);
+      setVehicleResubmitReason('');
+      fetchUser();
+    } catch (error) {
+      console.error('Failed to request vehicle resubmission', error);
     } finally {
       setActionLoading(false);
     }
@@ -332,76 +350,169 @@ const UserDetail: React.FC = () => {
                   </Typography>
                 </Paper>
 
-                {user.driver_profile.vehicles && user.driver_profile.vehicles.map((v: any, vIdx: number) => (
-                  <Paper key={vIdx} sx={{ p: 4, borderRadius: 4, border: 'none' }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                        Vehicle: {v.make} {v.model}
-                      </Typography>
-                      <Chip 
-                        label={v.inspection_status || 'PENDING'} 
-                        size="small"
-                        color={getStatusColor(v.inspection_status) as any}
-                        sx={{ fontWeight: 800, height: 22, fontSize: '0.65rem' }}
-                      />
-                    </Box>
-                    <Grid container spacing={3} sx={{ mb: 4 }} {...({ component: 'div' } as any)}>
-                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PLATE NUMBER</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{v.license_plate_number}</Typography>
-                      </Grid>
-                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>CONFIGURATION</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{v.color} / {v.interior_color} Int</Typography>
-                      </Grid>
-                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PRODUCTION YEAR</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{v.year}</Typography>
-                      </Grid>
-                    </Grid>
-
-                    {v.inspection_photo_url && (
-                      <>
-                        <Divider sx={{ my: 3, borderStyle: 'dashed' }} />
-                        <Typography variant="caption" sx={{ fontWeight: 800, mb: 2, display: 'block', color: 'text.secondary' }}>VEHICLE INSPECTION CERTIFICATE</Typography>
-                        <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                          <Card sx={{ maxWidth: 350, border: '1px solid #eee', boxShadow: 'none' }}>
-                            <CardMedia
-                              component="img"
-                              height="200"
-                              image={v.inspection_photo_url}
-                              alt="Inspection Certificate"
-                              sx={{ objectFit: 'cover', cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 0.9 } }}
-                              onClick={() => window.open(v.inspection_photo_url, '_blank')}
+                {/* Latest finalized vehicle submission — shown in the primary review section */}
+                {(() => {
+                  const finalizedSub = user.driver_profile?.latest_finalized_vehicle_submission;
+                  const isApproved = finalizedSub?.status === 'APPROVED';
+                  const isRejected = finalizedSub?.status === 'REJECTED';
+                  return (
+                    <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                          Latest Vehicle Review
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          {finalizedSub && (
+                            <Chip
+                              label={isApproved ? 'APPROVED' : isRejected ? 'REJECTED' : finalizedSub.status}
+                              size="small"
+                              color={isApproved ? 'success' : isRejected ? 'error' : 'warning' as any}
+                              sx={{ fontWeight: 800, height: 22, fontSize: '0.65rem' }}
                             />
-                          </Card>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: 1 }}>
-                            <Button 
-                              variant="contained" 
-                              color="success" 
+                          )}
+                          {user.driver_profile?.active_vehicle && (
+                            <Chip
+                              label="ACTIVE"
                               size="small"
-                              onClick={() => handleVerifyInspection(v.id, 'APPROVED')}
-                              disabled={actionLoading || v.inspection_status === 'APPROVED'}
-                              sx={{ borderRadius: '10px', height: 40, px: 3 }}
-                            >
-                              Approve Inspection
-                            </Button>
-                            <Button 
-                              variant="outlined" 
-                              color="error" 
+                              color="success"
+                              variant="outlined"
+                              sx={{ fontWeight: 800, height: 22, fontSize: '0.65rem' }}
+                            />
+                          )}
+                        </Box>
+                      </Box>
+                      {finalizedSub ? (
+                        <>
+                          <Grid container spacing={3} sx={{ mb: 3 }} {...({ component: 'div' } as any)}>
+                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>MAKE</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.make || '---'}</Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>MODEL</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.model || '---'}</Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>YEAR</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.year || '---'}</Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>COLOR</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.color || '---'}</Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PLATE NUMBER</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.license_plate_number || '---'}</Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PLATE STATE</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.license_plate_state || '---'}</Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>ZIP CODE</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.zip_code || '---'}</Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>REVIEWED</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                {finalizedSub.reviewed_at ? format(new Date(finalizedSub.reviewed_at), 'PP') : '---'}
+                              </Typography>
+                            </Grid>
+                          </Grid>
+                          {isRejected && finalizedSub.rejection_reason && (
+                            <Box sx={{ mt: 2, p: 2, bgcolor: '#FCE9E9', borderRadius: 2 }}>
+                              <Typography variant="caption" sx={{ fontWeight: 700, color: '#C65A5A' }}>REJECTION REASON</Typography>
+                              <Typography variant="body2" sx={{ mt: 0.5 }}>{finalizedSub.rejection_reason}</Typography>
+                            </Box>
+                          )}
+                          <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
+                            <Button
+                              variant="outlined"
+                              color="warning"
                               size="small"
-                              onClick={() => handleVerifyInspection(v.id, 'REJECTED')}
-                              disabled={actionLoading || v.inspection_status === 'REJECTED'}
-                              sx={{ borderRadius: '10px', height: 40, px: 3 }}
+                              onClick={() => setVehicleResubmitOpen(true)}
+                              disabled={actionLoading}
+                              sx={{ borderRadius: '10px', fontWeight: 700 }}
                             >
-                              Flag Documents
+                              Request Again
                             </Button>
                           </Box>
-                        </Box>
-                      </>
-                    )}
+                        </>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                          No finalized vehicle submissions found.
+                        </Typography>
+                      )}
+                    </Paper>
+                  );
+                })()}
+
+                {/* All vehicle records (for reference) */}
+                {user.driver_profile.vehicles && user.driver_profile.vehicles.length > 0 && (
+                  <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 3 }}>
+                      Vehicle Records ({user.driver_profile.vehicles.length})
+                    </Typography>
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Make</TableCell>
+                            <TableCell>Model</TableCell>
+                            <TableCell>Year</TableCell>
+                            <TableCell>Color</TableCell>
+                            <TableCell>Plate</TableCell>
+                            <TableCell>Status</TableCell>
+                            <TableCell>Approved At</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {user.driver_profile.vehicles.map((v: any, idx: number) => (
+                            <TableRow key={v.id || idx} hover>
+                              <TableCell>
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                  {v.make || v.catalog_make || '---'}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2">
+                                  {v.model || v.catalog_model || '---'}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2">{v.year || '---'}</Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2">{v.color || '---'}</Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2">{v.license_plate_number || '---'}</Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={v.vehicle_status || 'APPROVED'}
+                                  size="small"
+                                  color={
+                                    v.vehicle_status === 'APPROVED' || v.vehicle_status === null ? 'success'
+                                      : v.vehicle_status === 'PENDING_REVIEW' ? 'warning'
+                                      : v.vehicle_status === 'REJECTED' || v.vehicle_status === 'INACTIVE' ? 'default'
+                                      : 'default'
+                                  }
+                                  sx={{ fontWeight: 700, height: 22, fontSize: '0.65rem' }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2">
+                                  {v.approved_at ? format(new Date(v.approved_at), 'PP') : '---'}
+                                </Typography>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                   </Paper>
-                ))}
+                )}
 
                 <Box>
                   <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 800 }}>General Compliance Documents</Typography>
@@ -856,6 +967,51 @@ const UserDetail: React.FC = () => {
             sx={{ px: 4, borderRadius: '12px' }}
           >
             Clear Flag
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Vehicle Resubmission Request Dialog */}
+      <Dialog
+        open={vehicleResubmitOpen}
+        onClose={() => { setVehicleResubmitOpen(false); setVehicleResubmitReason(''); }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Request Vehicle Resubmission</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            This will mark the driver's currently approved vehicle as requiring resubmission.
+            The driver will see a notification on their home screen and must submit a new vehicle for review.
+          </Typography>
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            variant="filled"
+            label="Reason for resubmission"
+            placeholder="Explain why the driver needs to resubmit their vehicle..."
+            value={vehicleResubmitReason}
+            onChange={(e) => setVehicleResubmitReason(e.target.value)}
+            sx={{ '& .MuiFilledInput-root': { borderRadius: 2 } }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 3 }}>
+          <Button
+            onClick={() => { setVehicleResubmitOpen(false); setVehicleResubmitReason(''); }}
+            color="inherit"
+            sx={{ fontWeight: 700 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleVehicleResubmission}
+            color="warning"
+            variant="contained"
+            disabled={actionLoading || !vehicleResubmitReason.trim()}
+            sx={{ px: 4, borderRadius: '12px' }}
+          >
+            {actionLoading ? 'Sending...' : 'Request Resubmission'}
           </Button>
         </DialogActions>
       </Dialog>

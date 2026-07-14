@@ -494,4 +494,35 @@ export class DriverController {
       res.status(500).json({ error: 'Failed to retrieve pending vehicle submissions.' });
     }
   }
+
+  static async getVehicleResubmissionRequirements(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const result = await DriverService.getVehicleResubmissionRequirements(userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Vehicle resubmission requirements error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to retrieve vehicle resubmission requirements.' });
+    }
+  }
+
+  static async submitVehicleResubmission(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const validated = SubmitNewVehicleSchema.parse(req.body);
+      const { resubmissionRequestId } = req.body;
+      const result = await DriverService.submitVehicleResubmission(userId, validated, resubmissionRequestId);
+      res.status(201).json(result);
+    } catch (error: any) {
+      if (error?.name === 'ZodError') {
+        return res.status(400).json({ error: 'Invalid vehicle data.', details: error.errors });
+      }
+      console.error(`[DRIVER] ❌ Submit vehicle resubmission error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to submit vehicle resubmission.' });
+    }
+  }
 }

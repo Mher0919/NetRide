@@ -12,6 +12,7 @@ const MINUTE = 60 * 1000;
 const HOUR = 3600 * 1000;
 
 export const RATE_LIMITS: Record<string, RateLimitEntry> = {
+  // Authentication endpoints — strict limits
   'POST /api/auth/signup': {
     ip: { max: 10, windowMs: HOUR },
   },
@@ -21,6 +22,17 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
   'POST /api/auth/verify-otp': {
     ip: { max: 10, windowMs: MINUTE },
   },
+  'POST /api/auth/request-otp': {
+    ip: { max: 10, windowMs: MINUTE },
+  },
+  'POST /api/auth/forgot-password': {
+    ip: { max: 5, windowMs: MINUTE },
+  },
+  'POST /api/auth/reset-password': {
+    ip: { max: 5, windowMs: MINUTE },
+  },
+
+  // Ride endpoints — moderate limits
   'POST /api/ride/request': {
     user: { max: 30, windowMs: MINUTE },
     ip: { max: 100, windowMs: MINUTE },
@@ -36,14 +48,87 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
   'GET /api/ride/history': {
     user: { max: 60, windowMs: MINUTE },
   },
+
+  // Upload endpoint — generous for legitimate usage, but not unlimited
+  'POST /api/admin/users/:id/request-vehicle-resubmission': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'GET /api/driver/vehicles/resubmission-requirements': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'POST /api/driver/vehicles/submit-resubmission': {
+    user: { max: 10, windowMs: MINUTE },
+    ip: { max: 30, windowMs: MINUTE },
+  },
   'POST /api/upload': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+
+  // Driver profile — authenticated users, higher limits
+  'GET /api/driver/profile': {
     user: { max: 60, windowMs: MINUTE },
-    ip: { max: 100, windowMs: MINUTE },
+    ip: { max: 200, windowMs: MINUTE },
+  },
+  'PATCH /api/driver/profile': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'GET /api/driver/vehicles': {
+    user: { max: 60, windowMs: MINUTE },
+  },
+  'GET /api/driver/vehicle-models/makes': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'GET /api/driver/vehicle-models/models': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'POST /api/driver/vehicles/submit': {
+    user: { max: 10, windowMs: MINUTE },
+    ip: { max: 30, windowMs: MINUTE },
+  },
+  'POST /api/driver/profile-changes': {
+    user: { max: 5, windowMs: MINUTE },
+    ip: { max: 10, windowMs: MINUTE },
+  },
+
+  // Admin endpoints — authenticated admins
+  'GET /api/admin/users': {
+    user: { max: 120, windowMs: MINUTE },
+    ip: { max: 200, windowMs: MINUTE },
+  },
+  'GET /api/admin/users/:id': {
+    user: { max: 120, windowMs: MINUTE },
+    ip: { max: 200, windowMs: MINUTE },
+  },
+  'PATCH /api/admin/users/:id/verify': {
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 120, windowMs: MINUTE },
+  },
+  'POST /api/admin/vehicles/submissions/:id/approve': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'POST /api/admin/vehicles/submissions/:id/reject': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'POST /api/admin/vehicles/submissions/:id/request-changes': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'POST /api/admin/users/:id/request-docs': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
   },
 };
 
 export const DEFAULT_USER_LIMIT: RateLimitRule = { max: 100, windowMs: MINUTE };
-export const DEFAULT_IP_LIMIT: RateLimitRule = { max: 100, windowMs: MINUTE };
+export const DEFAULT_IP_LIMIT: RateLimitRule = { max: 60, windowMs: MINUTE };
 
 export function matchRoute(path: string, method: string): string | null {
   const key = `${method} ${path}`;

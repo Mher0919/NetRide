@@ -42,4 +42,8 @@ router.post('/documents/resubmit', authMiddleware, DriverController.resubmitDocu
 router.post('/vehicles/submit', authMiddleware, DriverController.submitNewVehicle);
 router.get('/vehicles/submissions/pending', authMiddleware, DriverController.getPendingVehicleSubmissions);
 
+// Vehicle resubmission requirements (026)
+router.get('/vehicles/resubmission-requirements', authMiddleware, DriverController.getVehicleResubmissionRequirements);
+router.post('/vehicles/submit-resubmission', authMiddleware, DriverController.submitVehicleResubmission);
+
 export default router;
