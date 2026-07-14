@@ -221,12 +221,15 @@ export class AdminController {
     const adminId = req.user!.id;
     try {
       // Lock the DOB if it's set (identity verification includes DOB review).
-      const existing = await prisma.user.findUnique({ where: { id }, select: { date_of_birth: true } });
-      if (existing?.date_of_birth) {
-        await (prisma.user as any).update({
-          where: { id },
-          data: { dob_locked: true },
-        });
+      const existing = await pool.query(
+        `SELECT date_of_birth FROM users WHERE id = $1`,
+        [id]
+      );
+      if (existing.rows[0]?.date_of_birth) {
+        await pool.query(
+          `UPDATE users SET dob_locked = true WHERE id = $1`,
+          [id]
+        );
       }
 
       const user = await (prisma.user as any).update({

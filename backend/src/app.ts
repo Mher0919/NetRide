@@ -417,6 +417,18 @@ async function runMigrations() {
       console.log('✅ Vehicle active + resubmission schema (026) applied');
     }
 
+    // DOB locked column (027).
+    const hasDobLocked = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'dob_locked'"
+    );
+    if (hasDobLocked.rowCount === 0) {
+      console.log('⚡ Applying DOB locked schema (027)...');
+      const schemaPath = path.join(__dirname, '../migrations/027_add_dob_locked.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ DOB locked schema (027) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);
