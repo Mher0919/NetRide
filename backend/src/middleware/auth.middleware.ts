@@ -1,6 +1,7 @@
 // backend/src/middleware/auth.middleware.ts
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../modules/auth/auth.service';
+import { pool } from '../config/database';
 import { env } from '../config/env';
 
 export interface AuthRequest extends Request {
@@ -45,9 +46,21 @@ export const riderMiddleware = (req: AuthRequest, res: Response, next: NextFunct
   next();
 };
 
-export const driverMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (!req.user || req.user.role !== 'DRIVER') {
+export const driverMiddleware = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
     return res.status(403).json({ error: 'Access denied. Driver account required.' });
   }
-  next();
+  if (req.user.role === 'DRIVER' || req.user.role === 'ADMIN') {
+    return next();
+  }
+  // Dual-role: user signed up as RIDER but has a drivers row
+  try {
+    const result = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [req.user.id]);
+    if (result.rows.length > 0) {
+      return next();
+    }
+    return res.status(403).json({ error: 'Access denied. Driver account required.' });
+  } catch (err) {
+    next(err);
+  }
 };

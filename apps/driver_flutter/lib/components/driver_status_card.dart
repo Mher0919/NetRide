@@ -117,6 +117,24 @@ class DriverStatusCard extends StatelessWidget {
           dismissible: true,
           onDismiss: onDismiss,
         );
+
+      case DriverStatusKind.documentActionRequired:
+        return _build(
+          color: AppTheme.errorColor,
+          icon: Icons.description_outlined,
+          title: 'Action required: document resubmission',
+          message: 'An admin has requested updated documents. Please review and resubmit.',
+          actionLabel: 'VIEW',
+          onAction: onAction,
+        );
+
+      case DriverStatusKind.documentSubmittedForReview:
+        return _build(
+          color: AppTheme.warningColor,
+          icon: Icons.hourglass_bottom_rounded,
+          title: 'Document resubmitted',
+          message: 'Your updated document is being reviewed. We\'ll let you know once it\'s approved.',
+        );
     }
   }
 
@@ -249,6 +267,8 @@ enum DriverStatusKind {
   readyToDrive,
   profileChangePending,
   profileChangeApproved,
+  documentActionRequired,
+  documentSubmittedForReview,
 }
 
 class DriverStatus {
@@ -265,6 +285,8 @@ class DriverStatus {
   static const readyToDrive = DriverStatus._(DriverStatusKind.readyToDrive, null);
   static const profileChangePending = DriverStatus._(DriverStatusKind.profileChangePending, null);
   static const profileChangeApproved = DriverStatus._(DriverStatusKind.profileChangeApproved, null);
+  static const documentActionRequired = DriverStatus._(DriverStatusKind.documentActionRequired, null);
+  static const documentSubmittedForReview = DriverStatus._(DriverStatusKind.documentSubmittedForReview, null);
 
   factory DriverStatus.faceRequired(String reason) =>
       DriverStatus._(DriverStatusKind.faceRequired, reason);

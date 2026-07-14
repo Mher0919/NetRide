@@ -43,6 +43,15 @@ class DriverProvider with ChangeNotifier {
   Map<String, dynamic>? _pendingChangesSummary;
   bool _showApprovedToast = false;
 
+  // Document requirements: admin-requested resubmissions
+  bool _hasDocumentActionRequired = false;
+  bool _hasDocumentSubmitted = false;
+  List<Map<String, dynamic>> _documentRequirements = [];
+
+  bool get hasDocumentActionRequired => _hasDocumentActionRequired;
+  bool get hasDocumentSubmitted => _hasDocumentSubmitted;
+  List<Map<String, dynamic>> get documentRequirements => _documentRequirements;
+
   models.DriverStatus get status => _status;
   models.VehicleClass get activeClass => _activeClass;
   models.Trip? get currentTrip => _currentTrip;
@@ -79,6 +88,7 @@ class DriverProvider with ChangeNotifier {
   /// switch on. The avatar/switch goes disabled otherwise.
   bool get canGoOnline =>
       !_hasPendingProfileChange &&
+      !_hasDocumentActionRequired &&
       _faceCheckStatus != FaceCheckStatus.flagged &&
       _faceCheckStatus != FaceCheckStatus.needsCheck;
 
@@ -440,6 +450,20 @@ class DriverProvider with ChangeNotifier {
       _pendingSince = null;
       _pendingChangesSummary = null;
     }
+
+    // Also refresh document requirements state
+    try {
+      final docReqs = await UserService.getDocumentRequirements();
+      final reqs = (docReqs['requirements'] as List?) ?? [];
+      _documentRequirements = reqs.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+      _hasDocumentActionRequired = reqs.any((r) =>
+          (r as Map)['status'] == 'resubmission_required');
+      _hasDocumentSubmitted = reqs.any((r) =>
+          (r as Map)['status'] == 'submitted');
+    } catch (_) {
+      // Non-fatal
+    }
+
     notifyListeners();
     return profile;
   }

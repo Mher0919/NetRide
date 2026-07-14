@@ -111,6 +111,23 @@ export const rejectPayoutCard = async (id: string, reason: string) => {
   return response.data;
 };
 
+// ----- Document resubmission requirements -----------------------------------
+
+export const requestDocumentResubmission = async (driverId: string, documentType: string, reason: string) => {
+  const response = await api.post(`/admin/users/${driverId}/request-docs`, { documentType, reason });
+  return response.data;
+};
+
+export const getDriverDocumentRequirements = async (driverId: string) => {
+  const response = await api.get(`/admin/users/${driverId}/document-requirements`);
+  return response.data as { requirements: any[] };
+};
+
+export const reviewDocumentRequirement = async (requirementId: string, decision: 'approved' | 'rejected') => {
+  const response = await api.patch(`/admin/document-requirements/${requirementId}/review`, { decision });
+  return response.data;
+};
+
 // ----- Payouts --------------------------------------------------------------
 
 export const listPayouts = async (status: 'PENDING' | 'PAID' | 'ALL' = 'PENDING') => {

@@ -108,6 +108,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             : null,
       };
       _hasPendingChange = profile['has_pending_profile_change'] == true;
+
+      try {
+        final docReqs = await UserService.getDocumentRequirements();
+        final reqs = (docReqs['requirements'] as List?) ?? [];
+        _hasDocumentActionRequired =
+            reqs.any((r) => (r as Map)['status'] == 'resubmission_required');
+      } catch (e) {
+        debugPrint('[PROFILE] ❌ Doc req fetch error: $e');
+      }
     } catch (e) {
       if (e is DioException && e.response?.statusCode == 404) {
         debugPrint('User not found (404), logging out...');
@@ -473,6 +482,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  bool _hasDocumentActionRequired = false;
+
   /// Cache of the last-fetched profile values used to compute the diff
   /// in `_saveProfile`. Loaded once per `_fetchProfile` call.
   Map<String, dynamic> _originals = const {};
@@ -571,6 +582,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_hasPendingChange) _buildPendingChangeBanner(),
+              if (_hasDocumentActionRequired) _buildDocActionBanner(),
               _buildProfileHeader(theme),
               const SizedBox(height: 32),
               _buildSectionCard(
@@ -933,6 +945,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ==========================================================================
   // Pending-change banner + Wallet section
   // ==========================================================================
+
+  Widget _buildDocActionBanner() {
+    return GestureDetector(
+      onTap: () => Navigator.pushNamed(context, '/documents'),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFCE9E9),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFEFCFCF)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.description_outlined, color: Color(0xFFC65A5A), size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Action required: document resubmission',
+                    style: TextStyle(
+                      color: Color(0xFF7A2A2A),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'An admin has requested updated documents. Tap to review and resubmit.',
+                    style: TextStyle(color: Color(0xFF7A2A2A), fontSize: 12, height: 1.35),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: Color(0xFF7A2A2A), size: 20),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildPendingChangeBanner() {
     return Container(

@@ -47,4 +47,39 @@ router.get('/search', authMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/geospatial/inspection-locations
+ * Query: zip (required), lat (optional), lon (optional)
+ * Returns nearby vehicle inspection stations.
+ */
+router.get('/inspection-locations', authMiddleware, async (req, res) => {
+  try {
+    let { zip, lat, lon } = req.query;
+    if (!zip) {
+      return res.status(400).json({ error: 'ZIP code (zip) is required' });
+    }
+
+    // If lat/lon not provided, try to geocode the ZIP first
+    if (!lat || !lon) {
+      const geoRes = await GeospatialService.searchPlaces(`${zip}, California`, undefined, undefined);
+      if (geoRes.length > 0) {
+        lat = String(geoRes[0].lat);
+        lon = String(geoRes[0].lon);
+      }
+    }
+
+    const query = 'vehicle inspection station smog check auto repair';
+    const results = await GeospatialService.searchPlaces(
+      query,
+      lat ? parseFloat(lat as string) : undefined,
+      lon ? parseFloat(lon as string) : undefined
+    );
+
+    res.json(results);
+  } catch (err: any) {
+    console.error('[GEOSPATIAL] Inspection locations Controller Error:', err.message);
+    res.status(500).json({ error: 'Failed to find inspection locations' });
+  }
+});
+
 export default router;

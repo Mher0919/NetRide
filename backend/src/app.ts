@@ -373,6 +373,18 @@ async function runMigrations() {
       console.log('✅ Driver phone columns (023) applied');
     }
 
+    // Document resubmission requirements (024).
+    const hasDocRequirements = await pool.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_name = 'driver_document_requirements'"
+    );
+    if (hasDocRequirements.rowCount === 0) {
+      console.log('⚡ Applying document resubmissions schema (024)...');
+      const schemaPath = path.join(__dirname, '../migrations/024_document_resubmissions.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Document resubmissions schema (024) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);

@@ -34,4 +34,8 @@ router.get('/wallet', authMiddleware, DriverController.getWallet);
 router.post('/wallet/request-payout', authMiddleware, DriverController.requestOnDemandPayout);
 router.get('/payouts', authMiddleware, DriverController.listMyPayouts);
 
+// Document requirements + resubmission
+router.get('/documents/requirements', authMiddleware, DriverController.getDocumentRequirements);
+router.post('/documents/resubmit', authMiddleware, DriverController.resubmitDocument);
+
 export default router;

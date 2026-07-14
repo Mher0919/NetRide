@@ -958,6 +958,50 @@ export class DriverService {
     return { payouts: res.rows, total: total.rows[0]?.c ?? 0 };
   }
 
+  // ============================================================
+  // Document resubmission requirements (024)
+  // ============================================================
+
+  static async getDocumentRequirements(userId: string) {
+    const reqs = await pool.query(
+      `SELECT dr.id, dr.document_type, dr.status, dr.current_document_url,
+              dr.request_reason, dr.requested_at, dr.resubmitted_at,
+              dr.new_document_url, dr.reviewed_at, dr.review_decision
+       FROM driver_document_requirements dr
+       WHERE dr.driver_id = $1
+       ORDER BY dr.requested_at DESC`,
+      [userId]
+    );
+
+    // Check if driver has any pending action
+    const hasActionRequired = reqs.rows.some(r => r.status === 'resubmission_required' || r.status === 'submitted');
+
+    return {
+      requirements: reqs.rows,
+      has_action_required: hasActionRequired,
+    };
+  }
+
+  static async resubmitDocument(userId: string, requirementId: string, newDocumentUrl: string) {
+    const req = await pool.query(
+      `SELECT id, driver_id, status, document_type FROM driver_document_requirements WHERE id = $1`,
+      [requirementId]
+    );
+
+    if (!req.rowCount) throw new Error('Document requirement not found.');
+    if (req.rows[0].driver_id !== userId) throw new Error('This document requirement does not belong to you.');
+    if (req.rows[0].status !== 'resubmission_required') throw new Error('This requirement is not pending resubmission.');
+
+    const updated = await pool.query(
+      `UPDATE driver_document_requirements
+       SET status = 'submitted', new_document_url = $1, resubmitted_at = NOW(), updated_at = NOW()
+       WHERE id = $2 RETURNING *`,
+      [newDocumentUrl, requirementId]
+    );
+
+    return { success: true, requirement: updated.rows[0] };
+  }
+
   /**
    * Idempotent ride-completion wallet credit. Safe to call multiple times
    * for the same ride — the unique index on payouts(ride_id) WHERE

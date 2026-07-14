@@ -308,6 +308,18 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       ));
     }
 
+    // Document requirements: admin-requested resubmissions.
+    if (provider.hasDocumentActionRequired) {
+      cards.add(DriverStatusCard(
+        state: DriverStatus.documentActionRequired,
+        onAction: () => Navigator.pushNamed(context, '/documents'),
+      ));
+    } else if (provider.hasDocumentSubmitted) {
+      cards.add(const DriverStatusCard(
+        state: DriverStatus.documentSubmittedForReview,
+      ));
+    }
+
     // Only show the green "ready to drive" card when nothing else is
     // blocking — that's the whole point of the priority stacking above.
     if (cards.isEmpty && _isVerified) {

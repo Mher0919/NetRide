@@ -148,4 +148,36 @@ class UserService {
       rethrow;
     }
   }
+
+  // ---- Document requirements + resubmission --------------------------------
+
+  static Future<Map<String, dynamic>> getDocumentRequirements() async {
+    try {
+      final response =
+          await ApiService.dio.get('/driver/documents/requirements');
+      return (response.data is Map)
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> resubmitDocument(
+      String requirementId, String newDocumentUrl) async {
+    try {
+      final response = await ApiService.dio.post(
+        '/driver/documents/resubmit',
+        data: {
+          'requirementId': requirementId,
+          'newDocumentUrl': newDocumentUrl,
+        },
+      );
+      return (response.data is Map)
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

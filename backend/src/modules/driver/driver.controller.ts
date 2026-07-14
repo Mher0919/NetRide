@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { DriverService } from './driver.service';
 import { z } from 'zod';
 import { VehicleDataService } from '../../services/vehicleData.service';
+import { pool } from '../../config/database';
 
 const OnboardSchema = z.object({
   personalInfo: z.object({
@@ -415,6 +416,37 @@ export class DriverController {
     } catch (error: any) {
       console.error(`[DRIVER] ❌ List payouts error: ${error.message}`);
       res.status(500).json({ error: 'Failed to list payouts.' });
+    }
+  }
+
+  static async getDocumentRequirements(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const result = await DriverService.getDocumentRequirements(userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Document requirements error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to retrieve document requirements.' });
+    }
+  }
+
+  static async resubmitDocument(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { requirementId, newDocumentUrl } = req.body;
+      if (!requirementId || !newDocumentUrl) {
+        return res.status(400).json({ error: 'Requirement ID and new document URL are required.' });
+      }
+
+      const result = await DriverService.resubmitDocument(userId, requirementId, newDocumentUrl);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Document resubmission error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to resubmit document.' });
     }
   }
 }

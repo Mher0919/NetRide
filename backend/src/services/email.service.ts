@@ -363,6 +363,87 @@ export class EmailService {
   }
 
   // ============================================================
+  // Document resubmission emails (024)
+  // ============================================================
+
+  static async sendDocumentResubmissionRequestedEmail(driver: { email?: string; full_name?: string }, info: { document_type: string; reason: string }) {
+    if (!driver.email) return;
+    const docLabels: Record<string, string> = {
+      license_photo_url: 'Driver License (Front)',
+      license_photo_back_url: 'Driver License (Back)',
+      insurance_photo_url: 'Insurance Certificate',
+      registration_photo_url: 'Vehicle Registration',
+      inspection_photo_url: 'Vehicle Inspection',
+      id_photo_front_url: 'ID Card (Front)',
+      id_photo_back_url: 'ID Card (Back)',
+    };
+    const label = docLabels[info.document_type] || info.document_type;
+    try {
+      await this.sendEmail({
+        to: driver.email,
+        subject: `Action Required — Update your ${label}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #C65A5A;">Document update needed</h2>
+            <p>Hi ${driver.full_name ?? 'Driver'},</p>
+            <p>Our team has reviewed your documents and needs an updated version of <strong>${label}</strong>.</p>
+            <div style="margin: 16px 0; padding: 14px; border-left: 4px solid #C65A5A; background: #f9f4f4;">
+              <strong>Reason:</strong> ${info.reason}
+            </div>
+            <p>Please open the app, go to your profile, and resubmit the requested document. Once you do, our team will review it promptly.</p>
+            <p style="color: #888; font-size: 12px;">You won't be able to go online until this is resolved.</p>
+          </div>
+        `,
+      });
+    } catch (error) {
+      console.error('❌ [GMAIL API] Error sending document resubmission email:', error);
+    }
+  }
+
+  static async sendDocumentResubmissionReviewedEmail(driver: { email?: string; full_name?: string }, info: { document_type: string; decision: string }) {
+    if (!driver.email) return;
+    const docLabels: Record<string, string> = {
+      license_photo_url: 'Driver License (Front)',
+      license_photo_back_url: 'Driver License (Back)',
+      insurance_photo_url: 'Insurance Certificate',
+      registration_photo_url: 'Vehicle Registration',
+      inspection_photo_url: 'Vehicle Inspection',
+      id_photo_front_url: 'ID Card (Front)',
+      id_photo_back_url: 'ID Card (Back)',
+    };
+    const label = docLabels[info.document_type] || info.document_type;
+    try {
+      if (info.decision === 'approved') {
+        await this.sendEmail({
+          to: driver.email,
+          subject: `Your ${label} has been approved`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+              <h2 style="color: #5B7760;">Document approved</h2>
+              <p>Hi ${driver.full_name ?? 'Driver'},</p>
+              <p>Your updated <strong>${label}</strong> has been reviewed and approved. All documents are in order.</p>
+            </div>
+          `,
+        });
+      } else {
+        await this.sendEmail({
+          to: driver.email,
+          subject: `Action Required — Your ${label} needs revision`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+              <h2 style="color: #C65A5A;">Document needs revision</h2>
+              <p>Hi ${driver.full_name ?? 'Driver'},</p>
+              <p>Unfortunately your updated <strong>${label}</strong> could not be approved. Please open the app and resubmit with a clearer photo.</p>
+            </div>
+          `,
+        });
+      }
+    } catch (error) {
+      console.error('❌ [GMAIL API] Error sending document review email:', error);
+    }
+  }
+
+  // ============================================================
   // Payout-card + payout emails (020)
   // ============================================================
 

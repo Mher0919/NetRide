@@ -906,6 +906,183 @@ export class AdminController {
   }
 
   // ============================================================
+  // Document resubmission requirements (024)
+  // ============================================================
+
+  static async requestDocumentResubmission(req: AuthRequest, res: Response) {
+    const { id: driverId } = req.params;
+    const { documentType, reason } = req.body;
+    const adminId = req.user!.id;
+
+    if (!documentType) return res.status(400).json({ error: 'Document type is required.' });
+    if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'Reason for resubmission is required.' });
+
+    const validTypes = ['license_photo_url', 'license_photo_back_url', 'insurance_photo_url',
+      'registration_photo_url', 'inspection_photo_url', 'id_photo_front_url', 'id_photo_back_url'];
+    if (!validTypes.includes(documentType)) {
+      return res.status(400).json({ error: `Invalid document type. Must be one of: ${validTypes.join(', ')}` });
+    }
+
+    try {
+      // Get the current document URL for this type
+      let currentUrl: string | null = null;
+      if (['license_photo_url', 'license_photo_back_url', 'insurance_photo_url', 'registration_photo_url'].includes(documentType)) {
+        const doc = await pool.query(`SELECT ${documentType} FROM drivers WHERE user_id = $1`, [driverId]);
+        currentUrl = doc.rows[0]?.[documentType] ?? null;
+      } else if (documentType === 'inspection_photo_url') {
+        const doc = await pool.query(`SELECT inspection_photo_url FROM driver_vehicles WHERE driver_id = $1 LIMIT 1`, [driverId]);
+        currentUrl = doc.rows[0]?.inspection_photo_url ?? null;
+      } else if (['id_photo_front_url', 'id_photo_back_url'].includes(documentType)) {
+        const doc = await pool.query(`SELECT ${documentType} FROM users WHERE id = $1`, [driverId]);
+        currentUrl = doc.rows[0]?.[documentType] ?? null;
+      }
+
+      const result = await pool.query(
+        `INSERT INTO driver_document_requirements
+         (driver_id, document_type, current_document_url, requested_by_admin_id, request_reason)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [driverId, documentType, currentUrl, adminId, reason]
+      );
+
+      // Mark driver as having action required
+      await pool.query(
+        `UPDATE drivers SET has_action_required = TRUE, last_action_required_at = NOW() WHERE user_id = $1`,
+        [driverId]
+      );
+
+      await prisma.auditLog.create({
+        data: {
+          admin_id: adminId,
+          target_id: driverId,
+          action: 'DOCUMENT_RESUBMISSION_REQUESTED',
+          details: `Admin requested resubmission of ${documentType}. Reason: ${reason}`,
+        },
+      });
+
+      // Fire-and-forget email
+      try {
+        const userInfo = await pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [driverId]);
+        if (userInfo.rows[0]?.email) {
+          await EmailService.sendDocumentResubmissionRequestedEmail(
+            { email: userInfo.rows[0].email, full_name: userInfo.rows[0].full_name },
+            { document_type: documentType, reason }
+          );
+        }
+      } catch (e: any) {
+        console.warn('[ADMIN] ⚠️ Resubmission email failed:', e.message);
+      }
+
+      res.json({ success: true, requirement: result.rows[0] });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Request document resubmission error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to request document resubmission.' });
+    }
+  }
+
+  static async getDriverDocumentRequirements(req: AuthRequest, res: Response) {
+    const { id: driverId } = req.params;
+    try {
+      const result = await pool.query(
+        `SELECT dr.*, a.full_name AS requested_by_admin_name,
+                r.full_name AS reviewed_by_admin_name
+         FROM driver_document_requirements dr
+         LEFT JOIN users a ON a.id = dr.requested_by_admin_id
+         LEFT JOIN users r ON r.id = dr.reviewed_by_admin_id
+         WHERE dr.driver_id = $1
+         ORDER BY dr.requested_at DESC`,
+        [driverId]
+      );
+      res.json({ requirements: result.rows });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Get document requirements error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to retrieve document requirements.' });
+    }
+  }
+
+  static async reviewDocumentRequirement(req: AuthRequest, res: Response) {
+    const { id: requirementId } = req.params;
+    const { decision } = req.body;
+    const adminId = req.user!.id;
+
+    if (!decision || !['approved', 'rejected'].includes(decision)) {
+      return res.status(400).json({ error: 'Valid decision (approved or rejected) is required.' });
+    }
+
+    try {
+      const reqRow = await pool.query(
+        `SELECT dr.* FROM driver_document_requirements dr WHERE dr.id = $1 FOR UPDATE`,
+        [requirementId]
+      );
+
+      if (!reqRow.rowCount) return res.status(404).json({ error: 'Document requirement not found.' });
+      if (reqRow.rows[0].status !== 'submitted') {
+        return res.status(400).json({ error: 'Document requirement must be in submitted status to review.' });
+      }
+
+      const driverId = reqRow.rows[0].driver_id;
+      const documentType = reqRow.rows[0].document_type;
+
+      const updated = await pool.query(
+        `UPDATE driver_document_requirements
+         SET status = 'reviewed', reviewed_at = NOW(), reviewed_by_admin_id = $1, review_decision = $2, updated_at = NOW()
+         WHERE id = $3 RETURNING *`,
+        [adminId, decision, requirementId]
+      );
+
+      // If approved, update the actual document URL
+      if (decision === 'approved') {
+        const newUrl = reqRow.rows[0].new_document_url;
+        if (newUrl) {
+          if (['license_photo_url', 'license_photo_back_url', 'insurance_photo_url', 'registration_photo_url'].includes(documentType)) {
+            await pool.query(
+              `UPDATE drivers SET ${documentType} = $1, verification_feedback_seen = FALSE WHERE user_id = $2`,
+              [newUrl, driverId]
+            );
+          } else if (documentType === 'inspection_photo_url') {
+            await pool.query(
+              `UPDATE driver_vehicles SET inspection_photo_url = $1 WHERE driver_id = $2`,
+              [newUrl, driverId]
+            );
+          } else if (['id_photo_front_url', 'id_photo_back_url'].includes(documentType)) {
+            await pool.query(
+              `UPDATE users SET ${documentType} = $1 WHERE id = $2`,
+              [newUrl, driverId]
+            );
+          }
+        }
+      }
+
+      // Check if there are any remaining pending requirements; if not, clear action_required flag
+      const remaining = await pool.query(
+        `SELECT COUNT(*)::int AS c FROM driver_document_requirements
+         WHERE driver_id = $1 AND status IN ('resubmission_required', 'submitted')`,
+        [driverId]
+      );
+      if (remaining.rows[0].c === 0) {
+        await pool.query(
+          `UPDATE drivers SET has_action_required = FALSE WHERE user_id = $1`,
+          [driverId]
+        );
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          admin_id: adminId,
+          target_id: driverId,
+          action: `DOCUMENT_RESUBMISSION_${decision.toUpperCase()}`,
+          details: `Document ${documentType} resubmission ${decision}.`,
+        },
+      });
+
+      res.json({ success: true, requirement: updated.rows[0] });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Review document requirement error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to review document requirement.' });
+    }
+  }
+
+  // ============================================================
   // Payouts (020)
   // ============================================================
 

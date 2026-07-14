@@ -40,4 +40,9 @@ router.post('/payout-cards/:id/reject', AdminController.rejectPayoutCard);
 router.get('/payouts', AdminController.listPayouts);
 router.post('/payouts/:id/mark-paid', AdminController.markPayoutPaid);
 
+// Document resubmission requirements
+router.post('/users/:id/request-docs', AdminController.requestDocumentResubmission);
+router.get('/users/:id/document-requirements', AdminController.getDriverDocumentRequirements);
+router.patch('/document-requirements/:id/review', AdminController.reviewDocumentRequirement);
+
 export default router;

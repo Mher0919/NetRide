@@ -36,6 +36,9 @@ import api from '../api';
 import {
   getDriverSpeeding,
   clearDangerousFlag,
+  getDriverDocumentRequirements,
+  requestDocumentResubmission,
+  reviewDocumentRequirement,
 } from '../api/admin';
 import { SpeedingBadge } from '../components/SpeedingBadge';
 import { format } from 'date-fns';
@@ -51,6 +54,10 @@ const UserDetail: React.FC = () => {
   const [violations, setViolations] = useState<any[]>([]);
   const [clearDangerousOpen, setClearDangerousOpen] = useState(false);
   const [clearNotes, setClearNotes] = useState('');
+  const [docRequirements, setDocRequirements] = useState<any[]>([]);
+  const [requestDocsOpen, setRequestDocsOpen] = useState(false);
+  const [requestDocType, setRequestDocType] = useState('');
+  const [requestDocReason, setRequestDocReason] = useState('');
   const isDriver = !!user?.driver_profile;
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
@@ -67,6 +74,13 @@ const UserDetail: React.FC = () => {
         } catch (err) {
           console.error('Failed to fetch speeding history', err);
           setViolations([]);
+        }
+        try {
+          const docs = await getDriverDocumentRequirements(id);
+          setDocRequirements(docs.requirements ?? []);
+        } catch (err) {
+          console.error('Failed to fetch document requirements', err);
+          setDocRequirements([]);
         }
       }
     } catch (error) {
@@ -125,6 +139,36 @@ const UserDetail: React.FC = () => {
       fetchUser();
     } catch (error) {
       console.error('Inspection verification failed', error);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRequestDocument = async () => {
+    if (!requestDocType || !requestDocReason.trim()) return;
+    setActionLoading(true);
+    try {
+      await requestDocumentResubmission(id, requestDocType, requestDocReason);
+      setRequestDocsOpen(false);
+      setRequestDocType('');
+      setRequestDocReason('');
+      const docs = await getDriverDocumentRequirements(id);
+      setDocRequirements(docs.requirements ?? []);
+    } catch (error) {
+      console.error('Failed to request document', error);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReviewDocument = async (requirementId: string, decision: 'approved' | 'rejected') => {
+    setActionLoading(true);
+    try {
+      await reviewDocumentRequirement(requirementId, decision);
+      const docs = await getDriverDocumentRequirements(id);
+      setDocRequirements(docs.requirements ?? []);
+    } catch (error) {
+      console.error('Failed to review document', error);
     } finally {
       setActionLoading(false);
     }
@@ -371,15 +415,24 @@ const UserDetail: React.FC = () => {
                   <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 800 }}>General Compliance Documents</Typography>
                   <Grid container spacing={2} {...({ component: 'div' } as any)}>
                     {[
-                      { title: 'Driver License (Front)', url: user.driver_profile.license_photo_url },
-                      { title: 'Driver License (Back)', url: user.driver_profile.license_photo_back_url },
-                      { title: 'Commercial Insurance', url: user.driver_profile.insurance_photo_url },
-                      { title: 'Vehicle Registration', url: user.driver_profile.registration_photo_url }
+                      { title: 'Driver License (Front)', key: 'license_photo_url', url: user.driver_profile.license_photo_url },
+                      { title: 'Driver License (Back)', key: 'license_photo_back_url', url: user.driver_profile.license_photo_back_url },
+                      { title: 'Commercial Insurance', key: 'insurance_photo_url', url: user.driver_profile.insurance_photo_url },
+                      { title: 'Vehicle Registration', key: 'registration_photo_url', url: user.driver_profile.registration_photo_url }
                     ].map((doc, idx) => (
                       <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
                         <Card sx={{ border: '1px solid #eee', boxShadow: 'none' }}>
-                          <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee' }}>
+                          <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <Typography variant="caption" sx={{ fontWeight: 800 }}>{doc.title}</Typography>
+                            <Button
+                              size="small"
+                              variant="text"
+                              color="warning"
+                              onClick={() => { setRequestDocType(doc.key); setRequestDocReason(''); setRequestDocsOpen(true); }}
+                              sx={{ fontSize: '0.65rem', fontWeight: 700 }}
+                            >
+                              Request
+                            </Button>
                           </CardContent>
                           {doc.url ? (
                             <CardMedia
@@ -400,6 +453,111 @@ const UserDetail: React.FC = () => {
                     ))}
                   </Grid>
                 </Box>
+
+                {/* Document Requirements */}
+                {docRequirements.length > 0 && (
+                  <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
+                    <Typography variant="subtitle1" sx={{ mb: 3, fontWeight: 800 }}>
+                      Document Resubmission History
+                    </Typography>
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Document</TableCell>
+                            <TableCell>Status</TableCell>
+                            <TableCell>Reason</TableCell>
+                            <TableCell>Requested</TableCell>
+                            <TableCell>Actions</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {docRequirements.map((r: any) => {
+                            const docLabels: Record<string, string> = {
+                              license_photo_url: 'License (Front)',
+                              license_photo_back_url: 'License (Back)',
+                              insurance_photo_url: 'Insurance',
+                              registration_photo_url: 'Registration',
+                              inspection_photo_url: 'Inspection',
+                              id_photo_front_url: 'ID (Front)',
+                              id_photo_back_url: 'ID (Back)',
+                            };
+                            return (
+                              <TableRow key={r.id} hover>
+                                <TableCell>
+                                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                    {docLabels[r.document_type] || r.document_type}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={r.status.replace('_', ' ').toUpperCase()}
+                                    size="small"
+                                    color={
+                                      r.status === 'reviewed' && r.review_decision === 'approved' ? 'success'
+                                        : r.status === 'reviewed' && r.review_decision === 'rejected' ? 'error'
+                                        : r.status === 'submitted' ? 'info'
+                                        : 'warning'
+                                    }
+                                    sx={{ fontWeight: 800, height: 22, fontSize: '0.65rem' }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Typography variant="body2" sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {r.request_reason}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>
+                                  <Typography variant="body2">
+                                    {format(new Date(r.requested_at), 'PP')}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>
+                                  {r.status === 'submitted' && (
+                                    <Stack direction="row" spacing={1}>
+                                      <Button
+                                        size="small"
+                                        variant="contained"
+                                        color="success"
+                                        onClick={() => handleReviewDocument(r.id, 'approved')}
+                                        disabled={actionLoading}
+                                        sx={{ borderRadius: '8px', height: 30, fontSize: '0.7rem' }}
+                                      >
+                                        Accept
+                                      </Button>
+                                      <Button
+                                        size="small"
+                                        variant="outlined"
+                                        color="error"
+                                        onClick={() => handleReviewDocument(r.id, 'rejected')}
+                                        disabled={actionLoading}
+                                        sx={{ borderRadius: '8px', height: 30, fontSize: '0.7rem' }}
+                                      >
+                                        Reject
+                                      </Button>
+                                    </Stack>
+                                  )}
+                                  {r.status === 'reviewed' && (
+                                    <Chip
+                                      label={r.review_decision === 'approved' ? 'Accepted' : 'Rejected'}
+                                      size="small"
+                                      color={r.review_decision === 'approved' ? 'success' : 'error'}
+                                      variant="outlined"
+                                      sx={{ fontWeight: 700, height: 22, fontSize: '0.65rem' }}
+                                    />
+                                  )}
+                                  {r.status === 'resubmission_required' && (
+                                    <Chip label="Awaiting" size="small" variant="outlined" sx={{ fontWeight: 700, height: 22, fontSize: '0.65rem' }} />
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Paper>
+                )}
 
                 {/* Safety */}
                 <Paper
@@ -615,6 +773,46 @@ const UserDetail: React.FC = () => {
             sx={{ px: 4, borderRadius: '12px' }}
           >
             Confirm Rejection
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Request Document Resubmission Dialog */}
+      <Dialog
+        open={requestDocsOpen}
+        onClose={() => setRequestDocsOpen(false)}
+        {...({
+          PaperProps: { sx: { borderRadius: 4, p: 1, maxWidth: 450 } }
+        } as any)}
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Request Document Resubmission</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 3, color: 'text.secondary', fontWeight: 500 }}>
+            Request the driver to upload a new version of the selected document. The driver will be notified via email and in-app.
+          </Typography>
+          <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>Document: {requestDocType}</Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Reason for resubmission"
+            multiline
+            rows={3}
+            variant="filled"
+            value={requestDocReason}
+            onChange={(e) => setRequestDocReason(e.target.value)}
+            sx={{ '& .MuiFilledInput-root': { borderRadius: 2 } }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 3 }}>
+          <Button onClick={() => setRequestDocsOpen(false)} color="inherit" sx={{ fontWeight: 700 }}>Cancel</Button>
+          <Button
+            onClick={handleRequestDocument}
+            color="warning"
+            variant="contained"
+            disabled={!requestDocReason.trim() || actionLoading}
+            sx={{ px: 4, borderRadius: '12px' }}
+          >
+            Send Request
           </Button>
         </DialogActions>
       </Dialog>
