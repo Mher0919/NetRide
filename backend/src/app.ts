@@ -361,6 +361,18 @@ async function runMigrations() {
       console.log('✅ Onboarding + phone fields schema (022) applied');
     }
 
+    // Driver-specific phone number + phone_verified columns (023).
+    const hasDriverPhoneColumn = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'drivers' AND column_name = 'phone_number'"
+    );
+    if (hasDriverPhoneColumn.rowCount === 0) {
+      console.log('⚡ Adding driver-specific phone columns (023)...');
+      const schemaPath = path.join(__dirname, '../migrations/023_driver_phone_separate.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Driver phone columns (023) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);

@@ -60,8 +60,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       final profile = await UserService.getProfile();
-      final vehicles = await UserService.getVehicles();
-      
+
+      List<dynamic> vehicles;
+      try {
+        vehicles = await UserService.getVehicles();
+      } catch (e) {
+        debugPrint('Failed to fetch vehicles: $e');
+        vehicles = [];
+      }
+
       setState(() {
         _nameController.text = profile['full_name'] ?? '';
         _phoneController.text = profile['phone_number'] ?? '';
