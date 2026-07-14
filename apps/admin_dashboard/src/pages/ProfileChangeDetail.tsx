@@ -218,6 +218,14 @@ const ProfileChangeDetail: React.FC = () => {
 
           {/* Action card */}
           <Card sx={{ mt: 2, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
+            {requested._reason && (
+              <Box sx={{ px: 3, pt: 2 }}>
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#8B7A3A', textTransform: 'uppercase', mb: 0.5 }}>
+                  Driver's Note
+                </Typography>
+                <Typography sx={{ fontSize: 14, color: '#5C4E1E', mb: 1 }}>{requested._reason}</Typography>
+              </Box>
+            )}
             <CardContent>
               <Typography sx={{ fontWeight: 800, mb: 1.5 }}>Decision</Typography>
               {status === 'PENDING' ? (

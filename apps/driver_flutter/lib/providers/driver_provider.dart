@@ -88,6 +88,10 @@ class DriverProvider with ChangeNotifier {
   bool get hasDocumentActionRequired => _hasDocumentActionRequired;
   bool get hasDocumentSubmitted => _hasDocumentSubmitted;
   List<Map<String, dynamic>> get documentRequirements => _documentRequirements;
+  bool get isVerified => _isVerified;
+  String get verificationStatus => _verificationStatus;
+  String? get rejectionReason => _rejectionReason;
+  bool get feedbackSeen => _feedbackSeen;
 
   models.DriverStatus get status => _status;
   models.VehicleClass get activeClass => _activeClass;

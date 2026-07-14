@@ -37,8 +37,8 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     user: { max: 60, windowMs: MINUTE },
   },
   'POST /api/upload': {
-    user: { max: 20, windowMs: MINUTE },
-    ip: { max: 50, windowMs: MINUTE },
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 100, windowMs: MINUTE },
   },
 };
 

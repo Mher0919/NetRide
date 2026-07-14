@@ -168,30 +168,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _uploadInProgress = false;
 
   Future<void> _changeProfilePicture() async {
-    if (_uploadInProgress) return; // guard against double-tap / auto-retry
+    if (_uploadInProgress) return;
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      _uploadInProgress = true;
+    if (pickedFile == null) return;
+
+    _uploadInProgress = true;
+    setState(() => _isSaving = true);
+    try {
+      final url = await AuthService.uploadImage(File(pickedFile.path));
+      _uploadInProgress = false;
+      setState(() => _isSaving = false);
+
+      if (!mounted) return;
+      final reason = await _showChangeReasonDialog('profile picture');
+      if (reason == null) return; // user cancelled
+
       setState(() => _isSaving = true);
-      try {
-        final url = await AuthService.uploadImage(File(pickedFile.path));
-        await UserService.updateProfile({'profile_image_url': url});
-        setState(() {
-          _profileImageUrl = url;
-          _isSaving = false;
-          _uploadInProgress = false;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated')));
-        }
-      } on Exception catch (e) {
-        _uploadInProgress = false;
-        setState(() => _isSaving = false);
-        final message = _friendlyUploadError(e);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-        }
+      await UserService.submitProfileChange({
+        'profile_image_url': url,
+        '_reason': reason,
+      });
+      setState(() {
+        _isSaving = false;
+        _hasPendingChange = true;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile picture submitted for admin review.'),
+            backgroundColor: Color(0xFF5B7760),
+          ),
+        );
+      }
+    } on Exception catch (e) {
+      _uploadInProgress = false;
+      setState(() => _isSaving = false);
+      final message = _friendlyUploadError(e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     }
   }
@@ -413,7 +428,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final fullName = _nameController.text.trim();
     final phoneNumber = _phoneController.text.trim();
     final dob = _dobController.text.trim();
-    final licenseNumber = _licenseController.text.trim();
     final plateNumber = _plateController.text.trim();
 
     if (fullName.length < 2) {
@@ -443,7 +457,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _parseDob(dob),
         original['date_of_birth'],
       );
-      pushIfChanged('license_number', licenseNumber, original['license_number']);
+      // license_number is deliberately excluded — it is not shown on
+      // the profile page and should never be re-submitted as a change.
       pushIfChanged(
         'profile_image_url',
         _profileImageUrl,
@@ -469,6 +484,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         }
         return;
+      }
+
+      // If the change touches name or photo, ask for a reason.
+      final touchesNameOrPhoto =
+          changes.containsKey('full_name') || changes.containsKey('profile_image_url');
+      if (touchesNameOrPhoto && mounted) {
+        final reason = await _showChangeReasonDialog(
+          changes.containsKey('full_name') ? 'name' : 'profile picture',
+        );
+        if (reason == null) {
+          setState(() {
+            _isSaving = false;
+            _isEditing = false;
+          });
+          return; // user cancelled
+        }
+        changes['_reason'] = reason;
       }
 
       await UserService.submitProfileChange(changes);
@@ -522,6 +554,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (_) {
       return text;
     }
+  }
+
+  /// Shows a dialog asking the driver why they want to make a change.
+  /// Returns the entered reason, or null if cancelled.
+  Future<String?> _showChangeReasonDialog(String what) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Why are you changing your $what?',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 3,
+          maxLength: 500,
+          decoration: const InputDecoration(
+            hintText: 'Tell the admin why you need this change…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isEmpty) return;
+              Navigator.pop(ctx, text);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF5B7760),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+    return result;
   }
 
   String _friendlyError(String raw) {
@@ -644,16 +719,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 24),
               _buildSectionCard(
-                title: 'License & Vehicle',
+                title: 'Vehicle',
                 children: [
-                  const Divider(height: 32),
-                  _buildProfileItem(
-                    icon: Icons.badge_outlined,
-                    label: 'License Number',
-                    controller: _licenseController,
-                    enabled: false,
-                  ),
-                  const Divider(height: 32),
+                  if (_vehicles.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 48, height: 48,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF7F4EF),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.directions_car_rounded, color: Color(0xFF5B7760), size: 26),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${_vehicles[0]['year']} ${_vehicles[0]['make']} ${_vehicles[0]['model']}',
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${_vehicles[0]['color']}${_vehicles[0]['interior_color'] != null ? ' / ${_vehicles[0]['interior_color']} Int' : ''}',
+                                  style: TextStyle(fontSize: 12, color: const Color(0xFF2F3A32).withOpacity(0.4)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const Divider(height: 16),
                   _buildProfileItem(
                     icon: Icons.vpn_key_outlined,
                     label: 'License Plate',
@@ -662,7 +763,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const Divider(height: 16),
                   _buildMenuTile(
-                    icon: Icons.directions_car_outlined,
+                    icon: Icons.swap_horiz_rounded,
                     title: 'Replace Vehicle',
                     onTap: () => Navigator.pushNamed(context, '/replace-vehicle'),
                   ),

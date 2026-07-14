@@ -80,6 +80,7 @@ const ProfileChangeChangesSchema = z.object({
 
 const ProfileChangeRequestSchema = z.object({
   changes: ProfileChangeChangesSchema,
+  reason: z.string().min(1).max(500).optional(),
 });
 
 const PayoutCardSchema = z.object({
@@ -335,7 +336,7 @@ export class DriverController {
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
       const validated = ProfileChangeRequestSchema.parse(req.body);
-      const result = await DriverService.submitProfileChange(userId, validated.changes);
+      const result = await DriverService.submitProfileChange(userId, validated.changes, validated.reason);
       res.json(result);
     } catch (error: any) {
       if (error?.name === 'ZodError') {

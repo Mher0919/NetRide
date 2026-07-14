@@ -64,12 +64,14 @@ export const rateLimitMiddleware = async (req: Request, res: Response, next: Nex
   const userRule = config?.user || (userId ? DEFAULT_USER_LIMIT : null);
   const ipRule = config?.ip || DEFAULT_IP_LIMIT;
 
+  // Keys include the route so each endpoint has its own budget.
+  const ns = routeKey ?? 'default';
   if (userRule && userId) {
-    userResult = await consume(`ratelimit:user:${userId}`, userRule);
+    userResult = await consume(`ratelimit:user:${ns}:${userId}`, userRule);
   }
 
   if (ipRule && !(userId && userResult?.allowed)) {
-    ipResult = await consume(`ratelimit:ip:${ip}`, ipRule);
+    ipResult = await consume(`ratelimit:ip:${ns}:${ip}`, ipRule);
   }
 
   const result = userResult && userId ? userResult : ipResult!;

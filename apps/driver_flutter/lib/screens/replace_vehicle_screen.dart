@@ -5,6 +5,14 @@ import 'package:image_picker/image_picker.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 
+const _usStates = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
+  'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY',
+];
+
 class ReplaceVehicleScreen extends StatefulWidget {
   const ReplaceVehicleScreen({super.key});
 
@@ -14,14 +22,23 @@ class ReplaceVehicleScreen extends StatefulWidget {
 
 class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _makeController = TextEditingController();
-  final _modelController = TextEditingController();
-  final _yearController = TextEditingController();
   final _colorController = TextEditingController();
   final _interiorColorController = TextEditingController();
   final _plateController = TextEditingController();
-  final _stateController = TextEditingController();
   final _zipController = TextEditingController();
+
+  // Dropdown selections
+  String? _selectedYear;
+  String? _selectedMake;
+  String? _selectedModel;
+  String? _selectedState;
+
+  List<int> _years = [];
+  List<String> _makes = [];
+  List<String> _models = [];
+  bool _loadingYears = true;
+  bool _loadingMakes = false;
+  bool _loadingModels = false;
 
   File? _registrationImage;
   File? _insuranceImage;
@@ -29,27 +46,80 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
   bool _isSubmitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    _loadYears();
+  }
+
+  @override
   void dispose() {
-    _makeController.dispose();
-    _modelController.dispose();
-    _yearController.dispose();
     _colorController.dispose();
     _interiorColorController.dispose();
     _plateController.dispose();
-    _stateController.dispose();
     _zipController.dispose();
     super.dispose();
   }
 
-  Future<String?> _pickAndUpload() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery);
-    if (picked == null) return null;
-    return AuthService.uploadImage(File(picked.path));
+  Future<void> _loadYears() async {
+    setState(() => _loadingYears = true);
+    try {
+      final years = await AuthService.getVehicleYears();
+      setState(() {
+        _years = years;
+        _loadingYears = false;
+      });
+    } catch (_) {
+      // Fallback to a reasonable range
+      final now = DateTime.now().year;
+      setState(() {
+        _years = List.generate(now - 2010, (i) => now - i);
+        _loadingYears = false;
+      });
+    }
+  }
+
+  Future<void> _loadMakes(int year) async {
+    setState(() => _loadingMakes = true);
+    try {
+      final makes = await AuthService.getVehicleMakes(year);
+      setState(() {
+        _makes = makes;
+        _loadingMakes = false;
+      });
+    } catch (_) {
+      setState(() {
+        _makes = [];
+        _loadingMakes = false;
+      });
+    }
+  }
+
+  Future<void> _loadModels(String make) async {
+    setState(() => _loadingModels = true);
+    try {
+      final models = await AuthService.getVehicleModels(make, int.parse(_selectedYear!));
+      setState(() {
+        _models = models;
+        _loadingModels = false;
+      });
+    } catch (_) {
+      setState(() {
+        _models = [];
+        _loadingModels = false;
+      });
+    }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_selectedYear == null || _selectedMake == null || _selectedModel == null) {
+      _showError('Please select year, make, and model.');
+      return;
+    }
+    if (_selectedState == null) {
+      _showError('Please select your license plate state.');
+      return;
+    }
     if (_registrationImage == null) {
       _showError('Registration photo is required.');
       return;
@@ -70,13 +140,13 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
       final inspUrl = await AuthService.uploadImage(_inspectionImage!);
 
       await UserService.submitNewVehicle({
-        'make': _makeController.text.trim(),
-        'model': _modelController.text.trim(),
-        'year': int.parse(_yearController.text.trim()),
+        'make': _selectedMake,
+        'model': _selectedModel,
+        'year': int.parse(_selectedYear!),
         'color': _colorController.text.trim(),
         'interior_color': _interiorColorController.text.trim(),
         'license_plate_number': _plateController.text.trim(),
-        'license_plate_state': _stateController.text.trim().toUpperCase(),
+        'license_plate_state': _selectedState,
         'zip_code': _zipController.text.trim(),
         'registration_photo_url': regUrl,
         'insurance_photo_url': insUrl,
@@ -90,9 +160,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
         Navigator.pop(context, true);
       }
     } catch (e) {
-      if (mounted) {
-        _showError('Failed to submit vehicle: $e');
-      }
+      if (mounted) _showError('Failed to submit vehicle: $e');
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -122,30 +190,66 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
             children: [
               Text('Vehicle Details', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700)),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _makeController,
-                decoration: const InputDecoration(labelText: 'Make', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _modelController,
-                decoration: const InputDecoration(labelText: 'Model', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _yearController,
+
+              // Year dropdown
+              DropdownButtonFormField<String>(
+                value: _selectedYear,
                 decoration: const InputDecoration(labelText: 'Year', border: OutlineInputBorder()),
-                keyboardType: TextInputType.number,
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Required';
-                  final y = int.tryParse(v.trim());
-                  if (y == null || y < 2011) return 'Must be 2011 or newer';
-                  return null;
+                isExpanded: true,
+                items: (_loadingYears
+                    ? <String>[]
+                    : _years.map((y) => DropdownMenuItem(value: y.toString(), child: Text(y.toString()))).toList()),
+                onChanged: (val) {
+                  setState(() {
+                    _selectedYear = val;
+                    _selectedMake = null;
+                    _selectedModel = null;
+                    _makes = [];
+                    _models = [];
+                  });
+                  if (val != null) _loadMakes(int.parse(val));
                 },
+                validator: (v) => v == null ? 'Required' : null,
               ),
               const SizedBox(height: 12),
+
+              // Make dropdown
+              DropdownButtonFormField<String>(
+                value: _selectedMake,
+                decoration: const InputDecoration(labelText: 'Make', border: OutlineInputBorder()),
+                isExpanded: true,
+                items: (_loadingMakes
+                    ? <DropdownMenuItem<String>>[]
+                    : _makes.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList()),
+                onChanged: _selectedYear == null
+                    ? null
+                    : (val) {
+                        setState(() {
+                          _selectedMake = val;
+                          _selectedModel = null;
+                          _models = [];
+                        });
+                        if (val != null) _loadModels(val);
+                      },
+                validator: (v) => v == null ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+
+              // Model dropdown
+              DropdownButtonFormField<String>(
+                value: _selectedModel,
+                decoration: const InputDecoration(labelText: 'Model', border: OutlineInputBorder()),
+                isExpanded: true,
+                items: (_loadingModels
+                    ? <DropdownMenuItem<String>>[]
+                    : _models.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList()),
+                onChanged: _selectedMake == null
+                    ? null
+                    : (val) => setState(() => _selectedModel = val),
+                validator: (v) => v == null ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+
               TextFormField(
                 controller: _colorController,
                 decoration: const InputDecoration(labelText: 'Color', border: OutlineInputBorder()),
@@ -163,11 +267,15 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _stateController,
-                decoration: const InputDecoration(labelText: 'License Plate State', border: OutlineInputBorder(), hintText: 'e.g. CA'),
-                textCapitalization: TextCapitalization.characters,
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+
+              // State dropdown
+              DropdownButtonFormField<String>(
+                value: _selectedState,
+                decoration: const InputDecoration(labelText: 'License Plate State', border: OutlineInputBorder()),
+                isExpanded: true,
+                items: _usStates.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                onChanged: (val) => setState(() => _selectedState = val),
+                validator: (v) => v == null ? 'Required' : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -180,7 +288,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
               const SizedBox(height: 12),
               _buildPhotoUpload('Vehicle Registration', _registrationImage, (f) => setState(() => _registrationImage = f)),
               const SizedBox(height: 12),
-              _buildPhotoUpload('Commercial Insurance', _insuranceImage, (f) => setState(() => _insuranceImage = f)),
+              _buildPhotoUpload('Regular Car Insurance', _insuranceImage, (f) => setState(() => _insuranceImage = f)),
               const SizedBox(height: 12),
               _buildPhotoUpload('Vehicle Inspection', _inspectionImage, (f) => setState(() => _inspectionImage = f)),
               const SizedBox(height: 32),

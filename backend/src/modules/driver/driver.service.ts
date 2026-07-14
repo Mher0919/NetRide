@@ -652,7 +652,7 @@ export class DriverService {
   // Profile-change approval queue (020)
   // ============================================================
 
-  static async submitProfileChange(userId: string, changes: any) {
+  static async submitProfileChange(userId: string, changes: any, reason?: string) {
     // Reject if the driver already has an open PENDING request.
     const open = await pool.query(
       `SELECT id FROM profile_change_requests WHERE driver_id = $1 AND status = 'PENDING' LIMIT 1`,
@@ -682,6 +682,7 @@ export class DriverService {
     let cardLast4: string | null = null;
     let cardBrand: string | null = null;
     let sanitizedChanges: any = { ...changes };
+    if (reason?.trim()) sanitizedChanges._reason = reason.trim();
 
     if (changes.payout_card) {
       const pc = changes.payout_card;
