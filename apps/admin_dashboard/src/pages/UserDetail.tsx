@@ -408,47 +408,46 @@ const UserDetail: React.FC = () => {
                   <Grid container spacing={2} {...({ component: 'div' } as any)}>
                     {(() => {
                       const firstVeh = user.driver_profile.vehicles?.[0];
-                      return [
+                      const items = [
                         { title: 'Driver License (Front)', key: 'license_photo_url', url: user.driver_profile.license_photo_url },
                         { title: 'Driver License (Back)', key: 'license_photo_back_url', url: user.driver_profile.license_photo_back_url },
                         { title: 'Commercial Insurance', key: 'insurance_photo_url', url: user.driver_profile.insurance_photo_url },
                         { title: 'Vehicle Registration', key: 'registration_photo_url', url: user.driver_profile.registration_photo_url },
                         { title: 'Vehicle Inspection', key: 'inspection_photo_url', url: firstVeh?.inspection_photo_url },
                       ];
+                      return items.filter(Boolean).map((doc, idx) => (
+                        <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
+                          <Card sx={{ border: '1px solid #eee', boxShadow: 'none' }}>
+                            <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Typography variant="caption" sx={{ fontWeight: 800 }}>{doc.title}</Typography>
+                              <Button
+                                size="small"
+                                variant="text"
+                                color="warning"
+                                onClick={() => { setRequestDocType(doc.key); setRequestDocReason(''); setRequestDocsOpen(true); }}
+                                sx={{ fontSize: '0.65rem', fontWeight: 700 }}
+                              >
+                                Request
+                              </Button>
+                            </CardContent>
+                            {doc.url ? (
+                              <CardMedia
+                                component="img"
+                                height="220"
+                                image={doc.url}
+                                alt={doc.title}
+                                sx={{ objectFit: 'cover', bgcolor: 'white', cursor: 'pointer' }}
+                                onClick={() => window.open(doc.url, '_blank')}
+                              />
+                            ) : (
+                              <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'white' }}>
+                                <Typography variant="caption" color="text.disabled" sx={{ fontWeight: 700 }}>DOCUMENT NOT PROVIDED</Typography>
+                              </Box>
+                            )}
+                          </Card>
+                        </Grid>
+                      ));
                     })()}
-                    .filter(Boolean)
-                    .map((doc: any, idx: number) => (
-                      <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
-                        <Card sx={{ border: '1px solid #eee', boxShadow: 'none' }}>
-                          <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Typography variant="caption" sx={{ fontWeight: 800 }}>{doc.title}</Typography>
-                            <Button
-                              size="small"
-                              variant="text"
-                              color="warning"
-                              onClick={() => { setRequestDocType(doc.key); setRequestDocReason(''); setRequestDocsOpen(true); }}
-                              sx={{ fontSize: '0.65rem', fontWeight: 700 }}
-                            >
-                              Request
-                            </Button>
-                          </CardContent>
-                          {doc.url ? (
-                            <CardMedia
-                              component="img"
-                              height="220"
-                              image={doc.url}
-                              alt={doc.title}
-                              sx={{ objectFit: 'cover', bgcolor: 'white', cursor: 'pointer' }}
-                              onClick={() => window.open(doc.url, '_blank')}
-                            />
-                          ) : (
-                            <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'white' }}>
-                              <Typography variant="caption" color="text.disabled" sx={{ fontWeight: 700 }}>DOCUMENT NOT PROVIDED</Typography>
-                            </Box>
-                          )}
-                        </Card>
-                      </Grid>
-                    ))}
                   </Grid>
                 </Box>
 
