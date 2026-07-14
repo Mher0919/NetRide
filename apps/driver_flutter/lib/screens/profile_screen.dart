@@ -731,7 +731,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildSectionCard(
                 title: 'Vehicle',
                 children: [
-                  if (_activeVehicle != null)
+                  final av = _activeVehicle;
+                  if (av != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Row(
@@ -750,12 +751,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '${_activeVehicle['year']} ${_activeVehicle['make']} ${_activeVehicle['model']}',
+                                  '${av['year']} ${av['make']} ${av['model']}',
                                   style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${_activeVehicle['color']}${_activeVehicle['interior_color'] != null ? ' / ${_activeVehicle['interior_color']} Int' : ''}',
+                                  '${av['color']}${av['interior_color'] != null ? ' / ${av['interior_color']} Int' : ''}',
                                   style: TextStyle(fontSize: 12, color: const Color(0xFF2F3A32).withOpacity(0.4)),
                                 ),
                               ],

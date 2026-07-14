@@ -16,6 +16,7 @@ router.patch('/users/:id/verify', AdminController.verifyUser);
 router.patch('/users/:id/reject', AdminController.rejectUser);
 router.patch('/users/:id/pending', AdminController.setPending);
 router.patch('/users/:id/clear-dangerous', AdminController.clearDangerousFlag);
+router.patch('/users/:id/license', AdminController.updateLicense);
 router.get('/rides', AdminController.getRides);
 router.get('/rides/:id', AdminController.getRideById);
 router.get('/rides/:id/audit', AdminController.getRideAudit);

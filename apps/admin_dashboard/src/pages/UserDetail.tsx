@@ -40,6 +40,7 @@ import {
   requestDocumentResubmission,
   reviewDocumentRequirement,
   requestVehicleResubmission,
+  updateLicense,
 } from '../api/admin';
 import { SpeedingBadge } from '../components/SpeedingBadge';
 import { format } from 'date-fns';
@@ -61,6 +62,9 @@ const UserDetail: React.FC = () => {
   const [requestDocReason, setRequestDocReason] = useState('');
   const [vehicleResubmitOpen, setVehicleResubmitOpen] = useState(false);
   const [vehicleResubmitReason, setVehicleResubmitReason] = useState('');
+  const [licenseNumber, setLicenseNumber] = useState('');
+  const [licenseExpiry, setLicenseExpiry] = useState('');
+  const [licenseSaving, setLicenseSaving] = useState(false);
   const isDriver = !!user?.driver_profile;
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
@@ -85,6 +89,11 @@ const UserDetail: React.FC = () => {
           console.error('Failed to fetch document requirements', err);
           setDocRequirements([]);
         }
+        const dp = response.data.driver_profile;
+        setLicenseNumber(dp?.license_number ?? '');
+        setLicenseExpiry(dp?.license_expiry_date
+          ? format(new Date(dp.license_expiry_date), 'yyyy-MM-dd')
+          : '');
       }
     } catch (error) {
       console.error('Failed to fetch user', error);
@@ -189,6 +198,21 @@ const UserDetail: React.FC = () => {
       console.error('Failed to request vehicle resubmission', error);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleSaveLicense = async () => {
+    setLicenseSaving(true);
+    try {
+      await updateLicense(id, {
+        license_number: licenseNumber || undefined,
+        license_expiry_date: licenseExpiry || undefined,
+      });
+      fetchUser();
+    } catch (error) {
+      console.error('Failed to update license', error);
+    } finally {
+      setLicenseSaving(false);
     }
   };
 
@@ -341,13 +365,56 @@ const UserDetail: React.FC = () => {
             {user.driver_profile && (
               <>
                 <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
-                  <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 800, mb: 3 }}>
-                    Driver Identity
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    License on file — expiry:
-                    {' '}{user.driver_profile.license_expiry_date ? format(new Date(user.driver_profile.license_expiry_date), 'PPP') : '---'}
-                  </Typography>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                      Driver Identity
+                    </Typography>
+                    {user.driver_profile.license_expiry_date && new Date(user.driver_profile.license_expiry_date) < new Date() && (
+                      <Chip
+                        label="EXPIRED"
+                        size="small"
+                        color="error"
+                        sx={{ fontWeight: 800, height: 22, fontSize: '0.65rem' }}
+                      />
+                    )}
+                  </Box>
+                  <Grid container spacing={3} sx={{ mb: 3 }} {...({ component: 'div' } as any)}>
+                    <Grid item xs={12} sm={6} {...({ component: 'div' } as any)}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>LICENSE NUMBER</Typography>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        variant="outlined"
+                        value={licenseNumber}
+                        onChange={(e) => setLicenseNumber(e.target.value)}
+                        sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6} {...({ component: 'div' } as any)}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>EXPIRATION DATE</Typography>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        type="date"
+                        variant="outlined"
+                        value={licenseExpiry}
+                        onChange={(e) => setLicenseExpiry(e.target.value)}
+                        sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                  </Grid>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleSaveLicense}
+                      disabled={licenseSaving}
+                      sx={{ borderRadius: '10px', fontWeight: 700 }}
+                    >
+                      {licenseSaving ? 'Saving...' : 'Save License Info'}
+                    </Button>
+                  </Box>
                 </Paper>
 
                 {/* Latest finalized vehicle submission — shown in the primary review section */}

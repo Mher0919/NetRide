@@ -150,6 +150,13 @@ export const requestVehicleResubmission = async (driverId: string, reason: strin
   return response.data;
 };
 
+// ----- License management ---------------------------------------------------
+
+export const updateLicense = async (userId: string, data: { license_number?: string; license_expiry_date?: string }) => {
+  const response = await api.patch(`/admin/users/${userId}/license`, data);
+  return response.data;
+};
+
 // ----- Payouts --------------------------------------------------------------
 
 export const listPayouts = async (status: 'PENDING' | 'PAID' | 'ALL' = 'PENDING') => {

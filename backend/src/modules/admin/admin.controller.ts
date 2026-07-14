@@ -665,6 +665,63 @@ export class AdminController {
     }
   }
 
+  static async updateLicense(req: AuthRequest, res: Response) {
+    try {
+      const { id } = req.params;
+      const adminId = req.user!.id;
+      const { license_number, license_expiry_date } = req.body;
+
+      if (!license_number && !license_expiry_date) {
+        return res.status(400).json({ error: 'Provide at least one field to update (license_number or license_expiry_date).' });
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const sets: string[] = [];
+        const params: any[] = [];
+        let idx = 1;
+
+        if (license_number !== undefined) {
+          sets.push(`license_number = $${idx++}`);
+          params.push(license_number);
+        }
+        if (license_expiry_date !== undefined) {
+          sets.push(`license_expiry_date = $${idx++}`);
+          params.push(license_expiry_date);
+        }
+
+        params.push(id);
+        await client.query(
+          `UPDATE drivers SET ${sets.join(', ')}, updated_at = NOW() WHERE user_id = $${idx}`,
+          params
+        );
+
+        await client.query('COMMIT');
+
+        await prisma.auditLog.create({
+          data: {
+            admin_id: adminId,
+            target_id: id,
+            action: 'LICENSE_UPDATED',
+            details: `License info updated by admin. Fields: ${sets.join(', ')}.`,
+          },
+        });
+
+        res.json({ success: true });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Update license error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to update license information.' });
+    }
+  }
+
   // ============================================================
   // Profile-change approval queue (020)
   // ============================================================
