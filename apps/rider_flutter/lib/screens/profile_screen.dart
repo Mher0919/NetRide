@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
 import 'settings_screen.dart';
@@ -526,7 +527,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: CircleAvatar(
                   radius: 50,
                   backgroundColor: const Color(0xFFF7F4EF),
-                  backgroundImage: _profileImageUrl != null ? NetworkImage(_profileImageUrl!) : null,
+                  backgroundImage: _profileImageUrl != null ? CachedNetworkImageProvider(_profileImageUrl!) : null,
                   child: _profileImageUrl == null ? const Icon(Icons.person, size: 48, color: Color(0xFF5B7760)) : null,
                 ),
               ),

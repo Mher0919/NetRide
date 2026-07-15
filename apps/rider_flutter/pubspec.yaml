@@ -50,6 +50,7 @@ dependencies:
   supabase_flutter: ^2.8.0
   url_launcher: ^6.3.0
   app_links: ^6.3.3
+  cached_network_image: ^3.4.1
 
   # Audio playback for app-level sound effects (accept, cancel, tip,
   # completed). MP3s are bundled under assets/sounds/.

@@ -52,7 +52,16 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       final prefs = await SharedPreferences.getInstance();
       if (!prefs.containsKey('jwt_token')) return;
 
-      final profile = await UserService.getProfile();
+      // Use cache-first fetch via DriverProvider
+      final provider = Provider.of<DriverProvider>(context, listen: false);
+      Map<String, dynamic> profile;
+      try {
+        profile = await provider.fetchProfile();
+      } catch (_) {
+        // Fallback: direct fetch if provider cache isn't ready
+        profile = await UserService.getProfile();
+      }
+
       if (mounted) {
         setState(() {
           final fullName = profile['full_name'] ?? 'Driver';
@@ -62,7 +71,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
       // Pull the latest face-check gate so the banner reflects reality on
       // app open, not just on the offline-switch tap.
-      final provider = Provider.of<DriverProvider>(context, listen: false);
       try {
         await provider.refreshFaceCheck(
           lat: _lastPosition?.latitude,
@@ -73,10 +81,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         // known state.
       }
 
-      // Also pull the latest profile-change gate (admin approval queue).
-      // The provider ignores fields it already controls; calling this on
-      // every boot keeps the offline-switch gate and the red banner in
-      // sync with whatever the server has.
+      // Revalidate profile in background (cache-first already returned data,
+      // this ensures the provider refreshes its state).
       try {
         await provider.refreshProfile();
       } catch (_) {

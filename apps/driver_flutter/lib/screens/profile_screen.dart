@@ -7,11 +7,14 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
+import '../cache/cache_service.dart';
+import '../cache/cache_keys.dart';
+import '../cache/cache_policy.dart';
 import 'settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -80,7 +83,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _fetchProfile() async {
-    setState(() => _state = ViewState.loading);
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('jwt_token');
@@ -89,7 +91,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      final profile = await UserService.getProfile();
+      // Cache-first: try to render from cache immediately
+      final cache = CacheService.instance;
+      Map<String, dynamic>? profile;
+
+      // Try to get the cached driver ID from SharedPreferences
+      final userId = prefs.getString('user_id');
+      if (userId != null && userId.isNotEmpty) {
+        final cached = cache.get(CacheKeys.driverProfile(userId));
+        if (cached != null) {
+          profile = Map<String, dynamic>.from(cached as Map);
+          if (profile['full_name'] != null) {
+            // Render immediately from cache, skip loading state
+            _applyProfileData(profile);
+            setState(() => _state = ViewState.success);
+            // Background fetch happens below
+          }
+        }
+      }
+
+      // If no cached data, show loading
+      if (profile == null) {
+        setState(() => _state = ViewState.loading);
+      }
+
+      // Authoritative fetch (will use cache-first from provider)
+      profile = await UserService.getProfile();
 
       List<dynamic> vehicles;
       try {
@@ -99,41 +126,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         vehicles = [];
       }
 
+      _applyProfileData(profile);
       setState(() {
-        _nameController.text = profile['full_name'] ?? '';
-        _phoneController.text = profile['phone_number'] ?? '';
-        _dobController.text = profile['date_of_birth'] != null 
-            ? DateFormat('MM-dd-yyyy').format(DateTime.parse(profile['date_of_birth']))
-            : '';
-        _licenseController.text = profile['license_number'] ?? '';
-        _email = profile['email'] ?? '';
-        _emailController.text = _email;
-        _profileImageUrl = profile['profile_image_url'];
-        _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
-        _hasPassword = profile['has_password'] == true;
-        _dobLocked = profile['dob_locked'] == true;
-        _rating = double.tryParse(profile['rating']?.toString() ?? '') ?? 5.0;
-        _totalRides = int.tryParse(profile['rating_count']?.toString() ?? '') ?? 0;
-        
-        final activeV = profile['active_vehicle'];
-        _activeVehicle = activeV is Map<String, dynamic> ? activeV : null;
-        if (activeV != null) {
-          _selectedVehicleId = activeV['id']?.toString() ?? activeV['vehicle_id']?.toString();
-          _plateController.text = activeV['license_plate_number'] ?? '';
-        } else if (profile['vehicles'] != null && profile['vehicles'].isNotEmpty) {
-          final v = profile['vehicles'][0];
-          _selectedVehicleId = v['vehicle_id'];
-          _plateController.text = v['license_plate_number'] ?? '';
-        }
-        
         _vehicles = vehicles;
         _state = ViewState.success;
       });
 
       // Capture baseline of the authoritative approved profile values.
-      // This snapshot is used to detect which fields have locally unsaved
-      // changes. Reviewed-field changes that have already been submitted
-      // for admin review are tracked separately in _pendingSubmittedValues.
       _editingBaseline = {
         'full_name': profile['full_name'],
         'phone_number': profile['phone_number'],
@@ -146,9 +145,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 : null),
       };
       _hasPendingChange = profile['has_pending_profile_change'] == true;
-      // Track reviewed-field values that have already been submitted pending.
-      // The backend returns pending_changes_values when has_pending_profile_change
-      // is true. These fields are not considered locally dirty.
       if (_hasPendingChange) {
         final pendingValues = profile['pending_changes_values'];
         if (pendingValues is Map) {
@@ -158,6 +154,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       } else {
         _pendingSubmittedValues = {};
+      }
+
+      // Cache the profile for next cold start
+      if (userId != null && userId.isNotEmpty) {
+        await cache.set(
+          CacheKeys.driverProfile(userId),
+          profile,
+          CachePolicy.profile,
+        );
       }
 
       try {
@@ -187,6 +192,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _state = ViewState.failure;
         _errorMessage = 'We were unable to load your driver credentials. Please verify your connection.';
       });
+    }
+  }
+
+  void _applyProfileData(Map<String, dynamic> profile) {
+    _nameController.text = profile['full_name'] ?? '';
+    _phoneController.text = profile['phone_number'] ?? '';
+    _dobController.text = profile['date_of_birth'] != null 
+        ? DateFormat('MM-dd-yyyy').format(DateTime.parse(profile['date_of_birth']))
+        : '';
+    _licenseController.text = profile['license_number'] ?? '';
+    _email = profile['email'] ?? '';
+    _emailController.text = _email;
+    _profileImageUrl = profile['profile_image_url'];
+    _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
+    _hasPassword = profile['has_password'] == true;
+    _dobLocked = profile['dob_locked'] == true;
+    _rating = double.tryParse(profile['rating']?.toString() ?? '') ?? 5.0;
+    _totalRides = int.tryParse(profile['rating_count']?.toString() ?? '') ?? 0;
+    
+    final activeV = profile['active_vehicle'];
+    _activeVehicle = activeV is Map<String, dynamic> ? activeV : null;
+    if (activeV != null) {
+      _selectedVehicleId = activeV['id']?.toString() ?? activeV['vehicle_id']?.toString();
+      _plateController.text = activeV['license_plate_number'] ?? '';
+    } else if (profile['vehicles'] != null && profile['vehicles'].isNotEmpty) {
+      final v = profile['vehicles'][0];
+      _selectedVehicleId = v['vehicle_id'];
+      _plateController.text = v['license_plate_number'] ?? '';
     }
   }
 
@@ -1056,12 +1089,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 child: _profileImageUrl != null
                     ? ClipOval(
-                        child: Image.network(
-                          _profileImageUrl!,
+                        child: CachedNetworkImage(
+                          imageUrl: _profileImageUrl!,
                           width: 100,
                           height: 100,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 48, color: Color(0xFF5B7760)),
+                          errorWidget: (_, __, ___) => const Icon(Icons.person, size: 48, color: Color(0xFF5B7760)),
+                          placeholder: (_, __) => const SizedBox(
+                            width: 100, height: 100,
+                            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                          ),
                         ),
                       )
                     : const CircleAvatar(

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/auth_service.dart';
 import '../components/state_container.dart';
 
@@ -436,7 +437,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 radius: 80,
                 backgroundColor: Colors.grey[100],
                 backgroundImage: _profileImageUrl != null
-                    ? NetworkImage(_profileImageUrl!)
+                    ? CachedNetworkImageProvider(_profileImageUrl!)
                     : null,
                 child: _profileImageUrl == null
                     ? Column(
@@ -1177,7 +1178,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Center(
               child: CircleAvatar(
                 radius: 40,
-                backgroundImage: NetworkImage(_profileImageUrl!),
+                backgroundImage: CachedNetworkImageProvider(_profileImageUrl!),
               ),
             ),
             const SizedBox(height: 16),
@@ -1296,7 +1297,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           borderRadius: BorderRadius.circular(12),
           image: imageUrl != null
               ? DecorationImage(
-                  image: NetworkImage(imageUrl), fit: BoxFit.cover)
+                  image: CachedNetworkImageProvider(imageUrl), fit: BoxFit.cover)
               : null,
         ),
         child: imageUrl == null

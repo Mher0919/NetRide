@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/trip_models.dart' as models;
@@ -7,41 +7,24 @@ import '../services/user_service.dart';
 import '../services/face_verification_service.dart';
 import '../services/sound_service.dart';
 import '../components/tip_received_dialog.dart';
+import '../cache/cache_service.dart';
+import '../cache/cache_keys.dart';
+import '../cache/cache_policy.dart';
+import '../cache/user_cache_repository.dart';
 
 /// Ordered compliance status for the driver's current blocker (if any).
 /// Priority decreases from top to bottom.
 enum DriverComplianceStatus {
-  /// Driver has submitted profile edits awaiting admin review.
   profileChangePending,
-
-  /// Profile change was recently approved; ephemeral toast.
   profileChangeApproved,
-
-  /// Background check was rejected by admin.
   backgroundCheckRejected,
-
-  /// Background check is pending admin review.
   backgroundCheckPending,
-
-  /// Background check approved but feedback not yet dismissed.
   backgroundCheckApproved,
-
-  /// Face check flagged — under review.
   faceFlagged,
-
-  /// Face check is required before going online.
   faceCheckNeeded,
-
-  /// Admin has requested document resubmission.
   documentActionRequired,
-
-  /// Vehicle inspection required as a post-submission step.
   vehicleInspectionRequired,
-
-  /// Driver has resubmitted documents; awaiting admin review.
   documentSubmitted,
-
-  /// Headshot verification required — driver chose Stay Offline.
   headshotActionRequired,
 }
 
@@ -64,36 +47,35 @@ class DriverProvider with ChangeNotifier {
   double _recommendedPrice = 2.00;
   DateTime? _priceLastChanged;
 
-  // Face verification state. The app re-checks on boot, on go-online, and
-  // when the server pushes a `faceCheckRequired` socket event.
   FaceCheckStatus _faceCheckStatus = FaceCheckStatus.needsCheck;
   String? _faceCheckReason;
   DateTime? _lastFaceCheckAt;
   bool _faceCheckPending = false;
 
-  // Pending profile-change state. When the driver has submitted edits
-  // that are awaiting admin review, the offline switch is locked and the
-  // availability screen renders a red `profileChangePending` card.
   bool _hasPendingProfileChange = false;
   String? _pendingRequestId;
   DateTime? _pendingSince;
   Map<String, dynamic>? _pendingChangesSummary;
   bool _showApprovedToast = false;
 
-  // Document requirements: admin-requested resubmissions
   bool _hasDocumentActionRequired = false;
   bool _hasVehicleInspectionRequired = false;
   bool _hasDocumentSubmitted = false;
   List<Map<String, dynamic>> _documentRequirements = [];
 
-  // Headshot action required (driver chose Stay Offline when prompted)
   bool _headshotActionRequired = false;
 
-  // Verification & compliance state (pulled from profile).
   bool _isVerified = false;
   String _verificationStatus = 'PENDING';
   String? _rejectionReason;
   bool _feedbackSeen = true;
+
+  // Cache infrastructure
+  final _cacheRepo = UserCacheRepository();
+  bool _cacheHydrated = false;
+
+  /// Tracks foreground revalidation throttle to prevent duplicate calls.
+  DateTime _lastForegroundRevalidation = DateTime(2000);
 
   bool get hasDocumentActionRequired => _hasDocumentActionRequired;
   bool get hasVehicleInspectionRequired => _hasVehicleInspectionRequired;
@@ -121,8 +103,6 @@ class DriverProvider with ChangeNotifier {
   List<models.ChatMessage> get messages => _messages;
   Map<String, dynamic>? get recommendation => _recommendation;
 
-  /// Underlying socket so the CommunicationService can hook into the
-  /// same connection the rest of the trip flow uses.
   IO.Socket? get socket => _socket;
 
   double get pricePerMile => _pricePerMile;
@@ -142,8 +122,6 @@ class DriverProvider with ChangeNotifier {
   Map<String, dynamic>? get pendingChangesSummary => _pendingChangesSummary;
   bool get showApprovedToast => _showApprovedToast;
 
-  /// True when the driver is free of all blockers and may flip the offline
-  /// switch on. The avatar/switch goes disabled otherwise.
   bool get canGoOnline =>
       _isVerified &&
       !_hasPendingProfileChange &&
@@ -153,47 +131,119 @@ class DriverProvider with ChangeNotifier {
       _faceCheckStatus != FaceCheckStatus.flagged &&
       _faceCheckStatus != FaceCheckStatus.needsCheck;
 
-  /// Resolves the highest-priority blocking status for the driver.
-  /// Only returns a non-null status when there is something that
-  /// prevents the driver from going online. The caller can use this
-  /// to render status cards in priority order.
   DriverComplianceStatus? buildDriverComplianceStatus() {
-    // 1. Profile change pending — highest priority, actionable
     if (_hasPendingProfileChange) return DriverComplianceStatus.profileChangePending;
-
-    // 2. Background check rejected — terminal blocker
     if (_verificationStatus == 'REJECTED') return DriverComplianceStatus.backgroundCheckRejected;
-
-    // 3. Face check flagged — admin review in progress
     if (_faceCheckStatus == FaceCheckStatus.flagged) return DriverComplianceStatus.faceFlagged;
-
-    // 4. Document action required — actionable (admin requested resubmission)
     if (_hasDocumentActionRequired) return DriverComplianceStatus.documentActionRequired;
-
-    // 4b. Vehicle inspection required — post-submission requirement
     if (_hasVehicleInspectionRequired) return DriverComplianceStatus.vehicleInspectionRequired;
-
-    // 5. Face check required — actionable (driver must take photo)
     if (_faceCheckStatus == FaceCheckStatus.needsCheck && _faceCheckPending && !_headshotActionRequired) return DriverComplianceStatus.faceCheckNeeded;
-
-    // 5b. Headshot action required — driver chose Stay Offline
     if (_headshotActionRequired) return DriverComplianceStatus.headshotActionRequired;
-
-    // 6. Background check pending — passive (driver waits)
     if (_verificationStatus == 'PENDING') return DriverComplianceStatus.backgroundCheckPending;
-
-    // 7. Background check approved but feedback not yet dismissed
     if (_verificationStatus == 'APPROVED' && !_feedbackSeen) return DriverComplianceStatus.backgroundCheckApproved;
-
-    // 8. Document submitted for review (informational, not a blocker)
     if (_hasDocumentSubmitted) return DriverComplianceStatus.documentSubmitted;
-
-    // 9. No blockers — profile-change approved toast (informational, ephemeral)
     if (_showApprovedToast) return DriverComplianceStatus.profileChangeApproved;
-
-    // No blockers, driver is ready
     return null;
   }
+
+  // ── Cache hydration on first load ────────────────────────────────
+
+  /// Called after the socket connects and driver ID is available.
+  /// Hydrates state from cached data so the UI renders immediately,
+  /// then fetches authoritative data in the background.
+  Future<void> hydrateFromCache(String driverId) async {
+    if (_cacheHydrated) return;
+    _cacheRepo.setDriverId(driverId);
+    _cacheHydrated = true;
+
+    // 1. Hydrate profile from cache (Class A — fast render)
+    final cachedProfile = _cacheHydrateProfile();
+    if (cachedProfile != null) {
+      // Profile data already applied via _cacheHydrateProfile
+      debugPrint('[CACHE] Profile hydrated from cache');
+    }
+
+    // 2. Hydrate document requirements from cache (Class B — fast render)
+    final cachedDocReqs = _cacheRepo.getCachedDocumentRequirements();
+    if (cachedDocReqs != null) {
+      _applyDocumentRequirements(cachedDocReqs);
+      debugPrint('[CACHE] Document requirements hydrated from cache');
+    }
+
+    // 3. Hydrate verification status from cache
+    final cachedVerification = _cacheRepo.getCachedVerificationStatus();
+    if (cachedVerification != null) {
+      debugPrint('[CACHE] Verification status hydrated from cache');
+    }
+
+    // 4. Hydrate profile change pending state
+    final cachedPending = _cacheRepo.getCachedHasPendingProfileChange();
+    if (cachedPending != null) {
+      debugPrint('[CACHE] Pending profile change state hydrated from cache');
+    }
+
+    notifyListeners();
+
+    // 5. Background revalidation of all critical state
+    _revalidateAfterHydration();
+  }
+
+  Map<String, dynamic>? _cacheHydrateProfile() {
+    try {
+      final cached = CacheService.instance.get(CacheKeys.driverProfile(
+        _cacheRepo.driverId,
+      ));
+      if (cached == null) return null;
+      final profile = Map<String, dynamic>.from(cached as Map);
+      _applyProfileState(profile);
+      return profile;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _revalidateAfterHydration() async {
+    debugPrint('[CACHE] Starting background revalidation after hydration');
+    try {
+      await _fetchAndCacheProfile();
+      await _fetchAndCacheDocumentRequirements();
+    } catch (e) {
+      debugPrint('[CACHE] Background revalidation error: $e');
+    }
+  }
+
+  // ── Foreground revalidation (called from main.dart lifecycle) ────
+
+  /// Called when the app returns to foreground.
+  /// Revalidates critical Class B data but respects throttle.
+  Future<void> onAppForegrounded() async {
+    // Throttle: don't revalidate more than once every 30 seconds
+    final now = DateTime.now();
+    if (now.difference(_lastForegroundRevalidation).inSeconds < 30) {
+      debugPrint('[CACHE] Foreground revalidation throttled');
+      return;
+    }
+    _lastForegroundRevalidation = now;
+    debugPrint('[CACHE] App foregrounded — revalidating critical state');
+
+    try {
+      // Revalidate compliance-critical data in parallel
+      await Future.wait([
+        _fetchAndCacheProfile(),
+        _fetchAndCacheDocumentRequirements(),
+      ]);
+
+      // Also revalidate pricing if stale
+      final pricingKey = CacheKeys.driverPricing(_cacheRepo.driverId);
+      if (CacheService.instance.staleness(pricingKey) != Staleness.fresh) {
+        await fetchPricing();
+      }
+    } catch (e) {
+      debugPrint('[CACHE] Foreground revalidation error: $e');
+    }
+  }
+
+  // ── Token / socket initialization ────────────────────────────────
 
   void updateToken(String token) {
     initSocket(token);
@@ -203,19 +253,40 @@ class DriverProvider with ChangeNotifier {
   }
 
   Future<void> fetchPricing() async {
+    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    if (driverId != null) {
+      final cached = CacheService.instance.get(CacheKeys.driverPricing(driverId));
+      if (cached != null) {
+        final data = cached as Map<String, dynamic>;
+        _applyPricing(data);
+        notifyListeners();
+      }
+    }
+
     try {
       final response = await ApiService.dio.get('/driver/pricing');
       final data = response.data;
-      _pricePerMile = (data['price_per_mile'] as num).toDouble();
-      _priceRangeMin = (data['price_range_min'] as num).toDouble();
-      _priceRangeMax = (data['price_range_max'] as num).toDouble();
-      _recommendedPrice = (data['recommended_price'] as num).toDouble();
-      if (data['price_last_changed'] != null) {
-        _priceLastChanged = DateTime.parse(data['price_last_changed']);
+      _applyPricing(data);
+      if (driverId != null) {
+        await CacheService.instance.set(
+          CacheKeys.driverPricing(driverId),
+          data,
+          CachePolicy.pricing,
+        );
       }
       notifyListeners();
     } catch (e) {
       debugPrint('Error fetching pricing: $e');
+    }
+  }
+
+  void _applyPricing(Map<String, dynamic> data) {
+    _pricePerMile = (data['price_per_mile'] as num).toDouble();
+    _priceRangeMin = (data['price_range_min'] as num).toDouble();
+    _priceRangeMax = (data['price_range_max'] as num).toDouble();
+    _recommendedPrice = (data['recommended_price'] as num).toDouble();
+    if (data['price_last_changed'] != null) {
+      _priceLastChanged = DateTime.parse(data['price_last_changed']);
     }
   }
 
@@ -225,12 +296,14 @@ class DriverProvider with ChangeNotifier {
         'pricePerMile': newPrice,
       });
       final data = response.data;
-      _pricePerMile = (data['price_per_mile'] as num).toDouble();
-      _priceRangeMin = (data['price_range_min'] as num).toDouble();
-      _priceRangeMax = (data['price_range_max'] as num).toDouble();
-      _recommendedPrice = (data['recommended_price'] as num).toDouble();
-      if (data['price_last_changed'] != null) {
-        _priceLastChanged = DateTime.parse(data['price_last_changed']);
+      _applyPricing(data);
+      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      if (driverId != null) {
+        await CacheService.instance.set(
+          CacheKeys.driverPricing(driverId),
+          data,
+          CachePolicy.pricing,
+        );
       }
       notifyListeners();
     } catch (e) {
@@ -276,6 +349,151 @@ class DriverProvider with ChangeNotifier {
     }
   }
 
+  // ── Cache-aware profile fetching ─────────────────────────────────
+
+  /// Cache-first profile fetch with background revalidation.
+  Future<Map<String, dynamic>> fetchProfile() async {
+    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+
+    if (!_cacheHydrated && driverId != null) {
+      _cacheRepo.setDriverId(driverId);
+      _cacheHydrated = true;
+    }
+
+    // Cache-first: try L1/L2
+    if (driverId != null) {
+      final cached = CacheService.instance.get(CacheKeys.driverProfile(driverId));
+      if (cached != null) {
+        final profile = Map<String, dynamic>.from(cached as Map);
+        _applyProfileState(profile);
+        notifyListeners();
+
+        // Background revalidation if stale
+        final staleness = CacheService.instance.staleness(CacheKeys.driverProfile(driverId));
+        if (staleness != Staleness.fresh) {
+          _fetchAndCacheProfile();
+        }
+        return profile;
+      }
+    }
+
+    // Cache miss: fetch authoritative
+    return _fetchAndCacheProfile();
+  }
+
+  Future<Map<String, dynamic>> _fetchAndCacheProfile() async {
+    try {
+      final profile = await UserService.getProfile();
+      _applyProfileState(profile);
+      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      if (driverId != null) {
+        await CacheService.instance.set(
+          CacheKeys.driverProfile(driverId),
+          profile,
+          CachePolicy.profile,
+        );
+      }
+      notifyListeners();
+      return profile;
+    } catch (e) {
+      debugPrint('Error fetching profile: $e');
+      rethrow;
+    }
+  }
+
+  void _applyProfileState(Map<String, dynamic> profile) {
+    _hasPendingProfileChange = profile['has_pending_profile_change'] == true;
+    _pendingRequestId = profile['pending_request_id']?.toString();
+    final since = profile['pending_requested_at']?.toString();
+    _pendingSince = since == null ? null : DateTime.tryParse(since);
+    final raw = profile['pending_changes_summary'];
+    _pendingChangesSummary = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : null;
+    if (!_hasPendingProfileChange) {
+      _pendingRequestId = null;
+      _pendingSince = null;
+      _pendingChangesSummary = null;
+    }
+
+    _verificationStatus = (profile['background_check_status'] ?? 'PENDING').toString();
+    _rejectionReason = profile['rejection_reason']?.toString();
+    _feedbackSeen = profile['verification_feedback_seen'] == true;
+    _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
+
+    // Cache verification status separately (Class B)
+    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    if (driverId != null) {
+      CacheService.instance.set(
+        CacheKeys.driverVerificationStatus(driverId),
+        _verificationStatus,
+        CachePolicy.verificationStatus,
+      );
+    }
+  }
+
+  // ── Cache-aware document requirements fetching ───────────────────
+
+  Future<void> fetchDocumentRequirements() async {
+    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+
+    // Cache-first
+    if (driverId != null) {
+      final cached = CacheService.instance.get(CacheKeys.driverDocumentRequirements(driverId));
+      if (cached != null) {
+        final reqs = (cached as List)
+            .map((r) => Map<String, dynamic>.from(r as Map))
+            .toList();
+        _applyDocumentRequirements(reqs);
+        notifyListeners();
+
+        final staleness = CacheService.instance.staleness(CacheKeys.driverDocumentRequirements(driverId));
+        if (staleness != Staleness.fresh) {
+          _fetchAndCacheDocumentRequirements();
+        }
+        return;
+      }
+    }
+
+    await _fetchAndCacheDocumentRequirements();
+  }
+
+  Future<void> _fetchAndCacheDocumentRequirements() async {
+    try {
+      final docReqs = await UserService.getDocumentRequirements();
+      final reqs = (docReqs['requirements'] as List?)
+              ?.map((r) => Map<String, dynamic>.from(r as Map))
+              .toList() ??
+          [];
+      _applyDocumentRequirements(reqs);
+      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      if (driverId != null) {
+        await CacheService.instance.set(
+          CacheKeys.driverDocumentRequirements(driverId),
+          reqs,
+          CachePolicy.documentRequirements,
+        );
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error fetching document requirements: $e');
+    }
+  }
+
+  void _applyDocumentRequirements(List<Map<String, dynamic>> reqs) {
+    _documentRequirements = reqs;
+    _hasVehicleInspectionRequired = reqs.any((r) =>
+        r['status'] == 'resubmission_required' &&
+        r['document_type'] == 'inspection_photo_url');
+    _hasDocumentActionRequired = reqs.any((r) =>
+        r['status'] == 'resubmission_required' &&
+        r['document_type'] != 'inspection_photo_url');
+    _hasDocumentSubmitted = reqs.any((r) =>
+        r['status'] == 'submitted');
+  }
+
+  // ── Socket initialization with cache-awareness ───────────────────
+
   void initSocket(String token) {
     if (_socket != null) {
       _socket!.off('');
@@ -285,12 +503,9 @@ class DriverProvider with ChangeNotifier {
     }
     final url = 'https://netride.onrender.com';
     print('--- DRIVER SOCKET INIT ---');
-    print('URL: $url');
-    print('Token: $token');
-    print('--------------------------');
 
     _socket = IO.io(url, IO.OptionBuilder()
-      .setTransports(['websocket']) // Force websocket
+      .setTransports(['websocket'])
       .enableForceNew()
       .enableReconnection()
       .setAuth({
@@ -302,6 +517,8 @@ class DriverProvider with ChangeNotifier {
     _socket!.onConnect((_) {
       print('Driver connected to socket');
       _isConnected = true;
+      // Extract driver ID from token and hydrate cache
+      _tryHydrateFromToken(token);
       notifyListeners();
     });
 
@@ -323,12 +540,14 @@ class DriverProvider with ChangeNotifier {
     });
 
     _socket!.on('pricingUpdate', (data) {
-      _pricePerMile = (data['price_per_mile'] as num).toDouble();
-      _priceRangeMin = (data['price_range_min'] as num).toDouble();
-      _priceRangeMax = (data['price_range_max'] as num).toDouble();
-      _recommendedPrice = (data['recommended_price'] as num).toDouble();
-      if (data['price_last_changed'] != null) {
-        _priceLastChanged = DateTime.parse(data['price_last_changed']);
+      _applyPricing(data as Map<String, dynamic>);
+      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      if (driverId != null) {
+        CacheService.instance.set(
+          CacheKeys.driverPricing(driverId),
+          data,
+          CachePolicy.pricing,
+        );
       }
       notifyListeners();
     });
@@ -358,12 +577,6 @@ class DriverProvider with ChangeNotifier {
       notifyListeners();
     });
 
-    // ----- Navigation lifecycle events ----------------------------------
-    // These are pushed by the server (NavigationService emitters) when
-    // the trip transitions between pickup → destination, when a manual
-    // reroute completes, or when a rider-side destination change
-    // forces a re-route. The NavigationScreen consumes them by reading
-    // NavigationService directly; the driver app simply forwards.
     _socket!.on('navigationStarted', (data) {
       try {
         final tripId = (data as Map)['tripId']?.toString();
@@ -379,7 +592,7 @@ class DriverProvider with ChangeNotifier {
     _socket!.on('navigationLegAdvanced', (data) {
       try {
         final tripId = (data as Map)['tripId']?.toString();
-        debugPrint('[NAV] leg advanced → destination for $tripId');
+        debugPrint('[NAV] leg advanced -> destination for $tripId');
         notifyListeners();
       } catch (e) {
         debugPrint('Bad navigationLegAdvanced payload: $e');
@@ -414,10 +627,6 @@ class DriverProvider with ChangeNotifier {
     });
 
     _socket!.on('faceCheckRequired', (data) {
-      // The server pushed a face-check gate (either an attempt to go
-      // online was blocked, or the admin just cleared something and we
-      // need a fresh re-check). Update local state so the UI routes to
-      // the capture screen.
       try {
         final decision = FaceCheckDecision.fromJson(
           Map<String, dynamic>.from(data as Map),
@@ -433,7 +642,6 @@ class DriverProvider with ChangeNotifier {
     });
 
     _socket!.on('faceCheckStatusChanged', (data) {
-      // Admin cleared/rejected a flagged event in real time.
       final status = (data as Map)['status']?.toString();
       if (status == 'CLEAR') {
         _faceCheckStatus = FaceCheckStatus.clear;
@@ -446,53 +654,56 @@ class DriverProvider with ChangeNotifier {
       notifyListeners();
     });
 
+    // ── Cache-aware Socket.IO event handlers ──────────────────────
+    // These events signal remote admin changes. We invalidate the
+    // affected cache keys and re-fetch authoritative data.
+
     _socket!.on('documentRequirementsChanged', (data) async {
-      // Admin requested document resubmission — refresh requirements state
-      // so the Action Required card appears in real time.
-      try {
-        final docReqs = await UserService.getDocumentRequirements();
-        final reqs = (docReqs['requirements'] as List?) ?? [];
-        _documentRequirements = reqs.map((r) => Map<String, dynamic>.from(r as Map)).toList();
-        _hasVehicleInspectionRequired = reqs.any((r) =>
-            (r as Map)['status'] == 'resubmission_required' &&
-            (r as Map)['document_type'] == 'inspection_photo_url');
-        _hasDocumentActionRequired = reqs.any((r) =>
-            (r as Map)['status'] == 'resubmission_required' &&
-            (r as Map)['document_type'] != 'inspection_photo_url');
-        _hasDocumentSubmitted = reqs.any((r) =>
-            (r as Map)['status'] == 'submitted');
-        notifyListeners();
-      } catch (e) {
-        debugPrint('Failed to refresh document requirements from socket: $e');
+      debugPrint('[SOCKET] documentRequirementsChanged received — invalidating cache');
+      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      if (driverId != null) {
+        await CacheService.instance.invalidate(CacheKeys.driverDocumentRequirements(driverId));
+        await CacheService.instance.invalidate(CacheKeys.driverProfile(driverId));
+        await CacheService.instance.invalidate(CacheKeys.driverVerificationStatus(driverId));
       }
+      // Re-fetch authoritative state
+      await _fetchAndCacheDocumentRequirements();
+      try {
+        await _fetchAndCacheProfile();
+      } catch (_) {}
     });
 
     _socket!.on('vehicleRequirementsChanged', (data) async {
-      // Admin requested vehicle resubmission — refresh profile so the
-      // vehicle action required card appears in real time.
-      try {
-        await refreshProfile();
-      } catch (e) {
-        debugPrint('Failed to refresh profile from vehicle socket: $e');
+      debugPrint('[SOCKET] vehicleRequirementsChanged received — invalidating cache');
+      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      if (driverId != null) {
+        await CacheService.instance.invalidate(CacheKeys.driverVehicle(driverId));
+        await CacheService.instance.invalidate(CacheKeys.driverProfile(driverId));
       }
+      try {
+        await _fetchAndCacheProfile();
+      } catch (_) {}
     });
 
     _socket!.on('profileChangeReviewed', (data) async {
-      // Admin reviewed a profile-change request. Refresh from the server
-      // so the offline switch unlocks / re-locks based on the latest
-      // `has_pending_profile_change` flag. Also surface a brief green
-      // toast when the request was approved so the driver knows the
-      // changes are live.
+      debugPrint('[SOCKET] profileChangeReviewed received — invalidating cache');
+      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      if (driverId != null) {
+        await CacheService.instance.invalidateAll([
+          CacheKeys.driverProfile(driverId),
+          CacheKeys.driverProfileChange(driverId),
+          CacheKeys.driverVerificationStatus(driverId),
+          CacheKeys.driverEligibility(driverId),
+        ]);
+      }
       try {
         final map = Map<String, dynamic>.from(data as Map);
         final decision = map['decision']?.toString();
-        await refreshProfile();
+        await _fetchAndCacheProfile();
         if (decision == 'APPROVED') {
           _showApprovedToast = true;
           notifyListeners();
         } else if (decision == 'REJECTED') {
-          // Rejection emails the driver — just re-render to drop the red
-          // card. Reason is in the email body.
           notifyListeners();
         }
       } catch (e) {
@@ -526,8 +737,34 @@ class DriverProvider with ChangeNotifier {
     _socket!.on('error', (data) => print('Socket Error: $data'));
   }
 
-  /// Re-fetch the current face-check gate from the server and update the
-  /// local state. Called on app boot and right before toggling online.
+  void _tryHydrateFromToken(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return;
+      String payload = parts[1];
+      // Restore base64 padding if missing
+      switch (payload.length % 4) {
+        case 2:
+          payload += '==';
+          break;
+        case 3:
+          payload += '=';
+          break;
+      }
+      final decoded = String.fromCharCodes(base64Decode(payload));
+      final json = jsonDecode(decoded) as Map<String, dynamic>;
+      final driverId = json['id']?.toString();
+      if (driverId != null && driverId.isNotEmpty) {
+        _cacheRepo.setDriverId(driverId);
+        hydrateFromCache(driverId);
+      }
+    } catch (e) {
+      debugPrint('[CACHE] Token hydration failed: $e');
+    }
+  }
+
+  // ── Face verification ────────────────────────────────────────────
+
   Future<FaceCheckDecision> refreshFaceCheck({double? lat, double? lng}) async {
     try {
       final decision = await FaceVerificationService.isCheckRequired(
@@ -546,8 +783,6 @@ class DriverProvider with ChangeNotifier {
     }
   }
 
-  /// Called after a successful face capture completes. Lifts the local
-  /// flag so the UI can immediately route back to the offline switch.
   void markFaceCheckPassed({DateTime? at}) {
     _faceCheckStatus = FaceCheckStatus.clear;
     _faceCheckReason = null;
@@ -556,9 +791,6 @@ class DriverProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Called when the capture screen reports a flagged result so the
-  /// banner can flip to the red "under review" state without another
-  /// round trip.
   void markFaceCheckFlagged(String reason) {
     _faceCheckStatus = FaceCheckStatus.flagged;
     _faceCheckReason = reason;
@@ -566,64 +798,27 @@ class DriverProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Pulls the latest profile (incl. `has_pending_profile_change`) from
-  /// the server. Called on app boot, after submitting a profile change,
-  /// and when the server pushes `profileChangeReviewed`.
+  /// Pulls the latest profile from the server, bypasses cache.
   Future<Map<String, dynamic>> refreshProfile() async {
-    final profile = await UserService.getProfile();
-    _hasPendingProfileChange = profile['has_pending_profile_change'] == true;
-    _pendingRequestId = profile['pending_request_id']?.toString();
-    final since = profile['pending_requested_at']?.toString();
-    _pendingSince = since == null ? null : DateTime.tryParse(since);
-    final raw = profile['pending_changes_summary'];
-    _pendingChangesSummary = raw is Map
-        ? Map<String, dynamic>.from(raw)
-        : null;
-    if (!_hasPendingProfileChange) {
-      _pendingRequestId = null;
-      _pendingSince = null;
-      _pendingChangesSummary = null;
+    // Invalidate profile cache
+    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    if (driverId != null) {
+      await CacheService.instance.invalidate(CacheKeys.driverProfile(driverId));
     }
-
-    // Store verification state from profile
-    _verificationStatus = (profile['background_check_status'] ?? 'PENDING').toString();
-    _rejectionReason = profile['rejection_reason']?.toString();
-    _feedbackSeen = profile['verification_feedback_seen'] == true;
-    _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
-
-    // Also refresh document requirements state
-    try {
-      final docReqs = await UserService.getDocumentRequirements();
-      final reqs = (docReqs['requirements'] as List?) ?? [];
-      _documentRequirements = reqs.map((r) => Map<String, dynamic>.from(r as Map)).toList();
-      _hasVehicleInspectionRequired = reqs.any((r) =>
-          (r as Map)['status'] == 'resubmission_required' &&
-          (r as Map)['document_type'] == 'inspection_photo_url');
-      _hasDocumentActionRequired = reqs.any((r) =>
-          (r as Map)['status'] == 'resubmission_required' &&
-          (r as Map)['document_type'] != 'inspection_photo_url');
-      _hasDocumentSubmitted = reqs.any((r) =>
-          (r as Map)['status'] == 'submitted');
-    } catch (_) {
-      // Non-fatal
-    }
-
-    notifyListeners();
-    return profile;
+    return _fetchAndCacheProfile();
   }
 
-  /// Acknowledge the brief "approved" toast — the availability screen
-  /// calls this after dismissing the green card so the flag doesn't
-  /// re-trigger on every rebuild.
   void markProfileChangeApprovedShown() {
     _showApprovedToast = false;
     notifyListeners();
   }
 
+  // ── Message / online / offline / trip actions ────────────────────
+
   void sendMessage(String tripId, String message) {
     _socket?.emit('sendMessage', {'tripId': tripId, 'message': message});
     _messages.add(models.ChatMessage(
-      senderId: 'me', 
+      senderId: 'me',
       role: 'driver',
       message: message,
       timestamp: DateTime.now(),
@@ -636,9 +831,6 @@ class DriverProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Returns true if the driver was sent online. Returns false when the
-  /// server told us a face check is required — caller should route into
-  /// the capture screen. Throws on transport errors.
   Future<bool> setOnline({double? lat, double? lng}) async {
     try {
       final decision = await refreshFaceCheck(lat: lat, lng: lng);
@@ -648,10 +840,7 @@ class DriverProvider with ChangeNotifier {
         notifyListeners();
         return false;
       }
-    } catch (_) {
-      // Transport failure — let the socket-level gate catch it; we still
-      // emit `goOnline` so the server has the final word.
-    }
+    } catch (_) {}
 
     _status = models.DriverStatus.online;
     if (lat != null && lng != null) {
@@ -675,9 +864,6 @@ class DriverProvider with ChangeNotifier {
     _socket?.emit('acceptTrip', tripId);
   }
 
-  /// Driver rejected the incoming request. Clears the local UI and notifies
-  /// the backend so it can dispatch to the next driver immediately instead
-  /// of waiting for the 15s accept timeout to elapse.
   void declineTrip(String tripId) {
     _socket?.emit('declineTrip', tripId);
     if (_incomingRequest?.id == tripId) {
@@ -712,6 +898,15 @@ class DriverProvider with ChangeNotifier {
   void setIncomingRequest(models.Trip? request) {
     _incomingRequest = request;
     notifyListeners();
+  }
+
+  // ── Logout / cleanup ─────────────────────────────────────────────
+
+  /// Called on logout to clear all cached data for this user.
+  Future<void> clearUserCache() async {
+    await CacheService.instance.clearAll();
+    _cacheHydrated = false;
+    debugPrint('[CACHE] All user cache cleared on logout');
   }
 
   @override

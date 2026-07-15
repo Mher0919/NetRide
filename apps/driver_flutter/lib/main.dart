@@ -24,6 +24,7 @@ import 'services/navigation_voice_service.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'cache/cache_service.dart';
 
 import 'package:app_links/app_links.dart';
 
@@ -43,6 +44,10 @@ void main() async {
   await NavigationVoiceService.instance.init();
 
   final prefs = await SharedPreferences.getInstance();
+
+  // Initialize the cache layer
+  await CacheService.instance.init(prefs);
+
   String? token = prefs.getString('jwt_token');
 
   final supabase = Supabase.instance.client;
@@ -82,8 +87,6 @@ void main() async {
           return provider;
         }),
         ChangeNotifierProvider(create: (_) => NavigationService()),
-        // In-trip chat + masked call service. Attached lazily from the
-        // trip screen once a ride is active.
         ChangeNotifierProvider(create: (_) => CommunicationService()),
       ],
       child: NetRideDriver(isAuthenticated: token != null),
@@ -99,13 +102,36 @@ class NetRideDriver extends StatefulWidget {
   State<NetRideDriver> createState() => _NetRideDriverState();
 }
 
-class _NetRideDriverState extends State<NetRideDriver> {
+class _NetRideDriverState extends State<NetRideDriver> with WidgetsBindingObserver {
   late AppLinks _appLinks;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initDeepLinks();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('[LIFECYCLE] App returned to foreground — triggering revalidation');
+      try {
+        final context = ApiService.navigatorKey.currentContext;
+        if (context != null) {
+          final provider = Provider.of<DriverProvider>(context, listen: false);
+          provider.onAppForegrounded();
+        }
+      } catch (e) {
+        debugPrint('[LIFECYCLE] Foreground revalidation error: $e');
+      }
+    }
   }
 
   void _initDeepLinks() {

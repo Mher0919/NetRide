@@ -55,6 +55,7 @@ dependencies:
   path_provider: ^2.1.4
   permission_handler: ^11.3.1
   path: ^1.9.0
+  cached_network_image: ^3.4.1
   # Google Maps SDK for the in-trip navigation view. Used for tile
   # rendering + heading-up camera only; routing/ETA remain OSRM via
   # the backend. No billable Directions API calls are made from the

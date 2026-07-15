@@ -1,11 +1,13 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'availability_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
+import '../providers/driver_provider.dart';
 
 class MainWrapper extends StatefulWidget {
   const MainWrapper({super.key});
@@ -41,7 +43,15 @@ class _MainWrapperState extends State<MainWrapper> {
     }
 
     try {
-      final profile = await UserService.getProfile();
+      // Use cache-first fetch via provider
+      Map<String, dynamic> profile;
+      try {
+        final provider = Provider.of<DriverProvider>(context, listen: false);
+        profile = await provider.fetchProfile();
+      } catch (_) {
+        profile = await UserService.getProfile();
+      }
+
       final onboardingStep = profile['onboarding_step'] ?? 0;
       final isSubmitted = onboardingStep >= 5;
       if (profile['user_id'] == null || !isSubmitted) {

@@ -41,7 +41,8 @@ class _DocumentResubmissionScreenState
     setState(() => _isLoading = true);
     try {
       final provider = Provider.of<DriverProvider>(context, listen: false);
-      await provider.refreshProfile();
+      // Use cache-first fetch; background revalidation happens automatically
+      await provider.fetchDocumentRequirements();
       setState(() {
         _requirements = provider.documentRequirements
             .where((r) => r['status'] != 'reviewed')

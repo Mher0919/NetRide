@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 import '../providers/driver_provider.dart';
+import '../cache/cache_service.dart';
 
 class AuthService {
   static final ValueNotifier<bool> isAuthenticatedNotifier = ValueNotifier<bool>(false);
@@ -383,6 +384,14 @@ class AuthService {
   }
 
   static Future<void> logout() async {
+    // Clear all user-scoped cached data first (privacy/security)
+    try {
+      await CacheService.instance.clearAll();
+      debugPrint('[AUTH] User cache cleared on logout');
+    } catch (e) {
+      debugPrint('[AUTH] Cache clear error: $e');
+    }
+
     try {
       await Supabase.instance.client.auth.signOut();
     } catch (e) {
