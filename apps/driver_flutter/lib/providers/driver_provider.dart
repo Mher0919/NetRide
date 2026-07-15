@@ -35,6 +35,9 @@ enum DriverComplianceStatus {
   /// Admin has requested document resubmission.
   documentActionRequired,
 
+  /// Vehicle inspection required as a post-submission step.
+  vehicleInspectionRequired,
+
   /// Driver has resubmitted documents; awaiting admin review.
   documentSubmitted,
 
@@ -79,6 +82,7 @@ class DriverProvider with ChangeNotifier {
 
   // Document requirements: admin-requested resubmissions
   bool _hasDocumentActionRequired = false;
+  bool _hasVehicleInspectionRequired = false;
   bool _hasDocumentSubmitted = false;
   List<Map<String, dynamic>> _documentRequirements = [];
 
@@ -92,6 +96,7 @@ class DriverProvider with ChangeNotifier {
   bool _feedbackSeen = true;
 
   bool get hasDocumentActionRequired => _hasDocumentActionRequired;
+  bool get hasVehicleInspectionRequired => _hasVehicleInspectionRequired;
   bool get hasDocumentSubmitted => _hasDocumentSubmitted;
   List<Map<String, dynamic>> get documentRequirements => _documentRequirements;
 
@@ -143,6 +148,7 @@ class DriverProvider with ChangeNotifier {
       _isVerified &&
       !_hasPendingProfileChange &&
       !_hasDocumentActionRequired &&
+      !_hasVehicleInspectionRequired &&
       !_headshotActionRequired &&
       _faceCheckStatus != FaceCheckStatus.flagged &&
       _faceCheckStatus != FaceCheckStatus.needsCheck;
@@ -163,6 +169,9 @@ class DriverProvider with ChangeNotifier {
 
     // 4. Document action required — actionable (admin requested resubmission)
     if (_hasDocumentActionRequired) return DriverComplianceStatus.documentActionRequired;
+
+    // 4b. Vehicle inspection required — post-submission requirement
+    if (_hasVehicleInspectionRequired) return DriverComplianceStatus.vehicleInspectionRequired;
 
     // 5. Face check required — actionable (driver must take photo)
     if (_faceCheckStatus == FaceCheckStatus.needsCheck && _faceCheckPending && !_headshotActionRequired) return DriverComplianceStatus.faceCheckNeeded;
@@ -444,8 +453,12 @@ class DriverProvider with ChangeNotifier {
         final docReqs = await UserService.getDocumentRequirements();
         final reqs = (docReqs['requirements'] as List?) ?? [];
         _documentRequirements = reqs.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+        _hasVehicleInspectionRequired = reqs.any((r) =>
+            (r as Map)['status'] == 'resubmission_required' &&
+            (r as Map)['document_type'] == 'inspection_photo_url');
         _hasDocumentActionRequired = reqs.any((r) =>
-            (r as Map)['status'] == 'resubmission_required');
+            (r as Map)['status'] == 'resubmission_required' &&
+            (r as Map)['document_type'] != 'inspection_photo_url');
         _hasDocumentSubmitted = reqs.any((r) =>
             (r as Map)['status'] == 'submitted');
         notifyListeners();
@@ -583,8 +596,12 @@ class DriverProvider with ChangeNotifier {
       final docReqs = await UserService.getDocumentRequirements();
       final reqs = (docReqs['requirements'] as List?) ?? [];
       _documentRequirements = reqs.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+      _hasVehicleInspectionRequired = reqs.any((r) =>
+          (r as Map)['status'] == 'resubmission_required' &&
+          (r as Map)['document_type'] == 'inspection_photo_url');
       _hasDocumentActionRequired = reqs.any((r) =>
-          (r as Map)['status'] == 'resubmission_required');
+          (r as Map)['status'] == 'resubmission_required' &&
+          (r as Map)['document_type'] != 'inspection_photo_url');
       _hasDocumentSubmitted = reqs.any((r) =>
           (r as Map)['status'] == 'submitted');
     } catch (_) {

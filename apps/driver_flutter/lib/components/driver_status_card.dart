@@ -145,6 +145,16 @@ class DriverStatusCard extends StatelessWidget {
           actionLabel: 'START',
           onAction: onStartFaceCheck,
         );
+
+      case DriverStatusKind.vehicleInspectionRequired:
+        return _build(
+          color: AppTheme.errorColor,
+          icon: Icons.directions_car_rounded,
+          title: 'Action required: vehicle inspection',
+          message: 'A certified vehicle inspection is required before you can drive.',
+          actionLabel: 'VIEW',
+          onAction: onAction,
+        );
     }
   }
 
@@ -278,6 +288,7 @@ enum DriverStatusKind {
   profileChangePending,
   profileChangeApproved,
   documentActionRequired,
+  vehicleInspectionRequired,
   documentSubmittedForReview,
   headshotActionRequired,
 }
@@ -297,6 +308,7 @@ class DriverStatus {
   static const profileChangePending = DriverStatus._(DriverStatusKind.profileChangePending, null);
   static const profileChangeApproved = DriverStatus._(DriverStatusKind.profileChangeApproved, null);
   static const documentActionRequired = DriverStatus._(DriverStatusKind.documentActionRequired, null);
+  static const vehicleInspectionRequired = DriverStatus._(DriverStatusKind.vehicleInspectionRequired, null);
   static const documentSubmittedForReview = DriverStatus._(DriverStatusKind.documentSubmittedForReview, null);
   static const headshotActionRequired = DriverStatus._(DriverStatusKind.headshotActionRequired, null);
 

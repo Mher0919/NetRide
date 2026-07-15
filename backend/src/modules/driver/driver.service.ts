@@ -286,6 +286,29 @@ export class DriverService {
       client.release();
     }
 
+    // Auto-create vehicle inspection requirement as a post-submission Action Required
+    try {
+      const existingReq = await pool.query(
+        `SELECT id FROM driver_document_requirements
+         WHERE driver_id = $1 AND document_type = 'inspection_photo_url'`,
+        [userId]
+      );
+      if (existingReq.rows.length === 0) {
+        await pool.query(
+          `INSERT INTO driver_document_requirements (driver_id, document_type, status)
+           VALUES ($1, 'inspection_photo_url', 'resubmission_required')`,
+          [userId]
+        );
+        await pool.query(
+          `UPDATE drivers SET has_action_required = TRUE, last_action_required_at = NOW()
+           WHERE user_id = $1`,
+          [userId]
+        );
+      }
+    } catch (reqErr) {
+      console.error(`[DRIVER] ❌ Failed to create vehicle inspection requirement (non-fatal):`, reqErr);
+    }
+
     // Notify admin via email (fire-and-forget after confirmed persistence)
     try {
       const userEmail = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
@@ -326,9 +349,7 @@ export class DriverService {
       if (!data.identity.insurance_photo_url || !data.identity.registration_photo_url) {
         throw new Error('Insurance and car registration photos are mandatory');
       }
-      if (!data.vehicle.inspection_photo_url) {
-        throw new Error('Vehicle inspection certificate is mandatory for registration');
-      }
+      // Vehicle inspection is enforced post-submission, not during registration.
 
       // Vehicle Year Validation (2011 -> Present)
       const vehicleYear = parseInt(data.vehicle.year);

@@ -326,6 +326,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         card = const DriverStatusCard(
           state: DriverStatus.documentSubmittedForReview,
         );
+      case DriverComplianceStatus.vehicleInspectionRequired:
+        card = DriverStatusCard(
+          state: DriverStatus.vehicleInspectionRequired,
+          onAction: () => Navigator.pushNamed(context, '/vehicle-inspection'),
+        );
       case DriverComplianceStatus.headshotActionRequired:
         card = DriverStatusCard(
           state: DriverStatus.headshotActionRequired,
