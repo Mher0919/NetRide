@@ -135,6 +135,16 @@ class DriverStatusCard extends StatelessWidget {
           title: 'Document resubmitted',
           message: 'Your updated document is being reviewed. We\'ll let you know once it\'s approved.',
         );
+
+      case DriverStatusKind.headshotActionRequired:
+        return _build(
+          color: AppTheme.errorColor,
+          icon: Icons.face_retouching_natural,
+          title: 'Action required: face verification',
+          message: 'Headshot photo check required',
+          actionLabel: 'START',
+          onAction: onStartFaceCheck,
+        );
     }
   }
 
@@ -269,6 +279,7 @@ enum DriverStatusKind {
   profileChangeApproved,
   documentActionRequired,
   documentSubmittedForReview,
+  headshotActionRequired,
 }
 
 class DriverStatus {
@@ -287,6 +298,7 @@ class DriverStatus {
   static const profileChangeApproved = DriverStatus._(DriverStatusKind.profileChangeApproved, null);
   static const documentActionRequired = DriverStatus._(DriverStatusKind.documentActionRequired, null);
   static const documentSubmittedForReview = DriverStatus._(DriverStatusKind.documentSubmittedForReview, null);
+  static const headshotActionRequired = DriverStatus._(DriverStatusKind.headshotActionRequired, null);
 
   factory DriverStatus.faceRequired(String reason) =>
       DriverStatus._(DriverStatusKind.faceRequired, reason);

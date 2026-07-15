@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { env } from '../../config/env';
 import { uploadToSupabase } from '../../config/supabase';
+import { io } from '../../app';
 
 export class AdminController {
   static async getStats(req: AuthRequest, res: Response) {
@@ -711,7 +712,7 @@ export class AdminController {
 
         params.push(id);
         await client.query(
-          `UPDATE drivers SET ${sets.join(', ')}, updated_at = NOW() WHERE user_id = $${idx}`,
+          `UPDATE drivers SET ${sets.join(', ')} WHERE user_id = $${idx}`,
           params
         );
 
@@ -1157,6 +1158,15 @@ export class AdminController {
         }
       } catch (e: any) {
         console.warn('[ADMIN] ⚠️ Resubmission email failed:', e.message);
+      }
+
+      // Notify the driver via socket so the Action Required card appears in real time
+      try {
+        io.to(`driver:${driverId}`).emit('documentRequirementsChanged', {
+          has_action_required: true,
+        });
+      } catch (e: any) {
+        console.warn('[ADMIN] ⚠️ Socket notification failed:', e.message);
       }
 
       res.json({ success: true, requirement: result.rows[0] });
@@ -1635,6 +1645,15 @@ export class AdminController {
           details: `Vehicle resubmission requested for driver ${driverId}: ${reason}`,
         },
       });
+
+      // Notify the driver via socket so the Action Required card appears in real time
+      try {
+        io.to(`driver:${driverId}`).emit('vehicleRequirementsChanged', {
+          has_action_required: true,
+        });
+      } catch (e: any) {
+        console.warn('[ADMIN] ⚠️ Socket notification for vehicle failed:', e.message);
+      }
 
       res.json({
         success: true,

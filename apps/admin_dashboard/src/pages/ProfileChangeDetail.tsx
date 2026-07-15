@@ -232,12 +232,12 @@ const ProfileChangeDetail: React.FC = () => {
                 <Stack spacing={1.5}>
                   <Button
                     variant="contained"
-                    startIcon={<CheckIcon />}
+                    startIcon={actionLoading ? undefined : <CheckIcon />}
                     disabled={actionLoading}
                     onClick={handleApprove}
                     sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none', fontWeight: 700, py: 1.2 }}
                   >
-                    Approve Changes
+                    {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Approve Changes'}
                   </Button>
                   <Button
                     variant="outlined"
@@ -334,7 +334,7 @@ const ProfileChangeDetail: React.FC = () => {
             variant="contained"
             sx={{ backgroundColor: '#C65A5A', '&:hover': { backgroundColor: '#B14848' }, textTransform: 'none', fontWeight: 700 }}
           >
-            Reject
+            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Reject'}
           </Button>
         </DialogActions>
       </Dialog>

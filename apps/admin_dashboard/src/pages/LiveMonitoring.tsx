@@ -10,7 +10,8 @@ import {
   ListItemAvatar,
   ListItemText,
   Divider,
-  Button
+  Button,
+  CircularProgress
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import TaxiIcon from '@mui/icons-material/LocalTaxi';
@@ -46,13 +47,17 @@ const FitDrivers: React.FC<{ drivers: any[] }> = ({ drivers }) => {
 
 const LiveMonitoring: React.FC = () => {
   const [drivers, setDrivers] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchDrivers = async () => {
+    setRefreshing(true);
     try {
       const data = await getLiveDrivers();
       setDrivers(data);
     } catch (error) {
       console.error('Failed to fetch live drivers:', error);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -100,12 +105,13 @@ const LiveMonitoring: React.FC = () => {
           </Typography>
         </Box>
         <Button 
-          startIcon={<RefreshIcon />} 
-          onClick={fetchDrivers} 
+          startIcon={refreshing ? undefined : <RefreshIcon />} 
+          onClick={async () => { setRefreshing(true); try { await fetchDrivers(); } finally { setRefreshing(false); } }} 
           variant="contained"
+          disabled={refreshing}
           sx={{ borderRadius: '12px' }}
         >
-          Refresh Dispatch
+          {refreshing ? <CircularProgress size={20} color="inherit" /> : 'Refresh Dispatch'}
         </Button>
       </Box>
 

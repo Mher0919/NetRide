@@ -16,6 +16,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
   ViewState _state = ViewState.loading;
   String? _errorMessage;
   List<dynamic> _history = [];
+  bool _isDeleting = false;
 
   @override
   void initState() {
@@ -50,25 +51,26 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _deleteActivity(String id) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Activity'),
-        content: const Text('Are you sure you want to delete this trip from your history?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
+    setState(() => _isDeleting = true);
     try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete Activity'),
+          content: const Text('Are you sure you want to delete this trip from your history?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+
       await ApiService.dio.delete('/ride/history/$id');
       setState(() {
         _history.removeWhere((ride) => ride['id'] == id);
@@ -84,6 +86,8 @@ class _ActivityScreenState extends State<ActivityScreen> {
           SnackBar(content: Text('Failed to delete activity: $e')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isDeleting = false);
     }
   }
 
@@ -192,8 +196,10 @@ class _ActivityScreenState extends State<ActivityScreen> {
                   const SizedBox(width: 8),
                   IconButton(
                     visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                    onPressed: () => _deleteActivity(ride['id']),
+                    icon: _isDeleting
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.redAccent))
+                        : const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                    onPressed: _isDeleting ? null : () => _deleteActivity(ride['id']),
                   ),
                 ],
               ),

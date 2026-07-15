@@ -32,6 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _showChangePasswordDialog() async {
     final currentPasswordController = TextEditingController();
     bool obscure = true;
+    bool isSendingVerification = false;
 
     await showDialog(
       context: context,
@@ -59,22 +60,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             ElevatedButton(
-              onPressed: () async {
-                if (currentPasswordController.text.isEmpty) return;
-                try {
-                  await AuthService.requestPasswordChange(currentPasswordController.text);
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Verification email sent! Please check your inbox.')),
-                    );
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              },
+              onPressed: isSendingVerification
+                  ? null
+                  : () async {
+                      setDialogState(() => isSendingVerification = true);
+                      if (currentPasswordController.text.isEmpty) {
+                        setDialogState(() => isSendingVerification = false);
+                        return;
+                      }
+                      try {
+                        await AuthService.requestPasswordChange(currentPasswordController.text);
+                        if (mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Verification email sent! Please check your inbox.')),
+                          );
+                        }
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                      } finally {
+                        setDialogState(() => isSendingVerification = false);
+                      }
+                    },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-              child: const Text('Send Verification'),
+              child: isSendingVerification
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Send Verification'),
             ),
           ],
         ),

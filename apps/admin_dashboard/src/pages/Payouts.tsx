@@ -253,10 +253,10 @@ const Payouts: React.FC = () => {
             onClick={handleMarkPaid}
             disabled={!reference.trim() || actionLoading}
             variant="contained"
-            startIcon={<CheckIcon />}
+            startIcon={actionLoading ? undefined : <CheckIcon />}
             sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none', fontWeight: 700 }}
           >
-            Confirm Paid
+            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Confirm Paid'}
           </Button>
         </DialogActions>
       </Dialog>

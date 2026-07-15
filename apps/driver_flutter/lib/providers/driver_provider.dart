@@ -37,6 +37,9 @@ enum DriverComplianceStatus {
 
   /// Driver has resubmitted documents; awaiting admin review.
   documentSubmitted,
+
+  /// Headshot verification required — driver chose Stay Offline.
+  headshotActionRequired,
 }
 
 class DriverProvider with ChangeNotifier {
@@ -79,6 +82,9 @@ class DriverProvider with ChangeNotifier {
   bool _hasDocumentSubmitted = false;
   List<Map<String, dynamic>> _documentRequirements = [];
 
+  // Headshot action required (driver chose Stay Offline when prompted)
+  bool _headshotActionRequired = false;
+
   // Verification & compliance state (pulled from profile).
   bool _isVerified = false;
   String _verificationStatus = 'PENDING';
@@ -88,6 +94,12 @@ class DriverProvider with ChangeNotifier {
   bool get hasDocumentActionRequired => _hasDocumentActionRequired;
   bool get hasDocumentSubmitted => _hasDocumentSubmitted;
   List<Map<String, dynamic>> get documentRequirements => _documentRequirements;
+
+  bool get headshotActionRequired => _headshotActionRequired;
+  void setHeadshotActionRequired(bool value) {
+    _headshotActionRequired = value;
+    notifyListeners();
+  }
   bool get isVerified => _isVerified;
   String get verificationStatus => _verificationStatus;
   String? get rejectionReason => _rejectionReason;
@@ -131,6 +143,7 @@ class DriverProvider with ChangeNotifier {
       _isVerified &&
       !_hasPendingProfileChange &&
       !_hasDocumentActionRequired &&
+      !_headshotActionRequired &&
       _faceCheckStatus != FaceCheckStatus.flagged &&
       _faceCheckStatus != FaceCheckStatus.needsCheck;
 
@@ -139,26 +152,29 @@ class DriverProvider with ChangeNotifier {
   /// prevents the driver from going online. The caller can use this
   /// to render status cards in priority order.
   DriverComplianceStatus? buildDriverComplianceStatus() {
-    // 1. Profile change pending — highest priority
+    // 1. Profile change pending — highest priority, actionable
     if (_hasPendingProfileChange) return DriverComplianceStatus.profileChangePending;
 
-    // 2. Background check rejected
+    // 2. Background check rejected — terminal blocker
     if (_verificationStatus == 'REJECTED') return DriverComplianceStatus.backgroundCheckRejected;
 
-    // 3. Background check pending
-    if (_verificationStatus == 'PENDING') return DriverComplianceStatus.backgroundCheckPending;
-
-    // 4. Background check approved but feedback not yet dismissed
-    if (_verificationStatus == 'APPROVED' && !_feedbackSeen) return DriverComplianceStatus.backgroundCheckApproved;
-
-    // 5. Face check flagged
+    // 3. Face check flagged — admin review in progress
     if (_faceCheckStatus == FaceCheckStatus.flagged) return DriverComplianceStatus.faceFlagged;
 
-    // 6. Face check required
-    if (_faceCheckStatus == FaceCheckStatus.needsCheck && _faceCheckPending) return DriverComplianceStatus.faceCheckNeeded;
-
-    // 7. Document action required
+    // 4. Document action required — actionable (admin requested resubmission)
     if (_hasDocumentActionRequired) return DriverComplianceStatus.documentActionRequired;
+
+    // 5. Face check required — actionable (driver must take photo)
+    if (_faceCheckStatus == FaceCheckStatus.needsCheck && _faceCheckPending && !_headshotActionRequired) return DriverComplianceStatus.faceCheckNeeded;
+
+    // 5b. Headshot action required — driver chose Stay Offline
+    if (_headshotActionRequired) return DriverComplianceStatus.headshotActionRequired;
+
+    // 6. Background check pending — passive (driver waits)
+    if (_verificationStatus == 'PENDING') return DriverComplianceStatus.backgroundCheckPending;
+
+    // 7. Background check approved but feedback not yet dismissed
+    if (_verificationStatus == 'APPROVED' && !_feedbackSeen) return DriverComplianceStatus.backgroundCheckApproved;
 
     // 8. Document submitted for review (informational, not a blocker)
     if (_hasDocumentSubmitted) return DriverComplianceStatus.documentSubmitted;
@@ -419,6 +435,33 @@ class DriverProvider with ChangeNotifier {
         _faceCheckReason = 'flagged';
       }
       notifyListeners();
+    });
+
+    _socket!.on('documentRequirementsChanged', (data) async {
+      // Admin requested document resubmission — refresh requirements state
+      // so the Action Required card appears in real time.
+      try {
+        final docReqs = await UserService.getDocumentRequirements();
+        final reqs = (docReqs['requirements'] as List?) ?? [];
+        _documentRequirements = reqs.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+        _hasDocumentActionRequired = reqs.any((r) =>
+            (r as Map)['status'] == 'resubmission_required');
+        _hasDocumentSubmitted = reqs.any((r) =>
+            (r as Map)['status'] == 'submitted');
+        notifyListeners();
+      } catch (e) {
+        debugPrint('Failed to refresh document requirements from socket: $e');
+      }
+    });
+
+    _socket!.on('vehicleRequirementsChanged', (data) async {
+      // Admin requested vehicle resubmission — refresh profile so the
+      // vehicle action required card appears in real time.
+      try {
+        await refreshProfile();
+      } catch (e) {
+        debugPrint('Failed to refresh profile from vehicle socket: $e');
+      }
     });
 
     _socket!.on('profileChangeReviewed', (data) async {

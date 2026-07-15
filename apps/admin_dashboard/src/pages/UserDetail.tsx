@@ -367,13 +367,13 @@ const UserDetail: React.FC = () => {
               <Button 
                 variant="contained" 
                 color="success" 
-                startIcon={<CheckIcon />}
+                startIcon={actionLoading ? undefined : <CheckIcon />}
                 onClick={handleVerify}
                 disabled={actionLoading || user.verification_status === 'VERIFIED'}
                 fullWidth
                 sx={{ borderRadius: '12px', height: 48 }}
               >
-                Approve User
+                {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Approve User'}
               </Button>
               <Button 
                 variant="outlined" 
@@ -389,13 +389,13 @@ const UserDetail: React.FC = () => {
               <Button 
                 variant="text" 
                 color="inherit" 
-                startIcon={<HistoryIcon />}
+                startIcon={actionLoading ? undefined : <HistoryIcon />}
                 onClick={handleSetPending}
                 disabled={actionLoading || user.verification_status === 'PENDING'}
                 fullWidth
                 sx={{ mt: 1, fontWeight: 700, opacity: 0.6 }}
               >
-                Reset to Pending
+                {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Reset to Pending'}
               </Button>
             </Box>
           </Paper>
@@ -675,7 +675,7 @@ const UserDetail: React.FC = () => {
                                     {uploadingField === doc.key ? '...' : 'Replace'}
                                   </Button>
                                 </label>
-                                {doc.url ? (
+                                  {doc.url ? (
                                   <Button
                                     size="small"
                                     variant="text"
@@ -684,7 +684,7 @@ const UserDetail: React.FC = () => {
                                     onClick={() => handleDeleteDocument(doc.key)}
                                     sx={{ fontSize: '0.65rem', fontWeight: 700 }}
                                   >
-                                    Remove
+                                    {uploadingField === doc.key ? <CircularProgress size={12} /> : 'Remove'}
                                   </Button>
                                 ) : null}
                               </Stack>
@@ -779,7 +779,7 @@ const UserDetail: React.FC = () => {
                                         disabled={actionLoading}
                                         sx={{ borderRadius: '8px', height: 30, fontSize: '0.7rem' }}
                                       >
-                                        Accept
+                                        {actionLoading ? <CircularProgress size={14} color="inherit" /> : 'Accept'}
                                       </Button>
                                       <Button
                                         size="small"
@@ -789,7 +789,7 @@ const UserDetail: React.FC = () => {
                                         disabled={actionLoading}
                                         sx={{ borderRadius: '8px', height: 30, fontSize: '0.7rem' }}
                                       >
-                                        Reject
+                                        {actionLoading ? <CircularProgress size={14} color="inherit" /> : 'Reject'}
                                       </Button>
                                     </Stack>
                                   )}
@@ -1066,7 +1066,7 @@ const UserDetail: React.FC = () => {
             disabled={!rejectReason || actionLoading}
             sx={{ px: 4, borderRadius: '12px' }}
           >
-            Confirm Rejection
+            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Confirm Rejection'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1106,7 +1106,7 @@ const UserDetail: React.FC = () => {
             disabled={!requestDocReason.trim() || actionLoading}
             sx={{ px: 4, borderRadius: '12px' }}
           >
-            Send Request
+            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Send Request'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1152,7 +1152,7 @@ const UserDetail: React.FC = () => {
             disabled={actionLoading}
             sx={{ px: 4, borderRadius: '12px' }}
           >
-            Clear Flag
+            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Clear Flag'}
           </Button>
         </DialogActions>
       </Dialog>

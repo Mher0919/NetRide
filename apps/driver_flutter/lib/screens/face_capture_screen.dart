@@ -13,9 +13,10 @@ import '../services/face_verification_service.dart';
 /// Flow:
 ///   1. Initialize camera (rear-camera first, fallback to any available).
 ///   2. Show dashed head outline + "TAP TO START" pill.
-///   3. On tap → countdown 3-2-1, then record a 3-second MP4.
-///   4. During recording, cycle through liveness prompts ("Look left"…).
-///   5. Stop early if the user taps "STOP" or auto-stop at 3s.
+///   3. On tap → countdown 3-2-1, then start recording.
+///   4. During recording, show each liveness prompt ("Look left"…) for 3 seconds
+///      with a visible countdown and progress bar.
+///   5. Stop early if the user taps "STOP" or auto-stop after all prompts.
 ///   6. POST /api/face/verify with the clip + the cached enrollment image.
 ///   7. Show inline PASS / FAIL, then `Navigator.pop` with the result.
 class FaceCaptureScreen extends StatefulWidget {
@@ -36,10 +37,17 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
   Future<void>? _initFuture;
   bool _isRecording = false;
   bool _isCountingDown = false;
+  bool _isStarting = false;
+  bool _isSubmitting = false;
   int _countdownValue = 3;
-  int _promptIndex = 0;
+
+  // Sequential prompt state.
+  static const int _secondsPerPrompt = 3;
+  int _currentPromptStep = 0;
+  int _promptSecondsRemaining = _secondsPerPrompt;
+  Timer? _promptTimer;
+
   Timer? _countdownTimer;
-  Timer? _recordStopper;
 
   // Animation for the dashed outline pulse.
   late final AnimationController _pulseController;
@@ -109,16 +117,17 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
   @override
   void dispose() {
     _countdownTimer?.cancel();
-    _recordStopper?.cancel();
+    _promptTimer?.cancel();
     _pulseController.dispose();
     _camera?.dispose();
     super.dispose();
   }
 
   Future<void> _startCaptureFlow() async {
-    if (_camera == null || _isRecording || _isCountingDown) return;
+    if (_camera == null || _isRecording || _isCountingDown || _isStarting) return;
 
     setState(() {
+      _isStarting = true;
       _isCountingDown = true;
       _countdownValue = 3;
     });
@@ -127,8 +136,11 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
       if (_countdownValue <= 1) {
         timer.cancel();
         setState(() {
+          _isStarting = false;
           _isCountingDown = false;
           _countdownValue = 3;
+          _currentPromptStep = 0;
+          _promptSecondsRemaining = _secondsPerPrompt;
         });
         await _startRecording();
       } else {
@@ -140,38 +152,54 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
   Future<void> _startRecording() async {
     if (_camera == null) return;
 
-    setState(() {
-      _isRecording = true;
-      _promptIndex = 0;
-    });
-
-    // Rotate prompts every ~750ms while recording.
-    final promptTimer = Timer.periodic(
-      const Duration(milliseconds: 750),
-      (_) {
-        if (!mounted) return;
-        setState(() => _promptIndex = (_promptIndex + 1) % _prompts.length);
-      },
-    );
+    setState(() => _isRecording = true);
 
     try {
       await _camera!.startVideoRecording();
     } catch (e) {
-      promptTimer.cancel();
       _showErrorAndExit('Failed to start camera: $e');
       return;
     }
 
-    // Auto-stop after 3 seconds.
-    _recordStopper = Timer(const Duration(seconds: 3), () async {
-      promptTimer.cancel();
-      await _stopAndSubmit();
+    _advancePrompt();
+  }
+
+  /// Show the current prompt for [_secondsPerPrompt] seconds, then advance
+  /// to the next prompt or stop when all prompts are complete.
+  void _advancePrompt() {
+    if (!mounted || _camera == null) return;
+    _promptTimer?.cancel();
+
+    if (_currentPromptStep >= _prompts.length) {
+      _stopAndSubmit();
+      return;
+    }
+
+    setState(() {
+      _promptSecondsRemaining = _secondsPerPrompt;
+    });
+
+    _promptTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_promptSecondsRemaining <= 1) {
+        timer.cancel();
+        setState(() {
+          _currentPromptStep++;
+        });
+        _advancePrompt();
+      } else {
+        setState(() => _promptSecondsRemaining--);
+      }
     });
   }
 
   Future<void> _stopAndSubmit() async {
-    if (_camera == null || !_isRecording) return;
-    _recordStopper?.cancel();
+    if (_camera == null || !_isRecording || _isSubmitting) return;
+    _isSubmitting = true;
+    _promptTimer?.cancel();
 
     XFile? captured;
     try {
@@ -209,8 +237,10 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
       );
 
       if (!mounted) return;
+      _isSubmitting = false;
       Navigator.pop(context, result);
     } catch (e) {
+      _isSubmitting = false;
       _showErrorAndExit('Upload failed: $e');
     }
   }
@@ -367,7 +397,7 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
                   ),
                 ] else if (_isRecording) ...[
                   Text(
-                    _prompts[_promptIndex],
+                    _prompts[_currentPromptStep < _prompts.length ? _currentPromptStep : _prompts.length - 1],
                     style: GoogleFonts.inter(
                       color: _sage,
                       fontSize: 22,
@@ -376,22 +406,47 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Hold still and follow the prompts',
+                    'Step ${(_currentPromptStep < _prompts.length ? _currentPromptStep : _prompts.length - 1) + 1} of ${_prompts.length}',
                     style: GoogleFonts.inter(
-                      color: _darkForest.withOpacity(0.7),
+                      color: _darkForest.withOpacity(0.6),
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: _promptSecondsRemaining / _secondsPerPrompt,
+                      backgroundColor: _darkForest.withOpacity(0.1),
+                      valueColor: const AlwaysStoppedAnimation<Color>(_sage),
+                      minHeight: 4,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_promptSecondsRemaining}s',
+                    style: GoogleFonts.inter(
+                      color: _darkForest,
                       fontSize: 13,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _stopAndSubmit,
+                      onPressed: _isSubmitting ? null : _stopAndSubmit,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _terracotta,
                         foregroundColor: Colors.white,
                       ),
-                      child: const Text('STOP'),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('STOP'),
                     ),
                   ),
                 ] else ...[
@@ -416,12 +471,18 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _startCaptureFlow,
+                      onPressed: _isStarting ? null : _startCaptureFlow,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _sage,
                         foregroundColor: Colors.white,
                       ),
-                      child: const Text('TAP TO START'),
+                      child: _isStarting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('TAP TO START'),
                     ),
                   ),
                 ],

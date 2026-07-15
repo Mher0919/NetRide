@@ -38,6 +38,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _errorMessage;
   bool _isSaving = false;
   bool _isEditing = false;
+  bool _isSendingEmailLink = false;
+  bool _isSubmittingCard = false;
+  bool _isRequestingPayout = false;
   bool _isVerified = false;
   bool _hasPassword = false;
   bool _showVerificationHint = false;
@@ -602,21 +605,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
-            onPressed: () async {
-              final newEmail = emailController.text.trim();
-              if (newEmail == _email) return;
-              try {
-                await AuthService.requestEmailChange(newEmail);
-                if (mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Verification link sent to your new email')));
-                }
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-              }
-            },
+            onPressed: _isSendingEmailLink
+                ? null
+                : () async {
+                    setState(() => _isSendingEmailLink = true);
+                    final newEmail = emailController.text.trim();
+                    if (newEmail == _email) {
+                      if (mounted) setState(() => _isSendingEmailLink = false);
+                      return;
+                    }
+                    try {
+                      await AuthService.requestEmailChange(newEmail);
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Verification link sent to your new email')));
+                      }
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    } finally {
+                      if (mounted) setState(() => _isSendingEmailLink = false);
+                    }
+                  },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-            child: const Text('Send Link'),
+            child: _isSendingEmailLink
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Send Link'),
           ),
         ],
       ),
@@ -1600,41 +1613,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
               FilledButton(
-                onPressed: () async {
-                  if (!(formKey.currentState?.validate() ?? false)) return;
-                  try {
-                    await UserService.addPayoutCard({
-                      'card_number': cardNum.text.replaceAll(RegExp(r'\D'), ''),
-                      'exp_month': int.parse(expM.text.trim()),
-                      'exp_year': int.parse(expY.text.trim()),
-                      'cardholder_name': name.text.trim(),
-                      'zip': zip.text.trim(),
-                      'cvc': cvc.text.trim(),
-                    });
-                    if (mounted) {
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Card submitted — awaiting admin approval.'),
-                          backgroundColor: Color(0xFF5B7760),
-                        ),
-                      );
-                      setState(() {});
-                    }
-                  } catch (e) {
-                    final msg = _friendlyError(e.toString());
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
-                      );
-                    }
-                  }
-                },
+                onPressed: _isSubmittingCard
+                    ? null
+                    : () async {
+                        setState(() => _isSubmittingCard = true);
+                        if (!(formKey.currentState?.validate() ?? false)) {
+                          if (mounted) setState(() => _isSubmittingCard = false);
+                          return;
+                        }
+                        try {
+                          await UserService.addPayoutCard({
+                            'card_number': cardNum.text.replaceAll(RegExp(r'\D'), ''),
+                            'exp_month': int.parse(expM.text.trim()),
+                            'exp_year': int.parse(expY.text.trim()),
+                            'cardholder_name': name.text.trim(),
+                            'zip': zip.text.trim(),
+                            'cvc': cvc.text.trim(),
+                          });
+                          if (mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Card submitted — awaiting admin approval.'),
+                                backgroundColor: Color(0xFF5B7760),
+                              ),
+                            );
+                            setState(() {});
+                          }
+                        } catch (e) {
+                          final msg = _friendlyError(e.toString());
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
+                            );
+                          }
+                        } finally {
+                          if (mounted) setState(() => _isSubmittingCard = false);
+                        }
+                      },
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF5B7760),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: const Text('Submit for review'),
+                child: _isSubmittingCard
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Submit for review'),
               ),
             ],
           );
@@ -1713,9 +1736,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
               FilledButton(
-                onPressed: !canSubmit
+                onPressed: !canSubmit || _isRequestingPayout
                     ? null
                     : () async {
+                        setState(() => _isRequestingPayout = true);
                         try {
                           await UserService.requestOnDemandPayout(rawCents);
                           if (mounted) {
@@ -1735,13 +1759,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
                             );
                           }
+                        } finally {
+                          if (mounted) setState(() => _isRequestingPayout = false);
                         }
                       },
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF5B7760),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: const Text('Request payout'),
+                child: _isRequestingPayout
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Request payout'),
               ),
             ],
           );

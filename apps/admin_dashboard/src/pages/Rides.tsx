@@ -135,13 +135,13 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
           {title}
         </Typography>
         <Button 
-          startIcon={<RefreshIcon />} 
+          startIcon={loading ? undefined : <RefreshIcon />} 
           variant="contained" 
           onClick={fetchRides}
           disabled={loading}
           sx={{ borderRadius: '12px' }}
         >
-          Refresh
+          {loading ? <CircularProgress size={20} color="inherit" /> : 'Refresh'}
         </Button>
       </Box>
 

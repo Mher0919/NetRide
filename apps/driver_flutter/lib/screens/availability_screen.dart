@@ -37,6 +37,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   double? _tempPrice;
   bool _isDragging = false;
   String? _lastIncomingRequestId;
+  bool _isTogglingOnline = false;
+  bool _isConfirmingPrice = false;
 
   @override
   void initState() {
@@ -324,6 +326,12 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         card = const DriverStatusCard(
           state: DriverStatus.documentSubmittedForReview,
         );
+      case DriverComplianceStatus.headshotActionRequired:
+        card = DriverStatusCard(
+          state: DriverStatus.headshotActionRequired,
+          onStartFaceCheck: () =>
+              _showHeadshotModal(reason: provider.faceCheckReason ?? 'first_time'),
+        );
     }
 
     return Column(
@@ -337,6 +345,68 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     );
   }
 
+  /// Show the headshot requirement modal instead of immediately opening the camera.
+  Future<void> _showHeadshotModal({required String reason}) async {
+    final provider = Provider.of<DriverProvider>(context, listen: false);
+    final choice = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text(
+          'Headshot Photo Required',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
+        ),
+        content: const Text(
+          'A headshot verification is required before you can go online.',
+          style: TextStyle(fontSize: 14, height: 1.4),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () => Navigator.pop(ctx, 'stay_offline'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text(
+                'Stay Offline',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, 'take_photo'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF5B7760),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text(
+                'Take Photo',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (choice == 'take_photo') {
+      provider.setHeadshotActionRequired(false);
+      await _runFaceCheck(reason: reason);
+    } else if (choice == 'stay_offline') {
+      provider.setHeadshotActionRequired(true);
+      _showError('You\'ll need to complete face verification before going online.');
+    }
+  }
+
   /// Push the face capture screen, upload the result, and react.
   Future<void> _runFaceCheck({required String reason}) async {
     final provider = Provider.of<DriverProvider>(context, listen: false);
@@ -346,6 +416,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     );
     if (result == null) return;
     if (result.passed) {
+      provider.setHeadshotActionRequired(false);
       provider.markFaceCheckPassed();
       _showSuccess('Face check passed — you\'re cleared to drive.');
     } else if (result.reason == 'flagged' || result.match == false) {
@@ -672,48 +743,59 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                           ),
                           Switch(
                             value: isOnline && driverProvider.canGoOnline,
-                            onChanged: (val) async {
-                              if (!driverProvider.canGoOnline) {
-                                final cs = driverProvider.buildDriverComplianceStatus();
-                                if (cs == DriverComplianceStatus.backgroundCheckRejected ||
-                                    cs == DriverComplianceStatus.backgroundCheckPending) {
-                                  _showError('Your account is under review. We\'re reviewing your documents.');
-                                  return;
-                                }
-                                if (cs == DriverComplianceStatus.profileChangePending) {
-                                  _showError('Your profile change is awaiting admin review.');
-                                  _showPendingChangeDetails();
-                                  return;
-                                }
-                                // Face check or document requirements — route
-                                // the user into the capture screen or documents.
-                                if (cs == DriverComplianceStatus.faceCheckNeeded) {
-                                  _runFaceCheck(reason: driverProvider.faceCheckReason ?? 'first_time');
-                                  return;
-                                }
-                                if (cs == DriverComplianceStatus.documentActionRequired) {
-                                  Navigator.pushNamed(context, '/documents');
-                                  return;
-                                }
-                                _showError('You\'re not eligible to go online at this time.');
-                                return;
-                              }
-                              if (val) {
-                                final ok = await driverProvider.setOnline(
-                                  lat: _lastPosition?.latitude,
-                                  lng: _lastPosition?.longitude,
-                                );
-                                if (ok) {
-                                  SoundService.instance.playOnline();
-                                }
-                                if (!ok && mounted) {
-                                  _runFaceCheck(reason: driverProvider.faceCheckReason ?? 'first_time');
-                                }
-                              } else {
-                                driverProvider.setOffline();
-                                SoundService.instance.playOffline();
-                              }
-                            },
+                            onChanged: _isTogglingOnline
+                                ? null
+                                : (val) async {
+                                    setState(() => _isTogglingOnline = true);
+                                    try {
+                                      if (!driverProvider.canGoOnline) {
+                                        final cs = driverProvider.buildDriverComplianceStatus();
+                                        if (cs == DriverComplianceStatus.backgroundCheckRejected ||
+                                            cs == DriverComplianceStatus.backgroundCheckPending) {
+                                          _showError('Your account is under review. We\'re reviewing your documents.');
+                                          return;
+                                        }
+                                        if (cs == DriverComplianceStatus.profileChangePending) {
+                                          _showError('Your profile change is awaiting admin review.');
+                                          _showPendingChangeDetails();
+                                          return;
+                                        }
+                                        // Face check or document requirements — route
+                                        // the user into the capture screen or documents.
+                                        if (cs == DriverComplianceStatus.faceCheckNeeded) {
+                                          _showHeadshotModal(reason: driverProvider.faceCheckReason ?? 'first_time');
+                                          return;
+                                        }
+                                        if (cs == DriverComplianceStatus.headshotActionRequired) {
+                                          _showHeadshotModal(reason: driverProvider.faceCheckReason ?? 'first_time');
+                                          return;
+                                        }
+                                        if (cs == DriverComplianceStatus.documentActionRequired) {
+                                          Navigator.pushNamed(context, '/documents');
+                                          return;
+                                        }
+                                        _showError('You\'re not eligible to go online at this time.');
+                                        return;
+                                      }
+                                      if (val) {
+                                        final ok = await driverProvider.setOnline(
+                                          lat: _lastPosition?.latitude,
+                                          lng: _lastPosition?.longitude,
+                                        );
+                                        if (ok) {
+                                          SoundService.instance.playOnline();
+                                        }
+                                        if (!ok && mounted) {
+                                          _showHeadshotModal(reason: driverProvider.faceCheckReason ?? 'first_time');
+                                        }
+                                      } else {
+                                        driverProvider.setOffline();
+                                        SoundService.instance.playOffline();
+                                      }
+                                    } finally {
+                                      if (mounted) setState(() => _isTogglingOnline = false);
+                                    }
+                                  },
                             activeColor: Colors.white,
                             activeTrackColor: const Color(0xFF5B7760),
                             inactiveTrackColor: const Color(0xFFD8D2CA),
@@ -971,43 +1053,49 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
             child: const Text('CANCEL', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
           ),
           ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await provider.updatePrice(value);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Driving price successfully set to \$${value.toStringAsFixed(2)}/mi.'),
-                      backgroundColor: const Color(0xFF5B7760),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Error'),
-                      content: Text(e.toString().replaceAll('Exception: ', '')),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('OK'),
-                        )
-                      ],
-                    ),
-                  );
-                }
-              } finally {
-                setState(() {
-                  _tempPrice = null;
-                });
-              }
-            },
+            onPressed: _isConfirmingPrice
+                ? null
+                : () async {
+                    setState(() => _isConfirmingPrice = true);
+                    Navigator.pop(context);
+                    try {
+                      await provider.updatePrice(value);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Driving price successfully set to \$${value.toStringAsFixed(2)}/mi.'),
+                            backgroundColor: const Color(0xFF5B7760),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Error'),
+                            content: Text(e.toString().replaceAll('Exception: ', '')),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('OK'),
+                              )
+                            ],
+                          ),
+                        );
+                      }
+                    } finally {
+                      setState(() {
+                        _isConfirmingPrice = false;
+                        _tempPrice = null;
+                      });
+                    }
+                  },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5B7760), foregroundColor: Colors.white),
-            child: const Text('CONFIRM', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: _isConfirmingPrice
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('CONFIRM', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
