@@ -672,7 +672,7 @@ const UserDetail: React.FC = () => {
                                     disabled={uploadingField === doc.key}
                                     sx={{ fontSize: '0.65rem', fontWeight: 700 }}
                                   >
-                                    {uploadingField === doc.key ? '...' : 'Replace'}
+                                    {uploadingField === doc.key ? '...' : (doc.url ? 'Replace' : 'Upload')}
                                   </Button>
                                 </label>
                                   {doc.url ? (
