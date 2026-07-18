@@ -1,0 +1,90 @@
+# NetRide Render Blueprint
+#
+# Deploys the backend (Node/TypeScript) and the Python face-verification
+# microservice together. The backend reaches the face-service over HTTP
+# via FACE_SERVICE_URL.
+#
+# Usage:
+#   1. Render dashboard -> New -> Blueprint -> connect this repo.
+#   2. Render reads this file and creates both services.
+#   3. Fill in the secret env vars marked <REQUIRED> (DATABASE_URL,
+#      REDIS_URL, JWT_SECRET, etc.) in each service's Environment tab.
+#   4. The face-service URL is wired automatically via FACE_SERVICE_URL.
+
+services:
+  # ----------------------------------------------------------------------
+  # Backend API (Node + TypeScript)
+  # ----------------------------------------------------------------------
+  - type: web
+    name: netride-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    rootDir: backend
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: FACE_SERVICE_URL
+        # Private-service URL of the face-service defined below.
+        sync: false
+        value: https://netride-face-service.onrender.com
+      # ---- Secrets you MUST set in the dashboard ----
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      # ---- Tunables (defaults from .env.example) ----
+      - key: FACE_MATCH_THRESHOLD
+        value: "0.45"
+      - key: FACE_CHECK_INTERVAL_HOURS
+        value: "12"
+      - key: FACE_LOCATION_JUMP_MILES
+        value: "5"
+      - key: OSRM_URL
+        sync: false
+
+  # ----------------------------------------------------------------------
+  # Python face-verification microservice (FastAPI + dlib/opencv)
+  # ----------------------------------------------------------------------
+  - type: web
+    name: netride-face-service
+    runtime: docker
+    dockerfilePath: ./backend/face_service/Dockerfile
+    rootDir: backend/face_service
+    plan: standard # dlib/opencv need real CPU + ~1-2GB RAM; free tier will OOM
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: FACE_MATCH_THRESHOLD
+        value: "0.45"
+      - key: FACE_MIN_MOTION_PX
+        value: "15"
+      - key: FACE_MIN_BLINK_COUNT
+        value: "1"
+      - key: FACE_MIN_LAPLACIAN_VAR
+        value: "80"
+      - key: FACE_MIN_AREA_RATIO
+        value: "0.04"
+      - key: FACE_MAX_AREA_RATIO
+        value: "0.60"
+      - key: FACE_MIN_BRIGHTNESS
+        value: "40"
+      - key: FACE_MAX_BRIGHTNESS
+        value: "230"
+      - key: FACE_MIN_LBP_VARIANCE
+        value: "3.0"
+      - key: FACE_MAX_MULTIPLE_FACES
+        value: "1"
+      - key: FACE_LIVENESS_CONFIDENCE
+        value: "0.5"
