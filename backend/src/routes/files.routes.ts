@@ -1,17 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { StorageService } from '../services/storage.service';
-import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
 
 /**
  * GET /api/files/:id
  * Returns a file by its storage_files.id.
- * For Supabase files: returns a JSON with a public URL.
+ * For Supabase files: redirects to the public Supabase URL.
  * For local files: streams the file directly.
- * Protected by auth — only authenticated users can access files.
+ *
+ * No auth middleware — file IDs are random UUIDs (unguessable).
+ * Images embedded in <img> tags (e.g. admin dashboard) cannot carry
+ * auth headers, so requiring authentication would break all image loads.
  */
-router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { url, mimetype } = await StorageService.getAccessUrl(req.params.id);
     if (!url) {
