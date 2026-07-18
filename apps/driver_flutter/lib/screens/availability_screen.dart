@@ -897,7 +897,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
             
             if (isOnline && driverProvider.incomingRequest == null)
               Positioned(
-                top: 140,
+                bottom: 100,
                 left: 0,
                 right: 0,
                 child: Column(
