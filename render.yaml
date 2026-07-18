@@ -28,10 +28,10 @@ services:
       - key: PORT
         value: "3000"
       - key: FACE_SERVICE_URL
-        # Private-service URL of the face-service defined below.
-        sync: false
+        # URL of the face-service defined below. Update if Render
+        # appends a random suffix to the service name.
         value: https://netride-face-service.onrender.com
-      # ---- Secrets you MUST set in the dashboard ----
+      # ---- Secrets you MUST set in the dashboard (sync: false) ----
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL
@@ -44,6 +44,8 @@ services:
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
+      - key: OSRM_URL
+        sync: false
       # ---- Tunables (defaults from .env.example) ----
       - key: FACE_MATCH_THRESHOLD
         value: "0.45"
@@ -51,8 +53,6 @@ services:
         value: "12"
       - key: FACE_LOCATION_JUMP_MILES
         value: "5"
-      - key: OSRM_URL
-        sync: false
 
   # ----------------------------------------------------------------------
   # Python face-verification microservice (FastAPI + dlib/opencv)
