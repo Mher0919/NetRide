@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -297,6 +298,16 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen> {
   }
 
   String _getNetworkErrorMessage(dynamic e) {
+    // Surface the backend's actual error message when present so the user
+    // sees the real reason (e.g. "No reference image found…") instead of a
+    // generic fallback.
+    if (e is DioException && e.response?.data is Map) {
+      final data = e.response!.data as Map;
+      final serverMsg = data['error'] ?? data['message'];
+      if (serverMsg is String && serverMsg.isNotEmpty) {
+        return serverMsg;
+      }
+    }
     final msg = e.toString().toLowerCase();
     if (msg.contains('timeout')) return 'Request timed out. Please check your connection and try again.';
     if (msg.contains('connection') || msg.contains('network')) return 'Network error. Please check your internet connection.';
@@ -347,77 +358,117 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen> {
 
   Widget _buildCaptureUI() {
     final controller = _camera!;
-    final size = MediaQuery.of(context).size;
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: ClipRect(
-            child: OverflowBox(
-              alignment: Alignment.center,
-              child: FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: controller.value.previewSize?.height ?? size.width,
-                  height: controller.value.previewSize?.width ?? size.height,
-                  child: CameraPreview(controller),
-                ),
-              ),
-            ),
-          ),
-        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = constraints.maxWidth;
+        final screenHeight = constraints.maxHeight;
+        
+        final previewSize = controller.value.previewSize;
+        final previewWidth = previewSize?.width ?? screenWidth;
+        final previewHeight = previewSize?.height ?? screenHeight;
+        
+        final double previewAspectRatio = previewWidth / previewHeight;
+        final double screenAspectRatio = screenWidth / screenHeight;
+        
+        final bool isPreviewPillarboxed = previewAspectRatio < screenAspectRatio;
+        
+        double previewVisibleWidth;
+        double previewVisibleHeight;
+        double previewStartX;
+        double previewStartY;
+        
+        if (isPreviewPillarboxed) {
+          previewVisibleWidth = screenHeight * previewAspectRatio;
+          previewVisibleHeight = screenHeight;
+          previewStartX = (screenWidth - previewVisibleWidth) / 2;
+          previewStartY = 0;
+        } else {
+          previewVisibleWidth = screenWidth;
+          previewVisibleHeight = screenWidth / previewAspectRatio;
+          previewStartX = 0;
+          previewStartY = (screenHeight - previewVisibleHeight) / 2;
+        }
+        
+        // Visible camera preview region within the available (SafeArea) box.
+        final double centerX = previewStartX + previewVisibleWidth / 2;
+        final double centerY = previewStartY + previewVisibleHeight / 2;
 
-        Positioned.fill(
-          child: CustomPaint(
-            painter: _CutoutScrimPainter(
-              ovalSize: const Size(260, 340),
-              color: Colors.black.withOpacity(0.55),
-            ),
-          ),
-        ),
+        // Responsive oval sizing: scale to the visible preview, clamped so it
+        // never overflows small screens nor looks tiny on tablets.
+        final double ovalWidth = (previewVisibleWidth * 0.66).clamp(180.0, 420.0);
+        final double ovalHeight = (ovalWidth * 1.3).clamp(234.0, 546.0);
 
-        Center(
-          child: CustomPaint(
-            size: const Size(260, 340),
-            painter: _SelfieFramePainter(
-              strokeColor: _cream,
-              cornerColor: _sage,
-            ),
-          ),
-        ),
+        // Slightly above the vertical midpoint of the *visible preview*.
+        final double ovalCenterX = centerX;
+        final double ovalCenterY = centerY - (previewVisibleHeight * 0.22);
 
-        Positioned(
-          top: 12,
-          left: 12,
-          right: 12,
-          child: Row(
-            children: [
-              IconButton(
-                onPressed: _isProcessing ? null : () => Navigator.pop(context),
-                icon: const Icon(Icons.close, color: Colors.white),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Face Verification',
-                  style: GoogleFonts.inter(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: ClipRect(
+                child: OverflowBox(
+                  alignment: Alignment.center,
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: previewWidth,
+                      height: previewHeight,
+                      child: CameraPreview(controller),
+                    ),
                   ),
                 ),
               ),
-            ],
-          ),
-        ),
+            ),
 
-        if (_isProcessing)
-          _buildProcessingOverlay()
-        else if (_showResult)
-          _buildResultCard()
-        else
-          _buildCapturePrompt(),
-      ],
+            // Scrim + frame share the SAME coordinate space (the fill box) and
+            // the SAME center/size, so they can never drift apart.
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _FaceOverlayPainter(
+                  ovalSize: Size(ovalWidth, ovalHeight),
+                  center: Offset(ovalCenterX, ovalCenterY),
+                  scrimColor: Colors.black.withOpacity(0.55),
+                  strokeColor: _cream,
+                  cornerColor: _sage,
+                ),
+              ),
+            ),
+
+            Positioned(
+              top: 12,
+              left: 12,
+              right: 12,
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: _isProcessing ? null : () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: Colors.white),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Face Verification',
+                      style: GoogleFonts.inter(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            if (_isProcessing)
+              _buildProcessingOverlay()
+            else if (_showResult)
+              _buildResultCard()
+            else
+              _buildCapturePrompt(),
+          ],
+        );
+      },
     );
   }
 
@@ -621,79 +672,76 @@ class _BrightnessCheck {
   _BrightnessCheck(this.passed, this.message);
 }
 
-class _CutoutScrimPainter extends CustomPainter {
+class _FaceOverlayPainter extends CustomPainter {
   final Size ovalSize;
-  final Color color;
-
-  _CutoutScrimPainter({required this.ovalSize, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final oval = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height / 2),
-      width: ovalSize.width,
-      height: ovalSize.height,
-    );
-    final path = Path()
-      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..addOval(oval)
-      ..fillType = PathFillType.evenOdd;
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _CutoutScrimPainter old) =>
-      old.ovalSize != ovalSize || old.color != color;
-}
-
-class _SelfieFramePainter extends CustomPainter {
+  final Offset center;
+  final Color scrimColor;
   final Color strokeColor;
   final Color cornerColor;
 
-  _SelfieFramePainter({required this.strokeColor, required this.cornerColor});
+  const _FaceOverlayPainter({
+    required this.ovalSize,
+    required this.center,
+    required this.scrimColor,
+    required this.strokeColor,
+    required this.cornerColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..color = strokeColor.withOpacity(0.6);
+    final rect = Rect.fromCenter(
+      center: center,
+      width: ovalSize.width,
+      height: ovalSize.height,
+    );
 
-    final rect = Rect.fromLTWH(2, 2, size.width - 4, size.height - 4);
-    canvas.drawOval(rect, paint);
+    // 1. Dim everything outside the oval.
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..addOval(rect)
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(path, Paint()..color = scrimColor);
 
+    // 2. Oval outline (uses the SAME rect, same coordinate space).
+    canvas.drawOval(
+      rect,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = strokeColor.withOpacity(0.6),
+    );
+
+    // 3. Corner accents.
+    final rx = ovalSize.width / 2;
+    final ry = ovalSize.height / 2;
     const cl = 28.0;
+    const inset = 6.0;
     final cornerPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4
       ..strokeCap = StrokeCap.round
       ..color = cornerColor;
 
-    final w = size.width;
-    final h = size.height;
-    final cx = w / 2;
-    final cy = h / 2;
-    final rx = w / 2 - 4;
-    final ry = h / 2 - 4;
-    final inset = 6.0;
-
     final corners = [
-      Offset(cx - rx + inset, cy - ry + inset),
-      Offset(cx + rx - inset, cy - ry + inset),
-      Offset(cx + rx - inset, cy + ry - inset),
-      Offset(cx - rx + inset, cy + ry - inset),
+      Offset(center.dx - rx + inset, center.dy - ry + inset),
+      Offset(center.dx + rx - inset, center.dy - ry + inset),
+      Offset(center.dx + rx - inset, center.dy + ry - inset),
+      Offset(center.dx - rx + inset, center.dy + ry - inset),
     ];
 
     for (final c in corners) {
-      final dx = c.dx < cx ? 1.0 : -1.0;
-      final dy = c.dy < cy ? 1.0 : -1.0;
+      final dx = c.dx < center.dx ? 1.0 : -1.0;
+      final dy = c.dy < center.dy ? 1.0 : -1.0;
       canvas.drawLine(c, Offset(c.dx + dx * cl, c.dy), cornerPaint);
       canvas.drawLine(c, Offset(c.dx, c.dy + dy * cl), cornerPaint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _SelfieFramePainter old) =>
-      old.strokeColor != strokeColor || old.cornerColor != cornerColor;
+  bool shouldRepaint(covariant _FaceOverlayPainter old) =>
+      old.ovalSize != ovalSize ||
+      old.center != center ||
+      old.scrimColor != scrimColor ||
+      old.strokeColor != strokeColor ||
+      old.cornerColor != cornerColor;
 }

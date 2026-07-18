@@ -310,6 +310,7 @@ export const FaceService = {
     imageFilename: string;
     referenceBuffer: Buffer;
     referenceMime: string;
+    isEnrollment?: boolean;
     deviceId?: string | null;
     lat?: number | null;
     lng?: number | null;
@@ -349,9 +350,11 @@ export const FaceService = {
       };
     }
 
-    // Combined decision: quality AND match AND liveness must pass
+    // Combined decision: quality AND (match OR enrollment) AND liveness must
+    // pass. In enrollment mode the selfie is its own reference, so a 1:1
+    // self-match is expected and we decide on quality + liveness only.
     const qualityPassed = result.quality?.passed ?? false;
-    const matchPassed = result.match === true;
+    const matchPassed = args.isEnrollment ? true : result.match === true;
     const livenessPassed = result.liveness?.passed ?? false;
     const passed = qualityPassed && matchPassed && livenessPassed;
     const flagged = !passed;

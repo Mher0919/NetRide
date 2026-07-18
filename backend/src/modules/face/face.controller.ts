@@ -155,9 +155,11 @@ export class FaceController {
         fs.writeFileSync(selfiePath, selfieFile.buffer);
         const selfieUrl = `${env.APP_URL}/uploads/face/${userId}/${selfieFilename}`;
 
-        // Reference image — either uploaded by client or fetched from DB.
+        // Reference image — either uploaded by client, fetched from DB, or
+        // (for first-time drivers) established by enrolling from this selfie.
         let referenceBuffer: Buffer = Buffer.alloc(0);
         let referenceMime = 'image/jpeg';
+        let isEnrollment = false;
         if (referenceFile) {
           referenceBuffer = referenceFile.buffer;
           referenceMime = referenceFile.mimetype || 'image/jpeg';
@@ -168,10 +170,6 @@ export class FaceController {
           );
           const row = refRes.rows[0];
           const refUrls = [row?.face_enrollment_url, row?.profile_image_url].filter(Boolean);
-
-          if (refUrls.length === 0) {
-            return res.status(400).json({ error: 'No reference image found. Please enroll your face first.' });
-          }
 
           let fetched = false;
           for (const rawUrl of refUrls) {
@@ -199,8 +197,12 @@ export class FaceController {
             }
           }
 
+          // No existing reference → first-time enrollment: use the selfie
+          // itself as the trusted reference (quality + liveness only).
           if (!fetched) {
-            return res.status(400).json({ error: 'No reference image found. Please enroll your face first.' });
+            referenceBuffer = selfieFile.buffer;
+            referenceMime = selfieFile.mimetype || 'image/jpeg';
+            isEnrollment = true;
           }
         }
 
@@ -211,28 +213,35 @@ export class FaceController {
           imageFilename: 'selfie.jpg',
           referenceBuffer,
           referenceMime,
+          isEnrollment,
           deviceId,
           lat,
           lng,
         });
 
-        // Update enrollment reference on success (only if client uploaded a reference)
-        if (!result.flagged && referenceFile) {
-          const refFilename = `${uuidv4()}.jpg`;
-          const refPath = path.join(clipDir, refFilename);
-          fs.writeFileSync(refPath, referenceFile.buffer);
-          const refUrl = `${env.APP_URL}/uploads/face/${userId}/${refFilename}`;
-          await pool.query(
-            `UPDATE users
-               SET face_enrollment_url = $1,
-                   last_device_id = COALESCE(NULLIF($2, ''), last_device_id)
-             WHERE id = $3`,
-            [refUrl, deviceId || null, userId],
-          );
+        // Persist the enrollment reference on success. For first-time
+        // enrollment the selfie IS the reference; otherwise only the client
+        // uploaded reference is stored.
+        if (!result.flagged) {
+          const refBuffer = isEnrollment ? selfieFile.buffer : referenceFile?.buffer;
+          if (refBuffer) {
+            const refFilename = `${uuidv4()}.jpg`;
+            const refPath = path.join(clipDir, refFilename);
+            fs.writeFileSync(refPath, refBuffer);
+            const refUrl = `${env.APP_URL}/uploads/face/${userId}/${refFilename}`;
+            await pool.query(
+              `UPDATE users
+                  SET face_enrollment_url = $1,
+                      last_device_id = COALESCE(NULLIF($2, ''), last_device_id)
+                WHERE id = $3`,
+              [refUrl, deviceId || null, userId],
+            );
+          }
         }
 
         res.json({
           status: result.flagged ? 'FLAGGED' : 'PASS',
+          enrolled: isEnrollment && !result.flagged,
           match: result.match,
           score: result.score,
           reason: result.reason,
