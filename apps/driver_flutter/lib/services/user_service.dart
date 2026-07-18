@@ -51,11 +51,14 @@ class UserService {
   /// code (e.g. "PROFILE_CHANGE_PENDING", "RATE_LIMITED",
   /// "PHONE_NOT_VERIFIED") — callers should map these to UI messages.
   static Future<Map<String, dynamic>> submitProfileChange(
-      Map<String, dynamic> changes) async {
+      Map<String, dynamic> changes, {String? reason}) async {
     try {
       final response = await ApiService.dio.post(
         '/driver/profile-changes',
-        data: {'changes': changes},
+        data: {
+          'changes': changes,
+          if (reason != null) 'reason': reason,
+        },
       );
       return (response.data is Map)
           ? Map<String, dynamic>.from(response.data as Map)

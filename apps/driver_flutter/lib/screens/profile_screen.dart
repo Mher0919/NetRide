@@ -276,8 +276,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() => _isSaving = true);
       await UserService.submitProfileChange({
         'profile_image_url': url,
-        '_reason': reason,
-      });
+      }, reason: reason);
       setState(() {
         _isSaving = false;
         _hasPendingChange = true;

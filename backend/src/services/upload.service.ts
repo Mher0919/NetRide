@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { env } from '../config/env';
 import { StorageService } from './storage.service';
 
 export class UploadService {
@@ -22,8 +23,9 @@ export class UploadService {
         mimetype,
       });
 
-      console.log(`📸 [UPLOAD] Uploaded via StorageService: ${result.id} (${buffer.length} bytes) -> ${result.url}`);
-      res.json({ url: result.url });
+      const fullUrl = `${env.APP_URL}${result.url}`;
+      console.log(`📸 [UPLOAD] Uploaded via StorageService: ${result.id} (${buffer.length} bytes) -> ${fullUrl}`);
+      res.json({ url: fullUrl });
     } catch (error: any) {
       console.error('❌ Upload error:', error);
       res.status(500).json({ error: error.message });
