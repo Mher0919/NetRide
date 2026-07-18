@@ -9,6 +9,7 @@ import { AuthRequest, adminMiddleware } from '../../middleware/auth.middleware';
 import { pool } from '../../config/database';
 import { env } from '../../config/env';
 import { FaceService } from '../../services/face.service';
+import { StorageService } from '../../services/storage.service';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -155,8 +156,8 @@ export class FaceController {
         const selfieUrl = `${env.APP_URL}/uploads/face/${userId}/${selfieFilename}`;
 
         // Reference image — either uploaded by client or fetched from DB.
-        let referenceBuffer: Buffer;
-        let referenceMime: string;
+        let referenceBuffer: Buffer = Buffer.alloc(0);
+        let referenceMime = 'image/jpeg';
         if (referenceFile) {
           referenceBuffer = referenceFile.buffer;
           referenceMime = referenceFile.mimetype || 'image/jpeg';
@@ -165,17 +166,42 @@ export class FaceController {
             `SELECT face_enrollment_url, profile_image_url FROM users WHERE id = $1`,
             [userId],
           );
-          const refUrl = refRes.rows[0]?.face_enrollment_url || refRes.rows[0]?.profile_image_url;
-          if (!refUrl) {
+          const row = refRes.rows[0];
+          const refUrls = [row?.face_enrollment_url, row?.profile_image_url].filter(Boolean);
+
+          if (refUrls.length === 0) {
             return res.status(400).json({ error: 'No reference image found. Please enroll your face first.' });
           }
-          // Handle relative URLs
-          const absoluteUrl = refUrl.startsWith('http://') || refUrl.startsWith('https://')
-            ? refUrl
-            : `${env.APP_URL}${refUrl.startsWith('/') ? '' : '/'}${refUrl}`;
-          const resp = await axios.get(absoluteUrl, { responseType: 'arraybuffer' });
-          referenceBuffer = Buffer.from(resp.data);
-          referenceMime = resp.headers['content-type'] as string || 'image/jpeg';
+
+          let fetched = false;
+          for (const rawUrl of refUrls) {
+            try {
+              let absoluteUrl: string;
+              if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+                absoluteUrl = rawUrl;
+              } else if (rawUrl.startsWith('/api/files/')) {
+                const fileId = rawUrl.replace('/api/files/', '');
+                const access = await StorageService.getAccessUrl(fileId);
+                if (!access.url) continue;
+                absoluteUrl = access.url;
+                referenceMime = access.mimetype || 'image/jpeg';
+              } else {
+                absoluteUrl = `${env.APP_URL}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
+              }
+
+              const resp = await axios.get(absoluteUrl, { responseType: 'arraybuffer', timeout: 10000 });
+              referenceBuffer = Buffer.from(resp.data);
+              referenceMime = (resp.headers['content-type'] as string) || 'image/jpeg';
+              fetched = true;
+              break;
+            } catch {
+              // Try the next URL
+            }
+          }
+
+          if (!fetched) {
+            return res.status(400).json({ error: 'No reference image found. Please enroll your face first.' });
+          }
         }
 
         const result = await FaceService.runImageVerification({
