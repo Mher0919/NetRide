@@ -18,5 +18,6 @@ router.post('/verify-image', authMiddleware, driverMiddleware, FaceController.ve
 router.get('/admin/flagged', authMiddleware, adminMiddleware, FaceController.listFlagged);
 router.post('/admin/review/:eventId', authMiddleware, adminMiddleware, FaceController.review);
 router.get('/admin/user/:userId', authMiddleware, adminMiddleware, FaceController.userEvents);
+router.post('/admin/trigger/:userId', authMiddleware, adminMiddleware, FaceController.trigger);
 
 export default router;

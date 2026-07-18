@@ -190,3 +190,25 @@ export const markPayoutPaid = async (id: string, reference: string, notes?: stri
   const response = await api.post(`/admin/payouts/${id}/mark-paid`, { reference, notes });
   return response.data;
 };
+
+// ----- Face checks ---------------------------------------------------------
+
+export const getFlaggedFaceChecks = async () => {
+  const response = await api.get('/face/admin/flagged');
+  return response.data as { events: any[] };
+};
+
+export const getFaceCheckEventsByUser = async (userId: string) => {
+  const response = await api.get(`/face/admin/user/${userId}`);
+  return response.data as { events: any[] };
+};
+
+export const reviewFaceCheck = async (eventId: string, decision: 'APPROVED' | 'REJECTED', notes?: string) => {
+  const response = await api.post(`/face/admin/review/${eventId}`, { decision, notes });
+  return response.data;
+};
+
+export const triggerFaceCheck = async (userId: string) => {
+  const response = await api.post(`/face/admin/trigger/${userId}`);
+  return response.data;
+};

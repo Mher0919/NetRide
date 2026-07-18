@@ -19,6 +19,7 @@ import ProfileChanges from './pages/ProfileChanges';
 import ProfileChangeDetail from './pages/ProfileChangeDetail';
 import PayoutCards from './pages/PayoutCards';
 import Payouts from './pages/Payouts';
+import FaceChecks from './pages/FaceChecks';
 import NotFound from './pages/NotFound';
 import UserTable from './components/UserTable';
 import MainLayout from './components/MainLayout';
@@ -70,6 +71,7 @@ const App: React.FC = () => {
               <Route path="profile-changes/:id" element={<ProfileChangeDetail />} />
               <Route path="payout-cards" element={<PayoutCards />} />
               <Route path="payouts" element={<Payouts />} />
+              <Route path="face-checks" element={<FaceChecks />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

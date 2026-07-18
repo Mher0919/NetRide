@@ -7,6 +7,7 @@ import { pool } from '../config/database';
 import { env } from '../config/env';
 import { ImageVerifyResult, verifyImage } from './faceMatcher';
 import { io } from '../app';
+import { EmailService } from './email.service';
 import { isTestEmail } from '../utils/testUser';
 
 export type FaceCheckReason =
@@ -316,6 +317,27 @@ export const FaceService = {
       } catch {
         // io may not be initialized in test contexts.
       }
+
+      // Notify admins (best-effort) so flagged checks are actionable.
+      try {
+        const driverRes = await pool.query(
+          `SELECT full_name, email FROM users WHERE id = $1`,
+          [args.userId],
+        );
+        const drow = driverRes.rows[0] || {};
+        const adminRes = await pool.query(
+          `SELECT email FROM users WHERE role = 'ADMIN'`,
+        );
+        await EmailService.sendFaceCheckFlaggedNotice(adminRes.rows, {
+          driverName: drow.full_name,
+          driverEmail: drow.email,
+          reason: result.reason,
+          score: result.score,
+          eventId,
+        });
+      } catch (emailErr: any) {
+        console.error('[FACE] admin notice error:', emailErr.message);
+      }
     }
 
     return { ...result, flagged, eventId };
@@ -416,5 +438,51 @@ export const FaceService = {
       [userId, limit],
     );
     return res.rows;
+  },
+
+  /**
+   * Admin-triggered face check. Forces the driver to re-verify on their next
+   * app open (and immediately if connected) by flipping face_check_status to
+   * FLAGGED and emitting a realtime event.
+   */
+  async forceFaceCheck(args: { userId: string; adminId: string }): Promise<{ userId: string; triggered: boolean }> {
+    const userRes = await pool.query(
+      `SELECT id, full_name, email FROM users WHERE id = $1`,
+      [args.userId],
+    );
+    if (userRes.rowCount === 0) {
+      throw new Error('User not found');
+    }
+
+    await pool.query(
+      `UPDATE users
+          SET face_check_status = 'FLAGGED',
+              last_face_check_at = NULL
+        WHERE id = $1`,
+      [args.userId],
+    );
+
+    await pool.query(
+      `INSERT INTO audit_logs (admin_id, target_id, action, details)
+       VALUES ($1, $2, 'FACE_CHECK_TRIGGERED', $3)`,
+      [
+        args.adminId,
+        args.userId,
+        JSON.stringify({ admin_id: args.adminId, user_id: args.userId }),
+      ],
+    );
+
+    try {
+      io.to(`driver:${args.userId}`).emit('faceCheckRequired', {
+        required: true,
+        reason: 'flagged',
+        faceCheckStatus: 'FLAGGED',
+        lastFaceCheckAt: null,
+      });
+    } catch {
+      // socket may be unavailable in test contexts
+    }
+
+    return { userId: args.userId, triggered: true };
   },
 };

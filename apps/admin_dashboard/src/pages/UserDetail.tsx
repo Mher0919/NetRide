@@ -25,6 +25,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
@@ -32,6 +34,7 @@ import CheckIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import HistoryIcon from '@mui/icons-material/History';
 import BackIcon from '@mui/icons-material/ArrowBack';
+import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
 import api from '../api';
 import {
   getDriverSpeeding,
@@ -43,6 +46,7 @@ import {
   updateLicense,
   uploadUserDocument,
   deleteUserDocument,
+  triggerFaceCheck,
 } from '../api/admin';
 import { SpeedingBadge } from '../components/SpeedingBadge';
 import { format } from 'date-fns';
@@ -68,6 +72,7 @@ const UserDetail: React.FC = () => {
   const [licenseExpiry, setLicenseExpiry] = useState('');
   const [licenseSaving, setLicenseSaving] = useState(false);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({ open: false, message: '' });
   const isDriver = !!user?.driver_profile;
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
@@ -142,6 +147,20 @@ const UserDetail: React.FC = () => {
       fetchUser();
     } catch (error) {
       console.error('Failed to set pending', error);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTriggerFaceCheck = async () => {
+    setActionLoading(true);
+    try {
+      await triggerFaceCheck(id!);
+      setSnackbar({ open: true, message: 'Face check triggered. The driver will be prompted to re-verify.' });
+      fetchUser();
+    } catch (error) {
+      console.error('Failed to trigger face check', error);
+      setSnackbar({ open: true, message: 'Failed to trigger face check.' });
     } finally {
       setActionLoading(false);
     }
@@ -397,6 +416,19 @@ const UserDetail: React.FC = () => {
               >
                 {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Reset to Pending'}
               </Button>
+              {isDriver && (
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  startIcon={actionLoading ? undefined : <FaceRetouchingNaturalIcon />}
+                  onClick={handleTriggerFaceCheck}
+                  disabled={actionLoading}
+                  fullWidth
+                  sx={{ mt: 1, borderRadius: '12px', height: 48 }}
+                >
+                  {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Trigger Face Check'}
+                </Button>
+              )}
             </Box>
           </Paper>
         </Grid>
@@ -1217,6 +1249,21 @@ const UserDetail: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ open: false, message: '' })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          severity="info"
+          onClose={() => setSnackbar({ open: false, message: '' })}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

@@ -197,4 +197,22 @@ export class FaceController {
     const events = await FaceService.listUserEvents(userId);
     res.json({ events });
   }
+
+  /**
+   * Admin: manually force a face check for a driver. Sets the user's face
+   * check status to FLAGGED (so check-required prompts re-verification) and
+   * pushes a realtime event to the driver app to open the camera.
+   */
+  static async trigger(req: AuthRequest, res: Response) {
+    const adminId = req.user!.id;
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId required.' });
+    try {
+      const result = await FaceService.forceFaceCheck({ userId, adminId });
+      res.json({ message: 'Face check triggered.', ...result });
+    } catch (err: any) {
+      console.error('[FACE] trigger error:', err.message);
+      res.status(500).json({ error: 'Failed to trigger face check.' });
+    }
+  }
 }
