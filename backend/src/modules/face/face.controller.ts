@@ -144,11 +144,6 @@ export class FaceController {
             .status(400)
             .json({ error: 'Missing selfie image.' });
         }
-        if (!referenceFile) {
-          return res
-            .status(400)
-            .json({ error: 'Missing reference image.' });
-        }
 
         // Persist the selfie to disk for admin review
         const clipDir = path.join(__dirname, '../../uploads/face', userId);
@@ -158,25 +153,53 @@ export class FaceController {
         fs.writeFileSync(selfiePath, selfieFile.buffer);
         const selfieUrl = `${env.APP_URL}/uploads/face/${userId}/${selfieFilename}`;
 
-        const refFilename = `${uuidv4()}.jpg`;
-        const refPath = path.join(clipDir, refFilename);
-        fs.writeFileSync(refPath, referenceFile.buffer);
-        const refUrl = `${env.APP_URL}/uploads/face/${userId}/${refFilename}`;
+        // Reference image — either uploaded by client or fetched from DB.
+        let referenceBuffer: Buffer;
+        let referenceMime: string;
+        if (referenceFile) {
+          referenceBuffer = referenceFile.buffer;
+          referenceMime = referenceFile.mimetype || 'image/jpeg';
+        } else {
+          const refRes = await pool.query(
+            `SELECT face_enrollment_url, profile_image_url FROM users WHERE id = $1`,
+            [userId],
+          );
+          const refUrl = refRes.rows[0]?.face_enrollment_url || refRes.rows[0]?.profile_image_url;
+          if (!refUrl) {
+            return res.status(400).json({ error: 'No reference image found. Please enroll your face first.' });
+          }
+          const http = await import('http');
+          const https = await import('https');
+          referenceBuffer = await new Promise<Buffer>((resolve, reject) => {
+            const client = refUrl.startsWith('https') ? https : http;
+            client.get(refUrl, (response) => {
+              const chunks: Buffer[] = [];
+              response.on('data', (chunk: Buffer) => chunks.push(chunk));
+              response.on('end', () => resolve(Buffer.concat(chunks)));
+              response.on('error', reject);
+            }).on('error', reject);
+          });
+          referenceMime = 'image/jpeg';
+        }
 
         const result = await FaceService.runImageVerification({
           userId,
           imageBuffer: selfieFile.buffer,
           imageMime: selfieFile.mimetype || 'image/jpeg',
           imageFilename: 'selfie.jpg',
-          referenceBuffer: referenceFile.buffer,
-          referenceMime: referenceFile.mimetype || 'image/jpeg',
+          referenceBuffer,
+          referenceMime,
           deviceId,
           lat,
           lng,
         });
 
-        // Update enrollment + device id on success
-        if (!result.flagged) {
+        // Update enrollment reference on success (only if client uploaded a reference)
+        if (!result.flagged && referenceFile) {
+          const refFilename = `${uuidv4()}.jpg`;
+          const refPath = path.join(clipDir, refFilename);
+          fs.writeFileSync(refPath, referenceFile.buffer);
+          const refUrl = `${env.APP_URL}/uploads/face/${userId}/${refFilename}`;
           await pool.query(
             `UPDATE users
                SET face_enrollment_url = $1,

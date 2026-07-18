@@ -43,6 +43,7 @@ const ProfileChangeDetail: React.FC = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reason, setReason] = useState('');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -137,7 +138,8 @@ const ProfileChangeDetail: React.FC = () => {
           component="img"
           src={val}
           alt=""
-          sx={{ width: 100, height: 70, objectFit: 'cover', borderRadius: 1.5, border: '1px solid rgba(0,0,0,0.06)' }}
+          onClick={() => setPreviewImage(val)}
+          sx={{ width: 100, height: 70, objectFit: 'cover', borderRadius: 1.5, border: '1px solid rgba(0,0,0,0.06)', cursor: 'pointer', '&:hover': { opacity: 0.8 } }}
         />
       );
     }
@@ -190,7 +192,11 @@ const ProfileChangeDetail: React.FC = () => {
         <Grid size={{ xs: 12, md: 4 }}>
           <Paper sx={{ p: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
             <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-              <Avatar src={change?.profile_image_url ?? undefined} sx={{ width: 56, height: 56, bgcolor: 'primary.main', fontWeight: 700 }}>
+              <Avatar
+                src={change?.profile_image_url ?? undefined}
+                onClick={() => change?.profile_image_url && setPreviewImage(change.profile_image_url)}
+                sx={{ width: 56, height: 56, bgcolor: 'primary.main', fontWeight: 700, cursor: change?.profile_image_url ? 'pointer' : 'default' }}
+              >
                 {(change?.full_name ?? '?').charAt(0)}
               </Avatar>
               <Box sx={{ minWidth: 0 }}>
@@ -307,6 +313,17 @@ const ProfileChangeDetail: React.FC = () => {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* Image preview dialog */}
+      <Dialog open={!!previewImage} onClose={() => setPreviewImage(null)} maxWidth="lg">
+        <Box
+          component="img"
+          src={previewImage ?? ''}
+          alt="Preview"
+          onClick={() => setPreviewImage(null)}
+          sx={{ maxWidth: '90vw', maxHeight: '90vh', cursor: 'pointer', objectFit: 'contain' }}
+        />
+      </Dialog>
 
       {/* Reject dialog */}
       <Dialog open={rejectOpen} onClose={() => setRejectOpen(false)} fullWidth maxWidth="sm">

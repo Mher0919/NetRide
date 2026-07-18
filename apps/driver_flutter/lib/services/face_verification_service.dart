@@ -176,36 +176,40 @@ class FaceVerificationService {
     return FaceVerifyResult.fromJson(response.data as Map<String, dynamic>);
   }
 
-  /// Upload a single selfie image + reference JPEG for verification.
+  /// Upload a single selfie image + optional reference JPEG for verification.
   ///
-  /// This is the new primary flow. Uses the /face/verify-image endpoint
-  /// which includes quality validation, anti-spoofing, and face matching
-  /// in a single call.
+  /// When [referenceFile] is omitted, the server will look up the
+  /// enrollment reference from the database automatically.
   static Future<FaceVerifyResult> verifyImage({
     required File selfieFile,
-    required File referenceFile,
+    File? referenceFile,
     double? lat,
     double? lng,
   }) async {
     final deviceId = await DeviceFingerprint.getOrCreate();
 
     final selfieName = p.basename(selfieFile.path);
-    final refName = p.basename(referenceFile.path);
 
-    final formData = FormData.fromMap({
+    final map = <String, dynamic>{
       'selfie': await MultipartFile.fromFile(
         selfieFile.path,
         filename: selfieName,
         contentType: MediaType('image', 'jpeg'),
       ),
-      'reference': await MultipartFile.fromFile(
+      if (lat != null) 'lat': lat.toString(),
+      if (lng != null) 'lng': lng.toString(),
+    };
+
+    if (referenceFile != null) {
+      final refName = p.basename(referenceFile.path);
+      map['reference'] = await MultipartFile.fromFile(
         referenceFile.path,
         filename: refName,
         contentType: MediaType('image', 'jpeg'),
-      ),
-      if (lat != null) 'lat': lat.toString(),
-      if (lng != null) 'lng': lng.toString(),
-    });
+      );
+    }
+
+    final formData = FormData.fromMap(map);
 
     final response = await ApiService.dio.post(
       '/face/verify-image',

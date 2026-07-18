@@ -6,8 +6,6 @@ import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/face_verification_service.dart';
 
@@ -205,20 +203,6 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen> {
     setState(() => _processingMessage = _processingMessages[1]);
     await Future.delayed(const Duration(milliseconds: 400));
 
-    final prefs = await _loadCachedReference();
-    if (prefs == null) {
-      if (!mounted) return;
-      setState(() {
-        _isProcessing = false;
-        _hasError = true;
-        _showResult = true;
-        _captureSuccess = false;
-        _resultMessage = 'No reference image found';
-        _resultDetail = 'Please re-enroll your face from your profile.';
-      });
-      return;
-    }
-
     if (!mounted) return;
     setState(() => _processingMessage = _processingMessages[2]);
     await Future.delayed(const Duration(milliseconds: 400));
@@ -229,7 +213,6 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen> {
     try {
       final result = await FaceVerificationService.verifyImage(
         selfieFile: File(captured.path),
-        referenceFile: prefs,
       );
 
       if (!mounted) return;
@@ -318,13 +301,6 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen> {
     if (msg.contains('timeout')) return 'Request timed out. Please check your connection and try again.';
     if (msg.contains('connection') || msg.contains('network')) return 'Network error. Please check your internet connection.';
     return 'An unexpected error occurred. Please try again.';
-  }
-
-  Future<File?> _loadCachedReference() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final refPath = p.join(dir.path, 'face_enrollment.jpg');
-    final f = File(refPath);
-    return f.existsSync() ? f : null;
   }
 
   void _retake() {
