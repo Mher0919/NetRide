@@ -1359,7 +1359,6 @@ export class DriverService {
       }
 
       await client.query('COMMIT');
-      client.release();
 
       // ── Fire-and-forget notifications (must not block response) ──────
       try {
