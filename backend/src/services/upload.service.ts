@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { env } from '../config/env';
 import { StorageService } from './storage.service';
 
 export class UploadService {
@@ -23,9 +22,11 @@ export class UploadService {
         mimetype,
       });
 
-      const fullUrl = `${env.APP_URL}${result.url}`;
-      console.log(`📸 [UPLOAD] Uploaded via StorageService: ${result.id} (${buffer.length} bytes) -> ${fullUrl}`);
-      res.json({ url: fullUrl });
+      // Return the relative /api/files/{id} path.
+      // The Flutter app resolves it to a full URL via resolveFileUrl(),
+      // which works on any platform (emulator, device, web).
+      console.log(`📸 [UPLOAD] Uploaded via StorageService: ${result.id} (${buffer.length} bytes) -> ${result.url}`);
+      res.json({ url: result.url });
     } catch (error: any) {
       console.error('❌ Upload error:', error);
       res.status(500).json({ error: error.message });

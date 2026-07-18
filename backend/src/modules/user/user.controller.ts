@@ -14,10 +14,16 @@ export const updateProfileSchema = z.object({
   }),
 });
 
+// Accepts either a full URL or a relative /api/files/{id} path.
+const fileUrlSchema = () => z.string().refine(
+  v => v.startsWith('/api/files/') || z.string().url().safeParse(v).success,
+  { message: 'Must be a valid URL or /api/files/{id} path' }
+);
+
 export const verifyIdentitySchema = z.object({
   body: z.object({
-    id_photo_front_url: z.string().url(),
-    id_photo_back_url: z.string().url(),
+    id_photo_front_url: fileUrlSchema(),
+    id_photo_back_url: fileUrlSchema(),
     date_of_birth: z.string().optional(),
   }),
 });

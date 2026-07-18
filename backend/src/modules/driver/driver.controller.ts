@@ -5,18 +5,24 @@ import { z } from 'zod';
 import { VehicleDataService } from '../../services/vehicleData.service';
 import { pool } from '../../config/database';
 
+// Accepts either a full URL or a relative /api/files/{id} path.
+const fileUrlSchema = () => z.string().refine(
+  v => v.startsWith('/api/files/') || z.string().url().safeParse(v).success,
+  { message: 'Must be a valid URL or /api/files/{id} path' }
+);
+
 const OnboardSchema = z.object({
   personalInfo: z.object({
     full_name: z.string().optional(),
     phone_number: z.string(),
     date_of_birth: z.string(),
-    profile_image_url: z.string().url(),
+    profile_image_url: fileUrlSchema(),
   }),
   identity: z.object({
-    license_photo_url: z.string().url(),
-    license_photo_back_url: z.string().url(),
-    insurance_photo_url: z.string().url(),
-    registration_photo_url: z.string().url(),
+    license_photo_url: fileUrlSchema(),
+    license_photo_back_url: fileUrlSchema(),
+    insurance_photo_url: fileUrlSchema(),
+    registration_photo_url: fileUrlSchema(),
   }),
   vehicle: z.object({
     license_plate_number: z.string(),
@@ -34,7 +40,7 @@ const UpdateProfileSchema = z.object({
   full_name: z.string().optional(),
   phone_number: z.string().optional(),
   date_of_birth: z.string().optional(),
-  profile_image_url: z.string().url().optional(),
+  profile_image_url: fileUrlSchema().optional(),
   license_number: z.string().optional(),
   license_expiry_date: z.string().optional(),
   vehicle_id: z.string().uuid().optional(),
@@ -47,8 +53,8 @@ const UpdateProfileSchema = z.object({
 });
 
 const VerifyIdentitySchema = z.object({
-  license_photo_url: z.string().url(),
-  license_photo_back_url: z.string().url(),
+  license_photo_url: fileUrlSchema(),
+  license_photo_back_url: fileUrlSchema(),
   date_of_birth: z.string().optional(),
   license_number: z.string().optional(),
 });
@@ -57,12 +63,12 @@ const ProfileChangeChangesSchema = z.object({
   full_name: z.string().min(2).max(80).optional(),
   phone_number: z.string().regex(/^\+?[0-9 ()\-]{7,20}$/).optional(),
   date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  profile_image_url: z.string().url().optional(),
+  profile_image_url: fileUrlSchema().optional(),
   license_number: z.string().min(3).max(40).optional(),
   license_plate_number: z.string().min(1).max(15).optional(),
-  license_plate_photo_url: z.string().url().optional(),
-  inspection_photo_url: z.string().url().optional(),
-  car_photo_urls: z.array(z.string().url()).max(4).optional(),
+  license_plate_photo_url: fileUrlSchema().optional(),
+  inspection_photo_url: fileUrlSchema().optional(),
+  car_photo_urls: z.array(fileUrlSchema()).max(4).optional(),
   make: z.string().min(1).max(40).optional(),
   model: z.string().min(1).max(40).optional(),
   year: z.number().int().min(2011).max(new Date().getFullYear() + 1).optional(),
