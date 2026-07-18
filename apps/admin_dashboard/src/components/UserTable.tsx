@@ -80,20 +80,42 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
       }
     },
     ...(role === 'DRIVER'
-      ? [{
-          field: 'is_dangerous',
-          headerName: 'Safety',
-          width: 120,
-          sortable: false,
-          filterable: false,
-          renderCell: (params: GridRenderCellParams) => (
-            <SpeedingBadge
-              isDangerous={!!params.row?.driver_profile?.is_dangerous}
-              driverId={params.row?.id}
-              size="sm"
-            />
-          ),
-        }]
+      ? [
+          {
+            field: 'has_pending_document_review',
+            headerName: 'Documents',
+            width: 140,
+            sortable: false,
+            filterable: false,
+            renderCell: (params: GridRenderCellParams) => {
+              const pending = params.value as boolean;
+              if (!pending) return null;
+              return (
+                <Chip
+                  label="Action Needed"
+                  color="error"
+                  size="small"
+                  variant="outlined"
+                  sx={{ fontWeight: 600, fontSize: 11 }}
+                />
+              );
+            },
+          },
+          {
+            field: 'is_dangerous',
+            headerName: 'Safety',
+            width: 120,
+            sortable: false,
+            filterable: false,
+            renderCell: (params: GridRenderCellParams) => (
+              <SpeedingBadge
+                isDangerous={!!params.row?.driver_profile?.is_dangerous}
+                driverId={params.row?.id}
+                size="sm"
+              />
+            ),
+          },
+        ]
       : []),
     {
       field: 'created_at',

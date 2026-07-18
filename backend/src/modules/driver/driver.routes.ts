@@ -37,6 +37,7 @@ router.get('/payouts', authMiddleware, DriverController.listMyPayouts);
 // Document requirements + resubmission
 router.get('/documents/requirements', authMiddleware, DriverController.getDocumentRequirements);
 router.post('/documents/resubmit', authMiddleware, DriverController.resubmitDocument);
+router.post('/documents/batch-resubmit', authMiddleware, DriverController.batchResubmitDocuments);
 
 // New vehicle submission (025)
 router.post('/vehicles/submit', authMiddleware, DriverController.submitNewVehicle);

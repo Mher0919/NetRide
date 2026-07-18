@@ -111,6 +111,16 @@ export const rejectPayoutCard = async (id: string, reason: string) => {
   return response.data;
 };
 
+/// Fetch the count of pending document reviews from dashboard stats.
+export const getPendingDocumentReviewsCount = async () => {
+  try {
+    const stats = await getAdminStats();
+    return (stats as any)?.pendingDocumentReviews ?? 0;
+  } catch {
+    return 0;
+  }
+};
+
 // ----- Document resubmission requirements -----------------------------------
 
 export const requestDocumentResubmission = async (driverId: string, documentType: string, reason: string) => {

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
@@ -163,7 +164,7 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen> {
       final frame = await codec.getNextFrame();
       final bitmap = frame.image;
       final byteData = await bitmap.toByteData();
-      await codec.dispose();
+      codec.dispose();
 
       if (byteData == null) {
         return _BrightnessCheck(false, 'Could not analyze image');
@@ -686,40 +687,34 @@ class _SelfieFramePainter extends CustomPainter {
     final rect = Rect.fromLTWH(2, 2, size.width - 4, size.height - 4);
     canvas.drawOval(rect, paint);
 
-    const cornerLength = 30.0;
-    const cornerGap = 20.0;
+    const cl = 28.0;
     final cornerPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4
       ..strokeCap = StrokeCap.round
       ..color = cornerColor;
 
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final rx = size.width / 2 - 2;
-    final ry = size.height / 2 - 2;
+    final w = size.width;
+    final h = size.height;
+    final cx = w / 2;
+    final cy = h / 2;
+    final rx = w / 2 - 4;
+    final ry = h / 2 - 4;
+    final inset = 6.0;
 
-    for (final angle in [0.0, 90.0, 180.0, 270.0]) {
-      final rad = angle * (3.14159 / 180.0);
-      final x = cx + rx * 0.85 * _cos(rad);
-      final y = cy + ry * 0.85 * _sin(rad);
-      final dx = _cos(rad) * cornerLength;
-      final dy = _sin(rad) * cornerLength;
-      canvas.drawLine(Offset(x, y), Offset(x + dx, y + dy), cornerPaint);
+    final corners = [
+      Offset(cx - rx + inset, cy - ry + inset),
+      Offset(cx + rx - inset, cy - ry + inset),
+      Offset(cx + rx - inset, cy + ry - inset),
+      Offset(cx - rx + inset, cy + ry - inset),
+    ];
+
+    for (final c in corners) {
+      final dx = c.dx < cx ? 1.0 : -1.0;
+      final dy = c.dy < cy ? 1.0 : -1.0;
+      canvas.drawLine(c, Offset(c.dx + dx * cl, c.dy), cornerPaint);
+      canvas.drawLine(c, Offset(c.dx, c.dy + dy * cl), cornerPaint);
     }
-  }
-
-  double _cos(double rad) => _clampCos(rad);
-  double _sin(double rad) => _clampSin(rad);
-
-  double _clampCos(double rad) {
-    final v = rad == 0 ? 1.0 : (rad / 90 * 3.14159 / 2).cos();
-    return v;
-  }
-
-  double _clampSin(double rad) {
-    final v = (rad / 90 * 3.14159 / 2).sin();
-    return v;
   }
 
   @override

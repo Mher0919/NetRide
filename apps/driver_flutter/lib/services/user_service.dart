@@ -166,6 +166,23 @@ class UserService {
     }
   }
 
+  /// Atomically submit multiple document requirements at once.
+  static Future<Map<String, dynamic>> batchResubmitDocuments(
+    List<Map<String, dynamic>> submissions,
+  ) async {
+    try {
+      final response = await ApiService.dio.post(
+        '/driver/documents/batch-resubmit',
+        data: {'submissions': submissions},
+      );
+      return (response.data is Map)
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   /// Submit one or more new document URLs for admin review.
   static Future<Map<String, dynamic>> resubmitDocument(
     String requirementId, {

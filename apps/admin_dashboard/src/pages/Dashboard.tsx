@@ -8,7 +8,7 @@ import {
   CardContent,
   Chip
 } from '@mui/material';
-import Grid from '@mui/material/Grid';
+import DescriptionIcon from '@mui/icons-material/Description';
 import PeopleIcon from '@mui/icons-material/People';
 import DriverIcon from '@mui/icons-material/LocalTaxi';
 import PendingIcon from '@mui/icons-material/PendingActions';
@@ -23,6 +23,7 @@ interface Stats {
   pendingVerifications: number;
   verifiedUsers: number;
   rejectedUsers: number;
+  pendingDocumentReviews: number;
 }
 
 const Dashboard: React.FC = () => {
@@ -57,6 +58,7 @@ const Dashboard: React.FC = () => {
     { title: 'Pending', value: stats?.pendingVerifications, icon: <PendingIcon />, color: '#fff3e0', iconColor: '#ed6c02' },
     { title: 'Verified', value: stats?.verifiedUsers, icon: <VerifiedIcon />, color: '#e8f5e9', iconColor: '#2e7d32' },
     { title: 'Rejected', value: stats?.rejectedUsers, icon: <RejectedIcon />, color: '#ffebee', iconColor: '#d32f2f' },
+    { title: 'Docs Pending', value: stats?.pendingDocumentReviews, icon: <DescriptionIcon />, color: '#e8eaf6', iconColor: '#3f51b5' },
   ];
 
   const chartData = [
@@ -65,6 +67,7 @@ const Dashboard: React.FC = () => {
     { name: 'Pending', count: stats?.pendingVerifications },
     { name: 'Verified', count: stats?.verifiedUsers },
     { name: 'Rejected', count: stats?.rejectedUsers },
+    { name: 'Docs Pending', count: stats?.pendingDocumentReviews },
   ];
 
   return (

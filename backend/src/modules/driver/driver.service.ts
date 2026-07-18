@@ -1316,6 +1316,102 @@ export class DriverService {
   }
 
   /**
+   * Atomically submit multiple document requirements in a single transaction.
+   * All submissions succeed or none do — partial failures are rolled back.
+   */
+  static async batchResubmitDocuments(
+    userId: string,
+    submissions: Array<{ requirementId: string; newDocumentUrls: string[] }>
+  ) {
+    if (!submissions.length) throw new Error('No submissions provided.');
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const sub of submissions) {
+        const { requirementId, newDocumentUrls } = sub;
+        if (!requirementId || !newDocumentUrls?.length) {
+          throw new Error(`Invalid submission for requirement ${requirementId}`);
+        }
+
+        const req = await client.query(
+          `SELECT id, driver_id, status FROM driver_document_requirements WHERE id = $1`,
+          [requirementId]
+        );
+
+        if (!req.rowCount) throw new Error(`Requirement ${requirementId} not found.`);
+        if (req.rows[0].driver_id !== userId) throw new Error(`Requirement ${requirementId} does not belong to you.`);
+        if (req.rows[0].status !== 'resubmission_required') {
+          throw new Error(`Requirement ${requirementId} is not pending resubmission.`);
+        }
+
+        const documentUrl = newDocumentUrls.length === 1
+          ? newDocumentUrls[0]
+          : JSON.stringify(newDocumentUrls);
+
+        await client.query(
+          `UPDATE driver_document_requirements
+           SET status = 'submitted', new_document_url = $1, resubmitted_at = NOW(), updated_at = NOW()
+           WHERE id = $2`,
+          [documentUrl, requirementId]
+        );
+      }
+
+      await client.query('COMMIT');
+      client.release();
+
+      // ── Fire-and-forget notifications (must not block response) ──────
+      try {
+        const driverInfo = await pool.query(
+          `SELECT u.email, u.full_name FROM users u WHERE u.id = $1`,
+          [userId]
+        );
+        const driver = driverInfo.rows[0] || null;
+
+        const docTypesResult = await pool.query(
+          `SELECT document_type FROM driver_document_requirements
+           WHERE driver_id = $1 AND id = ANY($2) ORDER BY document_type`,
+          [userId, submissions.map(s => s.requirementId)]
+        );
+        const docTypes = docTypesResult.rows.map((r: any) => r.document_type);
+
+        if (driver) {
+          // Driver confirmation email
+          EmailService.sendDriverDocumentResubmittedConfirmationEmail(
+            { email: driver.email, full_name: driver.full_name },
+            { document_types: docTypes }
+          );
+
+          // Admin notification email
+          EmailService.sendAdminDocumentResubmissionNoticeEmail(
+            { email: env.GMAIL_USER_EMAIL },
+            {
+              id: userId,
+              full_name: driver.full_name,
+              email: driver.email,
+            },
+            {
+              document_types: docTypes,
+              submitted_at: new Date(),
+            }
+          );
+        }
+      } catch (notifErr) {
+        // Notifications are best-effort — document submission already succeeded
+        console.error('❌ [DOC SUBMIT] Notification error:', notifErr);
+      }
+
+      return { success: true };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Idempotent ride-completion wallet credit. Safe to call multiple times
    * for the same ride — the unique index on payouts(ride_id) WHERE
    * method='RIDE_CREDIT' prevents double-counting.

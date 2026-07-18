@@ -19,6 +19,7 @@ import ProfileChanges from './pages/ProfileChanges';
 import ProfileChangeDetail from './pages/ProfileChangeDetail';
 import PayoutCards from './pages/PayoutCards';
 import Payouts from './pages/Payouts';
+import NotFound from './pages/NotFound';
 import UserTable from './components/UserTable';
 import MainLayout from './components/MainLayout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -71,7 +72,7 @@ const App: React.FC = () => {
               <Route path="payouts" element={<Payouts />} />
             </Route>
 
-            <Route path="*" element={<Navigate to="/" />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </Router>
       </AuthProvider>

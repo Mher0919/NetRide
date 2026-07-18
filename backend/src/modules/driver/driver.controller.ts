@@ -472,6 +472,24 @@ export class DriverController {
     }
   }
 
+  static async batchResubmitDocuments(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { submissions } = req.body;
+      if (!Array.isArray(submissions) || submissions.length === 0) {
+        return res.status(400).json({ error: 'At least one document submission is required.' });
+      }
+
+      const result = await DriverService.batchResubmitDocuments(userId, submissions);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Batch document resubmission error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to resubmit documents.' });
+    }
+  }
+
   static async submitNewVehicle(req: any, res: Response) {
     try {
       const userId = req.user?.id;

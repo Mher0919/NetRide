@@ -11,12 +11,13 @@ import { io } from '../../app';
 export class AdminController {
   static async getStats(req: AuthRequest, res: Response) {
     try {
-      const [totalRiders, totalDrivers, pendingVerifications, verifiedUsers, rejectedUsers] = await Promise.all([
+      const [totalRiders, totalDrivers, pendingVerifications, verifiedUsers, rejectedUsers, pendingDocumentReviews] = await Promise.all([
         prisma.user.count({ where: { role: UserRole.RIDER } }),
         prisma.user.count({ where: { driver_profile: { isNot: null } } }),
         prisma.user.count({ where: { verification_status: VerificationStatus.PENDING } }),
         prisma.user.count({ where: { verification_status: VerificationStatus.VERIFIED } }),
         prisma.user.count({ where: { verification_status: VerificationStatus.REJECTED } }),
+        pool.query(`SELECT COUNT(*)::int AS c FROM driver_document_requirements WHERE status = 'submitted'`),
       ]);
 
       res.json({
@@ -25,6 +26,7 @@ export class AdminController {
         pendingVerifications,
         verifiedUsers,
         rejectedUsers,
+        pendingDocumentReviews: pendingDocumentReviews.rows[0].c,
       });
     } catch (error: any) {
       console.error(`[ADMIN] ❌ Stats error: ${error.message}`);
@@ -33,7 +35,7 @@ export class AdminController {
   }
 
   static async getUsers(req: AuthRequest, res: Response) {
-    const { role, status, search, page = 1, limit = 10, dangerousOnly } = req.query;
+    const { role, status, search, page = 1, limit = 10, dangerousOnly, documentPending } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: any = {};
@@ -59,18 +61,57 @@ export class AdminController {
     }
 
     try {
-      const [users, total] = await Promise.all([
-        prisma.user.findMany({
-          where,
-          skip,
-          take: Number(limit),
-          orderBy: { created_at: 'desc' },
-          include: {
-            driver_profile: true,
-          },
-        }),
-        prisma.user.count({ where }),
-      ]);
+      let users: any[];
+      let total: number;
+
+      if (documentPending === 'true') {
+        // Filter by drivers with pending document reviews
+        const pendingDriverIds = await pool.query(
+          `SELECT DISTINCT driver_id FROM driver_document_requirements WHERE status = 'submitted'`
+        );
+        const ids = pendingDriverIds.rows.map((r: any) => r.driver_id);
+        if (ids.length === 0) {
+          res.json({ users: [], total: 0, page: Number(page), totalPages: 0 });
+          return;
+        }
+        where.id = { in: ids };
+        [users, total] = await Promise.all([
+          prisma.user.findMany({
+            where,
+            skip,
+            take: Number(limit),
+            orderBy: { created_at: 'desc' },
+            include: { driver_profile: true },
+          }),
+          prisma.user.count({ where }),
+        ]);
+      } else {
+        [users, total] = await Promise.all([
+          prisma.user.findMany({
+            where,
+            skip,
+            take: Number(limit),
+            orderBy: { created_at: 'desc' },
+            include: { driver_profile: true },
+          }),
+          prisma.user.count({ where }),
+        ]);
+
+        // Attach pending document review status for each returned user
+        if (users.length > 0) {
+          const userIds = users.map((u: any) => u.id);
+          const pendingReqs = await pool.query(
+            `SELECT DISTINCT driver_id FROM driver_document_requirements
+             WHERE driver_id = ANY($1::text[]) AND status = 'submitted'`,
+            [userIds]
+          );
+          const pendingIds = new Set(pendingReqs.rows.map((r: any) => r.driver_id));
+          users = users.map((u: any) => ({
+            ...u,
+            has_pending_document_review: pendingIds.has(u.id),
+          }));
+        }
+      }
 
       res.json({
         users,
@@ -1270,6 +1311,30 @@ export class AdminController {
           details: `Document ${documentType} resubmission ${decision}.`,
         },
       });
+
+      // Send driver review notification email (fire-and-forget)
+      try {
+        const driverInfo = await pool.query(
+          `SELECT u.email, u.full_name FROM users u WHERE u.id = $1`,
+          [driverId]
+        );
+        const driver = driverInfo.rows[0];
+        if (driver) {
+          EmailService.sendDocumentResubmissionReviewedEmail(
+            { email: driver.email, full_name: driver.full_name },
+            { document_type: documentType, decision }
+          );
+        }
+      } catch (emailErr) {
+        console.error('❌ [ADMIN] Document review email error:', (emailErr as Error).message);
+      }
+
+      // Socket notification to driver so the app re-fetches requirements
+      try {
+        io.to(`driver:${driverId}`).emit('documentRequirementsChanged', {});
+      } catch (socketErr) {
+        console.error('❌ [ADMIN] Document review socket error:', (socketErr as Error).message);
+      }
 
       res.json({ success: true, requirement: updated.rows[0] });
     } catch (error: any) {

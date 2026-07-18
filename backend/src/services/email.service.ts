@@ -444,6 +444,63 @@ export class EmailService {
   }
 
   // ============================================================
+  // Driver document resubmitted — driver confirmation
+  // ============================================================
+
+  static async sendDriverDocumentResubmittedConfirmationEmail(driver: { email?: string; full_name?: string }, info: { document_types: string[] }) {
+    if (!driver.email) return;
+    const docLabel = info.document_types.join(', ');
+    try {
+      await this.sendEmail({
+        to: driver.email,
+        subject: 'Your documents have been received',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #5B7760;">Documents received</h2>
+            <p>Hi ${driver.full_name ?? 'Driver'},</p>
+            <p>Thank you. Your updated documents have been received successfully:</p>
+            <p><strong>${docLabel}</strong></p>
+            <p>Our team is reviewing your documents now. We'll notify you once the review is complete or if we need any additional information.</p>
+            <p style="color: #888; font-size: 12px;">You don't need to do anything else at this time.</p>
+          </div>
+        `,
+      });
+    } catch (error) {
+      console.error('❌ [GMAIL API] Error sending document confirmation email:', error);
+    }
+  }
+
+  // ============================================================
+  // Driver document resubmitted — admin notification
+  // ============================================================
+
+  static async sendAdminDocumentResubmissionNoticeEmail(admin: { email?: string }, driver: { id: string; full_name?: string; email?: string }, info: { document_types: string[]; submitted_at: Date }) {
+    if (!admin.email) return;
+    const docLabel = info.document_types.join(', ');
+    const reviewUrl = `${env.ADMIN_URL}/users/${driver.id}`;
+    try {
+      await this.sendEmail({
+        to: admin.email,
+        subject: `Document review needed — ${driver.full_name ?? 'Driver'}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #333;">Documents awaiting review</h2>
+            <p>Driver <strong>${driver.full_name ?? 'Unknown'}</strong> (${driver.email ?? ''}) has submitted documents for review.</p>
+            <p><strong>Documents submitted:</strong> ${docLabel}</p>
+            <p><strong>Submitted at:</strong> ${info.submitted_at.toLocaleString()}</p>
+            <p><strong>Status:</strong> Pending Review</p>
+            <div style="margin-top: 24px; text-align: center;">
+              <a href="${reviewUrl}" style="background-color: #5B7760; color: white; padding: 14px 22px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">REVIEW DRIVER</a>
+            </div>
+          </div>
+        `,
+      });
+    } catch (error) {
+      console.error('❌ [GMAIL API] Error sending admin document notice:', error);
+    }
+  }
+
+  // ============================================================
   // Payout-card + payout emails (020)
   // ============================================================
 

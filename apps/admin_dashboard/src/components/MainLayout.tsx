@@ -31,7 +31,7 @@ import CardIcon from '@mui/icons-material/CreditCard';
 import WalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getDangerousDrivers, listProfileChanges, listPayoutCards, listPayouts } from '../api/admin';
+import { getDangerousDrivers, listProfileChanges, listPayoutCards, listPayouts, getPendingDocumentReviewsCount } from '../api/admin';
 
 const drawerWidth = 240;
 
@@ -44,6 +44,7 @@ const MainLayout: React.FC = () => {
   const [profileChangeCount, setProfileChangeCount] = React.useState(0);
   const [payoutCardCount, setPayoutCardCount] = React.useState(0);
   const [payoutCount, setPayoutCount] = React.useState(0);
+  const [pendingDocReviewCount, setPendingDocReviewCount] = React.useState(0);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -72,6 +73,12 @@ const MainLayout: React.FC = () => {
       } catch {
         // Sidebar badge is decorative — fail silently.
       }
+      try {
+        const count = await getPendingDocumentReviewsCount();
+        if (!cancelled) setPendingDocReviewCount(count);
+      } catch {
+        // Sidebar badge is decorative — fail silently.
+      }
     };
     load();
     // Refresh while admin is online so the badge stays current.
@@ -88,7 +95,7 @@ const MainLayout: React.FC = () => {
     { text: 'Completed Rides', icon: <CompletedIcon />, path: '/rides/completed' },
     { text: 'Live Monitoring', icon: <MapIcon />, path: '/monitoring' },
     { text: 'Riders', icon: <PeopleIcon />, path: '/riders' },
-    { text: 'Drivers', icon: <DriverIcon />, path: '/drivers' },
+    { text: 'Drivers', icon: <DriverIcon />, path: '/drivers', badge: pendingDocReviewCount },
     { text: 'Speeding', icon: <SpeedingIcon />, path: '/speeding', badge: dangerousCount },
     { text: 'Profile Changes', icon: <ProfileIcon />, path: '/profile-changes', badge: profileChangeCount },
     { text: 'Payout Cards', icon: <CardIcon />, path: '/payout-cards', badge: payoutCardCount },
