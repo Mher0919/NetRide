@@ -100,10 +100,11 @@ export class AdminController {
         // Attach pending document review status for each returned user
         if (users.length > 0) {
           const userIds = users.map((u: any) => u.id);
+          const placeholders = userIds.map((_, i) => `$${i + 1}`).join(',');
           const pendingReqs = await pool.query(
             `SELECT DISTINCT driver_id FROM driver_document_requirements
-             WHERE driver_id = ANY($1::text[]) AND status = 'submitted'`,
-            [userIds]
+             WHERE driver_id IN (${placeholders}) AND status = 'submitted'`,
+            userIds
           );
           const pendingIds = new Set(pendingReqs.rows.map((r: any) => r.driver_id));
           users = users.map((u: any) => ({
