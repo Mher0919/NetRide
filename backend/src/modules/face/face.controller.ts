@@ -4,6 +4,7 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import axios from 'axios';
 import { AuthRequest, adminMiddleware } from '../../middleware/auth.middleware';
 import { pool } from '../../config/database';
 import { env } from '../../config/env';
@@ -168,18 +169,13 @@ export class FaceController {
           if (!refUrl) {
             return res.status(400).json({ error: 'No reference image found. Please enroll your face first.' });
           }
-          const http = await import('http');
-          const https = await import('https');
-          referenceBuffer = await new Promise<Buffer>((resolve, reject) => {
-            const client = refUrl.startsWith('https') ? https : http;
-            client.get(refUrl, (response) => {
-              const chunks: Buffer[] = [];
-              response.on('data', (chunk: Buffer) => chunks.push(chunk));
-              response.on('end', () => resolve(Buffer.concat(chunks)));
-              response.on('error', reject);
-            }).on('error', reject);
-          });
-          referenceMime = 'image/jpeg';
+          // Handle relative URLs
+          const absoluteUrl = refUrl.startsWith('http://') || refUrl.startsWith('https://')
+            ? refUrl
+            : `${env.APP_URL}${refUrl.startsWith('/') ? '' : '/'}${refUrl}`;
+          const resp = await axios.get(absoluteUrl, { responseType: 'arraybuffer' });
+          referenceBuffer = Buffer.from(resp.data);
+          referenceMime = resp.headers['content-type'] as string || 'image/jpeg';
         }
 
         const result = await FaceService.runImageVerification({
