@@ -13,12 +13,18 @@ import '../theme/app_theme.dart';
 ///   - face-check flagged, awaiting admin review (terracotta)
 ///   - face-check passed this session (sage)
 ///   - all clear, ready to drive (sage)
+///   - document resubmission required (terracotta, document-specific)
+///   - vehicle inspection required (terracotta)
+///   - profile change pending (terracotta)
+///   - headshot action required (terracotta)
 class DriverStatusCard extends StatelessWidget {
   final DriverStatus state;
   final String? rejectionReason;
   final VoidCallback? onAction;
   final VoidCallback? onDismiss;
   final VoidCallback? onStartFaceCheck;
+  final String? documentType;
+  final String? requirementId;
 
   const DriverStatusCard({
     super.key,
@@ -27,6 +33,8 @@ class DriverStatusCard extends StatelessWidget {
     this.onAction,
     this.onDismiss,
     this.onStartFaceCheck,
+    this.documentType,
+    this.requirementId,
   });
 
   @override
@@ -119,14 +127,7 @@ class DriverStatusCard extends StatelessWidget {
         );
 
       case DriverStatusKind.documentActionRequired:
-        return _build(
-          color: AppTheme.errorColor,
-          icon: Icons.description_outlined,
-          title: 'Action required: document resubmission',
-          message: 'An admin has requested updated documents. Please review and resubmit.',
-          actionLabel: 'VIEW',
-          onAction: onAction,
-        );
+        return _buildDocumentActionRequired();
 
       case DriverStatusKind.documentSubmittedForReview:
         return _build(
@@ -155,6 +156,39 @@ class DriverStatusCard extends StatelessWidget {
           actionLabel: 'VIEW',
           onAction: onAction,
         );
+    }
+  }
+
+  Widget _buildDocumentActionRequired() {
+    final docInfo = _getDocumentInfo(documentType ?? '');
+    return _build(
+      color: AppTheme.errorColor,
+      icon: docInfo.icon,
+      title: 'Action required: ${docInfo.title}',
+      message: 'An admin has requested an updated ${docInfo.title.toLowerCase()}. Please review and resubmit.',
+      actionLabel: 'VIEW',
+      onAction: onAction,
+    );
+  }
+
+  _DocumentInfo _getDocumentInfo(String docType) {
+    switch (docType) {
+      case 'license_photo_url':
+        return _DocumentInfo('Driver License (Front)', Icons.badge_outlined);
+      case 'license_photo_back_url':
+        return _DocumentInfo('Driver License (Back)', Icons.badge_outlined);
+      case 'insurance_photo_url':
+        return _DocumentInfo('Insurance Document', Icons.verified_outlined);
+      case 'registration_photo_url':
+        return _DocumentInfo('Vehicle Registration', Icons.description_outlined);
+      case 'inspection_photo_url':
+        return _DocumentInfo('Vehicle Inspection', Icons.directions_car_rounded);
+      case 'id_photo_front_url':
+        return _DocumentInfo('ID Card (Front)', Icons.credit_card_outlined);
+      case 'id_photo_back_url':
+        return _DocumentInfo('ID Card (Back)', Icons.credit_card_outlined);
+      default:
+        return _DocumentInfo('Document', Icons.description_outlined);
     }
   }
 
@@ -272,6 +306,13 @@ class DriverStatusCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DocumentInfo {
+  final String title;
+  final IconData icon;
+
+  _DocumentInfo(this.title, this.icon);
 }
 
 /// What the card should communicate. `faceReason` mirrors the backend's

@@ -452,12 +452,13 @@ export class DriverController {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-      const { requirementId, newDocumentUrl } = req.body;
-      if (!requirementId || !newDocumentUrl) {
-        return res.status(400).json({ error: 'Requirement ID and new document URL are required.' });
+      const { requirementId, newDocumentUrl, newDocumentUrls } = req.body;
+      const urls: string[] = newDocumentUrls ?? (newDocumentUrl ? [newDocumentUrl] : []);
+      if (!requirementId || urls.length === 0) {
+        return res.status(400).json({ error: 'Requirement ID and at least one document URL are required.' });
       }
 
-      const result = await DriverService.resubmitDocument(userId, requirementId, newDocumentUrl);
+      const result = await DriverService.resubmitDocument(userId, requirementId, urls);
       res.json(result);
     } catch (error: any) {
       console.error(`[DRIVER] ❌ Document resubmission error: ${error.message}`);

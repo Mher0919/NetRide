@@ -21,11 +21,17 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
   final _zipController = TextEditingController();
   final _zipFocusNode = FocusNode();
   bool _isLoading = false;
-  bool _isUploading = false;
   bool _hasSearched = false;
   String? _searchError;
   String? _inlineError;
   List<Map<String, dynamic>> _stations = [];
+
+  // Upload + submit state
+  List<String> _uploadedUrls = [];
+  bool _isUploading = false;
+  bool _isSubmitting = false;
+  bool _submitSuccess = false;
+  static const int _maxImages = 3;
 
   static const Color _cream = Color(0xFFF7F4EF);
   static const Color _sage = Color(0xFF5B7760);
@@ -164,7 +170,52 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
     }
   }
 
-  Future<void> _pickAndUpload() async {
+  /// Upload a single image to Supabase and add the URL to local state.
+  /// Does NOT submit for review — that requires an explicit Submit action.
+  Future<void> _pickImage() async {
+    if (_uploadedUrls.length >= _maxImages) return;
+
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+    );
+    if (pickedFile == null) return;
+
+    setState(() => _isUploading = true);
+    try {
+      final url = await AuthService.uploadImage(File(pickedFile.path));
+      if (!mounted) return;
+      setState(() {
+        _uploadedUrls.add(url);
+        _isUploading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isUploading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Upload failed: $e'),
+          backgroundColor: _terracotta,
+        ),
+      );
+    }
+  }
+
+  /// Remove an uploaded image from the local list by index.
+  /// For now this only removes from local state; orphaned Supabase files
+  /// are a known limitation documented in the engineering report.
+  void _removeImage(int index) {
+    if (index < 0 || index >= _uploadedUrls.length) return;
+    setState(() {
+      _uploadedUrls.removeAt(index);
+    });
+  }
+
+  /// Submit all uploaded images for admin review.
+  Future<void> _submitForReview() async {
+    if (_uploadedUrls.isEmpty || _isSubmitting) return;
+
     final provider = Provider.of<DriverProvider>(context, listen: false);
     final reqs = provider.documentRequirements;
     final inspectionReq = reqs.cast<Map<String, dynamic>>().firstWhere(
@@ -185,37 +236,27 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
       return;
     }
 
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-    );
-    if (pickedFile == null) return;
-
-    setState(() => _isUploading = true);
+    setState(() => _isSubmitting = true);
     try {
-      final url = await AuthService.uploadImage(File(pickedFile.path));
-      await UserService.resubmitDocument(inspectionReq['id'], url);
-      if (mounted) {
-        await provider.refreshProfile();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Inspection document submitted for review!'),
-            backgroundColor: _sage,
-          ),
-        );
-      }
+      await UserService.resubmitDocument(
+        inspectionReq['id'],
+        newDocumentUrls: List<String>.from(_uploadedUrls),
+      );
+      if (!mounted) return;
+      await provider.refreshProfile();
+      setState(() {
+        _isSubmitting = false;
+        _submitSuccess = true;
+      });
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Upload failed: $e'),
-            backgroundColor: _terracotta,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isUploading = false);
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Submission failed: $e'),
+          backgroundColor: _terracotta,
+        ),
+      );
     }
   }
 
@@ -765,10 +806,49 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // Upload section
+  // Upload section (multi-image gallery + submit)
   // ---------------------------------------------------------------------------
 
   Widget _buildUploadSection() {
+    // Show success state after submission
+    if (_submitSuccess) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: _sage.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _sage.withOpacity(0.2)),
+        ),
+        child: Column(
+          children: [
+            Icon(Icons.check_circle_rounded, color: _sage, size: 40),
+            const SizedBox(height: 12),
+            Text(
+              'Inspection submitted for review!',
+              style: GoogleFonts.inter(
+                color: _darkForest,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${_uploadedUrls.length} ${_uploadedUrls.length == 1 ? 'image has' : 'images have'} been sent to the admin team for review.',
+              style: GoogleFonts.inter(
+                color: _darkForest.withOpacity(0.6),
+                fontSize: 13,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    final canUpload = _uploadedUrls.length < _maxImages;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -795,7 +875,8 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Upload a clear photo or scan of your completed vehicle inspection certificate.',
+            'Upload clear photos of your completed vehicle inspection certificate. '
+            'Images are saved securely — you must press Submit to send them for review.',
             style: GoogleFonts.inter(
               color: _darkForest.withOpacity(0.6),
               fontSize: 13,
@@ -803,11 +884,90 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
             ),
           ),
           const SizedBox(height: 16),
+
+          // Image gallery
+          if (_uploadedUrls.isNotEmpty) ...[
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: List.generate(_uploadedUrls.length, (i) {
+                final url = _uploadedUrls[i];
+                return _buildImagePreview(url, i);
+              }),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // Upload button (hidden at max)
+          if (canUpload)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isUploading ? null : _pickImage,
+                icon: _isUploading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_a_photo_outlined, size: 20),
+                label: Text(
+                  _isUploading
+                      ? 'Uploading...'
+                      : _uploadedUrls.isEmpty
+                          ? 'Select & Upload Image'
+                          : 'Add Another Image',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _sage,
+                  side: BorderSide(color: _sage.withOpacity(0.4)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            )
+          else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: _sage.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_circle,
+                      size: 16, color: _sage.withOpacity(0.6)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Maximum $_maxImages images uploaded',
+                    style: GoogleFonts.inter(
+                      color: _sage.withOpacity(0.7),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 20),
+
+          // Submit button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _isUploading ? null : _pickAndUpload,
-              icon: _isUploading
+              onPressed: (_uploadedUrls.isNotEmpty && !_isSubmitting)
+                  ? _submitForReview
+                  : null,
+              icon: _isSubmitting
                   ? const SizedBox(
                       width: 18,
                       height: 18,
@@ -816,9 +976,9 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                         color: Colors.white,
                       ),
                     )
-                  : const Icon(Icons.image_outlined, size: 20),
+                  : const Icon(Icons.send_rounded, size: 20),
               label: Text(
-                _isUploading ? 'Uploading...' : 'Select & Upload',
+                _isSubmitting ? 'Submitting...' : 'Submit for Review',
                 style: GoogleFonts.inter(
                   fontWeight: FontWeight.w700,
                   fontSize: 14,
@@ -827,6 +987,8 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _sage,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: _darkForest.withOpacity(0.12),
+                disabledForegroundColor: _darkForest.withOpacity(0.35),
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -834,7 +996,139 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
               ),
             ),
           ),
+          if (_uploadedUrls.isEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Upload at least one image to enable submission.',
+              style: GoogleFonts.inter(
+                color: _darkForest.withOpacity(0.4),
+                fontSize: 11,
+              ),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildImagePreview(String url, int index) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: (MediaQuery.of(context).size.width - 60) / 3, // 3 per row
+        height: (MediaQuery.of(context).size.width - 60) / 3,
+        child: Stack(
+          children: [
+            // Image
+            GestureDetector(
+              onTap: () => _showImagePreview(url),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _darkForest.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    url,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return const Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Center(
+                        child: Icon(Icons.broken_image_outlined,
+                            size: 28, color: Colors.grey),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+            // Remove button (X) — top-right corner
+            Positioned(
+              top: 4,
+              right: 4,
+              child: GestureDetector(
+                onTap: () => _removeImage(index),
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.55),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showImagePreview(String url) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.network(
+                url,
+                fit: BoxFit.contain,
+                width: double.infinity,
+                height: double.infinity,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        size: 48, color: Colors.white70),
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child:
+                      const Icon(Icons.close_rounded, size: 20, color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

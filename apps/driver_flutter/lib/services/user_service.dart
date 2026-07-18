@@ -163,14 +163,19 @@ class UserService {
     }
   }
 
+  /// Submit one or more new document URLs for admin review.
   static Future<Map<String, dynamic>> resubmitDocument(
-      String requirementId, String newDocumentUrl) async {
+    String requirementId, {
+    String? newDocumentUrl,
+    List<String>? newDocumentUrls,
+  }) async {
     try {
       final response = await ApiService.dio.post(
         '/driver/documents/resubmit',
         data: {
           'requirementId': requirementId,
-          'newDocumentUrl': newDocumentUrl,
+          if (newDocumentUrls != null) 'newDocumentUrls': newDocumentUrls,
+          if (newDocumentUrl != null) 'newDocumentUrl': newDocumentUrl,
         },
       );
       return (response.data is Map)

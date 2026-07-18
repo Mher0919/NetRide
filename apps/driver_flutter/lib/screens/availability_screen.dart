@@ -263,97 +263,122 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     return '${diff.inDays}d ago';
   }
 
-  /// Build the stacked status cards at the top of the map. Driven by the
-  /// single authoritative [DriverProvider.buildDriverComplianceStatus] so
-  /// that every card renders with the same priority ordering.
   Widget _buildStatusCards(DriverProvider provider) {
+    final List<Widget> cards = [];
+
+    // 1. Non-document, mutually exclusive compliance items
     final status = provider.buildDriverComplianceStatus();
-
-    // When there is no blocker and the driver is verified, show ready-to-drive.
-    if (status == null) {
-      if (provider.isVerified) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: DriverStatusCard(state: DriverStatus.readyToDrive),
-            ),
-          ],
-        );
-      }
-      return const SizedBox.shrink();
-    }
-
-    // Map the compliance status to the corresponding DriverStatusCard.
-    // The enum ordering already enforces priority; we render the
-    // SINGLE highest-priority card only (no stacking).
-    Widget card;
+    Widget? singleCard;
     switch (status) {
       case DriverComplianceStatus.profileChangePending:
-        card = DriverStatusCard(
+        singleCard = DriverStatusCard(
           state: DriverStatus.profileChangePending,
           onAction: _showPendingChangeDetails,
         );
       case DriverComplianceStatus.profileChangeApproved:
-        card = DriverStatusCard(
+        singleCard = DriverStatusCard(
           state: DriverStatus.profileChangeApproved,
           onDismiss: () => provider.markProfileChangeApprovedShown(),
         );
       case DriverComplianceStatus.backgroundCheckRejected:
-        card = DriverStatusCard(
+        singleCard = DriverStatusCard(
           state: DriverStatus.backgroundRejected,
           rejectionReason: provider.rejectionReason,
           onAction: () => _showRejectionDetails(),
         );
       case DriverComplianceStatus.backgroundCheckPending:
-        card = const DriverStatusCard(state: DriverStatus.backgroundPending);
+        singleCard = const DriverStatusCard(state: DriverStatus.backgroundPending);
       case DriverComplianceStatus.backgroundCheckApproved:
-        card = DriverStatusCard(
+        singleCard = DriverStatusCard(
           state: DriverStatus.backgroundApproved,
           onDismiss: _dismissFeedback,
         );
       case DriverComplianceStatus.faceFlagged:
-        card = const DriverStatusCard(state: DriverStatus.faceFlagged);
+        singleCard = const DriverStatusCard(state: DriverStatus.faceFlagged);
       case DriverComplianceStatus.faceCheckNeeded:
         final reason = provider.faceCheckReason;
-        card = DriverStatusCard(
+        singleCard = DriverStatusCard(
           state: reason != null
               ? DriverStatus.faceRequired(reason)
               : DriverStatus.faceRequired('first_time'),
           onStartFaceCheck: () => _runFaceCheck(reason: reason ?? 'first_time'),
         );
-      case DriverComplianceStatus.documentActionRequired:
-        card = DriverStatusCard(
-          state: DriverStatus.documentActionRequired,
-          onAction: () => Navigator.pushNamed(context, '/documents'),
-        );
-      case DriverComplianceStatus.documentSubmitted:
-        card = const DriverStatusCard(
-          state: DriverStatus.documentSubmittedForReview,
-        );
-      case DriverComplianceStatus.vehicleInspectionRequired:
-        card = DriverStatusCard(
-          state: DriverStatus.vehicleInspectionRequired,
-          onAction: () => Navigator.pushNamed(context, '/vehicle-inspection'),
-        );
       case DriverComplianceStatus.headshotActionRequired:
-        card = DriverStatusCard(
+        singleCard = DriverStatusCard(
           state: DriverStatus.headshotActionRequired,
           onStartFaceCheck: () =>
               _showHeadshotModal(reason: provider.faceCheckReason ?? 'first_time'),
         );
+      case DriverComplianceStatus.documentSubmitted:
+        singleCard = const DriverStatusCard(state: DriverStatus.documentSubmittedForReview);
+      default:
+        singleCard = null;
     }
+
+    if (singleCard != null) {
+      cards.add(singleCard);
+    }
+
+    // 2. Vehicle inspection request (specific navigation to /vehicle-inspection)
+    if (provider.hasVehicleInspectionRequired) {
+      cards.add(
+        DriverStatusCard(
+          state: DriverStatus.vehicleInspectionRequired,
+          onAction: () => Navigator.pushNamed(context, '/vehicle-inspection'),
+        ),
+      );
+    }
+
+    // 3. Document action required — one card per document type
+    for (final req in provider.documentRequirements) {
+      if (req['status'] != 'resubmission_required') continue;
+      final docType = req['document_type'] as String;
+      if (docType == 'inspection_photo_url') continue;
+
+      cards.add(
+        DriverStatusCard(
+          state: DriverStatus.documentActionRequired,
+          documentType: docType,
+          onAction: () => _navigateToDocumentScreen(docType),
+        ),
+      );
+    }
+
+    // 4. When no blocker and verified, show ready-to-drive
+    if (cards.isEmpty) {
+      if (provider.isVerified) {
+        cards.add(DriverStatusCard(state: DriverStatus.readyToDrive));
+      }
+    }
+
+    if (cards.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: card,
-        ),
-      ],
+      children: cards
+          .map((card) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: card,
+              ))
+          .toList(),
     );
+  }
+
+  void _navigateToDocumentScreen(String? documentType) {
+    switch (documentType) {
+      case 'inspection_photo_url':
+        Navigator.pushNamed(context, '/vehicle-inspection');
+        break;
+      case 'license_photo_url':
+      case 'license_photo_back_url':
+      case 'registration_photo_url':
+      case 'id_photo_front_url':
+      case 'id_photo_back_url':
+        Navigator.pushNamed(context, '/documents');
+        break;
+      default:
+        Navigator.pushNamed(context, '/documents');
+    }
   }
 
   /// Show the headshot requirement modal instead of immediately opening the camera.

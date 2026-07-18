@@ -629,11 +629,11 @@ const UserDetail: React.FC = () => {
                     {(() => {
                       const firstVeh = user.driver_profile.vehicles?.[0];
                       const items = [
-                        { title: 'Driver License (Front)', key: 'license_photo_url', url: user.driver_profile.license_photo_url },
-                        { title: 'Driver License (Back)', key: 'license_photo_back_url', url: user.driver_profile.license_photo_back_url },
-                        { title: 'Commercial Insurance', key: 'insurance_photo_url', url: user.driver_profile.insurance_photo_url },
-                        { title: 'Vehicle Registration', key: 'registration_photo_url', url: user.driver_profile.registration_photo_url },
-                        { title: 'Vehicle Inspection', key: 'inspection_photo_url', url: firstVeh?.inspection_photo_url },
+                        { title: 'Driver License (Front)', key: 'license_photo_url', url: user.driver_profile.license_photo_url, requestable: true },
+                        { title: 'Driver License (Back)', key: 'license_photo_back_url', url: user.driver_profile.license_photo_back_url, requestable: true },
+                        { title: 'Commercial Insurance', key: 'insurance_photo_url', url: user.driver_profile.insurance_photo_url, requestable: false },
+                        { title: 'Vehicle Registration', key: 'registration_photo_url', url: user.driver_profile.registration_photo_url, requestable: true },
+                        { title: 'Vehicle Inspection', key: 'inspection_photo_url', url: firstVeh?.inspection_photo_url, requestable: true },
                       ];
                       return items.filter(Boolean).map((doc, idx) => (
                         <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
@@ -641,7 +641,7 @@ const UserDetail: React.FC = () => {
                             <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <Typography variant="caption" sx={{ fontWeight: 800 }}>{doc.title}</Typography>
                               <Stack direction="row" spacing={0.5}>
-                                {doc.key === 'inspection_photo_url' ? (
+                                {doc.requestable && (
                                   <Button
                                     size="small"
                                     variant="text"
@@ -651,7 +651,7 @@ const UserDetail: React.FC = () => {
                                   >
                                     Request
                                   </Button>
-                                ) : null}
+                                )}
                                 <input
                                   type="file"
                                   accept="image/*"

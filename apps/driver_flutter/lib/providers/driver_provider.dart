@@ -62,6 +62,7 @@ class DriverProvider with ChangeNotifier {
   bool _hasVehicleInspectionRequired = false;
   bool _hasDocumentSubmitted = false;
   List<Map<String, dynamic>> _documentRequirements = [];
+  Set<String> _documentTypesWithActionRequired = {};
 
   bool _headshotActionRequired = false;
 
@@ -81,6 +82,14 @@ class DriverProvider with ChangeNotifier {
   bool get hasVehicleInspectionRequired => _hasVehicleInspectionRequired;
   bool get hasDocumentSubmitted => _hasDocumentSubmitted;
   List<Map<String, dynamic>> get documentRequirements => _documentRequirements;
+  Set<String> get documentTypesWithActionRequired => _documentTypesWithActionRequired;
+
+  /// Returns the first document type that has action required, or null if none.
+  /// Used to determine which document screen to navigate to.
+  String? get documentTypeWithActionRequired {
+    if (_documentTypesWithActionRequired.isEmpty) return null;
+    return _documentTypesWithActionRequired.first;
+  }
 
   bool get headshotActionRequired => _headshotActionRequired;
   void setHeadshotActionRequired(bool value) {
@@ -490,6 +499,12 @@ class DriverProvider with ChangeNotifier {
         r['document_type'] != 'inspection_photo_url');
     _hasDocumentSubmitted = reqs.any((r) =>
         r['status'] == 'submitted');
+
+    // Track specific document types with action required
+    _documentTypesWithActionRequired = reqs
+        .where((r) => r['status'] == 'resubmission_required')
+        .map((r) => r['document_type'] as String)
+        .toSet();
   }
 
   // ── Socket initialization with cache-awareness ───────────────────

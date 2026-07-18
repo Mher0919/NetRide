@@ -1284,7 +1284,13 @@ export class DriverService {
     };
   }
 
-  static async resubmitDocument(userId: string, requirementId: string, newDocumentUrl: string) {
+  /**
+   * Submit one or more new document URLs for admin review.
+   * `newDocumentUrls` must be a non-empty array of strings (URLs).
+   * When multiple URLs are provided they are stored as a JSON array in
+   * `new_document_url` so the admin UI can display all submitted images.
+   */
+  static async resubmitDocument(userId: string, requirementId: string, newDocumentUrls: string[]) {
     const req = await pool.query(
       `SELECT id, driver_id, status, document_type FROM driver_document_requirements WHERE id = $1`,
       [requirementId]
@@ -1294,11 +1300,16 @@ export class DriverService {
     if (req.rows[0].driver_id !== userId) throw new Error('This document requirement does not belong to you.');
     if (req.rows[0].status !== 'resubmission_required') throw new Error('This requirement is not pending resubmission.');
 
+    // Store as JSON array for multi-image support, or plain string for single-image backward compat.
+    const documentUrl = newDocumentUrls.length === 1
+      ? newDocumentUrls[0]
+      : JSON.stringify(newDocumentUrls);
+
     const updated = await pool.query(
       `UPDATE driver_document_requirements
        SET status = 'submitted', new_document_url = $1, resubmitted_at = NOW(), updated_at = NOW()
        WHERE id = $2 RETURNING *`,
-      [newDocumentUrl, requirementId]
+      [documentUrl, requirementId]
     );
 
     return { success: true, requirement: updated.rows[0] };
