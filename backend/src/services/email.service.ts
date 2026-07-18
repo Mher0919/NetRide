@@ -12,6 +12,20 @@ export class EmailService {
     'https://developers.google.com/oauthplayground'
   );
 
+  private static DOC_TYPE_LABELS: Record<string, string> = {
+    license_photo_url: 'Driver License (Front)',
+    license_photo_back_url: 'Driver License (Back)',
+    insurance_photo_url: 'Insurance Certificate',
+    registration_photo_url: 'Vehicle Registration',
+    inspection_photo_url: 'Vehicle Inspection',
+    id_photo_front_url: 'ID Card (Front)',
+    id_photo_back_url: 'ID Card (Back)',
+  };
+
+  private static formatDocTypes(types: string[]): string {
+    return types.map(t => this.DOC_TYPE_LABELS[t] || t).join(', ');
+  }
+
   private static async getGmailClient() {
     this.oauth2Client.setCredentials({
       refresh_token: env.GMAIL_REFRESH_TOKEN,
@@ -368,16 +382,7 @@ export class EmailService {
 
   static async sendDocumentResubmissionRequestedEmail(driver: { email?: string; full_name?: string }, info: { document_type: string; reason: string }) {
     if (!driver.email) return;
-    const docLabels: Record<string, string> = {
-      license_photo_url: 'Driver License (Front)',
-      license_photo_back_url: 'Driver License (Back)',
-      insurance_photo_url: 'Insurance Certificate',
-      registration_photo_url: 'Vehicle Registration',
-      inspection_photo_url: 'Vehicle Inspection',
-      id_photo_front_url: 'ID Card (Front)',
-      id_photo_back_url: 'ID Card (Back)',
-    };
-    const label = docLabels[info.document_type] || info.document_type;
+    const label = this.DOC_TYPE_LABELS[info.document_type] || info.document_type;
     try {
       await this.sendEmail({
         to: driver.email,
@@ -402,16 +407,7 @@ export class EmailService {
 
   static async sendDocumentResubmissionReviewedEmail(driver: { email?: string; full_name?: string }, info: { document_type: string; decision: string }) {
     if (!driver.email) return;
-    const docLabels: Record<string, string> = {
-      license_photo_url: 'Driver License (Front)',
-      license_photo_back_url: 'Driver License (Back)',
-      insurance_photo_url: 'Insurance Certificate',
-      registration_photo_url: 'Vehicle Registration',
-      inspection_photo_url: 'Vehicle Inspection',
-      id_photo_front_url: 'ID Card (Front)',
-      id_photo_back_url: 'ID Card (Back)',
-    };
-    const label = docLabels[info.document_type] || info.document_type;
+    const label = this.DOC_TYPE_LABELS[info.document_type] || info.document_type;
     try {
       if (info.decision === 'approved') {
         await this.sendEmail({
@@ -449,7 +445,7 @@ export class EmailService {
 
   static async sendDriverDocumentResubmittedConfirmationEmail(driver: { email?: string; full_name?: string }, info: { document_types: string[] }) {
     if (!driver.email) return;
-    const docLabel = info.document_types.join(', ');
+    const docLabel = this.formatDocTypes(info.document_types);
     try {
       await this.sendEmail({
         to: driver.email,
@@ -476,7 +472,7 @@ export class EmailService {
 
   static async sendAdminDocumentResubmissionNoticeEmail(admin: { email?: string }, driver: { id: string; full_name?: string; email?: string }, info: { document_types: string[]; submitted_at: Date }) {
     if (!admin.email) return;
-    const docLabel = info.document_types.join(', ');
+    const docLabel = this.formatDocTypes(info.document_types);
     const reviewUrl = `${env.ADMIN_URL}/users/${driver.id}`;
     try {
       await this.sendEmail({
