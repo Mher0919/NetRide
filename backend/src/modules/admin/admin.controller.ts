@@ -874,14 +874,18 @@ export class AdminController {
         updatedFields.push('payout_card');
       }
 
-      // Mark the request APPROVED + unblock the driver.
+      // Mark the request APPROVED + restore the driver's previous state.
+      // Using prev_is_active / prev_bg_status from the saved snapshot so that
+      // approving a non-background field (e.g. profile picture) does NOT show
+      // the green "Background check complete" card — only the separate
+      // "Approve User" action (verifyUser) sets background_check_status = 'APPROVED'.
       await client.query(
         `UPDATE profile_change_requests SET status = 'APPROVED', reviewed_at = NOW(), reviewed_by_admin_id = $1 WHERE id = $2`,
         [adminId, id]
       );
       await client.query(
-        `UPDATE drivers SET is_active = true, background_check_status = 'APPROVED', verification_feedback_seen = false WHERE user_id = $1`,
-        [driverId]
+        `UPDATE drivers SET is_active = $1, background_check_status = $2, verification_feedback_seen = false WHERE user_id = $3`,
+        [row.prev_is_active ?? false, row.prev_bg_status ?? 'PENDING', driverId]
       );
 
       await client.query(

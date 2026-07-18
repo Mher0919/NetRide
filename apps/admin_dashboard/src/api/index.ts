@@ -2,6 +2,10 @@ import axios from 'axios';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000') + '/api';
 
+// Strip trailing /api for resolving /api/files/{id} relative URLs.
+// API_URL already includes /api, so API_ORIGIN is just the origin.
+const API_ORIGIN = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+
 const api = axios.create({
   baseURL: API_URL,
   headers: {
@@ -23,12 +27,13 @@ api.interceptors.request.use(
   }
 );
 
-// Resolve /api/files/{id} relative URLs to fully-qualified URLs using the API base.
+// Resolve /api/files/{id} relative URLs to fully-qualified URLs.
+// Uses API_ORIGIN (without trailing /api) to avoid double /api.
 function resolveFileUrls(obj: any): void {
   if (Array.isArray(obj)) {
     for (let i = 0; i < obj.length; i++) {
       if (typeof obj[i] === 'string' && obj[i].startsWith('/api/files/')) {
-        obj[i] = API_URL + obj[i];
+        obj[i] = API_ORIGIN + obj[i];
       } else if (obj[i] !== null && typeof obj[i] === 'object') {
         resolveFileUrls(obj[i]);
       }
@@ -37,7 +42,7 @@ function resolveFileUrls(obj: any): void {
     for (const key of Object.keys(obj)) {
       const val = obj[key];
       if (typeof val === 'string' && val.startsWith('/api/files/')) {
-        obj[key] = API_URL + val;
+        obj[key] = API_ORIGIN + val;
       } else if (val !== null && typeof val === 'object') {
         resolveFileUrls(val);
       }
