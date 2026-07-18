@@ -443,6 +443,20 @@ async function runMigrations() {
       console.log('✅ Storage files schema (028) applied');
     }
 
+    // Make audit_logs.admin_id nullable (029). System-generated events such
+    // as automated face checks have no acting admin, so the column must
+    // allow NULL. Guards on the column's nullability.
+    const adminIdNullable = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_logs' AND column_name = 'admin_id' AND is_nullable = 'YES'"
+    );
+    if (adminIdNullable.rowCount === 0) {
+      console.log('⚡ Relaxing audit_logs.admin_id nullability (029)...');
+      const schemaPath = path.join(__dirname, '../migrations/20260718_face_audit_admin_nullable.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ audit_logs.admin_id made nullable');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);
