@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
@@ -11,60 +13,154 @@ class VehicleInspectionScreen extends StatefulWidget {
   const VehicleInspectionScreen({super.key});
 
   @override
-  State<VehicleInspectionScreen> createState() => _VehicleInspectionScreenState();
+  State<VehicleInspectionScreen> createState() =>
+      _VehicleInspectionScreenState();
 }
 
 class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
   final _zipController = TextEditingController();
-  bool _isSearching = false;
+  final _zipFocusNode = FocusNode();
+  bool _isLoading = false;
   bool _isUploading = false;
   bool _hasSearched = false;
   String? _searchError;
-  List<Map<String, dynamic>> _locations = [];
+  String? _inlineError;
+  List<Map<String, dynamic>> _stations = [];
 
   static const Color _cream = Color(0xFFF7F4EF);
   static const Color _sage = Color(0xFF5B7760);
   static const Color _terracotta = Color(0xFFC65A5A);
   static const Color _darkForest = Color(0xFF2F3A32);
 
+  // California ZIP codes span roughly 90000–96199.
+  static bool isCaliforniaZip(String value) {
+    final stripped = value.replaceAll(RegExp(r'\s+'), '');
+    if (!RegExp(r'^\d{5}$').hasMatch(stripped)) return false;
+    final zip = int.tryParse(stripped);
+    return zip != null && zip >= 90000 && zip <= 96199;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _zipController.addListener(_onZipChanged);
+  }
+
   @override
   void dispose() {
+    _zipController.removeListener(_onZipChanged);
     _zipController.dispose();
+    _zipFocusNode.dispose();
     super.dispose();
   }
 
-  bool _isValidZip(String value) {
-    final stripped = value.replaceAll(RegExp(r'\s+'), '');
-    return RegExp(r'^\d{5}$').hasMatch(stripped);
+  void _onZipChanged() {
+    final raw = _zipController.text;
+    final stripped = raw.replaceAll(RegExp(r'\s+'), '');
+    if (stripped.isEmpty) {
+      setState(() => _inlineError = null);
+      return;
+    }
+    if (!RegExp(r'^\d{0,5}$').hasMatch(stripped)) {
+      setState(() => _inlineError = 'Numbers only.');
+      return;
+    }
+    if (stripped.length == 5) {
+      if (!isCaliforniaZip(stripped)) {
+        setState(
+          () => _inlineError =
+              'NetRide inspections are currently only available in California.\n'
+              'Please enter a California ZIP code (90000–96199).',
+        );
+      } else {
+        setState(() => _inlineError = null);
+      }
+    } else {
+      setState(() => _inlineError = null);
+    }
   }
 
   Future<void> _searchLocations() async {
-    final zip = _zipController.text.trim();
-    if (!_isValidZip(zip)) {
-      setState(() => _searchError = 'Please enter a valid 5-digit ZIP code.');
+    final zip = _zipController.text.replaceAll(RegExp(r'\s+'), '');
+    if (zip.length != 5) {
+      setState(() => _searchError = 'Please enter a 5-digit ZIP code.');
+      return;
+    }
+    if (!isCaliforniaZip(zip)) {
+      setState(
+        () => _searchError =
+            'This ZIP code is not a California ZIP code. '
+            'NetRide vehicle inspections are currently only available in California (90000–96199).',
+      );
       return;
     }
 
     setState(() {
-      _isSearching = true;
+      _isLoading = true;
       _searchError = null;
       _hasSearched = true;
-      _locations = [];
+      _stations = [];
     });
 
     try {
-      final results = await UserService.getInspectionLocations(zip);
+      final result = await UserService.getInspectionLocations(zip);
       if (!mounted) return;
+
+      final stationsRaw = result['stations'];
+      final stations = (stationsRaw is List)
+          ? stationsRaw
+              .map((s) => Map<String, dynamic>.from(s as Map))
+              .toList()
+          : <Map<String, dynamic>>[];
+
       setState(() {
-        _locations = results;
-        _isSearching = false;
+        _stations = stations;
+        _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _searchError = 'Could not find inspection locations. Please try again.';
-        _isSearching = false;
-      });
+      final msg = e.toString();
+      if (msg.contains('ZIP_NOT_IN_CALIFORNIA') ||
+          msg.contains('404') ||
+          msg.contains('outside California')) {
+        setState(() {
+          _searchError =
+              'This ZIP code could not be found or is outside California. '
+              'Please enter a valid California ZIP code.';
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _searchError = 'Could not find inspection locations. '
+              'Please check your connection and try again.';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openNavigation(double lat, double lon, String name) async {
+    final googleUrl =
+        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lon&travelmode=driving';
+    final googleUri = Uri.parse(googleUrl);
+    if (await canLaunchUrl(googleUri)) {
+      await launchUrl(googleUri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    // Fallback to geo: URI (opens default map app — Apple Maps on iOS)
+    final geoUrl = 'geo:$lat,$lon?q=$lat,$lon(${Uri.encodeComponent(name)})';
+    final geoUri = Uri.parse(geoUrl);
+    if (await canLaunchUrl(geoUri)) {
+      await launchUrl(geoUri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No navigation app available on this device.'),
+          backgroundColor: _terracotta,
+        ),
+      );
     }
   }
 
@@ -72,7 +168,9 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
     final provider = Provider.of<DriverProvider>(context, listen: false);
     final reqs = provider.documentRequirements;
     final inspectionReq = reqs.cast<Map<String, dynamic>>().firstWhere(
-      (r) => r['document_type'] == 'inspection_photo_url' && r['status'] == 'resubmission_required',
+      (r) =>
+          r['document_type'] == 'inspection_photo_url' &&
+          r['status'] == 'resubmission_required',
       orElse: () => <String, dynamic>{},
     );
     if (inspectionReq.isEmpty) {
@@ -120,6 +218,10 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
       if (mounted) setState(() => _isUploading = false);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -201,8 +303,10 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
           ),
           const SizedBox(height: 8),
           _bulletPoint('Visit a certified vehicle inspection location.'),
-          _bulletPoint('Request a vehicle inspection for ride-share eligibility.'),
-          _bulletPoint('Obtain the completed inspection document or certificate.'),
+          _bulletPoint(
+              'Request a vehicle inspection for ride-share eligibility.'),
+          _bulletPoint(
+              'Obtain the completed inspection document or certificate.'),
           _bulletPoint('Upload the document below using a photo or scan.'),
         ],
       ),
@@ -231,6 +335,10 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Find locations section
+  // ---------------------------------------------------------------------------
+
   Widget _buildFindLocationsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -245,7 +353,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Enter your ZIP code to find nearby vehicle inspection locations.',
+          'Enter your California ZIP code to find nearby vehicle inspection locations.',
           style: GoogleFonts.inter(
             color: _darkForest.withOpacity(0.6),
             fontSize: 13,
@@ -253,11 +361,50 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
         ),
         const SizedBox(height: 12),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'State',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: _darkForest.withOpacity(0.5),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  width: 44,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: _sage.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _sage.withOpacity(0.25),
+                      width: 1,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    'CA',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _sage,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
             Expanded(
               child: TextField(
                 controller: _zipController,
+                focusNode: _zipFocusNode,
                 keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 maxLength: 5,
                 decoration: InputDecoration(
                   counterText: '',
@@ -268,16 +415,20 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                 ),
                 style: GoogleFonts.inter(fontSize: 15),
+                onSubmitted: _isLoading ? null : (_) => _searchLocations(),
               ),
             ),
             const SizedBox(width: 12),
             SizedBox(
               height: 48,
               child: ElevatedButton(
-                onPressed: _isSearching ? null : _searchLocations,
+                onPressed: _isLoading ? null : _searchLocations,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _sage,
                   foregroundColor: Colors.white,
@@ -286,30 +437,80 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 24),
                 ),
-                child: _isSearching
+                child: _isLoading
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : Text(
                         'Search',
-                        style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14),
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
                       ),
               ),
             ),
           ],
         ),
+        // Inline validation error (shows as user types)
+        if (_inlineError != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            _inlineError!,
+            style: GoogleFonts.inter(
+              color: _terracotta,
+              fontSize: 12,
+              height: 1.4,
+            ),
+          ),
+        ],
+        // Post-search error
         if (_searchError != null) ...[
           const SizedBox(height: 8),
           Text(
             _searchError!,
-            style: GoogleFonts.inter(color: _terracotta, fontSize: 12),
+            style: GoogleFonts.inter(
+              color: _terracotta,
+              fontSize: 12,
+              height: 1.4,
+            ),
           ),
         ],
-        if (_hasSearched && !_isSearching) ...[
+        // Loading indicator during search
+        if (_isLoading) ...[
+          const SizedBox(height: 20),
+          Center(
+            child: Column(
+              children: [
+                const SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: _sage,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Searching for nearby inspection stations...',
+                  style: GoogleFonts.inter(
+                    color: _darkForest.withOpacity(0.6),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        // Results
+        if (_hasSearched && !_isLoading) ...[
           const SizedBox(height: 16),
-          if (_locations.isEmpty)
+          if (_stations.isEmpty) ...[
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
@@ -317,112 +518,255 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                 color: _cream,
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Text(
-                'No inspection locations found near this ZIP code. Try a different ZIP code or contact support.',
-                style: GoogleFonts.inter(
-                  color: _darkForest.withOpacity(0.7),
-                  fontSize: 13,
-                  height: 1.4,
-                ),
-              ),
-            )
-          else ...[
-            Text(
-              'Nearby vehicle inspection locations',
-              style: GoogleFonts.inter(
-                color: _darkForest.withOpacity(0.7),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+              child: Column(
+                children: [
+                  Icon(Icons.search_off_rounded,
+                      size: 32, color: _darkForest.withOpacity(0.3)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'No inspection locations found near this ZIP code.',
+                    style: GoogleFonts.inter(
+                      color: _darkForest.withOpacity(0.7),
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Try a different California ZIP code or contact support.',
+                    style: GoogleFonts.inter(
+                      color: _darkForest.withOpacity(0.5),
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
+          ] else ...[
+            Row(
+              children: [
+                Icon(Icons.location_on_outlined,
+                    size: 14, color: _darkForest.withOpacity(0.5)),
+                const SizedBox(width: 4),
+                Text(
+                  '${_stations.length} nearby ${_stations.length == 1 ? 'location' : 'locations'} found',
+                  style: GoogleFonts.inter(
+                    color: _darkForest.withOpacity(0.6),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
-            ..._locations.map((loc) => _buildLocationCard(loc)),
+            ..._stations.map(
+              (loc) => _buildLocationCard(loc),
+            ),
           ],
         ],
       ],
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Location card
+  // ---------------------------------------------------------------------------
+
   Widget _buildLocationCard(Map<String, dynamic> loc) {
-    final name = (loc['display_name'] as String? ?? '').split(',')[0].trim();
-    final address = (loc['display_name'] as String? ?? '').split(',').skip(1).join(',').trim();
+    final name = (loc['display_name'] as String? ?? '').trim();
+    if (name.isEmpty) return const SizedBox.shrink();
+
+    final addressRaw = loc['address'];
+    String addressStr = '';
+    if (addressRaw is Map) {
+      final parts = [
+        addressRaw['house_number'],
+        addressRaw['road'],
+        addressRaw['city'],
+        addressRaw['state'],
+        addressRaw['postcode'],
+      ].where((p) => p != null && p.toString().isNotEmpty);
+      addressStr = parts.join(', ');
+    }
+
     final distance = loc['distance_miles'];
     final lat = loc['lat'];
     final lon = loc['lon'];
+    final phone = loc['phone'] as String?;
+    final hours = loc['opening_hours'] as String?;
+    final hasCoords = lat != null && lon != null;
+
+    final double? latNum = hasCoords ? double.tryParse(lat.toString()) : null;
+    final double? lonNum = hasCoords ? double.tryParse(lon.toString()) : null;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: _cream,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _sage.withOpacity(0.1)),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: _sage.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(Icons.directions_car_rounded, color: _sage, size: 22),
-        ),
-        title: Text(
-          name,
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-            color: _darkForest,
-          ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 2),
-            Text(
-              address,
-              style: GoogleFonts.inter(
-                fontSize: 12,
-                color: _darkForest.withOpacity(0.6),
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (distance != null) ...[
-              const SizedBox(height: 2),
-              Text(
-                '${distance.toStringAsFixed(1)} mi',
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: _sage,
-                  fontWeight: FontWeight.w600,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            if (latNum != null && lonNum != null) {
+              _openNavigation(latNum, lonNum, name);
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: _sage.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.directions_car_rounded,
+                    color: _sage,
+                    size: 22,
+                  ),
                 ),
-              ),
-            ],
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (lat != null && lon != null)
-              IconButton(
-                icon: const Icon(Icons.map_outlined, size: 20, color: _sage),
-                onPressed: () {
-                  // ignore: deprecated_member_use
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Directions to $name'),
-                      backgroundColor: _sage,
-                      duration: const Duration(seconds: 3),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          color: _darkForest,
+                        ),
+                      ),
+                      if (addressStr.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          addressStr,
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: _darkForest.withOpacity(0.55),
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      if (distance != null) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.near_me_outlined,
+                                size: 12, color: _sage),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${(distance as num).toStringAsFixed(1)} mi',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: _sage,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      if (phone != null && phone.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        InkWell(
+                          onTap: () async {
+                            final telUri = Uri.parse('tel:$phone');
+                            if (await canLaunchUrl(telUri)) {
+                              await launchUrl(
+                                telUri,
+                                mode: LaunchMode.externalApplication,
+                              );
+                            }
+                          },
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.call_outlined,
+                                  size: 12, color: _sage),
+                              const SizedBox(width: 4),
+                              Text(
+                                phone,
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: _sage,
+                                  fontWeight: FontWeight.w500,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (hours != null && hours.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.access_time_rounded,
+                                size: 12, color: _darkForest.withOpacity(0.4)),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                hours,
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  color: _darkForest.withOpacity(0.45),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (latNum != null && lonNum != null) ...[
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => _openNavigation(latNum, lonNum, name),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: _sage.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.navigation_rounded,
+                        size: 18,
+                        color: _sage,
+                      ),
                     ),
-                  );
-                },
-              ),
-          ],
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Upload section
+  // ---------------------------------------------------------------------------
 
   Widget _buildUploadSection() {
     return Container(
@@ -467,12 +811,18 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.image_outlined, size: 20),
               label: Text(
                 _isUploading ? 'Uploading...' : 'Select & Upload',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14),
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _sage,

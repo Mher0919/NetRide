@@ -6,6 +6,18 @@ import { redis } from '../../config/redis';
 import { MLEtaService } from '../../services/ml-eta.service';
 import { enrichSteps } from '../../utils/road-classifier';
 
+interface InspectionStation {
+  display_name: string;
+  lat: string;
+  lon: string;
+  distance_miles: number | null;
+  address: Record<string, string> | null;
+  phone: string | null;
+  opening_hours: string | null;
+  type: string;
+  state: string;
+}
+
 export interface RouteResponse {
   distance: number;
   osrm_duration: number;
@@ -62,6 +74,174 @@ export class GeospatialService {
     } finally {
       this.inFlightRequests.delete(cacheKey);
     }
+  }
+
+  // ---- Inspection-location helpers (driver app) --------------------------
+
+  /// CA bounding constants used for validating geocoded ZIPs.
+  private static readonly CA_BBOX = {
+    south: 32.5,
+    north: 42.0,
+    west: -124.5,
+    east: -114.0,
+  };
+
+  private static isInCalifornia(lat: number, lon: number): boolean {
+    return (
+      lat >= this.CA_BBOX.south &&
+      lat <= this.CA_BBOX.north &&
+      lon >= this.CA_BBOX.west &&
+      lon <= this.CA_BBOX.east
+    );
+  }
+
+  /// Geocode a ZIP code to {lat, lon} via Nominatim (nationwide).
+  /// Returns null if the ZIP can't be resolved or lies outside CA.
+  static async geocodeZip(zip: string): Promise<{ lat: number; lon: number } | null> {
+    const cacheKey = `geocode:zip:${zip}`;
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return { lat: parsed.lat, lon: parsed.lon };
+      }
+    } catch {
+      // cache miss or redis down — proceed
+    }
+
+    try {
+      const resp = await axios.get('https://nominatim.openstreetmap.org/search', {
+        params: {
+          q: zip,
+          format: 'json',
+          countrycodes: 'us',
+          limit: 1,
+        },
+        headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
+        timeout: 5000,
+      });
+
+      const data = resp.data;
+      if (!Array.isArray(data) || data.length === 0) return null;
+
+      const lat = parseFloat(data[0].lat);
+      const lon = parseFloat(data[0].lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+      if (!this.isInCalifornia(lat, lon)) {
+        console.log(`[GEOSPATIAL] ZIP ${zip} resolved to non-CA location (${lat},${lon}) — rejecting`);
+        return null;
+      }
+
+      const result = { lat, lon };
+      // Cache for 24 hours
+      await redis.set(cacheKey, JSON.stringify(result), 'EX', 86400).catch(() => {});
+      return result;
+    } catch (err: any) {
+      console.error(`[GEOSPATIAL] ❌ Geocode failed for ZIP ${zip}: ${err.message}`);
+      return null;
+    }
+  }
+
+  /// Search for vehicle-inspection-related POIs near (lat,lon) using the
+  /// Overpass API.  Progressively expands the search radius until we have
+  /// enough results or hit the cap.
+  static async findNearbyInspections(
+    lat: number,
+    lon: number,
+  ): Promise<InspectionStation[]> {
+    const RADII_KM = [5, 10, 25, 50];
+    const seen = new Set<string>();
+
+    const results: InspectionStation[] = [];
+
+    const haversine = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+      const R = 3958.8;
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lon - a.lon);
+      const x =
+        Math.sin(dLat / 2) ** 2 +
+        Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
+      return 2 * R * Math.asin(Math.sqrt(x));
+    };
+
+    for (const radiusKm of RADII_KM) {
+      if (results.length >= 5) break;
+
+      const overpassQuery = `
+        [out:json][timeout:20];
+        (
+          node["amenity"="vehicle_inspection"](around:${radiusKm * 1000},${lat},${lon});
+          way["amenity"="vehicle_inspection"](around:${radiusKm * 1000},${lat},${lon});
+          node["shop"="car_repair"](around:${radiusKm * 1000},${lat},${lon});
+          way["shop"="car_repair"](around:${radiusKm * 1000},${lat},${lon});
+          node["amenity"="smog_check"](around:${radiusKm * 1000},${lat},${lon});
+          way["amenity"="smog_check"](around:${radiusKm * 1000},${lat},${lon});
+        );
+        out center 25;
+      `.replace(/\s+/g, ' ').trim();
+
+      try {
+        const resp = await axios.post(
+          'https://overpass-api.de/api/interpreter',
+          `data=${encodeURIComponent(overpassQuery)}`,
+          {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            timeout: 25000,
+          },
+        );
+
+        const elements: any[] = resp.data?.elements ?? [];
+        for (const el of elements) {
+          const tags = el.tags ?? {};
+          const name = tags.name;
+          if (!name) continue;
+
+          const elLat = el.type === 'node' ? el.lat : el.center?.lat;
+          const elLon = el.type === 'node' ? el.lon : el.center?.lon;
+          if (!Number.isFinite(elLat) || !Number.isFinite(elLon)) continue;
+
+          const addrParts = [
+            tags['addr:housenumber'],
+            tags['addr:street'],
+            tags['addr:city'],
+            tags['addr:state'],
+            tags['addr:postcode'],
+          ].filter(Boolean);
+          const addrStr = addrParts.length > 0 ? addrParts.join(', ') : null;
+
+          const key = `${name}|${addrStr ?? elLat},${elLon}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          results.push({
+            display_name: name,
+            lat: String(elLat),
+            lon: String(elLon),
+            distance_miles: Math.round(haversine({ lat, lon }, { lat: elLat, lon: elLon }) * 10) / 10,
+            address: addrStr
+              ? {
+                  house_number: tags['addr:housenumber'] ?? '',
+                  road: tags['addr:street'] ?? '',
+                  city: tags['addr:city'] ?? '',
+                  state: tags['addr:state'] ?? 'CA',
+                  postcode: tags['addr:postcode'] ?? '',
+                }
+              : null,
+            phone: tags.phone ?? tags['contact:phone'] ?? null,
+            opening_hours: tags.opening_hours ?? null,
+            type: tags.amenity || tags.shop || 'car_repair',
+            state: 'CA',
+          });
+        }
+      } catch (err: any) {
+        console.error(`[GEOSPATIAL] ❌ Overpass query failed at ${radiusKm}km: ${err.message}`);
+      }
+    }
+
+    results.sort((a, b) => (a.distance_miles ?? 999) - (b.distance_miles ?? 999));
+    return results.slice(0, 15);
   }
 
   static async searchPlaces(query: string, userLat?: number, userLon?: number): Promise<any[]> {

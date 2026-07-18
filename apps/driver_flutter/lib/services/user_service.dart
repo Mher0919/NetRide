@@ -213,18 +213,16 @@ class UserService {
   }
 
   /// Fetch nearby vehicle inspection locations for the given ZIP code.
-  static Future<List<Map<String, dynamic>>> getInspectionLocations(String zipCode) async {
+  /// Returns { stations: [...], lat, lon, zip, count }.
+  static Future<Map<String, dynamic>> getInspectionLocations(String zipCode) async {
     try {
       final response = await ApiService.dio.get(
         '/geospatial/inspection-locations',
         queryParameters: {'zip': zipCode},
       );
-      final data = response.data;
-      final locations = (data is List)
-          ? List<Map<String, dynamic>>.from(
-              data.map((l) => Map<String, dynamic>.from(l as Map)))
-          : <Map<String, dynamic>>[];
-      return locations;
+      return (response.data is Map)
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
     } catch (e) {
       rethrow;
     }

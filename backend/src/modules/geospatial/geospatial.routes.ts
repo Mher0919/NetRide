@@ -49,36 +49,51 @@ router.get('/search', authMiddleware, async (req, res) => {
 
 /**
  * GET /api/geospatial/inspection-locations
- * Query: zip (required), lat (optional), lon (optional)
- * Returns nearby vehicle inspection stations.
+ * Query: zip (required)
+ *
+ * Geocodes the ZIP via Nominatim (cached in Redis), validates the
+ * coordinates are within California, then searches for nearby vehicle
+ * inspection stations using the Overpass API with progressive radius
+ * expansion (5 → 10 → 25 → 50 km).
  */
 router.get('/inspection-locations', authMiddleware, async (req, res) => {
   try {
-    let { zip, lat, lon } = req.query;
-    if (!zip) {
-      return res.status(400).json({ error: 'ZIP code (zip) is required' });
+    const rawZip = (req.query.zip as string ?? '').replace(/\s+/g, '');
+    if (!rawZip) {
+      return res.status(400).json({ error: 'ZIP code is required.' });
+    }
+    if (!/^\d{5}$/.test(rawZip)) {
+      return res.status(400).json({ error: 'ZIP code must be exactly 5 digits.' });
     }
 
-    // If lat/lon not provided, try to geocode the ZIP first
-    if (!lat || !lon) {
-      const geoRes = await GeospatialService.searchPlaces(`${zip}, California`, undefined, undefined);
-      if (geoRes.length > 0) {
-        lat = String(geoRes[0].lat);
-        lon = String(geoRes[0].lon);
-      }
+    const coords = await GeospatialService.geocodeZip(rawZip);
+    if (!coords) {
+      return res.status(404).json({
+        error:
+          'This ZIP code could not be found or is outside California. ' +
+          'NetRide vehicle inspections are currently only available in California.',
+        code: 'ZIP_NOT_IN_CALIFORNIA',
+      });
     }
 
-    const query = 'vehicle inspection station smog check auto repair';
-    const results = await GeospatialService.searchPlaces(
-      query,
-      lat ? parseFloat(lat as string) : undefined,
-      lon ? parseFloat(lon as string) : undefined
+    const stations = await GeospatialService.findNearbyInspections(
+      coords.lat,
+      coords.lon,
     );
 
-    res.json(results);
+    res.json({
+      zip: rawZip,
+      lat: coords.lat,
+      lon: coords.lon,
+      stations,
+      count: stations.length,
+    });
   } catch (err: any) {
-    console.error('[GEOSPATIAL] Inspection locations Controller Error:', err.message);
-    res.status(500).json({ error: 'Failed to find inspection locations' });
+    console.error(
+      '[GEOSPATIAL] Inspection locations Controller Error:',
+      err.message,
+    );
+    res.status(500).json({ error: 'Failed to find inspection locations.' });
   }
 });
 
