@@ -1693,7 +1693,7 @@ export class AdminController {
          LIMIT $${i++} OFFSET $${i++}`,
         vals
       );
-      const totalRes = await pool.query(`SELECT COUNT(*)::int AS c FROM payouts ${whereClause}`, vals.slice(0, vals.length - 2));
+      const totalRes = await pool.query(`SELECT COUNT(*)::int AS c FROM payouts p ${whereClause}`, vals.slice(0, vals.length - 2));
       res.json({ payouts: res0.rows, total: totalRes.rows[0]?.c ?? 0 });
     } catch (error: any) {
       console.error(`[ADMIN] ❌ List payouts error: ${error.message}`);

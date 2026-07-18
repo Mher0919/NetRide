@@ -1,12 +1,29 @@
 import '../services/api_service.dart';
 
-/// Resolves a relative /api/files/{id} URL to a fully-qualified URL.
-/// Strips the trailing /api from the base URL to avoid double /api.
-/// Absolute URLs are returned unchanged.
+/// Resolves any /api/files/{id} URL — relative or absolute — to a
+/// fully-qualified URL that works from the current environment (emulator,
+/// device, web).
+///
+/// Strips the trailing /api from the API base URL to avoid double /api.
+/// Absolute URLs are returned as-is only when they do NOT point to our own
+/// /api/files/ endpoint (to handle stale localhost URLs that were stored
+/// during development).
 String resolveFileUrl(String url) {
+  // Already a clean relative path — simple case.
   if (url.startsWith('/api/files/')) {
     final base = ApiService.baseUrl.replaceAll(RegExp(r'/api/?$'), '');
     return '$base$url';
   }
+
+  // Full URL that points to our own /api/files/ endpoint
+  // (e.g. http://localhost:3000/api/files/xxx was stored during development).
+  // Re-resolve it so it works on emulator/device where localhost doesn't
+  // map to the host machine.
+  final match = RegExp(r'^https?://[^/]+(/api/files/)').firstMatch(url);
+  if (match != null) {
+    final base = ApiService.baseUrl.replaceAll(RegExp(r'/api/?$'), '');
+    return '$base${match.group(1)}${url.substring(match.end)}';
+  }
+
   return url;
 }
