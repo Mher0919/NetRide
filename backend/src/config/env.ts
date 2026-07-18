@@ -32,8 +32,6 @@ const envSchema = z.object({
   FACE_CHECK_INTERVAL_HOURS: z.union([z.string(), z.number()]).transform(Number).default(12),
   // Location jump threshold that triggers re-verify on offline→online.
   FACE_LOCATION_JUMP_MILES: z.union([z.string(), z.number()]).transform(Number).default(5),
-  // Base URL for the Python face microservice.
-  FACE_SERVICE_URL: z.string().default('http://localhost:8000'),
   GMAIL_CLIENT_ID: z.string().optional(),
   GMAIL_CLIENT_SECRET: z.string().optional(),
   GMAIL_REFRESH_TOKEN: z.string().optional(),

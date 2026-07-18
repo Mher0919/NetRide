@@ -5,7 +5,7 @@
 
 import { pool } from '../config/database';
 import { env } from '../config/env';
-import { PythonFaceClient, FaceVerifyResult, ImageVerifyResult } from './pythonClient';
+import { ImageVerifyResult, verifyImage } from './faceMatcher';
 import { io } from '../app';
 import { isTestEmail } from '../utils/testUser';
 
@@ -194,122 +194,15 @@ export const FaceService = {
   },
 
   /**
-   * Run the Python microservice against a captured clip + reference image
-   * and persist the result (legacy video flow).
-   */
-  async runVerification(args: {
-    userId: string;
-    videoBuffer: Buffer;
-    videoMime: string;
-    referenceBuffer: Buffer;
-    referenceMime: string;
-    deviceId?: string | null;
-    lat?: number | null;
-    lng?: number | null;
-  }): Promise<FaceVerifyResult & { flagged: boolean; eventId: string | null }> {
-    let result: FaceVerifyResult;
-    try {
-      result = await PythonFaceClient.verify({
-        videoBuffer: args.videoBuffer,
-        videoMime: args.videoMime,
-        videoFilename: 'capture.mp4',
-        referenceBuffer: args.referenceBuffer,
-        referenceMime: args.referenceMime,
-        referenceFilename: 'reference.jpg',
-      });
-    } catch (err: any) {
-      console.error('[FACE] Python service error:', err.message);
-      result = {
-        match: false,
-        score: 0,
-        reason: 'service_error',
-        liveness: {
-          face_frames: 0,
-          total_frames: 0,
-          motion_px: 0,
-          blink_count: 0,
-          laplacian_var: 0,
-          passed: false,
-        },
-      };
-    }
-
-    const passed = result.match === true && result.liveness.passed === true;
-    const flagged = !passed;
-
-    await pool.query(
-      `UPDATE users
-         SET last_face_check_at = NOW(),
-             last_face_check_score = $1,
-             last_face_check_device_id = $2,
-             face_check_status = $3
-       WHERE id = $4`,
-      [result.score, args.deviceId || null, flagged ? 'FLAGGED' : 'CLEAR', args.userId],
-    );
-
-    const eventRes = await pool.query(
-      `INSERT INTO face_check_events
-        (user_id, status, match_score,
-         liveness_face_frames, liveness_motion_px, liveness_blink_count, liveness_laplacian_var,
-         device_id, lat, lng)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING id`,
-      [
-        args.userId,
-        flagged ? 'FLAGGED' : 'PASS',
-        result.score,
-        result.liveness.face_frames,
-        result.liveness.motion_px,
-        result.liveness.blink_count,
-        result.liveness.laplacian_var,
-        args.deviceId || null,
-        args.lat ?? null,
-        args.lng ?? null,
-      ],
-    );
-    const eventId = eventRes.rows[0].id;
-
-    await pool.query(
-      `INSERT INTO audit_logs (admin_id, target_id, action, details)
-       VALUES (NULL, $1, 'FACE_CHECK', $2)`,
-      [
-        args.userId,
-        JSON.stringify({
-          status: flagged ? 'FLAGGED' : 'PASS',
-          score: result.score,
-          reason: result.reason,
-          event_id: eventId,
-        }),
-      ],
-    );
-
-    if (flagged) {
-      try {
-        io.to('monitoring:all_rides').emit('faceCheckFlagged', {
-          user_id: args.userId,
-          event_id: eventId,
-          score: result.score,
-          reason: result.reason,
-        });
-      } catch {
-        // io may not be initialized in test contexts.
-      }
-    }
-
-    return { ...result, flagged, eventId };
-  },
-
-  /**
-   * Run the Python microservice against a single selfie + reference image
-   * (new single-selfie flow with quality + anti-spoofing).
+   * Run in-process TypeScript face verification against a single selfie.
+   * (new single-selfie flow with quality + anti-spoofing + identity match)
    */
   async runImageVerification(args: {
     userId: string;
     imageBuffer: Buffer;
     imageMime: string;
     imageFilename: string;
-    referenceBuffer: Buffer;
-    referenceMime: string;
+    referenceDescriptor?: number[] | null;
     isEnrollment?: boolean;
     deviceId?: string | null;
     lat?: number | null;
@@ -317,16 +210,12 @@ export const FaceService = {
   }): Promise<ImageVerifyResult & { flagged: boolean; eventId: string | null }> {
     let result: ImageVerifyResult;
     try {
-      result = await PythonFaceClient.verifyImage({
-        imageBuffer: args.imageBuffer,
-        imageMime: args.imageMime,
-        imageFilename: args.imageFilename,
-        referenceBuffer: args.referenceBuffer,
-        referenceMime: args.referenceMime,
-        referenceFilename: 'reference.jpg',
+      result = await verifyImage({
+        selfieBuffer: args.imageBuffer,
+        referenceDescriptor: args.referenceDescriptor,
       });
     } catch (err: any) {
-      console.error('[FACE] Python service error (image):', err.message);
+      console.error('[FACE] verification error (image):', err.message);
       result = {
         match: false,
         score: 0,
@@ -358,6 +247,15 @@ export const FaceService = {
     const livenessPassed = result.liveness?.passed ?? false;
     const passed = qualityPassed && matchPassed && livenessPassed;
     const flagged = !passed;
+
+    // On a successful enrollment, persist the freshly computed descriptor
+    // so subsequent checks can run a real identity match.
+    if (!flagged && args.isEnrollment && Array.isArray((result as any)._descriptor)) {
+      await pool.query(
+        `UPDATE users SET face_enrollment_descriptor = $1 WHERE id = $2`,
+        [(result as any)._descriptor, args.userId],
+      );
+    }
 
     await pool.query(
       `UPDATE users

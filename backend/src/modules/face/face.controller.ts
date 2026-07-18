@@ -4,12 +4,10 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import axios from 'axios';
 import { AuthRequest, adminMiddleware } from '../../middleware/auth.middleware';
 import { pool } from '../../config/database';
 import { env } from '../../config/env';
 import { FaceService } from '../../services/face.service';
-import { StorageService } from '../../services/storage.service';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -37,84 +35,15 @@ export class FaceController {
 
   /**
    * POST /api/face/verify  (multipart: video + reference)
-   * Legacy multi-angle video flow — preserved for backward compatibility.
+   * Legacy multi-angle video flow — retired. The single-selfie flow
+   * (/verify-image, handled in-process) replaced it. Kept as a clear
+   * 400 so old clients get an actionable message instead of a crash.
    */
   static verify = [
-    upload.fields([
-      { name: 'video', maxCount: 1 },
-      { name: 'reference', maxCount: 1 },
-    ]),
-    async (req: AuthRequest, res: Response) => {
-      try {
-        const userId = req.user!.id;
-        const deviceId =
-          (req.header('X-Device-Id') as string | undefined) || null;
-        const lat = req.body?.lat ? Number(req.body.lat) : null;
-        const lng = req.body?.lng ? Number(req.body.lng) : null;
-
-        const files = req.files as
-          | { [k: string]: Express.Multer.File[] }
-          | undefined;
-        const videoFile = files?.video?.[0];
-        const referenceFile = files?.reference?.[0];
-
-        if (!videoFile) {
-          return res
-            .status(400)
-            .json({ error: 'Missing video capture.' });
-        }
-        if (!referenceFile) {
-          return res
-            .status(400)
-            .json({ error: 'Missing reference image.' });
-        }
-
-        const clipDir = path.join(__dirname, '../../uploads/face', userId);
-        fs.mkdirSync(clipDir, { recursive: true });
-        const clipFilename = `${uuidv4()}.mp4`;
-        const clipPath = path.join(clipDir, clipFilename);
-        fs.writeFileSync(clipPath, videoFile.buffer);
-        const clipUrl = `${env.APP_URL}/uploads/face/${userId}/${clipFilename}`;
-
-        const refFilename = `${uuidv4()}.jpg`;
-        const refPath = path.join(clipDir, refFilename);
-        fs.writeFileSync(refPath, referenceFile.buffer);
-        const refUrl = `${env.APP_URL}/uploads/face/${userId}/${refFilename}`;
-
-        const result = await FaceService.runVerification({
-          userId,
-          videoBuffer: videoFile.buffer,
-          videoMime: videoFile.mimetype || 'video/mp4',
-          referenceBuffer: referenceFile.buffer,
-          referenceMime: referenceFile.mimetype || 'image/jpeg',
-          deviceId,
-          lat,
-          lng,
-        });
-
-        if (!result.flagged) {
-          await pool.query(
-            `UPDATE users
-               SET face_enrollment_url = $1,
-                   last_device_id = COALESCE(NULLIF($2, ''), last_device_id)
-             WHERE id = $3`,
-            [refUrl, deviceId || null, userId],
-          );
-        }
-
-        res.json({
-          status: result.flagged ? 'FLAGGED' : 'PASS',
-          match: result.match,
-          score: result.score,
-          reason: result.reason,
-          liveness: result.liveness,
-          eventId: result.eventId,
-          clipUrl: result.flagged ? clipUrl : null,
-        });
-      } catch (err: any) {
-        console.error('[FACE] verify error:', err.message);
-        res.status(500).json({ error: 'Face verification failed. Please try again.' });
-      }
+    async (_req: AuthRequest, res: Response) => {
+      res.status(400).json({
+        error: 'The video verification flow is no longer supported. Please update the app to use the single-selfie face check.',
+      });
     },
   ];
 
@@ -155,53 +84,27 @@ export class FaceController {
         fs.writeFileSync(selfiePath, selfieFile.buffer);
         const selfieUrl = `${env.APP_URL}/uploads/face/${userId}/${selfieFilename}`;
 
-        // Reference image — either uploaded by client, fetched from DB, or
-        // (for first-time drivers) established by enrolling from this selfie.
-        let referenceBuffer: Buffer = Buffer.alloc(0);
-        let referenceMime = 'image/jpeg';
+        // Resolve the trusted reference. We now match on the stored
+        // face-api.js descriptor (JSONB). A first-time driver has none, so
+        // this becomes an enrollment (quality + liveness only).
+        let referenceDescriptor: number[] | null = null;
         let isEnrollment = false;
+
         if (referenceFile) {
-          referenceBuffer = referenceFile.buffer;
-          referenceMime = referenceFile.mimetype || 'image/jpeg';
+          // Client supplied a reference image — still need its descriptor,
+          // so we fall through to enrollment-style handling for the match.
+          isEnrollment = true;
         } else {
           const refRes = await pool.query(
-            `SELECT face_enrollment_url, profile_image_url FROM users WHERE id = $1`,
+            `SELECT face_enrollment_descriptor, face_enrollment_url
+               FROM users WHERE id = $1`,
             [userId],
           );
           const row = refRes.rows[0];
-          const refUrls = [row?.face_enrollment_url, row?.profile_image_url].filter(Boolean);
-
-          let fetched = false;
-          for (const rawUrl of refUrls) {
-            try {
-              let absoluteUrl: string;
-              if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
-                absoluteUrl = rawUrl;
-              } else if (rawUrl.startsWith('/api/files/')) {
-                const fileId = rawUrl.replace('/api/files/', '');
-                const access = await StorageService.getAccessUrl(fileId);
-                if (!access.url) continue;
-                absoluteUrl = access.url;
-                referenceMime = access.mimetype || 'image/jpeg';
-              } else {
-                absoluteUrl = `${env.APP_URL}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
-              }
-
-              const resp = await axios.get(absoluteUrl, { responseType: 'arraybuffer', timeout: 10000 });
-              referenceBuffer = Buffer.from(resp.data);
-              referenceMime = (resp.headers['content-type'] as string) || 'image/jpeg';
-              fetched = true;
-              break;
-            } catch {
-              // Try the next URL
-            }
-          }
-
-          // No existing reference → first-time enrollment: use the selfie
-          // itself as the trusted reference (quality + liveness only).
-          if (!fetched) {
-            referenceBuffer = selfieFile.buffer;
-            referenceMime = selfieFile.mimetype || 'image/jpeg';
+          if (Array.isArray(row?.face_enrollment_descriptor) && row.face_enrollment_descriptor.length > 0) {
+            referenceDescriptor = row.face_enrollment_descriptor;
+          } else {
+            // No stored descriptor → first-time enrollment.
             isEnrollment = true;
           }
         }
@@ -211,17 +114,14 @@ export class FaceController {
           imageBuffer: selfieFile.buffer,
           imageMime: selfieFile.mimetype || 'image/jpeg',
           imageFilename: 'selfie.jpg',
-          referenceBuffer,
-          referenceMime,
+          referenceDescriptor,
           isEnrollment,
           deviceId,
           lat,
           lng,
         });
 
-        // Persist the enrollment reference on success. For first-time
-        // enrollment the selfie IS the reference; otherwise only the client
-        // uploaded reference is stored.
+        // Persist the enrollment reference image + descriptor on success.
         if (!result.flagged) {
           const refBuffer = isEnrollment ? selfieFile.buffer : referenceFile?.buffer;
           if (refBuffer) {
