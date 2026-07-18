@@ -5,7 +5,7 @@
 
 import { pool } from '../config/database';
 import { env } from '../config/env';
-import { PythonFaceClient, FaceVerifyResult } from './pythonClient';
+import { PythonFaceClient, FaceVerifyResult, ImageVerifyResult } from './pythonClient';
 import { io } from '../app';
 import { isTestEmail } from '../utils/testUser';
 
@@ -73,8 +73,6 @@ export const FaceService = {
       };
     }
 
-    // Test-mode bypass: test/dev accounts bypass the face gate check to keep automated tests
-    // and developer testing loops running smoothly without head-tracking/video-liveness constraints.
     if (row.email && isTestEmail(row.email)) {
       return {
         required: false,
@@ -197,8 +195,7 @@ export const FaceService = {
 
   /**
    * Run the Python microservice against a captured clip + reference image
-   * and persist the result. Returns the verification outcome so the caller
-   * can decide what UI to show.
+   * and persist the result (legacy video flow).
    */
   async runVerification(args: {
     userId: string;
@@ -222,7 +219,6 @@ export const FaceService = {
       });
     } catch (err: any) {
       console.error('[FACE] Python service error:', err.message);
-      // Treat transport errors as a soft fail — escalate to admin.
       result = {
         match: false,
         score: 0,
@@ -241,7 +237,6 @@ export const FaceService = {
     const passed = result.match === true && result.liveness.passed === true;
     const flagged = !passed;
 
-    // 1) Update the user row.
     await pool.query(
       `UPDATE users
          SET last_face_check_at = NOW(),
@@ -252,7 +247,6 @@ export const FaceService = {
       [result.score, args.deviceId || null, flagged ? 'FLAGGED' : 'CLEAR', args.userId],
     );
 
-    // 2) Insert the event row (admin reviews flagged ones).
     const eventRes = await pool.query(
       `INSERT INTO face_check_events
         (user_id, status, match_score,
@@ -275,7 +269,6 @@ export const FaceService = {
     );
     const eventId = eventRes.rows[0].id;
 
-    // 3) Audit log entry.
     await pool.query(
       `INSERT INTO audit_logs (admin_id, target_id, action, details)
        VALUES (NULL, $1, 'FACE_CHECK', $2)`,
@@ -290,8 +283,127 @@ export const FaceService = {
       ],
     );
 
-    // 4) If flagged, notify admin via the monitoring room so the dashboard
-    //    can show a real-time badge.
+    if (flagged) {
+      try {
+        io.to('monitoring:all_rides').emit('faceCheckFlagged', {
+          user_id: args.userId,
+          event_id: eventId,
+          score: result.score,
+          reason: result.reason,
+        });
+      } catch {
+        // io may not be initialized in test contexts.
+      }
+    }
+
+    return { ...result, flagged, eventId };
+  },
+
+  /**
+   * Run the Python microservice against a single selfie + reference image
+   * (new single-selfie flow with quality + anti-spoofing).
+   */
+  async runImageVerification(args: {
+    userId: string;
+    imageBuffer: Buffer;
+    imageMime: string;
+    imageFilename: string;
+    referenceBuffer: Buffer;
+    referenceMime: string;
+    deviceId?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+  }): Promise<ImageVerifyResult & { flagged: boolean; eventId: string | null }> {
+    let result: ImageVerifyResult;
+    try {
+      result = await PythonFaceClient.verifyImage({
+        imageBuffer: args.imageBuffer,
+        imageMime: args.imageMime,
+        imageFilename: args.imageFilename,
+        referenceBuffer: args.referenceBuffer,
+        referenceMime: args.referenceMime,
+        referenceFilename: 'reference.jpg',
+      });
+    } catch (err: any) {
+      console.error('[FACE] Python service error (image):', err.message);
+      result = {
+        match: false,
+        score: 0,
+        reason: 'service_error',
+        liveness: {
+          passed: false,
+          confidence: 0,
+          laplacian_var: 0,
+          lbp_variance: 0,
+          brightness: 0,
+          reasons: ['Service unavailable'],
+        },
+        quality: {
+          passed: false,
+          laplacian_var: 0,
+          brightness: 0,
+          face_area_ratio: 0,
+          face_count: 0,
+          reasons: ['Service unavailable'],
+        },
+      };
+    }
+
+    // Combined decision: quality AND match AND liveness must pass
+    const qualityPassed = result.quality?.passed ?? false;
+    const matchPassed = result.match === true;
+    const livenessPassed = result.liveness?.passed ?? false;
+    const passed = qualityPassed && matchPassed && livenessPassed;
+    const flagged = !passed;
+
+    await pool.query(
+      `UPDATE users
+         SET last_face_check_at = NOW(),
+             last_face_check_score = $1,
+             last_face_check_device_id = $2,
+             face_check_status = $3
+       WHERE id = $4`,
+      [result.score, args.deviceId || null, flagged ? 'FLAGGED' : 'CLEAR', args.userId],
+    );
+
+    const eventRes = await pool.query(
+      `INSERT INTO face_check_events
+        (user_id, status, match_score,
+         liveness_face_frames, liveness_motion_px, liveness_blink_count, liveness_laplacian_var,
+         device_id, lat, lng)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [
+        args.userId,
+        flagged ? 'FLAGGED' : 'PASS',
+        result.score,
+        result.liveness?.passed ? 1 : 0,
+        0,
+        0,
+        result.liveness?.laplacian_var ?? 0,
+        args.deviceId || null,
+        args.lat ?? null,
+        args.lng ?? null,
+      ],
+    );
+    const eventId = eventRes.rows[0].id;
+
+    await pool.query(
+      `INSERT INTO audit_logs (admin_id, target_id, action, details)
+       VALUES (NULL, $1, 'FACE_CHECK', $2)`,
+      [
+        args.userId,
+        JSON.stringify({
+          status: flagged ? 'FLAGGED' : 'PASS',
+          score: result.score,
+          reason: result.reason,
+          liveness_confidence: result.liveness?.confidence,
+          quality_passed: qualityPassed,
+          event_id: eventId,
+        }),
+      ],
+    );
+
     if (flagged) {
       try {
         io.to('monitoring:all_rides').emit('faceCheckFlagged', {
@@ -340,14 +452,11 @@ export const FaceService = {
 
       const cleared = args.decision === 'APPROVED';
       if (cleared) {
-        // Approve = lift the flag, but don't reset last_face_check_at —
-        // the driver must still re-verify on the next 12h tick.
         await client.query(
           `UPDATE users SET face_check_status = 'CLEAR' WHERE id = $1`,
           [userId],
         );
       } else {
-        // Reject = keep the flag and the driver stays blocked.
         await client.query(
           `UPDATE users SET face_check_status = 'FLAGGED' WHERE id = $1`,
           [userId],
@@ -370,7 +479,6 @@ export const FaceService = {
 
       await client.query('COMMIT');
 
-      // Push the new state to the driver so the banner clears in real time.
       try {
         io.to(`driver:${userId}`).emit('faceCheckStatusChanged', {
           status: cleared ? 'CLEAR' : 'FLAGGED',

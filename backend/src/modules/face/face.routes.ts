@@ -12,6 +12,7 @@ const router = Router();
 // Driver-side
 router.get('/check-required', authMiddleware, driverMiddleware, FaceController.checkRequired);
 router.post('/verify', authMiddleware, driverMiddleware, FaceController.verify);
+router.post('/verify-image', authMiddleware, driverMiddleware, FaceController.verifyImage);
 
 // Admin-side
 router.get('/admin/flagged', authMiddleware, adminMiddleware, FaceController.listFlagged);

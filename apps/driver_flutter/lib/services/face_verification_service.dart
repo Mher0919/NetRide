@@ -10,9 +10,9 @@ enum FaceCheckReason {
   flagged,
   enrollment,
   firstTime,
-  expired, // >12h since last check
+  expired,
   newDevice,
-  locationJump, // >5mi from last offline location
+  locationJump,
 }
 
 /// High-level state derived from the last server response.
@@ -82,6 +82,8 @@ class FaceVerifyResult {
   final String? clipUrl;
   final String? eventId;
   final Map<String, dynamic>? liveness;
+  final Map<String, dynamic>? quality;
+  final String? selfieUrl;
 
   const FaceVerifyResult({
     required this.passed,
@@ -91,6 +93,8 @@ class FaceVerifyResult {
     this.clipUrl,
     this.eventId,
     this.liveness,
+    this.quality,
+    this.selfieUrl,
   });
 
   factory FaceVerifyResult.fromJson(Map<String, dynamic> json) {
@@ -102,11 +106,13 @@ class FaceVerifyResult {
       clipUrl: json['clipUrl'] as String?,
       eventId: json['eventId'] as String?,
       liveness: json['liveness'] as Map<String, dynamic>?,
+      quality: json['quality'] as Map<String, dynamic>?,
+      selfieUrl: json['selfieUrl'] as String?,
     );
   }
 }
 
-/// Talks to `/api/face/check-required` and `/api/face/verify`.
+/// Talks to `/api/face/check-required` and `/api/face/verify-image`.
 class FaceVerificationService {
   /// Query the server to decide whether the driver must re-verify before
   /// going online. Optional lat/lng let the server compute the >5mi jump
@@ -127,7 +133,7 @@ class FaceVerificationService {
     return FaceCheckDecision.fromJson(response.data as Map<String, dynamic>);
   }
 
-  /// Upload a recorded clip + reference JPEG for verification.
+  /// Upload a recorded clip + reference JPEG for verification (legacy).
   static Future<FaceVerifyResult> verify({
     required File clipFile,
     required File referenceFile,
@@ -162,10 +168,55 @@ class FaceVerificationService {
           'X-Device-Id': deviceId,
           'Content-Type': 'multipart/form-data',
         },
-        // Server-side Python liveness check can take a few seconds; bump
-        // receive timeout so we don't get a false timeout on slow CPUs.
         receiveTimeout: const Duration(seconds: 45),
         sendTimeout: const Duration(seconds: 60),
+      ),
+    );
+
+    return FaceVerifyResult.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Upload a single selfie image + reference JPEG for verification.
+  ///
+  /// This is the new primary flow. Uses the /face/verify-image endpoint
+  /// which includes quality validation, anti-spoofing, and face matching
+  /// in a single call.
+  static Future<FaceVerifyResult> verifyImage({
+    required File selfieFile,
+    required File referenceFile,
+    double? lat,
+    double? lng,
+  }) async {
+    final deviceId = await DeviceFingerprint.getOrCreate();
+
+    final selfieName = p.basename(selfieFile.path);
+    final refName = p.basename(referenceFile.path);
+
+    final formData = FormData.fromMap({
+      'selfie': await MultipartFile.fromFile(
+        selfieFile.path,
+        filename: selfieName,
+        contentType: MediaType('image', 'jpeg'),
+      ),
+      'reference': await MultipartFile.fromFile(
+        referenceFile.path,
+        filename: refName,
+        contentType: MediaType('image', 'jpeg'),
+      ),
+      if (lat != null) 'lat': lat.toString(),
+      if (lng != null) 'lng': lng.toString(),
+    });
+
+    final response = await ApiService.dio.post(
+      '/face/verify-image',
+      data: formData,
+      options: Options(
+        headers: {
+          'X-Device-Id': deviceId,
+          'Content-Type': 'multipart/form-data',
+        },
+        receiveTimeout: const Duration(seconds: 30),
+        sendTimeout: const Duration(seconds: 30),
       ),
     );
 

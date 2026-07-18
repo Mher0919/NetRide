@@ -771,6 +771,22 @@ const UserDetail: React.FC = () => {
                                 <TableCell>
                                   {r.status === 'submitted' && (
                                     <Stack direction="row" spacing={1}>
+                                      {r.new_document_url && (
+                                        <Button
+                                          size="small"
+                                          variant="text"
+                                          color="info"
+                                          onClick={() => {
+                                            const urls = r.new_document_url.startsWith('[')
+                                              ? JSON.parse(r.new_document_url)
+                                              : [r.new_document_url];
+                                            urls.forEach((u: string) => window.open(u, '_blank'));
+                                          }}
+                                          sx={{ borderRadius: '8px', height: 30, fontSize: '0.7rem' }}
+                                        >
+                                          View Docs
+                                        </Button>
+                                      )}
                                       <Button
                                         size="small"
                                         variant="contained"

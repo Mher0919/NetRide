@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,17 +10,18 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/face_verification_service.dart';
 
-/// Live-capture screen with the dashed head outline overlay (Uber-style).
+/// Single-selfie capture screen for identity verification.
 ///
 /// Flow:
-///   1. Initialize camera (rear-camera first, fallback to any available).
-///   2. Show dashed head outline + "TAP TO START" pill.
-///   3. On tap → countdown 3-2-1, then start recording.
-///   4. During recording, show each liveness prompt ("Look left"…) for 3 seconds
-///      with a visible countdown and progress bar.
-///   5. Stop early if the user taps "STOP" or auto-stop after all prompts.
-///   6. POST /api/face/verify with the clip + the cached enrollment image.
-///   7. Show inline PASS / FAIL, then `Navigator.pop` with the result.
+///   1. Initialize front camera
+///   2. Show oval frame with guidance text
+///   3. Driver taps to capture one selfie
+///   4. Local brightness check (reject obviously bad images)
+///   5. Processing indicator with status messages
+///   6. POST /api/face/verify-image with selfie + enrollment reference
+///   7. Show PASS/FAIL result, then Navigator.pop with the result
+///
+/// No multi-angle prompts, no video recording, no countdown.
 class FaceCaptureScreen extends StatefulWidget {
   final String reason;
 
@@ -31,47 +34,34 @@ class FaceCaptureScreen extends StatefulWidget {
   State<FaceCaptureScreen> createState() => _FaceCaptureScreenState();
 }
 
-class _FaceCaptureScreenState extends State<FaceCaptureScreen>
-    with TickerProviderStateMixin {
+class _FaceCaptureScreenState extends State<FaceCaptureScreen> {
   CameraController? _camera;
   Future<void>? _initFuture;
-  bool _isRecording = false;
-  bool _isCountingDown = false;
-  bool _isStarting = false;
-  bool _isSubmitting = false;
-  int _countdownValue = 3;
+  bool _isCapturing = false;
+  bool _isProcessing = false;
+  String _processingMessage = '';
+  bool _showResult = false;
+  bool _captureSuccess = false;
+  String _resultMessage = '';
+  String _resultDetail = '';
+  bool _hasError = false;
+  XFile? _capturedImage;
 
-  // Sequential prompt state.
-  static const int _secondsPerPrompt = 3;
-  int _currentPromptStep = 0;
-  int _promptSecondsRemaining = _secondsPerPrompt;
-  Timer? _promptTimer;
-
-  Timer? _countdownTimer;
-
-  // Animation for the dashed outline pulse.
-  late final AnimationController _pulseController;
-
-  // App palette (kept consistent with the rest of the app).
   static const Color _cream = Color(0xFFF7F4EF);
   static const Color _sage = Color(0xFF5B7760);
   static const Color _terracotta = Color(0xFFC65A5A);
   static const Color _darkForest = Color(0xFF2F3A32);
 
-  static const _prompts = [
-    'Look left',
-    'Look right',
-    'Smile',
-    'Blink twice',
+  static const _processingMessages = [
+    'Checking image quality...',
+    'Detecting face...',
+    'Validating selfie...',
+    'Verifying identity...',
   ];
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat(reverse: true);
     _initFuture = _initializeCamera();
   }
 
@@ -99,7 +89,7 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
       ));
       return;
     }
-    // Prefer the front camera (selfie). Fall back to whatever's there.
+
     final preferred = cameras.firstWhere(
       (c) => c.lensDirection == CameraLensDirection.front,
       orElse: () => cameras.first,
@@ -116,155 +106,245 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
 
   @override
   void dispose() {
-    _countdownTimer?.cancel();
-    _promptTimer?.cancel();
-    _pulseController.dispose();
     _camera?.dispose();
     super.dispose();
   }
 
-  Future<void> _startCaptureFlow() async {
-    if (_camera == null || _isRecording || _isCountingDown || _isStarting) return;
+  Future<void> _captureSelfie() async {
+    if (_camera == null || _isCapturing || _isProcessing) return;
 
     setState(() {
-      _isStarting = true;
-      _isCountingDown = true;
-      _countdownValue = 3;
+      _isCapturing = true;
+      _hasError = false;
+      _showResult = false;
     });
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!mounted) return;
-      if (_countdownValue <= 1) {
-        timer.cancel();
-        setState(() {
-          _isStarting = false;
-          _isCountingDown = false;
-          _countdownValue = 3;
-          _currentPromptStep = 0;
-          _promptSecondsRemaining = _secondsPerPrompt;
-        });
-        await _startRecording();
-      } else {
-        setState(() => _countdownValue -= 1);
-      }
-    });
-  }
-
-  Future<void> _startRecording() async {
-    if (_camera == null) return;
-
-    setState(() => _isRecording = true);
 
     try {
-      await _camera!.startVideoRecording();
-    } catch (e) {
-      _showErrorAndExit('Failed to start camera: $e');
-      return;
-    }
+      final captured = await _camera!.takePicture();
+      if (!mounted) return;
 
-    _advancePrompt();
-  }
-
-  /// Show the current prompt for [_secondsPerPrompt] seconds, then advance
-  /// to the next prompt or stop when all prompts are complete.
-  void _advancePrompt() {
-    if (!mounted || _camera == null) return;
-    _promptTimer?.cancel();
-
-    if (_currentPromptStep >= _prompts.length) {
-      _stopAndSubmit();
-      return;
-    }
-
-    setState(() {
-      _promptSecondsRemaining = _secondsPerPrompt;
-    });
-
-    _promptTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
+      // Basic client-side brightness check
+      final brightnessCheck = await _checkBrightness(captured);
+      if (!brightnessCheck.passed) {
+        setState(() {
+          _isCapturing = false;
+          _hasError = true;
+          _showResult = true;
+          _captureSuccess = false;
+          _resultMessage = brightnessCheck.message;
+          _resultDetail = 'Please move to a better lit area and try again.';
+        });
         return;
       }
-      if (_promptSecondsRemaining <= 1) {
-        timer.cancel();
-        setState(() {
-          _currentPromptStep++;
-        });
-        _advancePrompt();
-      } else {
-        setState(() => _promptSecondsRemaining--);
-      }
-    });
+
+      setState(() {
+        _isCapturing = false;
+        _isProcessing = true;
+        _processingMessage = _processingMessages[0];
+      });
+
+      await _processVerification(captured);
+    } catch (e) {
+      setState(() {
+        _isCapturing = false;
+        _hasError = true;
+        _showResult = true;
+        _captureSuccess = false;
+        _resultMessage = 'Failed to capture photo';
+        _resultDetail = 'Please try again.';
+      });
+    }
   }
 
-  Future<void> _stopAndSubmit() async {
-    if (_camera == null || !_isRecording || _isSubmitting) return;
-    _isSubmitting = true;
-    _promptTimer?.cancel();
-
-    XFile? captured;
+  Future<_BrightnessCheck> _checkBrightness(XFile image) async {
     try {
-      captured = await _camera!.stopVideoRecording();
-    } catch (e) {
-      _showErrorAndExit('Recording failed: $e');
+      final bytes = await image.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final bitmap = frame.image;
+      final byteData = await bitmap.toByteData();
+      await codec.dispose();
+
+      if (byteData == null) {
+        return _BrightnessCheck(false, 'Could not analyze image');
+      }
+
+      final pixels = byteData.buffer.asUint8List();
+      double totalBrightness = 0;
+      int count = 0;
+
+      for (int i = 0; i < pixels.length - 3; i += 4) {
+        final r = pixels[i];
+        final g = pixels[i + 1];
+        final b = pixels[i + 2];
+        totalBrightness += (0.299 * r + 0.587 * g + 0.114 * b);
+        count++;
+      }
+
+      final avgBrightness = count > 0 ? totalBrightness / count : 128;
+
+      if (avgBrightness < 40) {
+        return _BrightnessCheck(false, 'Image too dark');
+      }
+      if (avgBrightness > 230) {
+        return _BrightnessCheck(false, 'Image too bright');
+      }
+
+      return _BrightnessCheck(true, '');
+    } catch (_) {
+      return _BrightnessCheck(true, '');
+    }
+  }
+
+  Future<void> _processVerification(XFile captured) async {
+    setState(() => _processingMessage = _processingMessages[0]);
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    if (!mounted) return;
+    setState(() => _processingMessage = _processingMessages[1]);
+    await Future.delayed(const Duration(milliseconds: 400));
+
+    final prefs = await _loadCachedReference();
+    if (prefs == null) {
+      if (!mounted) return;
+      setState(() {
+        _isProcessing = false;
+        _hasError = true;
+        _showResult = true;
+        _captureSuccess = false;
+        _resultMessage = 'No reference image found';
+        _resultDetail = 'Please re-enroll your face from your profile.';
+      });
       return;
     }
 
     if (!mounted) return;
-    setState(() => _isRecording = false);
+    setState(() => _processingMessage = _processingMessages[2]);
+    await Future.delayed(const Duration(milliseconds: 400));
 
-    // Move the captured clip into a permanent location so it survives the
-    // platform's tmp cleanup, then upload it together with the user's
-    // cached enrollment photo.
+    if (!mounted) return;
+    setState(() => _processingMessage = _processingMessages[3]);
+
     try {
-      final dir = await getTemporaryDirectory();
-      final savedPath = p.join(dir.path, 'face_capture_${DateTime.now().millisecondsSinceEpoch}.mp4');
-      final capturedFile = captured;
-      if (capturedFile == null) {
-        _showErrorAndExit('Recording returned no file.');
-        return;
-      }
-      await File(capturedFile.path).copy(savedPath);
-
-      final prefs = await _loadCachedReference();
-      if (prefs == null) {
-        _showErrorAndExit('No reference image found. Please re-enroll your face from your profile.');
-        return;
-      }
-
-      final result = await FaceVerificationService.verify(
-        clipFile: File(savedPath),
+      final result = await FaceVerificationService.verifyImage(
+        selfieFile: File(captured.path),
         referenceFile: prefs,
       );
 
       if (!mounted) return;
-      _isSubmitting = false;
-      Navigator.pop(context, result);
+
+      if (result.passed) {
+        setState(() {
+          _isProcessing = false;
+          _showResult = true;
+          _captureSuccess = true;
+          _resultMessage = 'Verification successful!';
+          _resultDetail = 'You can now go online.';
+        });
+        await Future.delayed(const Duration(milliseconds: 1500));
+        if (mounted) {
+          Navigator.pop(context, FaceVerifyResult(
+            passed: true,
+            match: true,
+            score: result.score,
+            reason: 'match',
+            liveness: result.liveness,
+            quality: result.quality,
+          ));
+        }
+      } else {
+        String message;
+        String detail;
+
+        switch (result.reason) {
+          case 'quality_failed':
+            message = 'Photo quality not sufficient';
+            detail = _qualityFailureDetail(result);
+            break;
+          case 'liveness_failed':
+            message = 'Liveness check failed';
+            detail = 'Please ensure you are using a live photo of your face, not a picture or screen.';
+            break;
+          case 'face_mismatch':
+            message = 'Face does not match your enrollment photo';
+            detail = 'Please ensure good lighting and that your face is clearly visible.';
+            break;
+          case 'no_face_in_selfie':
+            message = 'No face detected';
+            detail = 'Please position your face inside the frame and try again.';
+            break;
+          case 'service_error':
+            message = 'Verification service unavailable';
+            detail = 'Please try again in a few moments.';
+            break;
+          default:
+            message = 'Verification failed';
+            detail = 'Please try again.';
+        }
+
+        setState(() {
+          _isProcessing = false;
+          _showResult = true;
+          _captureSuccess = false;
+          _hasError = true;
+          _resultMessage = message;
+          _resultDetail = detail;
+        });
+      }
     } catch (e) {
-      _isSubmitting = false;
-      _showErrorAndExit('Upload failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _isProcessing = false;
+        _hasError = true;
+        _showResult = true;
+        _captureSuccess = false;
+        _resultMessage = 'Verification failed';
+        _resultDetail = _getNetworkErrorMessage(e);
+      });
     }
   }
 
+  String _qualityFailureDetail(FaceVerifyResult result) {
+    final quality = result.quality;
+    if (quality == null) return 'Please retake with better lighting.';
+    final reasons = quality['reasons'] as List<dynamic>?;
+    if (reasons == null || reasons.isEmpty) return 'Please retake with better lighting.';
+    return reasons.join('\n');
+  }
+
+  String _getNetworkErrorMessage(dynamic e) {
+    final msg = e.toString().toLowerCase();
+    if (msg.contains('timeout')) return 'Request timed out. Please check your connection and try again.';
+    if (msg.contains('connection') || msg.contains('network')) return 'Network error. Please check your internet connection.';
+    return 'An unexpected error occurred. Please try again.';
+  }
+
   Future<File?> _loadCachedReference() async {
-    // The reference image is whatever the user uploaded as their profile
-    // photo at onboarding. We stored it locally in shared_prefs (path).
-    // Falls back to the platform's files dir if needed.
     final dir = await getApplicationDocumentsDirectory();
     final refPath = p.join(dir.path, 'face_enrollment.jpg');
     final f = File(refPath);
     return f.existsSync() ? f : null;
   }
 
-  void _showErrorAndExit(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: _terracotta),
-    );
+  void _retake() {
+    setState(() {
+      _showResult = false;
+      _hasError = false;
+      _captureSuccess = false;
+      _resultMessage = '';
+      _resultDetail = '';
+      _capturedImage = null;
+    });
+  }
+
+  void _exitWithError() {
     Navigator.pop(context, FaceVerifyResult(
       passed: false,
       match: false,
       score: 0,
       reason: 'client_error',
+      quality: null,
+      liveness: null,
     ));
   }
 
@@ -294,7 +374,6 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
 
     return Stack(
       children: [
-        // Camera preview (mirrored for selfie)
         Positioned.fill(
           child: ClipRect(
             child: OverflowBox(
@@ -311,34 +390,25 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
           ),
         ),
 
-        // Dark scrim around the cutout so the dashed outline pops
         Positioned.fill(
           child: CustomPaint(
             painter: _CutoutScrimPainter(
-              ovalSize: const Size(240, 320),
+              ovalSize: const Size(260, 340),
               color: Colors.black.withOpacity(0.55),
             ),
           ),
         ),
 
-        // Animated dashed head outline
         Center(
-          child: AnimatedBuilder(
-            animation: _pulseController,
-            builder: (context, _) {
-              return CustomPaint(
-                size: const Size(240, 320),
-                painter: _DashedHeadOutlinePainter(
-                  progress: _pulseController.value,
-                  strokeColor: _cream,
-                  dashColor: _sage,
-                ),
-              );
-            },
+          child: CustomPaint(
+            size: const Size(260, 340),
+            painter: _SelfieFramePainter(
+              strokeColor: _cream,
+              cornerColor: _sage,
+            ),
           ),
         ),
 
-        // Top bar with title + close
         Positioned(
           top: 12,
           left: 12,
@@ -346,7 +416,7 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
           child: Row(
             children: [
               IconButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: _isProcessing ? null : () => Navigator.pop(context),
                 icon: const Icon(Icons.close, color: Colors.white),
               ),
               const SizedBox(width: 8),
@@ -364,139 +434,216 @@ class _FaceCaptureScreenState extends State<FaceCaptureScreen>
           ),
         ),
 
-        // Bottom instruction card
-        Positioned(
-          left: 16,
-          right: 16,
-          bottom: 28,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-            decoration: BoxDecoration(
-              color: _cream,
-              borderRadius: BorderRadius.circular(20),
+        if (_isProcessing)
+          _buildProcessingOverlay()
+        else if (_showResult)
+          _buildResultCard()
+        else
+          _buildCapturePrompt(),
+      ],
+    );
+  }
+
+  Widget _buildCapturePrompt() {
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 28,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        decoration: BoxDecoration(
+          color: _cream,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Position your face inside the frame',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                color: _darkForest,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_isCountingDown) ...[
-                  Text(
-                    '$_countdownValue',
-                    style: GoogleFonts.inter(
-                      color: _sage,
-                      fontSize: 56,
-                      fontWeight: FontWeight.w800,
+            const SizedBox(height: 4),
+            Text(
+              'Make sure you\'re in a well-lit area',
+              style: GoogleFonts.inter(
+                color: _darkForest.withOpacity(0.6),
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Look directly at the camera',
+              style: GoogleFonts.inter(
+                color: _darkForest.withOpacity(0.5),
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isCapturing ? null : _captureSelfie,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _sage,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                child: _isCapturing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(
+                        'TAKE SELFIE',
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProcessingOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.7),
+      child: Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 40),
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 32),
+          decoration: BoxDecoration(
+            color: _cream,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: _sage,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                _processingMessage,
+                style: GoogleFonts.inter(
+                  color: _darkForest,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Please wait while we verify your identity',
+                style: GoogleFonts.inter(
+                  color: _darkForest.withOpacity(0.6),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResultCard() {
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 28,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        decoration: BoxDecoration(
+          color: _cream,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _captureSuccess ? Icons.check_circle_outline : Icons.error_outline,
+              color: _captureSuccess ? _sage : _terracotta,
+              size: 40,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _resultMessage,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                color: _captureSuccess ? _sage : _terracotta,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (_resultDetail.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                _resultDetail,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  color: _darkForest.withOpacity(0.7),
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (!_captureSuccess)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _retake,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _sage,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Get ready…',
+                  child: Text(
+                    'TRY AGAIN',
                     style: GoogleFonts.inter(
-                      color: _darkForest,
-                      fontSize: 14,
-                    ),
-                  ),
-                ] else if (_isRecording) ...[
-                  Text(
-                    _prompts[_currentPromptStep < _prompts.length ? _currentPromptStep : _prompts.length - 1],
-                    style: GoogleFonts.inter(
-                      color: _sage,
-                      fontSize: 22,
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Step ${(_currentPromptStep < _prompts.length ? _currentPromptStep : _prompts.length - 1) + 1} of ${_prompts.length}',
-                    style: GoogleFonts.inter(
-                      color: _darkForest.withOpacity(0.6),
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: _promptSecondsRemaining / _secondsPerPrompt,
-                      backgroundColor: _darkForest.withOpacity(0.1),
-                      valueColor: const AlwaysStoppedAnimation<Color>(_sage),
-                      minHeight: 4,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${_promptSecondsRemaining}s',
-                    style: GoogleFonts.inter(
-                      color: _darkForest,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isSubmitting ? null : _stopAndSubmit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _terracotta,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: _isSubmitting
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Text('STOP'),
-                    ),
-                  ),
-                ] else ...[
-                  Text(
-                    'Position your face inside the outline',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(
-                      color: _darkForest,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Make sure you\'re in a well-lit area',
-                    style: GoogleFonts.inter(
-                      color: _darkForest.withOpacity(0.6),
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isStarting ? null : _startCaptureFlow,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _sage,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: _isStarting
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Text('TAP TO START'),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
+                ),
+              )
+            else
+              const SizedBox.shrink(),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
 
-/// Scrim with a transparent oval cutout so the face is the only well-lit
-/// region on the screen.
+class _BrightnessCheck {
+  final bool passed;
+  final String message;
+
+  _BrightnessCheck(this.passed, this.message);
+}
+
 class _CutoutScrimPainter extends CustomPainter {
   final Size ovalSize;
   final Color color;
@@ -523,59 +670,59 @@ class _CutoutScrimPainter extends CustomPainter {
       old.ovalSize != ovalSize || old.color != color;
 }
 
-/// Dashed head-shaped outline that pulses softly to invite the driver
-/// inside.
-class _DashedHeadOutlinePainter extends CustomPainter {
-  final double progress; // 0..1
+class _SelfieFramePainter extends CustomPainter {
   final Color strokeColor;
-  final Color dashColor;
+  final Color cornerColor;
 
-  _DashedHeadOutlinePainter({
-    required this.progress,
-    required this.strokeColor,
-    required this.dashColor,
-  });
+  _SelfieFramePainter({required this.strokeColor, required this.cornerColor});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final pulse = 1.0 + (progress * 0.04);
-    final w = size.width * pulse;
-    final h = size.height * pulse;
-
-    final rect = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height / 2),
-      width: w,
-      height: h,
-    );
-
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
+      ..strokeWidth = 2
+      ..color = strokeColor.withOpacity(0.6);
+
+    final rect = Rect.fromLTWH(2, 2, size.width - 4, size.height - 4);
+    canvas.drawOval(rect, paint);
+
+    const cornerLength = 30.0;
+    const cornerGap = 20.0;
+    final cornerPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
       ..strokeCap = StrokeCap.round
-      ..color = dashColor.withOpacity(0.85);
+      ..color = cornerColor;
 
-    final path = Path()..addOval(rect);
-    _drawDashedPath(canvas, path, paint, dashWidth: 8, gapWidth: 6);
-  }
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final rx = size.width / 2 - 2;
+    final ry = size.height / 2 - 2;
 
-  void _drawDashedPath(
-    Canvas canvas,
-    Path path,
-    Paint paint, {
-    required double dashWidth,
-    required double gapWidth,
-  }) {
-    for (final metric in path.computeMetrics()) {
-      double dist = 0;
-      while (dist < metric.length) {
-        final next = dist + dashWidth;
-        canvas.drawPath(metric.extractPath(dist, next.clamp(0, metric.length)), paint);
-        dist = next + gapWidth;
-      }
+    for (final angle in [0.0, 90.0, 180.0, 270.0]) {
+      final rad = angle * (3.14159 / 180.0);
+      final x = cx + rx * 0.85 * _cos(rad);
+      final y = cy + ry * 0.85 * _sin(rad);
+      final dx = _cos(rad) * cornerLength;
+      final dy = _sin(rad) * cornerLength;
+      canvas.drawLine(Offset(x, y), Offset(x + dx, y + dy), cornerPaint);
     }
   }
 
+  double _cos(double rad) => _clampCos(rad);
+  double _sin(double rad) => _clampSin(rad);
+
+  double _clampCos(double rad) {
+    final v = rad == 0 ? 1.0 : (rad / 90 * 3.14159 / 2).cos();
+    return v;
+  }
+
+  double _clampSin(double rad) {
+    final v = (rad / 90 * 3.14159 / 2).sin();
+    return v;
+  }
+
   @override
-  bool shouldRepaint(covariant _DashedHeadOutlinePainter old) =>
-      old.progress != progress || old.dashColor != dashColor;
+  bool shouldRepaint(covariant _SelfieFramePainter old) =>
+      old.strokeColor != strokeColor || old.cornerColor != cornerColor;
 }

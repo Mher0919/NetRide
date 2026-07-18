@@ -329,17 +329,16 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       );
     }
 
-    // 3. Document action required — one card per document type
-    for (final req in provider.documentRequirements) {
-      if (req['status'] != 'resubmission_required') continue;
-      final docType = req['document_type'] as String;
-      if (docType == 'inspection_photo_url') continue;
-
+    // 3. Document action required — single card for all doc types
+    final hasDocAction = provider.documentRequirements.any(
+      (r) => r['status'] == 'resubmission_required' && r['document_type'] != 'inspection_photo_url',
+    );
+    if (hasDocAction) {
       cards.add(
         DriverStatusCard(
           state: DriverStatus.documentActionRequired,
-          documentType: docType,
-          onAction: () => _navigateToDocumentScreen(docType),
+          documentType: null,  // generic card for all docs
+          onAction: () => Navigator.pushNamed(context, '/documents'),
         ),
       );
     }
@@ -381,7 +380,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     }
   }
 
-  /// Show the headshot requirement modal instead of immediately opening the camera.
+  /// Show the selfie requirement modal instead of immediately opening the camera.
   Future<void> _showHeadshotModal({required String reason}) async {
     final provider = Provider.of<DriverProvider>(context, listen: false);
     final choice = await showDialog<String>(
@@ -390,11 +389,12 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: const Text(
-          'Headshot Photo Required',
+          'Selfie Required',
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
         ),
         content: const Text(
-          'A headshot verification is required before you can go online.',
+          'A quick selfie verification is required before you can go online.\n\n'
+          'You\'ll only need to take one front-facing photo.',
           style: TextStyle(fontSize: 14, height: 1.4),
         ),
         actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -425,7 +425,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               child: const Text(
-                'Take Photo',
+                'Take Selfie',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
               ),
             ),
@@ -453,8 +453,21 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     if (result == null) return;
     if (result.passed) {
       provider.setHeadshotActionRequired(false);
-      provider.markFaceCheckPassed();
-      _showSuccess('Face check passed — you\'re cleared to drive.');
+      provider.markFaceCheckPassed(at: DateTime.now());
+      _showSuccess('Face check passed — you\'re now online!');
+
+      // Automatically go online after successful verification
+      final ok = await provider.setOnline(
+        lat: _lastPosition?.latitude,
+        lng: _lastPosition?.longitude,
+      );
+      if (ok && mounted) {
+        SoundService.instance.playOnline();
+      }
+    } else if (result.reason == 'quality_failed') {
+      _showError('Photo quality not sufficient. Please ensure good lighting and try again.');
+    } else if (result.reason == 'liveness_failed') {
+      _showError('Liveness check failed. Please look directly at the camera and ensure you\'re using a live selfie.');
     } else if (result.reason == 'flagged' || result.match == false) {
       provider.markFaceCheckFlagged(reason);
       _showError('Face check flagged. Our team will review your capture.');
@@ -462,6 +475,10 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         result.reason == 'camera_permission_denied' ||
         result.reason == 'no_camera') {
       _showError('Couldn\'t open the camera. Please try again.');
+    } else if (result.reason == 'service_error') {
+      _showError('Verification service is temporarily unavailable. Please try again.');
+    } else {
+      _showError('Verification failed. Please ensure good lighting and try again.');
     }
   }
 

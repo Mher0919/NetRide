@@ -11,18 +11,12 @@ import { FaceService } from '../../services/face.service';
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB ceiling for clip
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 
 export class FaceController {
   /**
    * GET /api/face/check-required
-   *   Body: { lat?, lng? }
-   *   Returns: { required, reason, faceCheckStatus, lastFaceCheckAt }
-   *
-   * The driver app calls this before flipping the offline switch and
-   * before each login to decide whether to route into the face capture
-   * screen.
    */
   static async checkRequired(req: AuthRequest, res: Response) {
     const userId = req.user!.id;
@@ -40,10 +34,8 @@ export class FaceController {
   }
 
   /**
-   * POST /api/face/verify  (multipart: video + reference image)
-   *
-   * The captured clip is also persisted to disk so admin can review it
-   * later when it gets flagged.
+   * POST /api/face/verify  (multipart: video + reference)
+   * Legacy multi-angle video flow — preserved for backward compatibility.
    */
   static verify = [
     upload.fields([
@@ -75,7 +67,6 @@ export class FaceController {
             .json({ error: 'Missing reference image.' });
         }
 
-        // Persist the clip to disk so admin can review flagged events.
         const clipDir = path.join(__dirname, '../../uploads/face', userId);
         fs.mkdirSync(clipDir, { recursive: true });
         const clipFilename = `${uuidv4()}.mp4`;
@@ -83,7 +74,6 @@ export class FaceController {
         fs.writeFileSync(clipPath, videoFile.buffer);
         const clipUrl = `${env.APP_URL}/uploads/face/${userId}/${clipFilename}`;
 
-        // Also save the latest enrollment image (overwrites).
         const refFilename = `${uuidv4()}.jpg`;
         const refPath = path.join(clipDir, refFilename);
         fs.writeFileSync(refPath, referenceFile.buffer);
@@ -100,7 +90,6 @@ export class FaceController {
           lng,
         });
 
-        // Update enrollment + device id on success.
         if (!result.flagged) {
           await pool.query(
             `UPDATE users
@@ -122,6 +111,93 @@ export class FaceController {
         });
       } catch (err: any) {
         console.error('[FACE] verify error:', err.message);
+        res.status(500).json({ error: 'Face verification failed. Please try again.' });
+      }
+    },
+  ];
+
+  /**
+   * POST /api/face/verify-image  (multipart: selfie image + reference)
+   * New single-selfie flow with quality validation + anti-spoofing.
+   */
+  static verifyImage = [
+    upload.fields([
+      { name: 'selfie', maxCount: 1 },
+      { name: 'reference', maxCount: 1 },
+    ]),
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const deviceId =
+          (req.header('X-Device-Id') as string | undefined) || null;
+        const lat = req.body?.lat ? Number(req.body.lat) : null;
+        const lng = req.body?.lng ? Number(req.body.lng) : null;
+
+        const files = req.files as
+          | { [k: string]: Express.Multer.File[] }
+          | undefined;
+        const selfieFile = files?.selfie?.[0];
+        const referenceFile = files?.reference?.[0];
+
+        if (!selfieFile) {
+          return res
+            .status(400)
+            .json({ error: 'Missing selfie image.' });
+        }
+        if (!referenceFile) {
+          return res
+            .status(400)
+            .json({ error: 'Missing reference image.' });
+        }
+
+        // Persist the selfie to disk for admin review
+        const clipDir = path.join(__dirname, '../../uploads/face', userId);
+        fs.mkdirSync(clipDir, { recursive: true });
+        const selfieFilename = `${uuidv4()}.jpg`;
+        const selfiePath = path.join(clipDir, selfieFilename);
+        fs.writeFileSync(selfiePath, selfieFile.buffer);
+        const selfieUrl = `${env.APP_URL}/uploads/face/${userId}/${selfieFilename}`;
+
+        const refFilename = `${uuidv4()}.jpg`;
+        const refPath = path.join(clipDir, refFilename);
+        fs.writeFileSync(refPath, referenceFile.buffer);
+        const refUrl = `${env.APP_URL}/uploads/face/${userId}/${refFilename}`;
+
+        const result = await FaceService.runImageVerification({
+          userId,
+          imageBuffer: selfieFile.buffer,
+          imageMime: selfieFile.mimetype || 'image/jpeg',
+          imageFilename: 'selfie.jpg',
+          referenceBuffer: referenceFile.buffer,
+          referenceMime: referenceFile.mimetype || 'image/jpeg',
+          deviceId,
+          lat,
+          lng,
+        });
+
+        // Update enrollment + device id on success
+        if (!result.flagged) {
+          await pool.query(
+            `UPDATE users
+               SET face_enrollment_url = $1,
+                   last_device_id = COALESCE(NULLIF($2, ''), last_device_id)
+             WHERE id = $3`,
+            [refUrl, deviceId || null, userId],
+          );
+        }
+
+        res.json({
+          status: result.flagged ? 'FLAGGED' : 'PASS',
+          match: result.match,
+          score: result.score,
+          reason: result.reason,
+          liveness: result.liveness,
+          quality: result.quality,
+          eventId: result.eventId,
+          selfieUrl: result.flagged ? selfieUrl : null,
+        });
+      } catch (err: any) {
+        console.error('[FACE] verify-image error:', err.message);
         res.status(500).json({ error: 'Face verification failed. Please try again.' });
       }
     },

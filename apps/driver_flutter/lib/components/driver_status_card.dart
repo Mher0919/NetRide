@@ -160,7 +160,17 @@ class DriverStatusCard extends StatelessWidget {
   }
 
   Widget _buildDocumentActionRequired() {
-    final docInfo = _getDocumentInfo(documentType ?? '');
+    if (documentType == null) {
+      return _build(
+        color: AppTheme.errorColor,
+        icon: Icons.description_outlined,
+        title: 'Action required: documents',
+        message: 'An admin has requested updated documents. Please review and resubmit.',
+        actionLabel: 'VIEW',
+        onAction: onAction,
+      );
+    }
+    final docInfo = _getDocumentInfo(documentType!);
     return _build(
       color: AppTheme.errorColor,
       icon: docInfo.icon,
