@@ -21,6 +21,7 @@ import PayoutCards from './pages/PayoutCards';
 import Payouts from './pages/Payouts';
 import UserTable from './components/UserTable';
 import MainLayout from './components/MainLayout';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -48,7 +49,9 @@ const App: React.FC = () => {
             
             <Route path="/" element={
               <ProtectedRoute>
-                <MainLayout />
+                <ErrorBoundary>
+                  <MainLayout />
+                </ErrorBoundary>
               </ProtectedRoute>
             }>
               <Route index element={<Dashboard />} />

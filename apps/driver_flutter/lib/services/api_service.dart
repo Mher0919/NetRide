@@ -16,6 +16,9 @@ class ApiService {
           ? 'https://netride.onrender.com/api' 
           : 'https://netride.onrender.com/api';
 
+  /// The API base URL (with trailing /api).
+  static String get baseUrl => _baseUrl;
+
   static final Dio dio = Dio(
     BaseOptions(
       baseUrl: _baseUrl,

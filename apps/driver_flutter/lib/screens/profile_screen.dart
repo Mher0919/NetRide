@@ -13,6 +13,7 @@ import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
 import '../cache/cache_service.dart';
+import '../utils/file_url.dart';
 import '../cache/cache_keys.dart';
 import '../cache/cache_policy.dart';
 import 'settings_screen.dart';
@@ -1090,7 +1091,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: _profileImageUrl != null
                     ? ClipOval(
                         child: CachedNetworkImage(
-                          imageUrl: _profileImageUrl!,
+                          imageUrl: resolveFileUrl(_profileImageUrl!),
                           width: 100,
                           height: 100,
                           fit: BoxFit.cover,

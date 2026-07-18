@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
+import '../utils/file_url.dart';
 
 class VehicleInspectionScreen extends StatefulWidget {
   const VehicleInspectionScreen({super.key});
@@ -1030,7 +1031,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
-                    url,
+                    resolveFileUrl(url),
                     fit: BoxFit.cover,
                     width: double.infinity,
                     height: double.infinity,
@@ -1092,7 +1093,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: Image.network(
-                url,
+                resolveFileUrl(url),
                 fit: BoxFit.contain,
                 width: double.infinity,
                 height: double.infinity,

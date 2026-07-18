@@ -17,6 +17,7 @@ import { initSentry } from './observability/sentry';
 import { logger } from './observability/logger';
 import { requestContext, requestLogger } from './middleware/pinoHttp';
 import healthRouter from './health/health.controller';
+import fileRoutes from './routes/files.routes';
 import { register } from './observability/metrics';
 
 // Sentry must initialize before any other module that may throw at
@@ -139,6 +140,7 @@ app.use('/api/geospatial', geospatialRoutes);
 app.use('/api/navigation', navigationRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/face', faceRoutes);
+app.use('/api/files', fileRoutes);
 app.post('/api/upload', UploadService.upload);
 
 // Global Error Handler
@@ -427,6 +429,18 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ DOB locked schema (027) applied');
+    }
+
+    // Storage files table (028) — permanent file references.
+    const hasStorageFiles = await pool.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_name = 'storage_files'"
+    );
+    if (hasStorageFiles.rowCount === 0) {
+      console.log('⚡ Applying storage_files schema (028)...');
+      const schemaPath = path.join(__dirname, '../migrations/028_storage_files.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Storage files schema (028) applied');
     }
 
     console.log('🚀 All migrations completed');

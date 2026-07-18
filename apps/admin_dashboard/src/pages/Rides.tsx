@@ -5,6 +5,7 @@ import {
   Paper, 
   Chip, 
   Button,
+  CircularProgress,
   Table,
   TableBody,
   TableCell,
@@ -33,15 +34,19 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchRides = async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await getRides({ status, page: page + 1, limit: rowsPerPage });
-      setRides(data.rides);
-      setTotal(data.total);
-    } catch (error) {
-      console.error('Failed to fetch rides:', error);
+      setRides(data.rides ?? []);
+      setTotal(data.total ?? 0);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to fetch rides';
+      setError(msg);
+      console.error('Failed to fetch rides:', err);
     } finally {
       setLoading(false);
     }
@@ -216,7 +221,19 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
                   </TableCell>
                 </TableRow>
               ))}
-              {rides.length === 0 && !loading && (
+              {error && (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ py: 10 }}>
+                    <Box sx={{ opacity: 0.7 }}>
+                      <RefreshIcon sx={{ fontSize: 48, mb: 2, color: 'error.main' }} />
+                      <Typography variant="h6" color="error" gutterBottom>Unable to load rides</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{error}</Typography>
+                      <Button variant="outlined" size="small" onClick={fetchRides}>Retry</Button>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              )}
+              {!error && rides.length === 0 && !loading && (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 10 }}>
                     <Box sx={{ opacity: 0.5 }}>

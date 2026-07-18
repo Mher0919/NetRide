@@ -5,11 +5,7 @@ import { VerificationStatus, UserRole } from '@prisma/client';
 import { pool } from '../../config/database';
 import { SpeedingDetector } from '../../services/speeding_detector';
 import { EmailService } from '../../services/email.service';
-import { v4 as uuidv4 } from 'uuid';
-import fs from 'fs';
-import path from 'path';
-import { env } from '../../config/env';
-import { uploadToSupabase } from '../../config/supabase';
+import { StorageService } from '../../services/storage.service';
 import { io } from '../../app';
 
 export class AdminController {
@@ -1779,21 +1775,18 @@ export class AdminController {
     }
 
     try {
-      const extension = mimetype.split('/')[1] || 'jpg';
-      const filename = `${uuidv4()}.${extension}`;
       const buffer = Buffer.from(image, 'base64');
+      const fileType = field.replace(/_url$/, '');
+      const adminId = req.user?.id || id;
 
-      // Try Supabase first
-      let url: string | null = await uploadToSupabase(buffer, filename, mimetype);
-      if (!url) {
-        // Fallback to local disk
-        const uploadDir = path.join(__dirname, '../../uploads');
-        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-        fs.writeFileSync(path.join(uploadDir, filename), buffer);
-        url = `${env.APP_URL}/uploads/${filename}`;
-      }
+      const { id: fileId, url } = await StorageService.upload(buffer, {
+        userId: id,
+        fileType,
+        originalName: field,
+        mimetype,
+      });
 
-      // Update the database
+      // Update the database with the portable /api/files/:id URL
       await pool.query(
         `UPDATE ${mapping.table} SET ${mapping.column} = $1 WHERE ${mapping.table === 'users' ? 'id' : 'user_id'} = $2`,
         [url, id]

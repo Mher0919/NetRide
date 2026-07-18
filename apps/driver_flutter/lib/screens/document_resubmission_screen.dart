@@ -70,7 +70,7 @@ class _DocumentResubmissionScreenState
     setState(() => _isUploading = true);
     try {
       final url = await AuthService.uploadImage(File(pickedFile.path));
-      await UserService.resubmitDocument(requirementId, url);
+      await UserService.resubmitDocument(requirementId, newDocumentUrl: url);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

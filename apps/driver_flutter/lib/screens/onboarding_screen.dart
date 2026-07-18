@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/auth_service.dart';
 import '../components/state_container.dart';
+import '../utils/file_url.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -437,7 +438,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 radius: 80,
                 backgroundColor: Colors.grey[100],
                 backgroundImage: _profileImageUrl != null
-                    ? CachedNetworkImageProvider(_profileImageUrl!)
+                    ? CachedNetworkImageProvider(resolveFileUrl(_profileImageUrl!))
                     : null,
                 child: _profileImageUrl == null
                     ? Column(
@@ -1178,7 +1179,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Center(
               child: CircleAvatar(
                 radius: 40,
-                backgroundImage: CachedNetworkImageProvider(_profileImageUrl!),
+                backgroundImage: CachedNetworkImageProvider(resolveFileUrl(_profileImageUrl!)),
               ),
             ),
             const SizedBox(height: 16),
@@ -1297,7 +1298,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           borderRadius: BorderRadius.circular(12),
           image: imageUrl != null
               ? DecorationImage(
-                  image: CachedNetworkImageProvider(imageUrl), fit: BoxFit.cover)
+                  image: CachedNetworkImageProvider(resolveFileUrl(imageUrl)), fit: BoxFit.cover)
               : null,
         ),
         child: imageUrl == null
