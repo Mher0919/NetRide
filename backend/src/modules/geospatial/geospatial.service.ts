@@ -169,30 +169,56 @@ export class GeospatialService {
     for (const radiusKm of RADII_KM) {
       if (results.length >= 5) break;
 
-      const overpassQuery = `
-        [out:json][timeout:20];
-        (
-          node["amenity"="vehicle_inspection"](around:${radiusKm * 1000},${lat},${lon});
-          way["amenity"="vehicle_inspection"](around:${radiusKm * 1000},${lat},${lon});
-          node["shop"="car_repair"](around:${radiusKm * 1000},${lat},${lon});
-          way["shop"="car_repair"](around:${radiusKm * 1000},${lat},${lon});
-          node["amenity"="smog_check"](around:${radiusKm * 1000},${lat},${lon});
-          way["amenity"="smog_check"](around:${radiusKm * 1000},${lat},${lon});
-        );
-        out center 25;
-      `.replace(/\s+/g, ' ').trim();
+      const radiusM = radiusKm * 1000;
+      // Build a compact Overpass QL query. The backtick template contains
+      // actual newlines — Overpass tolerates whitespace, but we condense it
+      // for a cleaner log entry.
+      const overpassQuery = [
+        '[out:json][timeout:20];',
+        '(',
+        `node["amenity"="vehicle_inspection"](around:${radiusM},${lat},${lon});`,
+        `way["amenity"="vehicle_inspection"](around:${radiusM},${lat},${lon});`,
+        `node["shop"="car_repair"](around:${radiusM},${lat},${lon});`,
+        `way["shop"="car_repair"](around:${radiusM},${lat},${lon});`,
+        `node["amenity"="smog_check"](around:${radiusM},${lat},${lon});`,
+        `way["amenity"="smog_check"](around:${radiusM},${lat},${lon});`,
+        ');',
+        'out center 25;',
+      ].join('');
+
+      console.log(`[GEOSPATIAL] Overpass query (${radiusKm}km): ${overpassQuery.slice(0, 200)}...`);
+
+      const fetchOverpass = async (): Promise<any[]> => {
+        // Try POST first (preferred for longer queries).
+        try {
+          const formParams = new URLSearchParams();
+          formParams.append('data', overpassQuery);
+          const resp = await axios.post(
+            'https://overpass-api.de/api/interpreter',
+            formParams,
+            {
+              headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
+              timeout: 25000,
+            },
+          );
+          return resp.data?.elements ?? [];
+        } catch (postErr: any) {
+          console.warn(`[GEOSPATIAL] Overpass POST failed (${postErr.message}), trying GET...`);
+          // Fallback to GET
+          const resp = await axios.get(
+            'https://overpass-api.de/api/interpreter',
+            {
+              params: { data: overpassQuery },
+              headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
+              timeout: 25000,
+            },
+          );
+          return resp.data?.elements ?? [];
+        }
+      };
 
       try {
-        const resp = await axios.post(
-          'https://overpass-api.de/api/interpreter',
-          `data=${encodeURIComponent(overpassQuery)}`,
-          {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            timeout: 25000,
-          },
-        );
-
-        const elements: any[] = resp.data?.elements ?? [];
+        const elements = await fetchOverpass();
         for (const el of elements) {
           const tags = el.tags ?? {};
           const name = tags.name;
