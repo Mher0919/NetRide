@@ -558,39 +558,6 @@ class EmailService {
             console.error('❌ [GMAIL API] Error sending payout receipt email:', error);
         }
     }
-    /**
-     * Notify all admin users that a driver's face check was flagged for review.
-     * `admins` is a list of { email } rows (ADMIN role). Silently skips if no
-     * Gmail credentials are configured.
-     */
-    static async sendFaceCheckFlaggedNotice(admins, info) {
-        const recipients = admins.map((a) => a.email).filter(Boolean);
-        if (recipients.length === 0)
-            return;
-        try {
-            const reasonLabel = info.reason ?? 'unknown';
-            await this.sendEmail({
-                to: recipients.join(','),
-                subject: '⚠️ Driver face check flagged for review',
-                html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
-            <h2 style="color: #C65A5A;">Face check flagged</h2>
-            <p>A driver's identity verification failed automated checks and needs manual review.</p>
-            <p>
-              Driver: <strong>${info.driverName ?? 'Unknown'}</strong> (${info.driverEmail ?? 'n/a'})<br/>
-              Reason: <strong>${reasonLabel}</strong><br/>
-              Score: ${info.score ?? 'n/a'}<br/>
-              Event ID: ${info.eventId ?? 'n/a'}
-            </p>
-            <p style="color: #888; font-size: 12px;">Review it in the Admin Dashboard → Face Checks.</p>
-          </div>
-        `,
-            });
-        }
-        catch (error) {
-            console.error('❌ [GMAIL API] Error sending face-check flagged notice:', error);
-        }
-    }
 }
 exports.EmailService = EmailService;
 EmailService.oauth2Client = new googleapis_1.google.auth.OAuth2(env_1.env.GMAIL_CLIENT_ID, env_1.env.GMAIL_CLIENT_SECRET, 'https://developers.google.com/oauthplayground');

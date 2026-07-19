@@ -14,6 +14,7 @@ import 'screens/profile_screen.dart';
 import 'screens/document_resubmission_screen.dart';
 import 'screens/replace_vehicle_screen.dart';
 import 'screens/vehicle_inspection_screen.dart';
+import 'screens/ride_preferences_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/main_wrapper.dart';
 import 'screens/splash_screen.dart';
@@ -200,6 +201,9 @@ class _NetRideDriverState extends State<NetRideDriver> with WidgetsBindingObserv
           case '/reset-password':
             final args = settings.arguments as Map<String, dynamic>?;
             page = ResetPasswordScreen(token: args?['token']);
+            break;
+          case '/driver-preferences':
+            page = const RidePreferencesScreen();
             break;
           default:
             page = const AvailabilityScreen();

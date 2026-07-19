@@ -21,20 +21,6 @@ const envSchema = zod_1.z.object({
     DRIVER_PICKUP_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15),
     DRIVER_DESTINATION_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(30),
     // ---- Face verification --------------------------------------------------
-    // Distance threshold for the dlib 128-d embedding. Lower = stricter.
-    FACE_MATCH_THRESHOLD: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(0.45),
-    // Minimum bounding-box motion (px) inside the captured clip — rules out
-    // a printed photo.
-    FACE_MIN_MOTION_PX: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15),
-    // Minimum number of blinks (eye aspect ratio dips) detected in the clip.
-    FACE_MIN_BLINK_COUNT: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(1),
-    // Minimum Laplacian variance of the face region — rules out screen replays
-    // at low resolution.
-    FACE_MIN_LAPLACIAN_VAR: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(80),
-    // How often a driver must re-verify while online.
-    FACE_CHECK_INTERVAL_HOURS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(12),
-    // Location jump threshold that triggers re-verify on offline→online.
-    FACE_LOCATION_JUMP_MILES: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     GMAIL_CLIENT_ID: zod_1.z.string().optional(),
     GMAIL_CLIENT_SECRET: zod_1.z.string().optional(),
     GMAIL_REFRESH_TOKEN: zod_1.z.string().optional(),

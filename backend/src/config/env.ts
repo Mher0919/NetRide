@@ -18,20 +18,6 @@ const envSchema = z.object({
   DRIVER_DESTINATION_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(30),
 
   // ---- Face verification --------------------------------------------------
-  // Distance threshold for the dlib 128-d embedding. Lower = stricter.
-  FACE_MATCH_THRESHOLD: z.union([z.string(), z.number()]).transform(Number).default(0.45),
-  // Minimum bounding-box motion (px) inside the captured clip — rules out
-  // a printed photo.
-  FACE_MIN_MOTION_PX: z.union([z.string(), z.number()]).transform(Number).default(15),
-  // Minimum number of blinks (eye aspect ratio dips) detected in the clip.
-  FACE_MIN_BLINK_COUNT: z.union([z.string(), z.number()]).transform(Number).default(1),
-  // Minimum Laplacian variance of the face region — rules out screen replays
-  // at low resolution.
-  FACE_MIN_LAPLACIAN_VAR: z.union([z.string(), z.number()]).transform(Number).default(80),
-  // How often a driver must re-verify while online.
-  FACE_CHECK_INTERVAL_HOURS: z.union([z.string(), z.number()]).transform(Number).default(12),
-  // Location jump threshold that triggers re-verify on offline→online.
-  FACE_LOCATION_JUMP_MILES: z.union([z.string(), z.number()]).transform(Number).default(5),
   GMAIL_CLIENT_ID: z.string().optional(),
   GMAIL_CLIENT_SECRET: z.string().optional(),
   GMAIL_REFRESH_TOKEN: z.string().optional(),

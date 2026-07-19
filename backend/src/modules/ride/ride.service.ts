@@ -60,11 +60,13 @@ export class RideService {
       if (existingRating.rows.length > 0) throw new Error('You have already rated this ride');
 
       // 3. Create Rating
+      // Flag for admin review when a low rating (<3) is left with a note.
+      const flagged = data.rating < 3 && !!data.review_text && String(data.review_text).trim().length > 0;
       const ratingRes = await client.query(
-        `INSERT INTO ratings (ride_id, rater_id, target_id, target_role, rating, review_text)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO ratings (ride_id, rater_id, target_id, target_role, rating, review_text, flagged_for_review)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`,
-        [data.ride_id, data.rater_id, target_id, target_role, data.rating, data.review_text]
+        [data.ride_id, data.rater_id, target_id, target_role, data.rating, data.review_text, flagged]
       );
 
       // 4. Update Target Rating (Moving Average of last 100)

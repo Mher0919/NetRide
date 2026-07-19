@@ -4,7 +4,6 @@ import { LocationsService } from '../modules/location/locations.service';
 import { RideService } from '../modules/ride/ride.service';
 import { RideMessagesRepository } from '../modules/ride/ride_messages.repository';
 import { matchingService } from '../services/matching.service';
-import { FaceService } from '../services/face.service';
 import { NavigationService } from '../services/navigation.service';
 import { pool } from '../config/database';
 import { UserRole, Location, TripStatus } from '../types';
@@ -211,23 +210,6 @@ export function setupSocketGateway(io: Server) {
       socket.on('goOnline', async (loc?: Location) => {
         console.log(`[SOCKET] 🟢 Driver ${id} is now ONLINE`);
 
-        // Server-side gate: refuse to flip online if the driver's face
-        // check is blocked or stale. Defense in depth — the app also
-        // gates this client-side via DriverProvider.canGoOnline.
-        const deviceId =
-          (socket.handshake.headers['x-device-id'] as string | undefined) || null;
-        const faceGate = await FaceService.isCheckRequired(id, {
-          deviceId,
-          onlineLat: loc?.lat ?? null,
-          onlineLng: loc?.lng ?? null,
-        });
-        if (faceGate.required) {
-          console.log(`[SOCKET] ❌ Driver ${id} blocked from going online: face check required (${faceGate.reason})`);
-          socket.emit('faceCheckRequired', faceGate);
-          socket.emit('error', 'Face verification required before going online.');
-          return;
-        }
-
         (socket as any).isOnline = true;
         if (loc) {
           const gh = await LocationsService.updateDriverLocation(id, loc);
@@ -239,18 +221,6 @@ export function setupSocketGateway(io: Server) {
         console.log(`[SOCKET] 🔴 Driver ${id} is now OFFLINE`);
         (socket as any).isOnline = false;
         leaveGeohashRoom(socket);
-
-        // Persist the last-known offline location so we can detect the
-        // >5mi jump next time the driver tries to come back online.
-        let lastLoc: Location | null = null;
-        try {
-          lastLoc = await LocationsService.getDriverLocation(id);
-        } catch {}
-        await FaceService.recordDeviceAndOfflineLocation(id, {
-          deviceId: null,
-          offlineLat: lastLoc?.lat ?? null,
-          offlineLng: lastLoc?.lng ?? null,
-        });
 
         await LocationsService.removeDriverLocation(id);
       });

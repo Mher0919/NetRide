@@ -446,23 +446,20 @@ export class DriverService {
 
   static async updateOperatingClass(userId: string, activeClass: string) {
     const driver = await pool.query(
-      `SELECT v.service_class 
+      `SELECT dv.service_class 
        FROM driver_vehicles dv
-       JOIN vehicles v ON dv.vehicle_id = v.id
-       WHERE dv.driver_id = $1`,
+       WHERE dv.driver_id = $1
+       ORDER BY (dv.vehicle_status = 'APPROVED') DESC NULLS LAST
+       LIMIT 1`,
       [userId]
     );
 
     if (driver.rows.length === 0) throw new Error('Driver vehicle not found');
-    const vehicleClass = driver.rows[0].service_class;
-    
-    const eligibilityMap: Record<string, string[]> = {
-      'PRESTIGE': ['CORE', 'ELITE', 'PRESTIGE'],
-      'ELITE': ['CORE', 'ELITE'],
-      'CORE': ['CORE']
-    };
+    const vehicleClass = driver.rows[0].service_class || 'CORE';
 
-    if (!eligibilityMap[vehicleClass]?.includes(activeClass)) {
+    // Delegate tier eligibility to the centralized engine.
+    const { isClassEligibleForVehicle } = await import('../../services/vehicleEligibility.service');
+    if (!isClassEligibleForVehicle(vehicleClass, activeClass)) {
       throw new Error(`Your vehicle is not eligible for ${activeClass} mode.`);
     }
 
@@ -472,6 +469,91 @@ export class DriverService {
     );
 
     return res.rows[0];
+  }
+
+  /**
+   * Returns the driver's verified vehicle class plus the full list of ride
+   * types they are ELIGIBLE to receive (derived, not user-selected) and their
+   * current per-ride-type preferences (enabled/disabled).
+   */
+  static async getRidePreferences(userId: string) {
+    const { getEligibleRideTypes, ALL_RIDE_TYPES } = await import('../../services/vehicleEligibility.service');
+
+    const veh = await pool.query(
+      `SELECT dv.service_class
+       FROM driver_vehicles dv
+       WHERE dv.driver_id = $1
+       ORDER BY (dv.vehicle_status = 'APPROVED') DESC NULLS LAST
+       LIMIT 1`,
+      [userId]
+    );
+
+    const vehicleClass = (veh.rows[0]?.service_class as any) || 'CORE';
+    const eligible = getEligibleRideTypes(vehicleClass);
+
+    const prefsRes = await pool.query(
+      `SELECT ride_type, enabled FROM driver_ride_preferences WHERE driver_id = $1`,
+      [userId]
+    );
+    const enabledByType = new Map<string, boolean>();
+    for (const r of prefsRes.rows) enabledByType.set(r.ride_type, r.enabled);
+
+    // Every eligible type defaults to enabled unless explicitly disabled.
+    const preferences: Record<string, boolean> = {};
+    for (const rt of eligible) {
+      preferences[rt] = enabledByType.has(rt) ? enabledByType.get(rt)! : true;
+    }
+
+    return {
+      vehicleClass,
+      eligibleRideTypes: eligible,
+      allRideTypes: ALL_RIDE_TYPES,
+      preferences,
+    };
+  }
+
+  /**
+   * Persists the driver's ride-type preferences. Only ELIGIBLE ride types may
+   * be configured; any ineligible type in the payload is ignored to prevent
+   * invalid combinations. `enabled` is the list of ride types the driver
+   * wishes to receive; everything else eligible is disabled.
+   */
+  static async setRidePreferences(userId: string, enabled: string[]) {
+    const { getEligibleRideTypes, ALL_RIDE_TYPES } = await import('../../services/vehicleEligibility.service');
+
+    const veh = await pool.query(
+      `SELECT dv.service_class
+       FROM driver_vehicles dv
+       WHERE dv.driver_id = $1
+       ORDER BY (dv.vehicle_status = 'APPROVED') DESC NULLS LAST
+       LIMIT 1`,
+      [userId]
+    );
+    const vehicleClass = (veh.rows[0]?.service_class as any) || 'CORE';
+    const eligible = getEligibleRideTypes(vehicleClass);
+
+    const enabledSet = new Set(enabled.filter((t) => eligible.includes(t as any)));
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const rt of eligible) {
+        await client.query(
+          `INSERT INTO driver_ride_preferences (driver_id, ride_type, enabled, updated_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (driver_id, ride_type)
+           DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()`,
+          [userId, rt, enabledSet.has(rt)]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    return this.getRidePreferences(userId);
   }
 
   static async getRecommendations(userId: string) {
@@ -1062,13 +1144,14 @@ export class DriverService {
       const ins = await client.query(
         `INSERT INTO driver_vehicle_submissions
          (driver_id, status, make, model, year, color, interior_color,
+          seats, is_luxury,
           license_plate_number, license_plate_state, zip_code,
           registration_photo_url, insurance_photo_url, inspection_photo_url)
-         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING *`,
         [userId, data.make, data.model, data.year, data.color,
-         data.interior_color || null, data.license_plate_number,
-         data.license_plate_state, data.zip_code,
+         data.interior_color || null, data.seats ?? null, data.is_luxury ?? false,
+         data.license_plate_number, data.license_plate_state, data.zip_code,
          data.registration_photo_url, data.insurance_photo_url,
          data.inspection_photo_url]
       );
@@ -1078,14 +1161,15 @@ export class DriverService {
       await client.query(
         `INSERT INTO driver_vehicles
          (driver_id, vehicle_status, make, model, year, color, interior_color,
+          seats, is_luxury,
           license_plate_number, license_plate_state, zip_code,
           registration_photo_url, insurance_photo_url, inspection_photo_url,
           submitted_at)
-         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
          ON CONFLICT DO NOTHING`,
         [userId, data.make, data.model, data.year, data.color,
-         data.interior_color || null, data.license_plate_number,
-         data.license_plate_state, data.zip_code,
+         data.interior_color || null, data.seats ?? null, data.is_luxury ?? false,
+         data.license_plate_number, data.license_plate_state, data.zip_code,
          data.registration_photo_url, data.insurance_photo_url,
          data.inspection_photo_url]
       );

@@ -11,11 +11,9 @@ import '../models/trip_models.dart' as models;
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
-import '../services/face_verification_service.dart';
 import '../components/state_container.dart';
 import '../components/driver_status_card.dart';
 import '../services/sound_service.dart';
-import 'face_capture_screen.dart';
 
 class AvailabilityScreen extends StatefulWidget {
   const AvailabilityScreen({super.key});
@@ -69,18 +67,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         });
       }
 
-      // Pull the latest face-check gate so the banner reflects reality on
-      // app open, not just on the offline-switch tap.
-      try {
-        await provider.refreshFaceCheck(
-          lat: _lastPosition?.latitude,
-          lng: _lastPosition?.longitude,
-        );
-      } catch (_) {
-        // Face-check failures are non-fatal — the gate stays in its last
-        // known state.
-      }
-
       // Revalidate profile in background (cache-first already returned data,
       // this ensures the provider refreshes its state).
       try {
@@ -88,6 +74,14 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       } catch (_) {
         // Refresh failures are non-fatal — the gate stays in its last
         // known state. The next socket-driven review will reconcile.
+      }
+
+      // Load ride-type preferences (eligibility + opt-in) for the
+      // Preferences screen. Non-fatal if it fails.
+      try {
+        await provider.fetchRidePreferences();
+      } catch (_) {
+        debugPrint('Ride preferences load failed (non-fatal)');
       }
     } catch (e) {
       if (e is DioException && e.response?.statusCode == 404) {
@@ -293,21 +287,10 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           state: DriverStatus.backgroundApproved,
           onDismiss: _dismissFeedback,
         );
-      case DriverComplianceStatus.faceFlagged:
-        singleCard = const DriverStatusCard(state: DriverStatus.faceFlagged);
-      case DriverComplianceStatus.faceCheckNeeded:
-        final reason = provider.faceCheckReason;
-        singleCard = DriverStatusCard(
-          state: reason != null
-              ? DriverStatus.faceRequired(reason)
-              : DriverStatus.faceRequired('first_time'),
-          onStartFaceCheck: () => _runFaceCheck(reason: reason ?? 'first_time'),
-        );
       case DriverComplianceStatus.headshotActionRequired:
         singleCard = DriverStatusCard(
           state: DriverStatus.headshotActionRequired,
-          onStartFaceCheck: () =>
-              _showHeadshotModal(reason: provider.faceCheckReason ?? 'first_time'),
+          onAction: () => _showHeadshotModal(reason: 'headshot'),
         );
       case DriverComplianceStatus.documentSubmitted:
         singleCard = const DriverStatusCard(state: DriverStatus.documentSubmittedForReview);
@@ -436,49 +419,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
     if (choice == 'take_photo') {
       provider.setHeadshotActionRequired(false);
-      await _runFaceCheck(reason: reason);
     } else if (choice == 'stay_offline') {
       provider.setHeadshotActionRequired(true);
-      _showError('You\'ll need to complete face verification before going online.');
-    }
-  }
-
-  /// Push the face capture screen, upload the result, and react.
-  Future<void> _runFaceCheck({required String reason}) async {
-    final provider = Provider.of<DriverProvider>(context, listen: false);
-    final result = await Navigator.push<FaceVerifyResult>(
-      context,
-      MaterialPageRoute(builder: (_) => FaceCaptureScreen(reason: reason)),
-    );
-    if (result == null) return;
-    if (result.passed) {
-      provider.setHeadshotActionRequired(false);
-      provider.markFaceCheckPassed(at: DateTime.now());
-      _showSuccess('Face check passed — you\'re now online!');
-
-      // Automatically go online after successful verification
-      final ok = await provider.setOnline(
-        lat: _lastPosition?.latitude,
-        lng: _lastPosition?.longitude,
-      );
-      if (ok && mounted) {
-        SoundService.instance.playOnline();
-      }
-    } else if (result.reason == 'quality_failed') {
-      _showError('Photo quality not sufficient. Please ensure good lighting and try again.');
-    } else if (result.reason == 'liveness_failed') {
-      _showError('Liveness check failed. Please look directly at the camera and ensure you\'re using a live selfie.');
-    } else if (result.reason == 'flagged' || result.match == false) {
-      provider.markFaceCheckFlagged(reason);
-      _showError('Face check flagged. Our team will review your capture.');
-    } else if (result.reason == 'client_error' ||
-        result.reason == 'camera_permission_denied' ||
-        result.reason == 'no_camera') {
-      _showError('Couldn\'t open the camera. Please try again.');
-    } else if (result.reason == 'service_error') {
-      _showError('Verification service is temporarily unavailable. Please try again.');
-    } else {
-      _showError('Verification failed. Please ensure good lighting and try again.');
     }
   }
 
@@ -813,14 +755,10 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                                           _showPendingChangeDetails();
                                           return;
                                         }
-                                        // Face check or document requirements — route
+                                        // Headshot or document requirements — route
                                         // the user into the capture screen or documents.
-                                        if (cs == DriverComplianceStatus.faceCheckNeeded) {
-                                          _showHeadshotModal(reason: driverProvider.faceCheckReason ?? 'first_time');
-                                          return;
-                                        }
                                         if (cs == DriverComplianceStatus.headshotActionRequired) {
-                                          _showHeadshotModal(reason: driverProvider.faceCheckReason ?? 'first_time');
+                                          _showHeadshotModal(reason: 'headshot');
                                           return;
                                         }
                                         if (cs == DriverComplianceStatus.documentActionRequired) {
@@ -839,7 +777,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                                           SoundService.instance.playOnline();
                                         }
                                         if (!ok && mounted) {
-                                          _showHeadshotModal(reason: driverProvider.faceCheckReason ?? 'first_time');
+                                          _showHeadshotModal(reason: 'headshot');
                                         }
                                       } else {
                                         driverProvider.setOffline();
@@ -886,6 +824,23 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                   child: const Icon(Icons.my_location),
                 ),
               ),
+
+            // Top-right Preferences entry point (ride-type toggles).
+            Positioned(
+              top: 56,
+              right: 20,
+              child: FloatingActionButton(
+                heroTag: 'preferences_fab',
+                mini: true,
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF5B7760),
+                elevation: 4,
+                shape: const CircleBorder(),
+                tooltip: 'Ride Preferences',
+                onPressed: () => Navigator.pushNamed(context, '/driver-preferences'),
+                child: const Icon(Icons.tune_rounded),
+              ),
+            ),
 
             if (driverProvider.incomingRequest != null)
               Positioned(

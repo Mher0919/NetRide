@@ -108,6 +108,9 @@ const SubmitNewVehicleSchema = z.object({
   year: z.number().int().min(2011, 'Vehicle must be 2011 or newer'),
   color: z.string().min(1, 'Color is required'),
   interior_color: z.string().optional(),
+  // Verified classification inputs used by the eligibility engine.
+  seats: z.number().int().min(1).max(15).optional(),
+  is_luxury: z.boolean().optional(),
   license_plate_number: z.string().min(1, 'License plate is required'),
   license_plate_state: z.string().min(1, 'License plate state is required'),
   zip_code: z.string().min(1, 'ZIP code is required'),
@@ -291,6 +294,35 @@ export class DriverController {
     } catch (error: any) {
       console.error(`[DRIVER] ❌ Class update error: ${error.message}`);
       res.status(400).json({ error: error.message || 'Failed to update operating class.' });
+    }
+  }
+
+  static async getRidePreferences(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Please log in to view ride preferences.' });
+      const result = await DriverService.getRidePreferences(userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Get ride preferences error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to load ride preferences.' });
+    }
+  }
+
+  static async setRidePreferences(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Please log in to save ride preferences.' });
+
+      const { enabled } = req.body;
+      if (!Array.isArray(enabled)) {
+        return res.status(400).json({ error: 'enabled must be an array of ride types.' });
+      }
+      const result = await DriverService.setRidePreferences(userId, enabled);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error(`[DRIVER] ❌ Set ride preferences error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to save ride preferences.' });
     }
   }
 

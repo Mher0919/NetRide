@@ -96,6 +96,9 @@ const SubmitNewVehicleSchema = zod_1.z.object({
     year: zod_1.z.number().int().min(2011, 'Vehicle must be 2011 or newer'),
     color: zod_1.z.string().min(1, 'Color is required'),
     interior_color: zod_1.z.string().optional(),
+    // Verified classification inputs used by the eligibility engine.
+    seats: zod_1.z.number().int().min(1).max(15).optional(),
+    is_luxury: zod_1.z.boolean().optional(),
     license_plate_number: zod_1.z.string().min(1, 'License plate is required'),
     license_plate_state: zod_1.z.string().min(1, 'License plate state is required'),
     zip_code: zod_1.z.string().min(1, 'ZIP code is required'),
@@ -277,6 +280,36 @@ class DriverController {
         catch (error) {
             console.error(`[DRIVER] ❌ Class update error: ${error.message}`);
             res.status(400).json({ error: error.message || 'Failed to update operating class.' });
+        }
+    }
+    static async getRidePreferences(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Please log in to view ride preferences.' });
+            const result = await driver_service_1.DriverService.getRidePreferences(userId);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Get ride preferences error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to load ride preferences.' });
+        }
+    }
+    static async setRidePreferences(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Please log in to save ride preferences.' });
+            const { enabled } = req.body;
+            if (!Array.isArray(enabled)) {
+                return res.status(400).json({ error: 'enabled must be an array of ride types.' });
+            }
+            const result = await driver_service_1.DriverService.setRidePreferences(userId, enabled);
+            res.json({ success: true, ...result });
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Set ride preferences error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Failed to save ride preferences.' });
         }
     }
     static async getRecommendations(req, res) {

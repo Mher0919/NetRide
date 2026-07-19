@@ -9,9 +9,6 @@ import '../theme/app_theme.dart';
 ///   - background-check pending (terracotta)
 ///   - background-check approved first time (sage, dismissible)
 ///   - background-check rejected (terracotta, with feedback link)
-///   - face-check required (terracotta, action required)
-///   - face-check flagged, awaiting admin review (terracotta)
-///   - face-check passed this session (sage)
 ///   - all clear, ready to drive (sage)
 ///   - document resubmission required (terracotta, document-specific)
 ///   - vehicle inspection required (terracotta)
@@ -22,7 +19,6 @@ class DriverStatusCard extends StatelessWidget {
   final String? rejectionReason;
   final VoidCallback? onAction;
   final VoidCallback? onDismiss;
-  final VoidCallback? onStartFaceCheck;
   final String? documentType;
   final String? requirementId;
 
@@ -32,7 +28,6 @@ class DriverStatusCard extends StatelessWidget {
     this.rejectionReason,
     this.onAction,
     this.onDismiss,
-    this.onStartFaceCheck,
     this.documentType,
     this.requirementId,
   });
@@ -67,33 +62,6 @@ class DriverStatusCard extends StatelessWidget {
           message: rejectionReason ?? 'Please review the administrator feedback.',
           actionLabel: 'SEE WHY',
           onAction: onAction,
-        );
-
-      case DriverStatusKind.faceRequired:
-        return _build(
-          color: AppTheme.errorColor,
-          icon: Icons.face_retouching_natural,
-          title: 'Action required: face verification',
-          message: _faceMessage(state.faceReason),
-          actionLabel: 'START',
-          onAction: onStartFaceCheck,
-        );
-
-      case DriverStatusKind.faceFlagged:
-        return _build(
-          color: AppTheme.errorColor,
-          icon: Icons.priority_high_rounded,
-          title: 'Account flagged for review',
-          message:
-              'Your last face check didn\'t match. Our team is reviewing — please wait.',
-        );
-
-      case DriverStatusKind.facePassed:
-        return _build(
-          color: AppTheme.successGreen,
-          icon: Icons.verified_user_rounded,
-          title: 'Face check passed',
-          message: 'You\'re cleared to drive. We\'ll re-verify every 12 hours.',
         );
 
       case DriverStatusKind.readyToDrive:
@@ -141,10 +109,10 @@ class DriverStatusCard extends StatelessWidget {
         return _build(
           color: AppTheme.errorColor,
           icon: Icons.face_retouching_natural,
-          title: 'Action required: face verification',
-          message: 'Headshot photo check required',
-          actionLabel: 'START',
-          onAction: onStartFaceCheck,
+          title: 'Action required: headshot photo',
+          message: 'A headshot photo check is required before you can go online.',
+          actionLabel: 'UPDATE',
+          onAction: onAction,
         );
 
       case DriverStatusKind.vehicleInspectionRequired:
@@ -199,25 +167,6 @@ class DriverStatusCard extends StatelessWidget {
         return _DocumentInfo('ID Card (Back)', Icons.credit_card_outlined);
       default:
         return _DocumentInfo('Document', Icons.description_outlined);
-    }
-  }
-
-  String _faceMessage(String? reason) {
-    switch (reason) {
-      case 'flagged':
-        return 'Your last check failed — please retake it now.';
-      case 'enrollment':
-        return 'We need to capture your face to enroll you in our system.';
-      case 'first_time':
-        return 'First-time setup: please complete your face enrollment.';
-      case '12h_expired':
-        return 'It\'s been more than 12 hours since your last face check.';
-      case 'new_device':
-        return 'We noticed a new device. Please re-verify.';
-      case 'location_jump':
-        return 'You\'re more than 5 miles from your last offline location — please re-verify.';
-      default:
-        return 'A quick face check is needed before you can go online.';
     }
   }
 
@@ -325,16 +274,11 @@ class _DocumentInfo {
   _DocumentInfo(this.title, this.icon);
 }
 
-/// What the card should communicate. `faceReason` mirrors the backend's
-/// reason enum (`flagged`, `enrollment`, `first_time`, `12h_expired`,
-/// `new_device`, `location_jump`).
+/// What the card should communicate.
 enum DriverStatusKind {
   backgroundPending,
   backgroundApproved,
   backgroundRejected,
-  faceRequired,
-  faceFlagged,
-  facePassed,
   readyToDrive,
   profileChangePending,
   profileChangeApproved,
@@ -346,23 +290,17 @@ enum DriverStatusKind {
 
 class DriverStatus {
   final DriverStatusKind kind;
-  final String? faceReason;
 
-  const DriverStatus._(this.kind, this.faceReason);
+  const DriverStatus._(this.kind);
 
-  static const backgroundPending = DriverStatus._(DriverStatusKind.backgroundPending, null);
-  static const backgroundApproved = DriverStatus._(DriverStatusKind.backgroundApproved, null);
-  static const backgroundRejected = DriverStatus._(DriverStatusKind.backgroundRejected, null);
-  static const faceFlagged = DriverStatus._(DriverStatusKind.faceFlagged, null);
-  static const facePassed = DriverStatus._(DriverStatusKind.facePassed, null);
-  static const readyToDrive = DriverStatus._(DriverStatusKind.readyToDrive, null);
-  static const profileChangePending = DriverStatus._(DriverStatusKind.profileChangePending, null);
-  static const profileChangeApproved = DriverStatus._(DriverStatusKind.profileChangeApproved, null);
-  static const documentActionRequired = DriverStatus._(DriverStatusKind.documentActionRequired, null);
-  static const vehicleInspectionRequired = DriverStatus._(DriverStatusKind.vehicleInspectionRequired, null);
-  static const documentSubmittedForReview = DriverStatus._(DriverStatusKind.documentSubmittedForReview, null);
-  static const headshotActionRequired = DriverStatus._(DriverStatusKind.headshotActionRequired, null);
-
-  factory DriverStatus.faceRequired(String reason) =>
-      DriverStatus._(DriverStatusKind.faceRequired, reason);
+  static const backgroundPending = DriverStatus._(DriverStatusKind.backgroundPending);
+  static const backgroundApproved = DriverStatus._(DriverStatusKind.backgroundApproved);
+  static const backgroundRejected = DriverStatus._(DriverStatusKind.backgroundRejected);
+  static const readyToDrive = DriverStatus._(DriverStatusKind.readyToDrive);
+  static const profileChangePending = DriverStatus._(DriverStatusKind.profileChangePending);
+  static const profileChangeApproved = DriverStatus._(DriverStatusKind.profileChangeApproved);
+  static const documentActionRequired = DriverStatus._(DriverStatusKind.documentActionRequired);
+  static const vehicleInspectionRequired = DriverStatus._(DriverStatusKind.vehicleInspectionRequired);
+  static const documentSubmittedForReview = DriverStatus._(DriverStatusKind.documentSubmittedForReview);
+  static const headshotActionRequired = DriverStatus._(DriverStatusKind.headshotActionRequired);
 }

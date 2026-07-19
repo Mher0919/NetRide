@@ -13,14 +13,21 @@ import 'screens/profile_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/main_wrapper.dart';
 import 'screens/splash_screen.dart';
+import 'screens/blocked_account_screen.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
+import 'services/user_service.dart';
 import 'services/sound_service.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:app_links/app_links.dart';
+
+/// Set when a signed-in rider's account is blocked, so the app routes
+/// straight to the standalone blocked-account screen on startup.
+bool kInitialIsBlocked = false;
+String? kInitialBlockedReason;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,6 +71,20 @@ void main() async {
   }
 
   AuthService.isAuthenticatedNotifier.value = token != null;
+
+  // If an authenticated rider's account has been blocked by an admin,
+  // route them straight to the standalone blocked-account screen.
+  if (token != null) {
+    try {
+      final profile = await UserService.getProfile();
+      if (profile['verification_status'] == 'BLOCKED') {
+        kInitialBlockedReason = profile['blocked_reason'] as String?;
+        kInitialIsBlocked = true;
+      }
+    } catch (_) {
+      // If the profile can't be fetched, fall through to normal auth flow.
+    }
+  }
 
   runApp(
     MultiProvider(
@@ -133,10 +154,16 @@ class _NetRideRiderState extends State<NetRideRider> {
             switch (settings.name) {
               case '/splash':
                 final args = settings.arguments as Map<String, dynamic>?;
+                final targetRoute = kInitialIsBlocked
+                    ? '/blocked'
+                    : (args?['targetRoute'] ?? (isAuthenticated ? '/' : '/login'));
                 page = SplashScreen(
-                  targetRoute: args?['targetRoute'] ?? (isAuthenticated ? '/' : '/login'),
+                  targetRoute: targetRoute,
                   arguments: args?['arguments'],
                 );
+                break;
+              case '/blocked':
+                page = BlockedAccountScreen(reason: kInitialBlockedReason);
                 break;
               case '/login':
                 page = const LoginScreen();

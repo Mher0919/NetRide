@@ -3,10 +3,21 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 export declare class AdminController {
     static getStats(req: AuthRequest, res: Response): Promise<void>;
     static getUsers(req: AuthRequest, res: Response): Promise<void>;
+    /**
+     * Admin view of a driver's vehicle classification vs. their ride-type
+     * preferences. Clearly separates:
+     *   - vehicleClass: the verified class derived from the vehicle
+     *   - eligibleRideTypes: everything the class can serve (tier-inclusive)
+     *   - preferences: which eligible types the driver opted INTO
+     */
+    static getDriverRidePreferences(req: AuthRequest, res: Response): Promise<void>;
     static getUserById(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static verifyUser(req: AuthRequest, res: Response): Promise<void>;
     static rejectUser(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static setPending(req: AuthRequest, res: Response): Promise<void>;
+    static blockUser(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static unblockUser(req: AuthRequest, res: Response): Promise<void>;
+    static getFlaggedRatings(req: AuthRequest, res: Response): Promise<void>;
     static getLogs(req: AuthRequest, res: Response): Promise<void>;
     static getRides(req: AuthRequest, res: Response): Promise<void>;
     static getRideById(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;

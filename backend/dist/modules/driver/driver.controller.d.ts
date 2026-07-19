@@ -13,6 +13,8 @@ export declare class DriverController {
     static getVehicleMakes(req: any, res: Response): Promise<void>;
     static getVehicleModelsByMake(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static updateOperatingClass(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static getRidePreferences(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static setRidePreferences(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static getRecommendations(req: any, res: Response): Promise<void>;
     static getPricing(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static updatePrice(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;

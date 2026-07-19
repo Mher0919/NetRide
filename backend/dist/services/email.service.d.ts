@@ -111,18 +111,4 @@ export declare class EmailService {
         net_cents: number;
         reference?: string | null;
     }): Promise<void>;
-    /**
-     * Notify all admin users that a driver's face check was flagged for review.
-     * `admins` is a list of { email } rows (ADMIN role). Silently skips if no
-     * Gmail credentials are configured.
-     */
-    static sendFaceCheckFlaggedNotice(admins: {
-        email?: string;
-    }[], info: {
-        driverName?: string;
-        driverEmail?: string;
-        reason?: string;
-        score?: number;
-        eventId?: string;
-    }): Promise<void>;
 }

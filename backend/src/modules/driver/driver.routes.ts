@@ -14,6 +14,8 @@ router.post('/onboarding/complete', authMiddleware, DriverController.completeOnb
 router.post('/onboard', authMiddleware, DriverController.onboard);
 router.get('/vehicles', DriverController.getVehicles);
 router.patch('/operating-class', authMiddleware, DriverController.updateOperatingClass);
+router.get('/ride-preferences', authMiddleware, DriverController.getRidePreferences);
+router.put('/ride-preferences', authMiddleware, DriverController.setRidePreferences);
 router.get('/pricing', authMiddleware, DriverController.getPricing);
 router.post('/pricing/update', authMiddleware, DriverController.updatePrice);
 router.get('/recommendations', authMiddleware, DriverController.getRecommendations);

@@ -9,12 +9,6 @@ export declare const env: {
     DRIVER_ACCEPT_TIMEOUT_MS: number;
     DRIVER_PICKUP_PROXIMITY_M: number;
     DRIVER_DESTINATION_PROXIMITY_M: number;
-    FACE_MATCH_THRESHOLD: number;
-    FACE_MIN_MOTION_PX: number;
-    FACE_MIN_BLINK_COUNT: number;
-    FACE_MIN_LAPLACIAN_VAR: number;
-    FACE_CHECK_INTERVAL_HOURS: number;
-    FACE_LOCATION_JUMP_MILES: number;
     EMAIL_FROM: string;
     ADMIN_NOTIFY_EMAIL: string;
     APP_URL: string;

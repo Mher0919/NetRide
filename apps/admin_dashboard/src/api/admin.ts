@@ -5,6 +5,18 @@ export const getAdminStats = async () => {
   return response.data;
 };
 
+// ----- Block / unblock ----------------------------------------------------
+
+export const blockUser = async (id: string, reason: string) => {
+  const response = await api.patch(`/admin/users/${id}/block`, { reason });
+  return response.data;
+};
+
+export const unblockUser = async (id: string) => {
+  const response = await api.patch(`/admin/users/${id}/unblock`);
+  return response.data;
+};
+
 export const getRides = async (params: { status?: string, page?: number, limit?: number }) => {
   const response = await api.get('/admin/rides', { params });
   return response.data;
@@ -27,6 +39,11 @@ export const getUsers = async (params: any) => {
 
 export const getUserById = async (id: string) => {
   const response = await api.get(`/admin/users/${id}`);
+  return response.data;
+};
+
+export const getDriverRidePreferences = async (id: string) => {
+  const response = await api.get(`/admin/users/${id}/ride-preferences`);
   return response.data;
 };
 
@@ -191,24 +208,9 @@ export const markPayoutPaid = async (id: string, reference: string, notes?: stri
   return response.data;
 };
 
-// ----- Face checks ---------------------------------------------------------
+// ----- Flagged ride ratings ------------------------------------------------
 
-export const getFlaggedFaceChecks = async () => {
-  const response = await api.get('/face/admin/flagged');
-  return response.data as { events: any[] };
-};
-
-export const getFaceCheckEventsByUser = async (userId: string) => {
-  const response = await api.get(`/face/admin/user/${userId}`);
-  return response.data as { events: any[] };
-};
-
-export const reviewFaceCheck = async (eventId: string, decision: 'APPROVED' | 'REJECTED', notes?: string) => {
-  const response = await api.post(`/face/admin/review/${eventId}`, { decision, notes });
-  return response.data;
-};
-
-export const triggerFaceCheck = async (userId: string) => {
-  const response = await api.post(`/face/admin/trigger/${userId}`);
-  return response.data;
+export const getFlaggedRatings = async (params: { page?: number; limit?: number } = {}) => {
+  const response = await api.get('/admin/ratings/flagged', { params });
+  return response.data as { ratings: any[]; total: number; page: number; totalPages: number };
 };

@@ -21,6 +21,7 @@ enum VerificationStatus {
   PENDING
   VERIFIED
   REJECTED
+  BLOCKED
 
   @@map("verification_status")
 }
@@ -89,6 +90,7 @@ model User {
   password_changed_at DateTime?           @default(now()) @db.Timestamptz(6)
 
   rejection_reason           String?
+  blocked_reason             String?
   verification_feedback_seen Boolean? @default(false)
 
   onboarding_step     Int?
@@ -110,6 +112,7 @@ model User {
   payout_cards     PayoutCard[]           @relation("DriverPayoutCards")
   wallet           DriverWallet?          @relation("DriverWallet")
   payouts          Payout[]               @relation("DriverPayouts")
+  ride_preferences DriverRidePreference[] @relation("DriverRidePreferences")
 
   @@map("users")
 }
@@ -178,9 +181,9 @@ model Vehicle {
 }
 
 model DriverVehicle {
-  id                      String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  driver_id               String?  @db.Uuid
-  vehicle_id              String?  @db.Uuid
+  id                      String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  driver_id               String?      @db.Uuid
+  vehicle_id              String?      @db.Uuid
   license_plate_number    String
   license_plate_photo_url String?
   car_photo_urls          String[]
@@ -192,6 +195,13 @@ model DriverVehicle {
   license_plate_state     String?
   zip_code                String?
 
+  // --- Vehicle classification (derived, not user-selected) ---
+  // Verified vehicle class computed by the centralized eligibility engine.
+  service_class           VehicleClass? @default(CORE)
+  // Verified attributes used to derive service_class.
+  seats                   Int?
+  is_luxury               Boolean?     @default(false)
+
   inspection_photo_url   String?
   inspection_expiry_date DateTime?         @db.Timestamptz(6)
   inspection_status      ComplianceStatus? @default(PENDING)
@@ -200,7 +210,27 @@ model DriverVehicle {
   driver  Driver?  @relation(fields: [driver_id], references: [user_id], onDelete: Cascade)
   vehicle Vehicle? @relation(fields: [vehicle_id], references: [id], onDelete: Cascade)
 
+  @@index([service_class])
   @@map("driver_vehicles")
+}
+
+// Driver ride-type preferences (which ELIGIBLE ride types they opted into).
+// Stored as one row per (driver, ride_type) so future ride categories require
+// zero schema changes — just new rows. Preferences are independent of the
+// vehicle's eligibility (which is derived) and of the driver's currently
+// selected active_class.
+model DriverRidePreference {
+  id         String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  driver_id  String      @db.Uuid
+  ride_type  VehicleClass
+  enabled    Boolean     @default(true)
+  updated_at DateTime?   @default(now()) @db.Timestamptz(6)
+
+  driver User @relation("DriverRidePreferences", fields: [driver_id], references: [id], onDelete: Cascade)
+
+  @@unique([driver_id, ride_type])
+  @@index([driver_id])
+  @@map("driver_ride_preferences")
 }
 
 model AuditLog {
@@ -273,6 +303,7 @@ model Rating {
   target_role UserRole
   rating      Int
   review_text String?
+  flagged_for_review Boolean? @default(false)
   created_at  DateTime? @default(now()) @db.Timestamptz(6)
 
   ride Ride @relation(fields: [ride_id], references: [id], onDelete: Cascade)

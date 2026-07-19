@@ -4,7 +4,6 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/trip_models.dart' as models;
 import '../services/api_service.dart';
 import '../services/user_service.dart';
-import '../services/face_verification_service.dart';
 import '../services/sound_service.dart';
 import '../components/tip_received_dialog.dart';
 import '../cache/cache_service.dart';
@@ -20,8 +19,6 @@ enum DriverComplianceStatus {
   backgroundCheckRejected,
   backgroundCheckPending,
   backgroundCheckApproved,
-  faceFlagged,
-  faceCheckNeeded,
   documentActionRequired,
   vehicleInspectionRequired,
   documentSubmitted,
@@ -31,6 +28,11 @@ enum DriverComplianceStatus {
 class DriverProvider with ChangeNotifier {
   models.DriverStatus _status = models.DriverStatus.offline;
   models.VehicleClass _activeClass = models.VehicleClass.CORE;
+
+  // --- Ride-type preferences (eligibility vs. opt-in) ---
+  String _vehicleClass = 'CORE';
+  List<String> _eligibleRideTypes = ['CORE'];
+  Map<String, bool> _ridePreferences = {'CORE': true};
   models.Trip? _currentTrip;
   models.Trip? _incomingRequest;
   IO.Socket? _socket;
@@ -46,11 +48,6 @@ class DriverProvider with ChangeNotifier {
   double _priceRangeMax = 3.00;
   double _recommendedPrice = 2.00;
   DateTime? _priceLastChanged;
-
-  FaceCheckStatus _faceCheckStatus = FaceCheckStatus.needsCheck;
-  String? _faceCheckReason;
-  DateTime? _lastFaceCheckAt;
-  bool _faceCheckPending = false;
 
   bool _hasPendingProfileChange = false;
   String? _pendingRequestId;
@@ -103,6 +100,13 @@ class DriverProvider with ChangeNotifier {
 
   models.DriverStatus get status => _status;
   models.VehicleClass get activeClass => _activeClass;
+
+  String get vehicleClass => _vehicleClass;
+  List<String> get eligibleRideTypes => _eligibleRideTypes;
+  Map<String, bool> get ridePreferences => _ridePreferences;
+  /// Ride types the driver opted INTO (enabled among eligible).
+  List<String> get enabledRideTypes =>
+      _eligibleRideTypes.where((t) => _ridePreferences[t] == true).toList();
   models.Trip? get currentTrip => _currentTrip;
   models.Trip? get incomingRequest => _incomingRequest;
   bool get isConnected => _isConnected;
@@ -120,11 +124,6 @@ class DriverProvider with ChangeNotifier {
   double get recommendedPrice => _recommendedPrice;
   DateTime? get priceLastChanged => _priceLastChanged;
 
-  FaceCheckStatus get faceCheckStatus => _faceCheckStatus;
-  String? get faceCheckReason => _faceCheckReason;
-  DateTime? get lastFaceCheckAt => _lastFaceCheckAt;
-  bool get faceCheckPending => _faceCheckPending;
-
   bool get hasPendingProfileChange => _hasPendingProfileChange;
   String? get pendingRequestId => _pendingRequestId;
   DateTime? get pendingSince => _pendingSince;
@@ -136,17 +135,13 @@ class DriverProvider with ChangeNotifier {
       !_hasPendingProfileChange &&
       !_hasDocumentActionRequired &&
       !_hasVehicleInspectionRequired &&
-      !_headshotActionRequired &&
-      _faceCheckStatus != FaceCheckStatus.flagged &&
-      _faceCheckStatus != FaceCheckStatus.needsCheck;
+      !_headshotActionRequired;
 
   DriverComplianceStatus? buildDriverComplianceStatus() {
     if (_hasPendingProfileChange) return DriverComplianceStatus.profileChangePending;
     if (_verificationStatus == 'REJECTED') return DriverComplianceStatus.backgroundCheckRejected;
-    if (_faceCheckStatus == FaceCheckStatus.flagged) return DriverComplianceStatus.faceFlagged;
     if (_hasDocumentActionRequired) return DriverComplianceStatus.documentActionRequired;
     if (_hasVehicleInspectionRequired) return DriverComplianceStatus.vehicleInspectionRequired;
-    if (_faceCheckStatus == FaceCheckStatus.needsCheck && _faceCheckPending && !_headshotActionRequired) return DriverComplianceStatus.faceCheckNeeded;
     if (_headshotActionRequired) return DriverComplianceStatus.headshotActionRequired;
     if (_verificationStatus == 'PENDING') return DriverComplianceStatus.backgroundCheckPending;
     if (_verificationStatus == 'APPROVED' && !_feedbackSeen) return DriverComplianceStatus.backgroundCheckApproved;
@@ -344,6 +339,55 @@ class DriverProvider with ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Error updating operating class: $e');
+      rethrow;
+    }
+  }
+
+  /// Loads the driver's verified vehicle class, the ride types they are
+  /// ELIGIBLE for, and their current opt-in preferences.
+  Future<void> fetchRidePreferences() async {
+    try {
+      final response = await ApiService.dio.get('/driver/ride-preferences');
+      final data = response.data as Map<String, dynamic>;
+      _vehicleClass = data['vehicleClass']?.toString() ?? 'CORE';
+      _eligibleRideTypes = (data['eligibleRideTypes'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          ['CORE'];
+      final prefs = data['preferences'] as Map<String, dynamic>? ?? {};
+      _ridePreferences = {
+        for (final t in _eligibleRideTypes)
+          t: prefs[t] == true,
+      };
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error fetching ride preferences: $e');
+      rethrow;
+    }
+  }
+
+  /// Persists the set of enabled ride types. Only eligible types are accepted
+  /// by the backend; ineligible types in the payload are ignored server-side.
+  Future<void> saveRidePreferences(List<String> enabled) async {
+    try {
+      final response = await ApiService.dio.put(
+        '/driver/ride-preferences',
+        data: {'enabled': enabled},
+      );
+      final data = response.data as Map<String, dynamic>;
+      _vehicleClass = data['vehicleClass']?.toString() ?? _vehicleClass;
+      _eligibleRideTypes = (data['eligibleRideTypes'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          _eligibleRideTypes;
+      final prefs = data['preferences'] as Map<String, dynamic>? ?? {};
+      _ridePreferences = {
+        for (final t in _eligibleRideTypes)
+          t: prefs[t] == true,
+      };
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error saving ride preferences: $e');
       rethrow;
     }
   }
@@ -641,34 +685,6 @@ class DriverProvider with ChangeNotifier {
       }
     });
 
-    _socket!.on('faceCheckRequired', (data) {
-      try {
-        final decision = FaceCheckDecision.fromJson(
-          Map<String, dynamic>.from(data as Map),
-        );
-        _faceCheckStatus = decision.status;
-        _faceCheckReason = decision.reason.toString().split('.').last;
-        _lastFaceCheckAt = decision.lastFaceCheckAt;
-        _faceCheckPending = decision.required;
-        notifyListeners();
-      } catch (e) {
-        debugPrint('Bad faceCheckRequired payload: $e');
-      }
-    });
-
-    _socket!.on('faceCheckStatusChanged', (data) {
-      final status = (data as Map)['status']?.toString();
-      if (status == 'CLEAR') {
-        _faceCheckStatus = FaceCheckStatus.clear;
-        _faceCheckPending = false;
-      } else if (status == 'FLAGGED') {
-        _faceCheckStatus = FaceCheckStatus.flagged;
-        _faceCheckPending = true;
-        _faceCheckReason = 'flagged';
-      }
-      notifyListeners();
-    });
-
     // ── Cache-aware Socket.IO event handlers ──────────────────────
     // These events signal remote admin changes. We invalidate the
     // affected cache keys and re-fetch authoritative data.
@@ -778,41 +794,6 @@ class DriverProvider with ChangeNotifier {
     }
   }
 
-  // ── Face verification ────────────────────────────────────────────
-
-  Future<FaceCheckDecision> refreshFaceCheck({double? lat, double? lng}) async {
-    try {
-      final decision = await FaceVerificationService.isCheckRequired(
-        lat: lat,
-        lng: lng,
-      );
-      _faceCheckStatus = decision.status;
-      _faceCheckReason = decision.reason.toString().split('.').last;
-      _lastFaceCheckAt = decision.lastFaceCheckAt;
-      _faceCheckPending = decision.required;
-      notifyListeners();
-      return decision;
-    } catch (e) {
-      debugPrint('refreshFaceCheck failed: $e');
-      rethrow;
-    }
-  }
-
-  void markFaceCheckPassed({DateTime? at}) {
-    _faceCheckStatus = FaceCheckStatus.clear;
-    _faceCheckReason = null;
-    _faceCheckPending = false;
-    _lastFaceCheckAt = at ?? DateTime.now();
-    notifyListeners();
-  }
-
-  void markFaceCheckFlagged(String reason) {
-    _faceCheckStatus = FaceCheckStatus.flagged;
-    _faceCheckReason = reason;
-    _faceCheckPending = true;
-    notifyListeners();
-  }
-
   /// Pulls the latest profile from the server, bypasses cache.
   Future<Map<String, dynamic>> refreshProfile() async {
     // Invalidate profile cache
@@ -847,16 +828,6 @@ class DriverProvider with ChangeNotifier {
   }
 
   Future<bool> setOnline({double? lat, double? lng}) async {
-    try {
-      final decision = await refreshFaceCheck(lat: lat, lng: lng);
-      if (decision.required) {
-        _faceCheckPending = true;
-        _faceCheckReason = decision.reason.toString().split('.').last;
-        notifyListeners();
-        return false;
-      }
-    } catch (_) {}
-
     _status = models.DriverStatus.online;
     if (lat != null && lng != null) {
       _socket?.emit('goOnline', {'lat': lat, 'lng': lng});

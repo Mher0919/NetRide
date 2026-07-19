@@ -29,10 +29,9 @@ import SpeedingIcon from '@mui/icons-material/Speed';
 import ProfileIcon from '@mui/icons-material/Badge';
 import CardIcon from '@mui/icons-material/CreditCard';
 import WalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import FaceIcon from '@mui/icons-material/FaceRetouchingNatural';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getDangerousDrivers, listProfileChanges, listPayoutCards, listPayouts, getPendingDocumentReviewsCount, getFlaggedFaceChecks } from '../api/admin';
+import { getDangerousDrivers, listProfileChanges, listPayoutCards, listPayouts, getPendingDocumentReviewsCount } from '../api/admin';
 
 const drawerWidth = 240;
 
@@ -46,7 +45,6 @@ const MainLayout: React.FC = () => {
   const [payoutCardCount, setPayoutCardCount] = React.useState(0);
   const [payoutCount, setPayoutCount] = React.useState(0);
   const [pendingDocReviewCount, setPendingDocReviewCount] = React.useState(0);
-  const [faceCheckCount, setFaceCheckCount] = React.useState(0);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -81,12 +79,6 @@ const MainLayout: React.FC = () => {
       } catch {
         // Sidebar badge is decorative — fail silently.
       }
-      try {
-        const fc = await getFlaggedFaceChecks();
-        if (!cancelled) setFaceCheckCount(fc?.events?.length ?? 0);
-      } catch {
-        // Sidebar badge is decorative — fail silently.
-      }
     };
     load();
     // Refresh while admin is online so the badge stays current.
@@ -108,7 +100,7 @@ const MainLayout: React.FC = () => {
     { text: 'Profile Changes', icon: <ProfileIcon />, path: '/profile-changes', badge: profileChangeCount },
     { text: 'Payout Cards', icon: <CardIcon />, path: '/payout-cards', badge: payoutCardCount },
     { text: 'Payouts', icon: <WalletIcon />, path: '/payouts', badge: payoutCount },
-    { text: 'Face Checks', icon: <FaceIcon />, path: '/face-checks', badge: faceCheckCount },
+    { text: 'Flagged Reviews', icon: <SpeedingIcon />, path: '/ratings/flagged' },
     { text: 'Audit Logs', icon: <HistoryIcon />, path: '/logs' },
   ];
 

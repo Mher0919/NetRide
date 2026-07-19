@@ -38,7 +38,6 @@ const locations_service_1 = require("../modules/location/locations.service");
 const ride_service_1 = require("../modules/ride/ride.service");
 const ride_messages_repository_1 = require("../modules/ride/ride_messages.repository");
 const matching_service_1 = require("../services/matching.service");
-const face_service_1 = require("../services/face.service");
 const navigation_service_1 = require("../services/navigation.service");
 const database_1 = require("../config/database");
 const types_1 = require("../types");
@@ -220,21 +219,6 @@ function setupSocketGateway(io) {
         if (role === types_1.UserRole.DRIVER) {
             socket.on('goOnline', async (loc) => {
                 console.log(`[SOCKET] 🟢 Driver ${id} is now ONLINE`);
-                // Server-side gate: refuse to flip online if the driver's face
-                // check is blocked or stale. Defense in depth — the app also
-                // gates this client-side via DriverProvider.canGoOnline.
-                const deviceId = socket.handshake.headers['x-device-id'] || null;
-                const faceGate = await face_service_1.FaceService.isCheckRequired(id, {
-                    deviceId,
-                    onlineLat: loc?.lat ?? null,
-                    onlineLng: loc?.lng ?? null,
-                });
-                if (faceGate.required) {
-                    console.log(`[SOCKET] ❌ Driver ${id} blocked from going online: face check required (${faceGate.reason})`);
-                    socket.emit('faceCheckRequired', faceGate);
-                    socket.emit('error', 'Face verification required before going online.');
-                    return;
-                }
                 socket.isOnline = true;
                 if (loc) {
                     const gh = await locations_service_1.LocationsService.updateDriverLocation(id, loc);
@@ -245,18 +229,6 @@ function setupSocketGateway(io) {
                 console.log(`[SOCKET] 🔴 Driver ${id} is now OFFLINE`);
                 socket.isOnline = false;
                 leaveGeohashRoom(socket);
-                // Persist the last-known offline location so we can detect the
-                // >5mi jump next time the driver tries to come back online.
-                let lastLoc = null;
-                try {
-                    lastLoc = await locations_service_1.LocationsService.getDriverLocation(id);
-                }
-                catch { }
-                await face_service_1.FaceService.recordDeviceAndOfflineLocation(id, {
-                    deviceId: null,
-                    offlineLat: lastLoc?.lat ?? null,
-                    offlineLng: lastLoc?.lng ?? null,
-                });
                 await locations_service_1.LocationsService.removeDriverLocation(id);
             });
             socket.on('updateLocation', async (loc) => {

@@ -4,6 +4,7 @@ import { VehicleClass } from '../types';
 import { redis } from '../config/redis';
 import { mgetScoreFactors, refreshFromDb } from './driverScoreCache';
 import { env } from '../config/env';
+import { getEligibleRideTypes, rideTypeLabel } from './vehicleEligibility.service';
 
 export interface ScoredDriver {
   id: string;
@@ -31,6 +32,14 @@ export class DispatchService {
 
     const driverIds = nearby.map((d: any) => d.id);
 
+    // 1b. Respect DRIVER PREFERENCES. A driver only receives a ride request
+    //     for a ride type they have ENABLED (among those they are eligible
+    //     for). Drivers with no preference rows at all are treated as
+    //     opted-in to all eligible types (backward compatibility).
+    const allowedByPreference = await this.getDriversAcceptingClass(driverIds, requestedClass);
+    const eligibleDriverIds = driverIds.filter((id) => allowedByPreference.has(id));
+    if (eligibleDriverIds.length === 0) return [];
+
     // 2. Fetch driver operational details from DB or cache
     interface DriverData {
       user_id: string;
@@ -51,7 +60,7 @@ export class DispatchService {
     if (env.LEGACY_DB_SCORE) {
       const dbDrivers = await primaryPrisma.driver.findMany({
         where: {
-          user_id: { in: driverIds },
+          user_id: { in: eligibleDriverIds },
           is_active: true,
           active_class: { in: this.getEligibleActiveClasses(requestedClass) },
         } as any,
@@ -73,9 +82,9 @@ export class DispatchService {
         active_class: d.active_class || 'CORE',
       }));
     } else {
-      const cachedFactors = await mgetScoreFactors(driverIds);
+      const cachedFactors = await mgetScoreFactors(eligibleDriverIds);
       drivers = [];
-      for (const id of driverIds) {
+      for (const id of eligibleDriverIds) {
         let factors = cachedFactors.get(id);
         if (!factors) {
           try {
@@ -217,15 +226,10 @@ export class DispatchService {
 
   /**
    * Returns a list of active classes that can fulfill a specific ride request class.
+   * Delegates to the centralized eligibility engine (single source of truth).
    */
   private static getEligibleActiveClasses(requested: VehicleClass): VehicleClass[] {
-    if (requested === VehicleClass.PRESTIGE) {
-      return [VehicleClass.PRESTIGE];
-    }
-    if (requested === VehicleClass.ELITE) {
-      return [VehicleClass.ELITE, VehicleClass.PRESTIGE];
-    }
-    return [VehicleClass.CORE, VehicleClass.ELITE, VehicleClass.PRESTIGE];
+    return getEligibleRideTypes(requested);
   }
 
   /**
@@ -270,17 +274,40 @@ export class DispatchService {
   }
 
   private static getPotentialClasses(vehicleClass: VehicleClass): VehicleClass[] {
-    if (vehicleClass === VehicleClass.PRESTIGE) return [VehicleClass.CORE, VehicleClass.ELITE, VehicleClass.PRESTIGE];
-    if (vehicleClass === VehicleClass.ELITE) return [VehicleClass.CORE, VehicleClass.ELITE];
-    return [VehicleClass.CORE];
+    return getEligibleRideTypes(vehicleClass);
+  }
+
+  /**
+   * Returns the set of driver ids (from `candidateIds`) that should receive a
+   * ride of `requestedClass`, honoring their saved preferences. A driver is
+   * included if they have an enabled preference row for the requested class,
+   * OR if they have no preference rows at all (legacy / not-yet-configured
+   * drivers default to receiving all eligible ride types).
+   */
+  private static async getDriversAcceptingClass(
+    candidateIds: string[],
+    requestedClass: VehicleClass,
+  ): Promise<Set<string>> {
+    if (candidateIds.length === 0) return new Set();
+    const { prisma } = await import('./prisma.service');
+    const rows = await (prisma as any).driverRidePreference.findMany({
+      where: { driver_id: { in: candidateIds }, ride_type: requestedClass },
+      select: { driver_id: true, enabled: true },
+    });
+    const enabledIds = new Set<string>();
+    const seen = new Set<string>();
+    for (const r of rows) {
+      seen.add(r.driver_id);
+      if (r.enabled) enabledIds.add(r.driver_id);
+    }
+    // Drivers with no preference rows at all -> treat as opted-in.
+    for (const id of candidateIds) {
+      if (!seen.has(id)) enabledIds.add(id);
+    }
+    return enabledIds;
   }
 
   private static getFriendlyClassName(cls: VehicleClass): string {
-    switch(cls) {
-      case VehicleClass.CORE: return 'NetRide CORE';
-      case VehicleClass.ELITE: return 'NetRide ELITE';
-      case VehicleClass.PRESTIGE: return 'NetRide PRESTIGE';
-      default: return 'Standard';
-    }
+    return rideTypeLabel(cls);
   }
 }

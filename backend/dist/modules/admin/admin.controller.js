@@ -151,6 +151,48 @@ class AdminController {
             res.status(500).json({ error: 'Failed to retrieve user list.' });
         }
     }
+    /**
+     * Admin view of a driver's vehicle classification vs. their ride-type
+     * preferences. Clearly separates:
+     *   - vehicleClass: the verified class derived from the vehicle
+     *   - eligibleRideTypes: everything the class can serve (tier-inclusive)
+     *   - preferences: which eligible types the driver opted INTO
+     */
+    static async getDriverRidePreferences(req, res) {
+        const { id } = req.params;
+        try {
+            const { getEligibleRideTypes, ALL_RIDE_TYPES, rideTypeLabel } = await Promise.resolve().then(() => __importStar(require('../../services/vehicleEligibility.service')));
+            const veh = await database_1.pool.query(`SELECT dv.service_class
+         FROM driver_vehicles dv
+         WHERE dv.driver_id = $1
+         ORDER BY (dv.vehicle_status = 'APPROVED') DESC NULLS LAST
+         LIMIT 1`, [id]);
+            const vehicleClass = veh.rows[0]?.service_class || 'CORE';
+            const eligible = getEligibleRideTypes(vehicleClass);
+            const prefsRes = await database_1.pool.query(`SELECT ride_type, enabled FROM driver_ride_preferences WHERE driver_id = $1`, [id]);
+            const enabledByType = new Map();
+            for (const r of prefsRes.rows)
+                enabledByType.set(r.ride_type, r.enabled);
+            const preferences = {};
+            for (const rt of eligible) {
+                preferences[rt] = enabledByType.has(rt) ? enabledByType.get(rt) : true;
+            }
+            res.json({
+                vehicleClass,
+                vehicleClassLabel: rideTypeLabel(vehicleClass),
+                eligibleRideTypes: eligible,
+                eligibleLabels: eligible.reduce((acc, rt) => {
+                    acc[rt] = rideTypeLabel(rt);
+                    return acc;
+                }, {}),
+                preferences,
+            });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Driver ride preferences error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to load driver ride preferences.' });
+        }
+    }
     static async getUserById(req, res) {
         const { id } = req.params;
         try {
@@ -378,6 +420,108 @@ class AdminController {
         catch (error) {
             console.error(`[ADMIN] ❌ Set pending error: ${error.message}`);
             res.status(500).json({ error: 'Failed to update user status.' });
+        }
+    }
+    static async blockUser(req, res) {
+        const { id } = req.params;
+        const { reason } = req.body;
+        const adminId = req.user.id;
+        if (!reason || !String(reason).trim()) {
+            return res.status(400).json({ error: 'A block reason is required.' });
+        }
+        try {
+            const user = await prisma_service_1.prisma.user.update({
+                where: { id },
+                data: {
+                    verification_status: client_1.VerificationStatus.BLOCKED,
+                    is_verified: false,
+                    blocked_reason: reason,
+                    verification_feedback_seen: false,
+                },
+            });
+            const hasDriverProfile = await prisma_service_1.prisma.driver.findUnique({ where: { user_id: id } });
+            if (hasDriverProfile) {
+                await prisma_service_1.prisma.driver.update({
+                    where: { user_id: id },
+                    data: { is_active: false },
+                });
+            }
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: id,
+                    action: 'BLOCK',
+                    details: `User ${user.email} blocked. Reason: ${reason}`,
+                },
+            });
+            res.json({ message: 'User blocked', user });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Block user error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to block user.' });
+        }
+    }
+    static async unblockUser(req, res) {
+        const { id } = req.params;
+        const adminId = req.user.id;
+        try {
+            const user = await prisma_service_1.prisma.user.update({
+                where: { id },
+                data: {
+                    verification_status: client_1.VerificationStatus.VERIFIED,
+                    is_verified: true,
+                    blocked_reason: null,
+                    verification_feedback_seen: false,
+                },
+            });
+            const hasDriverProfile = await prisma_service_1.prisma.driver.findUnique({ where: { user_id: id } });
+            if (hasDriverProfile) {
+                await prisma_service_1.prisma.driver.update({
+                    where: { user_id: id },
+                    data: { is_active: true, background_check_status: 'APPROVED' },
+                });
+            }
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: id,
+                    action: 'UNBLOCK',
+                    details: `User ${user.email} unblocked.`,
+                },
+            });
+            res.json({ message: 'User unblocked', user });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Unblock user error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to unblock user.' });
+        }
+    }
+    static async getFlaggedRatings(req, res) {
+        try {
+            const { page = 1, limit = 20 } = req.query;
+            const skip = (Number(page) - 1) * Number(limit);
+            const ratingsRes = await database_1.pool.query(`SELECT r.*,
+                ride.pickup_address, ride.destination_address, ride.completed_at,
+                rider.full_name AS rider_name, rider.email AS rider_email,
+                driver.full_name AS driver_name, driver.email AS driver_email
+         FROM ratings r
+         JOIN rides ride ON ride.id = r.ride_id
+         JOIN users rider ON rider.id = r.rater_id
+         JOIN users driver ON driver.id = r.target_id
+         WHERE r.flagged_for_review = TRUE
+         ORDER BY r.created_at DESC
+         LIMIT $1 OFFSET $2`, [Number(limit), skip]);
+            const totalRes = await database_1.pool.query(`SELECT COUNT(*)::int AS c FROM ratings WHERE flagged_for_review = TRUE`);
+            res.json({
+                ratings: ratingsRes.rows,
+                total: totalRes.rows[0]?.c ?? 0,
+                page: Number(page),
+                totalPages: Math.ceil((totalRes.rows[0]?.c ?? 0) / Number(limit)),
+            });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Get flagged ratings error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve flagged ratings.' });
         }
     }
     static async getLogs(req, res) {
@@ -1244,10 +1388,23 @@ class AdminController {
          SET vehicle_status = 'INACTIVE', updated_at = NOW()
          WHERE driver_id = $1
            AND (vehicle_status = 'APPROVED' OR vehicle_status IS NULL)`, [driverId]);
-            // 2. Update or create the approved driver_vehicles row
+            // 2. Derive the vehicle class from VERIFIED attributes via the
+            //    centralized eligibility engine. This is the single place ride
+            //    classification happens.
+            const { computeVehicleClass } = await Promise.resolve().then(() => __importStar(require('../../services/vehicleEligibility.service')));
+            const eligibility = computeVehicleClass({
+                isLuxury: row.is_luxury ?? false,
+                seats: row.seats ?? undefined,
+                exteriorColor: row.color,
+                interiorColor: row.interior_color,
+            });
+            const derivedClass = eligibility.vehicleClass;
+            console.log(`[ADMIN] Derived vehicle class ${derivedClass} for submission ${id} (checks: ${eligibility.checks.map(c => `${c.rule}=${c.passed}`).join(', ')})`);
+            // 3. Update or create the approved driver_vehicles row
             const existingVeh = await client.query(`UPDATE driver_vehicles
          SET vehicle_status = 'APPROVED', make = $2, model = $3, year = $4,
-             color = $5, interior_color = $6, license_plate_number = $7,
+             color = $5, interior_color = $6, seats = $13, is_luxury = $14, service_class = $15,
+             license_plate_number = $7,
              license_plate_state = $8, zip_code = $9,
              registration_photo_url = $10, insurance_photo_url = $11,
              inspection_photo_url = $12, approved_at = NOW(), updated_at = NOW()
@@ -1256,20 +1413,23 @@ class AdminController {
                 row.interior_color, row.license_plate_number,
                 row.license_plate_state, row.zip_code,
                 row.registration_photo_url, row.insurance_photo_url,
-                row.inspection_photo_url]);
+                row.inspection_photo_url,
+                row.seats ?? null, row.is_luxury ?? false, derivedClass]);
             let vehId = existingVeh.rows[0]?.id;
             if (!vehId) {
                 const ins = await client.query(`INSERT INTO driver_vehicles
            (driver_id, vehicle_status, make, model, year, color, interior_color,
+            seats, is_luxury, service_class,
             license_plate_number, license_plate_state, zip_code,
             registration_photo_url, insurance_photo_url, inspection_photo_url,
             approved_at, submitted_at)
-           VALUES ($1, 'APPROVED', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+           VALUES ($1, 'APPROVED', $2, $3, $4, $5, $6, $13, $14, $15, $7, $8, $9, $10, $11, $12, NOW(), NOW())
            RETURNING id`, [driverId, row.make, row.model, row.year, row.color,
                     row.interior_color, row.license_plate_number,
                     row.license_plate_state, row.zip_code,
                     row.registration_photo_url, row.insurance_photo_url,
-                    row.inspection_photo_url]);
+                    row.inspection_photo_url,
+                    row.seats ?? null, row.is_luxury ?? false, derivedClass]);
                 vehId = ins.rows[0].id;
             }
             // 3. Mark the submission as APPROVED

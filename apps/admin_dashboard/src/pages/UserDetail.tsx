@@ -34,7 +34,6 @@ import CheckIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import HistoryIcon from '@mui/icons-material/History';
 import BackIcon from '@mui/icons-material/ArrowBack';
-import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
 import api from '../api';
 import {
   getDriverSpeeding,
@@ -46,7 +45,9 @@ import {
   updateLicense,
   uploadUserDocument,
   deleteUserDocument,
-  triggerFaceCheck,
+  blockUser,
+  unblockUser,
+  getDriverRidePreferences,
 } from '../api/admin';
 import { SpeedingBadge } from '../components/SpeedingBadge';
 import { format } from 'date-fns';
@@ -68,6 +69,9 @@ const UserDetail: React.FC = () => {
   const [requestDocReason, setRequestDocReason] = useState('');
   const [vehicleResubmitOpen, setVehicleResubmitOpen] = useState(false);
   const [vehicleResubmitReason, setVehicleResubmitReason] = useState('');
+  const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const [ridePrefs, setRidePrefs] = useState<any>(null);
+  const [blockReason, setBlockReason] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [licenseExpiry, setLicenseExpiry] = useState('');
   const [licenseSaving, setLicenseSaving] = useState(false);
@@ -109,6 +113,14 @@ const UserDetail: React.FC = () => {
         setLicenseExpiry(dp?.license_expiry_date
           ? format(new Date(dp.license_expiry_date), 'yyyy-MM-dd')
           : '');
+        // Ride eligibility vs. preferences (clearly separated for admin).
+        try {
+          const rp = await getDriverRidePreferences(id);
+          setRidePrefs(rp);
+        } catch (err) {
+          console.error('Failed to fetch driver ride preferences', err);
+          setRidePrefs(null);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch user', error);
@@ -162,12 +174,28 @@ const UserDetail: React.FC = () => {
   const handleTriggerFaceCheck = async () => {
     setActionLoading(true);
     try {
-      await triggerFaceCheck(id!);
-      setSnackbar({ open: true, message: 'Face check triggered. The driver will be prompted to re-verify.' });
+      await blockUser(id!, blockReason);
+      setBlockDialogOpen(false);
+      setBlockReason('');
+      setSnackbar({ open: true, message: 'User blocked. They will see the block notice and reason.' });
       fetchUser();
     } catch (error) {
-      console.error('Failed to trigger face check', error);
-      setSnackbar({ open: true, message: 'Failed to trigger face check.' });
+      console.error('Failed to block user', error);
+      setSnackbar({ open: true, message: 'Failed to block user.' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUnblock = async () => {
+    setActionLoading(true);
+    try {
+      await unblockUser(id!);
+      setSnackbar({ open: true, message: 'User unblocked.' });
+      fetchUser();
+    } catch (error) {
+      console.error('Failed to unblock user', error);
+      setSnackbar({ open: true, message: 'Failed to unblock user.' });
     } finally {
       setActionLoading(false);
     }
@@ -309,7 +337,7 @@ const UserDetail: React.FC = () => {
   const getStatusColor = (status: string) => {
     if (status === 'VERIFIED') return 'success';
     if (status === 'PENDING') return 'warning';
-    if (status === 'REJECTED') return 'error';
+    if (status === 'REJECTED' || status === 'BLOCKED') return 'error';
     return 'default';
   };
 
@@ -366,6 +394,11 @@ const UserDetail: React.FC = () => {
                 color={getStatusColor(user.verification_status) as any} 
                 sx={{ fontWeight: 800, height: 26, fontSize: '0.75rem' }} 
               />
+              {user.verification_status === 'BLOCKED' && user.blocked_reason && (
+                <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: '#C65A5A', fontWeight: 700 }}>
+                  Block reason: {user.blocked_reason}
+                </Typography>
+              )}
             </Box>
             
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -424,17 +457,29 @@ const UserDetail: React.FC = () => {
               >
                 {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Reset to Pending'}
               </Button>
-              {isDriver && (
+              {user.verification_status === 'BLOCKED' ? (
                 <Button
                   variant="outlined"
-                  color="warning"
-                  startIcon={actionLoading ? undefined : <FaceRetouchingNaturalIcon />}
-                  onClick={handleTriggerFaceCheck}
+                  color="primary"
+                  startIcon={actionLoading ? undefined : <CheckIcon />}
+                  onClick={handleUnblock}
                   disabled={actionLoading}
                   fullWidth
                   sx={{ mt: 1, borderRadius: '12px', height: 48 }}
                 >
-                  {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Trigger Face Check'}
+                  {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Unblock User'}
+                </Button>
+              ) : (
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={actionLoading ? undefined : <CancelIcon />}
+                  onClick={() => setBlockDialogOpen(true)}
+                  disabled={actionLoading}
+                  fullWidth
+                  sx={{ mt: 1, borderRadius: '12px', height: 48 }}
+                >
+                  Block User
                 </Button>
               )}
             </Box>
@@ -660,6 +705,65 @@ const UserDetail: React.FC = () => {
                         </TableBody>
                       </Table>
                     </TableContainer>
+                  </Paper>
+                )}
+
+                {/* Ride Eligibility vs. Driver Preferences */}
+                {isDriver && ridePrefs && (
+                  <Paper elevation={0} sx={{ p: 3, mt: 3, borderRadius: 3, border: '1px solid #eee' }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 0.5 }}>
+                      Ride Eligibility &amp; Preferences
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                      Vehicle class is derived from the verified vehicle. Eligible types are what the class
+                      can serve. Enabled types are what the driver opted into.
+                    </Typography>
+
+                    <Grid container spacing={2} {...({ component: 'div' } as any)}>
+                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                          VEHICLE CLASS
+                        </Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 700, color: '#5B7760' }}>
+                          {ridePrefs.vehicleClassLabel || ridePrefs.vehicleClass}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                          ELIGIBLE RIDE TYPES
+                        </Typography>
+                        <Box sx={{ mt: 0.5 }}>
+                          {(ridePrefs.eligibleRideTypes || []).map((rt: string) => (
+                            <Chip
+                              key={rt}
+                              label={ridePrefs.eligibleLabels?.[rt] || rt}
+                              size="small"
+                              sx={{ mr: 0.5, mb: 0.5, bgcolor: '#5B7760', color: 'white', fontWeight: 700 }}
+                            />
+                          ))}
+                        </Box>
+                      </Grid>
+                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                          ENABLED RIDE TYPES
+                        </Typography>
+                        <Box sx={{ mt: 0.5 }}>
+                          {(ridePrefs.eligibleRideTypes || []).map((rt: string) => {
+                            const on = ridePrefs.preferences?.[rt] === true;
+                            return (
+                              <Chip
+                                key={rt}
+                                label={ridePrefs.eligibleLabels?.[rt] || rt}
+                                size="small"
+                                variant={on ? 'filled' : 'outlined'}
+                                color={on ? 'success' : 'default'}
+                                sx={{ mr: 0.5, mb: 0.5, fontWeight: 700 }}
+                              />
+                            );
+                          })}
+                        </Box>
+                      </Grid>
+                    </Grid>
                   </Paper>
                 )}
 
@@ -1215,6 +1319,47 @@ const UserDetail: React.FC = () => {
             sx={{ px: 4, borderRadius: '12px' }}
           >
             {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Clear Flag'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Block User Dialog */}
+      <Dialog
+        open={blockDialogOpen}
+        onClose={() => setBlockDialogOpen(false)}
+        {...({
+          PaperProps: { sx: { borderRadius: 4, p: 1, maxWidth: 450 } }
+        } as any)}
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Block User</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 3, color: 'text.secondary', fontWeight: 500 }}>
+            This will immediately block the user. They will be shown a dedicated
+            blocked-account screen stating the reason below. This action is logged
+            in the audit trail.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Reason for blocking"
+            multiline
+            rows={4}
+            variant="filled"
+            value={blockReason}
+            onChange={(e) => setBlockReason(e.target.value)}
+            sx={{ '& .MuiFilledInput-root': { borderRadius: 2 } }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 3 }}>
+          <Button onClick={() => setBlockDialogOpen(false)} color="inherit" sx={{ fontWeight: 700 }}>Cancel</Button>
+          <Button
+            onClick={handleTriggerFaceCheck}
+            color="error"
+            variant="contained"
+            disabled={!blockReason.trim() || actionLoading}
+            sx={{ px: 4, borderRadius: '12px' }}
+          >
+            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Confirm Block'}
           </Button>
         </DialogActions>
       </Dialog>

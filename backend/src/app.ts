@@ -32,7 +32,6 @@ import rideRoutes from './modules/ride/ride.routes';
 import geospatialRoutes from './modules/geospatial/geospatial.routes';
 import navigationRoutes from './modules/navigation/navigation.routes';
 import adminRoutes from './modules/admin/admin.routes';
-import faceRoutes from './modules/face/face.routes';
 import { GeospatialService } from './modules/geospatial/geospatial.service';
 import { UploadService } from './services/upload.service';
 import { SpeedingDetector } from './services/speeding_detector';
@@ -139,7 +138,6 @@ app.use('/api/ride', rideRoutes);
 app.use('/api/geospatial', geospatialRoutes);
 app.use('/api/navigation', navigationRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/face', faceRoutes);
 app.use('/api/files', fileRoutes);
 app.post('/api/upload', UploadService.upload);
 
@@ -479,6 +477,26 @@ async function runMigrations() {
       console.log('✅ face_check_events.reason column added');
     }
 
+    // User block + rating flag (030)
+    const hasBlockedReason = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'blocked_reason'");
+    if (hasBlockedReason.rowCount === 0) {
+      console.log('⚡ Applying user block + rating flag schema (030)...');
+      const schemaPath = path.join(__dirname, '../migrations/030_user_block_and_rating_flag.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ User block + rating flag schema (030) applied');
+    }
+
+    // Vehicle classification + driver ride preferences (031)
+    const hasPrefs = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'driver_ride_preferences'");
+    if (hasPrefs.rowCount === 0) {
+      console.log('⚡ Applying vehicle classification + ride preferences schema (031)...');
+      const schemaPath = path.join(__dirname, '../migrations/031_vehicle_classification_and_preferences.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Vehicle classification + ride preferences schema (031) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);
@@ -499,13 +517,6 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
   await runMigrations();
   logger.info({ port: Number(PORT), env: env.NODE_ENV }, 'server_listening');
 
-  // Warm up the in-process face models in the background so the first face
-  // check doesn't pay the (slow) model-load / GitHub-fetch cost on the request
-  // path. Failures are logged but non-fatal.
-  import('./services/faceMatcher')
-    .then(({ loadFaceModels }) => loadFaceModels())
-    .then(() => logger.info('face_models_loaded'))
-    .catch((e) => logger.warn({ err: e.message }, 'face_models_warmup_failed'));
   logger.info({ set: !!env.JWT_SECRET, length: env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
 
   // Pre-cache OSRM routes for the launch market (Hollywood / UCLA /
