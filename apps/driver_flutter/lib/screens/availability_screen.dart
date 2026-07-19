@@ -46,6 +46,15 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     _checkPermissions();
     _fetchProfile();
     _startCooldownTimer();
+    // Guarantee authoritative pricing state is loaded from the backend every
+    // time this screen opens (hot restart, route push, background return).
+    // The backend is the single source of truth; this prevents the UI from
+    // ever displaying the hardcoded $2.00 default after a lifecycle event.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Provider.of<DriverProvider>(context, listen: false).fetchPricing();
+      }
+    });
   }
 
   /// Self-refreshing cooldown timer.
@@ -1149,6 +1158,9 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     final max = driverProvider.priceRangeMax;
     final current = _tempPrice ?? driverProvider.pricePerMile;
     final rec = driverProvider.recommendedPrice;
+
+    debugPrint('[PRICING] slider init current=\$' +
+        '$current (temp=$_tempPrice, provider=\$${driverProvider.pricePerMile}) range=\$$min..\$$max locked=${driverProvider.isPriceLocked}');
 
     final double recFraction = (max - min) > 0 ? (rec - min) / (max - min) : 0.5;
 

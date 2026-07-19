@@ -273,18 +273,27 @@ class DriverProvider with ChangeNotifier {
 
   Future<void> fetchPricing() async {
     final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    debugPrint('[PRICING] fetchPricing called (driverId=${driverId ?? "pending"})');
+
+    // 1) Instant render aid ONLY: paint last-known cached value immediately
+    //    so the UI is never blank. This is NOT authoritative — the network
+    //    response below always wins.
     if (driverId != null) {
       final cached = CacheService.instance.get(CacheKeys.driverPricing(driverId));
       if (cached != null) {
         final data = cached as Map<String, dynamic>;
         _applyPricing(data);
         notifyListeners();
+        debugPrint('[PRICING] applied cached price=\$' + '$_pricePerMile (will be reconciled with backend)');
       }
     }
 
+    // 2) AUTHORITATIVE load from backend. The network result is the single
+    //    source of truth and always overwrites any cached/default value.
+    //    This GET does NOT depend on driverId being set yet (auth uses JWT).
     try {
       final response = await ApiService.dio.get('/driver/pricing');
-      final data = response.data;
+      final data = response.data as Map<String, dynamic>;
       _applyPricing(data);
       if (driverId != null) {
         await CacheService.instance.set(
@@ -294,16 +303,30 @@ class DriverProvider with ChangeNotifier {
         );
       }
       notifyListeners();
+      debugPrint('[PRICING] backend price=\$' +
+          '$_pricePerMile range=$_priceRangeMin..$_priceRangeMax lastChanged=$_priceLastChanged cooldownActive=$_cooldownActive');
     } catch (e) {
-      debugPrint('Error fetching pricing: $e');
+      // Network failure: keep whatever we have (cached or default) but DO NOT
+      // silently reset to the $2.00 default. Surface the error so it is visible.
+      debugPrint('[PRICING] ❌ backend fetch failed, retaining current state: $e');
     }
   }
 
   void _applyPricing(Map<String, dynamic> data) {
-    _pricePerMile = (data['price_per_mile'] as num).toDouble();
-    _priceRangeMin = (data['price_range_min'] as num).toDouble();
-    _priceRangeMax = (data['price_range_max'] as num).toDouble();
-    _recommendedPrice = (data['recommended_price'] as num).toDouble();
+    // Never let a missing field silently revert to the $2.00 default.
+    // Only overwrite when the backend actually returns a value.
+    if (data['price_per_mile'] != null) {
+      _pricePerMile = (data['price_per_mile'] as num).toDouble();
+    }
+    if (data['price_range_min'] != null) {
+      _priceRangeMin = (data['price_range_min'] as num).toDouble();
+    }
+    if (data['price_range_max'] != null) {
+      _priceRangeMax = (data['price_range_max'] as num).toDouble();
+    }
+    if (data['recommended_price'] != null) {
+      _recommendedPrice = (data['recommended_price'] as num).toDouble();
+    }
     if (data['price_last_changed'] != null) {
       _priceLastChanged = DateTime.parse(data['price_last_changed']);
     }
@@ -331,10 +354,13 @@ class DriverProvider with ChangeNotifier {
 
   Future<void> updatePrice(double newPrice) async {
     try {
+      debugPrint('[PRICING] SAVE requested price=\$$newPrice');
       final response = await ApiService.dio.post('/driver/pricing/update', data: {
         'pricePerMile': newPrice,
       });
-      final data = response.data;
+      final data = response.data as Map<String, dynamic>;
+      debugPrint('[PRICING] SAVE response price=\$' +
+          '${data['price_per_mile']} lastChanged=${data['price_last_changed']} cooldownActive=${data['cooldown_active']}');
       _applyPricing(data);
       final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
       if (driverId != null) {
