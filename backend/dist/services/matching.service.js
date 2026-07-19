@@ -9,6 +9,8 @@ const locations_service_1 = require("../modules/location/locations.service");
 const dispatch_service_1 = require("./dispatch.service");
 const geospatial_service_1 = require("../modules/geospatial/geospatial.service");
 const database_1 = require("../config/database");
+const metrics_1 = require("../observability/metrics");
+/** @deprecated Use BullMQ queue (matchQueue.add) instead. Kept for LEGACY_SYNC_MATCHING fallback. */
 exports.matchingService = {
     async findAndDispatch(io, tripId, pickupLat, pickupLng, requestedClass, riderId) {
         const drivers = await dispatch_service_1.DispatchService.getWeightedDrivers({ lat: pickupLat, lng: pickupLng }, requestedClass, env_1.env.DRIVER_MATCH_RADIUS_KM || 10, riderId);
@@ -106,20 +108,23 @@ exports.matchingService = {
         }, env_1.env.DRIVER_ACCEPT_TIMEOUT_MS);
     },
     /**
-     * Driver explicitly declined an incoming request. Move immediately to the
-     * next-best driver without waiting for the accept timeout to elapse.
+     * Driver explicitly declined an incoming request in the parallel fan-out model.
+     * Removes the driver from the dispatched set and updates metrics.
      */
     async handleDecline(io, tripId, driverId) {
-        const pending = await redis_1.redis.get(`dispatch:${tripId}`);
-        if (!pending)
-            return;
-        const parsed = JSON.parse(pending);
-        if (parsed.driverId !== driverId || parsed.index === undefined)
-            return;
-        // Clear dispatch key so the pending setTimeout becomes a no-op.
-        await redis_1.redis.del(`dispatch:${tripId}`);
-        console.log(`[DISPATCH] Driver ${driverId} declined trip ${tripId}. Moving to next.`);
-        await this.dispatchToNextDriver(io, tripId, parsed.drivers, parsed.index + 1);
+        metrics_1.dispatchAcceptOutcomeTotal.inc({ outcome: 'declined' });
+        const dispatchedJson = await redis_1.redis.get(`match:queue:dispatched:${tripId}`);
+        if (dispatchedJson) {
+            const dispatchedDrivers = JSON.parse(dispatchedJson);
+            const filtered = dispatchedDrivers.filter(d => d !== driverId);
+            if (filtered.length === 0) {
+                await redis_1.redis.del(`match:queue:dispatched:${tripId}`);
+            }
+            else {
+                await redis_1.redis.setex(`match:queue:dispatched:${tripId}`, 300, JSON.stringify(filtered));
+            }
+        }
+        console.log(`[DISPATCH] Driver ${driverId} declined trip ${tripId}.`);
     },
 };
 //# sourceMappingURL=matching.service.js.map

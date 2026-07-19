@@ -8,6 +8,9 @@ const router = (0, express_1.Router)();
 router.get('/profile', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getProfile);
 router.patch('/profile', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.updateProfile);
 router.post('/verify-identity', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.verifyIdentity);
+router.get('/onboarding/progress', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getOnboardingProgress);
+router.post('/onboarding/step', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.saveOnboardingStep);
+router.post('/onboarding/complete', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.completeOnboarding);
 router.post('/onboard', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.onboard);
 router.get('/vehicles', driver_controller_1.DriverController.getVehicles);
 router.patch('/operating-class', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.updateOperatingClass);
@@ -27,5 +30,15 @@ router.post('/payout-cards', auth_middleware_1.authMiddleware, driver_controller
 router.get('/wallet', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getWallet);
 router.post('/wallet/request-payout', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.requestOnDemandPayout);
 router.get('/payouts', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.listMyPayouts);
+// Document requirements + resubmission
+router.get('/documents/requirements', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getDocumentRequirements);
+router.post('/documents/resubmit', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.resubmitDocument);
+router.post('/documents/batch-resubmit', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.batchResubmitDocuments);
+// New vehicle submission (025)
+router.post('/vehicles/submit', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.submitNewVehicle);
+router.get('/vehicles/submissions/pending', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getPendingVehicleSubmissions);
+// Vehicle resubmission requirements (026)
+router.get('/vehicles/resubmission-requirements', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getVehicleResubmissionRequirements);
+router.post('/vehicles/submit-resubmission', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.submitVehicleResubmission);
 exports.default = router;
 //# sourceMappingURL=driver.routes.js.map

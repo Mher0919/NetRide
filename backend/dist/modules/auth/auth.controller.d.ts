@@ -13,7 +13,7 @@ export declare class AuthController {
     static oauth(req: Request, res: Response): Promise<void>;
     static requestOTP(req: Request, res: Response): Promise<void>;
     static verifyOTP(req: Request, res: Response): Promise<void>;
-    static requestPhoneOTP(req: AuthRequest, res: Response): Promise<void>;
+    static requestPhoneOTP(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static verifyPhoneOTP(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static requestAdmin2FA(req: Request, res: Response): Promise<void>;
     static verifyAdmin2FA(req: Request, res: Response): Promise<void>;

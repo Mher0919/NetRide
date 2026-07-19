@@ -19,6 +19,7 @@ RUN apk add --no-cache \
     giflib \
     librsvg-dev \
     librsvg \
+    libc6-compat \
     python3 \
     make \
     g++ \

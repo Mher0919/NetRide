@@ -35,8 +35,6 @@ const envSchema = zod_1.z.object({
     FACE_CHECK_INTERVAL_HOURS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(12),
     // Location jump threshold that triggers re-verify on offline→online.
     FACE_LOCATION_JUMP_MILES: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
-    // Base URL for the Python face microservice.
-    FACE_SERVICE_URL: zod_1.z.string().default('http://localhost:8000'),
     GMAIL_CLIENT_ID: zod_1.z.string().optional(),
     GMAIL_CLIENT_SECRET: zod_1.z.string().optional(),
     GMAIL_REFRESH_TOKEN: zod_1.z.string().optional(),
@@ -82,6 +80,16 @@ const envSchema = zod_1.z.object({
     MATCH_WORKER_CONCURRENCY: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(4),
     DISPATCH_FANOUT_SIZE: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     DRIVER_SCORE_CACHE_TTL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(300),
+    // ---- Kill switches / legacy flags ---------------------------------------
+    LOAD_TEST: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    LEGACY_RATE_LIMIT: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    LEGACY_SYNC_MATCHING: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    LEGACY_SEQUENTIAL_DISPATCH: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    LEGACY_DB_SCORE: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    LEGACY_INLINE_PG: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    DIRECT_DATABASE_URL: zod_1.z.string().optional(),
+    GEOAPIFY_API_KEY: zod_1.z.string().optional(),
+    DATABASE_REPLICA_URL: zod_1.z.string().optional(),
 });
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {

@@ -1,13 +1,16 @@
 import { UserRole } from '../../types';
 export declare class AuthService {
-    static requestPhoneOTP(phoneNumber: string): Promise<{
+    static requestPhoneOTP(userId: string, phoneNumber: string, role?: string): Promise<{
         status: string;
         message: string;
     } | {
         status: string;
         message?: undefined;
+    } | {
+        auto_verified: boolean;
+        message: string;
     }>;
-    static verifyPhoneOTP(userId: string, phoneNumber: string, code: string): Promise<{
+    static verifyPhoneOTP(userId: string, phoneNumber: string, code: string, role?: string): Promise<{
         success: boolean;
         message: string;
     }>;

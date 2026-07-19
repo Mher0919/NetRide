@@ -101,7 +101,7 @@ export async function loadFaceModels(): Promise<void> {
 
 // ---- Image helpers ----------------------------------------------------
 
-const MAX_DIM = 320;
+const MAX_DIM = 224;
 
 function decodeCanvas(buffer: Buffer): Promise<any> {
   return loadImage(buffer as any).then((img: any) => {
@@ -144,32 +144,6 @@ function laplacianVariance(gray: Float64Array, w: number, h: number): number {
   if (n === 0) return 0;
   const mean = sum / n;
   return sumSq / n - mean * mean;
-}
-
-function lbpVariance(gray: Float64Array, w: number, h: number): number {
-  const hist = new Array(256).fill(0);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      let code = 0;
-      let bit = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          code |= (gray[i + dy * w + dx] >= gray[i] ? 1 : 0) << bit;
-          bit++;
-        }
-      }
-      hist[code]++;
-    }
-  }
-  const total = (w - 2) * (h - 2);
-  let mean = 0;
-  for (let k = 0; k < 256; k++) mean += k * hist[k];
-  mean /= total || 1;
-  let varSum = 0;
-  for (let k = 0; k < 256; k++) varSum += hist[k] * (k - mean) * (k - mean);
-  return varSum / (total || 1);
 }
 
 // ---- Public API -------------------------------------------------------
@@ -229,23 +203,20 @@ export async function verifyImage(args: VerifyImageArgs): Promise<ImageVerifyRes
     reasons: qualityReasons,
   };
 
-  // Anti-spoofing / liveness heuristic on the primary face crop.
-  const lbpVar = faceCount > 0 ? lbpVariance(gray, w, h) : 0;
+  // Anti-spoofing / liveness heuristic. Reuses the already-computed
+  // Laplacian variance (texture detail) plus brightness uniformity — cheap,
+  // no extra per-pixel passes. (The old LBP loop was the main CPU cost.)
   const spoofReasons: string[] = [];
   const laplacianScore = Math.min(1, laplacianVar / 240);
   if (laplacianVar < 80) {
     spoofReasons.push(`Low texture detail (${laplacianVar.toFixed(1)})`);
-  }
-  const lbpScore = Math.min(1, lbpVar / 15);
-  if (lbpVar < 3) {
-    spoofReasons.push(`Uniform texture pattern (${lbpVar.toFixed(1)})`);
   }
   const brightnessStd = stdDev(gray, brightness);
   const brightnessScore = Math.min(1, brightnessStd / 40);
   if (brightnessStd < 15) {
     spoofReasons.push(`Unnatural brightness uniformity (${brightnessStd.toFixed(1)})`);
   }
-  let combined = 0.4 * laplacianScore + 0.35 * lbpScore + 0.25 * brightnessScore;
+  let combined = 0.5 * laplacianScore + 0.5 * brightnessScore;
   if (brightness > 220) {
     combined *= 0.7;
     spoofReasons.push('Extremely bright — possible screen');
@@ -255,7 +226,7 @@ export async function verifyImage(args: VerifyImageArgs): Promise<ImageVerifyRes
     passed: livenessPassed,
     confidence: Math.round(combined * 1000) / 1000,
     laplacian_var: Math.round(laplacianVar * 100) / 100,
-    lbp_variance: Math.round(lbpVar * 1000) / 1000,
+    lbp_variance: 0,
     brightness: Math.round(brightness * 10) / 10,
     reasons: spoofReasons,
   };

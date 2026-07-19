@@ -39,15 +39,18 @@ const client_1 = require("@prisma/client");
 const database_1 = require("../../config/database");
 const speeding_detector_1 = require("../../services/speeding_detector");
 const email_service_1 = require("../../services/email.service");
+const storage_service_1 = require("../../services/storage.service");
+const app_1 = require("../../app");
 class AdminController {
     static async getStats(req, res) {
         try {
-            const [totalRiders, totalDrivers, pendingVerifications, verifiedUsers, rejectedUsers] = await Promise.all([
+            const [totalRiders, totalDrivers, pendingVerifications, verifiedUsers, rejectedUsers, pendingDocumentReviews] = await Promise.all([
                 prisma_service_1.prisma.user.count({ where: { role: client_1.UserRole.RIDER } }),
-                prisma_service_1.prisma.user.count({ where: { role: client_1.UserRole.DRIVER } }),
+                prisma_service_1.prisma.user.count({ where: { driver_profile: { isNot: null } } }),
                 prisma_service_1.prisma.user.count({ where: { verification_status: client_1.VerificationStatus.PENDING } }),
                 prisma_service_1.prisma.user.count({ where: { verification_status: client_1.VerificationStatus.VERIFIED } }),
                 prisma_service_1.prisma.user.count({ where: { verification_status: client_1.VerificationStatus.REJECTED } }),
+                database_1.pool.query(`SELECT COUNT(*)::int AS c FROM driver_document_requirements WHERE status = 'submitted'`),
             ]);
             res.json({
                 totalRiders,
@@ -55,6 +58,7 @@ class AdminController {
                 pendingVerifications,
                 verifiedUsers,
                 rejectedUsers,
+                pendingDocumentReviews: pendingDocumentReviews.rows[0].c,
             });
         }
         catch (error) {
@@ -63,11 +67,19 @@ class AdminController {
         }
     }
     static async getUsers(req, res) {
-        const { role, status, search, page = 1, limit = 10, dangerousOnly } = req.query;
+        const { role, status, search, page = 1, limit = 10, dangerousOnly, documentPending } = req.query;
         const skip = (Number(page) - 1) * Number(limit);
         const where = {};
-        if (role)
-            where.role = role;
+        if (role) {
+            // Support dual-role users: "DRIVER" means has a driver profile,
+            // "RIDER" means the original sign-up role.
+            if (role === 'DRIVER') {
+                where.driver_profile = { isNot: null };
+            }
+            else {
+                where.role = role;
+            }
+        }
         if (status)
             where.verification_status = status;
         if (search) {
@@ -81,18 +93,52 @@ class AdminController {
             where.driver_profile = { is: { is_dangerous: true } };
         }
         try {
-            const [users, total] = await Promise.all([
-                prisma_service_1.prisma.user.findMany({
-                    where,
-                    skip,
-                    take: Number(limit),
-                    orderBy: { created_at: 'desc' },
-                    include: {
-                        driver_profile: true,
-                    },
-                }),
-                prisma_service_1.prisma.user.count({ where }),
-            ]);
+            let users;
+            let total;
+            if (documentPending === 'true') {
+                // Filter by drivers with pending document reviews
+                const pendingDriverIds = await database_1.pool.query(`SELECT DISTINCT driver_id FROM driver_document_requirements WHERE status = 'submitted'`);
+                const ids = pendingDriverIds.rows.map((r) => r.driver_id);
+                if (ids.length === 0) {
+                    res.json({ users: [], total: 0, page: Number(page), totalPages: 0 });
+                    return;
+                }
+                where.id = { in: ids };
+                [users, total] = await Promise.all([
+                    prisma_service_1.prisma.user.findMany({
+                        where,
+                        skip,
+                        take: Number(limit),
+                        orderBy: { created_at: 'desc' },
+                        include: { driver_profile: true },
+                    }),
+                    prisma_service_1.prisma.user.count({ where }),
+                ]);
+            }
+            else {
+                [users, total] = await Promise.all([
+                    prisma_service_1.prisma.user.findMany({
+                        where,
+                        skip,
+                        take: Number(limit),
+                        orderBy: { created_at: 'desc' },
+                        include: { driver_profile: true },
+                    }),
+                    prisma_service_1.prisma.user.count({ where }),
+                ]);
+                // Attach pending document review status for each returned user
+                if (users.length > 0) {
+                    const userIds = users.map((u) => u.id);
+                    const placeholders = userIds.map((_, i) => `$${i + 1}`).join(',');
+                    const pendingReqs = await database_1.pool.query(`SELECT DISTINCT driver_id FROM driver_document_requirements
+             WHERE driver_id IN (${placeholders}) AND status = 'submitted'`, userIds);
+                    const pendingIds = new Set(pendingReqs.rows.map((r) => r.driver_id));
+                    users = users.map((u) => ({
+                        ...u,
+                        has_pending_document_review: pendingIds.has(u.id),
+                    }));
+                }
+            }
             res.json({
                 users,
                 total,
@@ -108,19 +154,103 @@ class AdminController {
     static async getUserById(req, res) {
         const { id } = req.params;
         try {
-            const user = await prisma_service_1.prisma.user.findUnique({
-                where: { id },
-                include: {
-                    driver_profile: {
-                        include: {
-                            vehicles: true,
-                        },
-                    },
-                },
-            });
-            if (!user) {
+            // Use raw SQL to include drivers.phone_number (not in Prisma Driver model).
+            // d.* overwrites u.* for columns with the same name (e.g. phone_number),
+            // so the result contains the driver-specific phone when available.
+            const userRes = await database_1.pool.query(`SELECT u.*, d.*
+         FROM users u
+         LEFT JOIN drivers d ON u.id = d.user_id
+         WHERE u.id = $1`, [id]);
+            if (!userRes.rowCount) {
                 return res.status(404).json({ error: 'User record not found.' });
             }
+            const row = userRes.rows[0];
+            // Reconstruct user (top-level) fields and nest driver fields.
+            const user = {
+                id: row.id,
+                email: row.email,
+                phone_number: row.phone_number, // driver-specific, or NULL
+                full_name: row.full_name,
+                profile_image_url: row.profile_image_url,
+                date_of_birth: row.date_of_birth,
+                role: row.role,
+                verification_status: row.verification_status,
+                is_verified: row.is_verified,
+                rejection_reason: row.rejection_reason,
+                verification_feedback_seen: row.verification_feedback_seen,
+                onboarding_step: row.onboarding_step,
+                phone_verified: row.phone_verified,
+                headshot_uploaded: row.headshot_uploaded,
+                has_password: row.has_password,
+                rating: row.rating,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            };
+            // Build driver_profile
+            const driverProfile = {
+                user_id: row.user_id,
+                license_number: row.license_number,
+                license_expiry_date: row.license_expiry_date,
+                license_photo_url: row.license_photo_url,
+                license_photo_back_url: row.license_photo_back_url,
+                insurance_photo_url: row.insurance_photo_url,
+                registration_photo_url: row.registration_photo_url,
+                background_check_status: row.background_check_status,
+                is_active: row.is_active,
+                active_class: row.active_class,
+                is_dangerous: row.is_dangerous,
+                is_flagged: row.is_flagged,
+                rating: row.rating,
+                total_rides: row.total_rides,
+                rejection_reason: row.rejection_reason,
+                verification_feedback_seen: row.verification_feedback_seen,
+                phone_number: row.phone_number, // <-- driver-specific phone
+                phone_verified: row.phone_verified,
+                has_action_required: row.has_action_required,
+                last_action_required_at: row.last_action_required_at,
+            };
+            // Fetch vehicles with submission info — ordered by status (APPROVED first),
+            // then by approval timestamp, then by submission timestamp.
+            const vehiclesRes = await database_1.pool.query(`SELECT dv.*, v.make AS catalog_make, v.model AS catalog_model,
+                v.year AS catalog_year, v.category, v.service_class
+         FROM driver_vehicles dv
+         LEFT JOIN vehicles v ON dv.vehicle_id = v.id
+         WHERE dv.driver_id = $1
+         ORDER BY
+           CASE
+             WHEN dv.vehicle_status = 'APPROVED' OR dv.vehicle_status IS NULL THEN 0
+             ELSE 1
+           END,
+           dv.approved_at DESC NULLS LAST,
+           dv.submitted_at DESC NULLS LAST,
+           dv.id DESC`, [id]);
+            driverProfile.vehicles = vehiclesRes.rows;
+            // Expose the active vehicle explicitly (for frontend to use directly)
+            const activeVeh = vehiclesRes.rows.find((r) => r.vehicle_status === 'APPROVED' || r.vehicle_status === null);
+            driverProfile.active_vehicle = activeVeh || null;
+            // Expose the latest finalized vehicle submission (for admin review display)
+            const latestFinalized = await database_1.pool.query(`SELECT s.*, u.full_name AS reviewed_by_admin_name
+         FROM driver_vehicle_submissions s
+         LEFT JOIN users u ON u.id = s.reviewed_by_admin_id
+         WHERE s.driver_id = $1
+           AND s.status IN ('APPROVED', 'REJECTED')
+         ORDER BY s.reviewed_at DESC NULLS LAST, s.submitted_at DESC
+         LIMIT 1`, [id]);
+            driverProfile.latest_finalized_vehicle_submission = latestFinalized.rows[0] || null;
+            user.driver_profile = driverProfile;
+            // Normalize phone: if driver-specific phone is set, prefer it at user level too.
+            if (driverProfile.phone_number) {
+                user.phone_number = driverProfile.phone_number;
+            }
+            // Add action required flag
+            const actionRes = await database_1.pool.query(`SELECT COUNT(*)::int AS c FROM driver_document_requirements
+         WHERE driver_id = $1 AND status = 'resubmission_required'`, [id]);
+            user.has_action_required = (actionRes.rows[0]?.c ?? 0) > 0;
+            // Attach pending vehicle submissions
+            const pendingVehRes = await database_1.pool.query(`SELECT * FROM driver_vehicle_submissions
+         WHERE driver_id = $1 AND status = 'PENDING_REVIEW'
+         ORDER BY submitted_at DESC`, [id]);
+            user.pending_vehicle_submissions = pendingVehRes.rows;
             res.json(user);
         }
         catch (error) {
@@ -132,6 +262,11 @@ class AdminController {
         const { id } = req.params;
         const adminId = req.user.id;
         try {
+            // Lock the DOB if it's set (identity verification includes DOB review).
+            const existing = await database_1.pool.query(`SELECT date_of_birth FROM users WHERE id = $1`, [id]);
+            if (existing.rows[0]?.date_of_birth) {
+                await database_1.pool.query(`UPDATE users SET dob_locked = true WHERE id = $1`, [id]);
+            }
             const user = await prisma_service_1.prisma.user.update({
                 where: { id },
                 data: {
@@ -140,7 +275,8 @@ class AdminController {
                     verification_feedback_seen: false
                 },
             });
-            if (user.role === client_1.UserRole.DRIVER) {
+            const hasDriverProfile = await prisma_service_1.prisma.driver.findUnique({ where: { user_id: id } });
+            if (hasDriverProfile) {
                 await prisma_service_1.prisma.driver.update({
                     where: { user_id: id },
                     data: {
@@ -181,7 +317,8 @@ class AdminController {
                     verification_feedback_seen: false
                 },
             });
-            if (user.role === client_1.UserRole.DRIVER) {
+            const hasDriverProfile = await prisma_service_1.prisma.driver.findUnique({ where: { user_id: id } });
+            if (hasDriverProfile) {
                 await prisma_service_1.prisma.driver.update({
                     where: { user_id: id },
                     data: {
@@ -218,7 +355,8 @@ class AdminController {
                     is_verified: false,
                 },
             });
-            if (user.role === client_1.UserRole.DRIVER) {
+            const hasDriverProfile = await prisma_service_1.prisma.driver.findUnique({ where: { user_id: id } });
+            if (hasDriverProfile) {
                 await prisma_service_1.prisma.driver.update({
                     where: { user_id: id },
                     data: {
@@ -544,6 +682,54 @@ class AdminController {
             res.status(500).json({ error: 'Failed to clear dangerous flag.' });
         }
     }
+    static async updateLicense(req, res) {
+        try {
+            const { id } = req.params;
+            const adminId = req.user.id;
+            const { license_number, license_expiry_date } = req.body;
+            if (!license_number && !license_expiry_date) {
+                return res.status(400).json({ error: 'Provide at least one field to update (license_number or license_expiry_date).' });
+            }
+            const client = await database_1.pool.connect();
+            try {
+                await client.query('BEGIN');
+                const sets = [];
+                const params = [];
+                let idx = 1;
+                if (license_number !== undefined) {
+                    sets.push(`license_number = $${idx++}`);
+                    params.push(license_number);
+                }
+                if (license_expiry_date !== undefined) {
+                    sets.push(`license_expiry_date = $${idx++}`);
+                    params.push(license_expiry_date);
+                }
+                params.push(id);
+                await client.query(`UPDATE drivers SET ${sets.join(', ')} WHERE user_id = $${idx}`, params);
+                await client.query('COMMIT');
+                await prisma_service_1.prisma.auditLog.create({
+                    data: {
+                        admin_id: adminId,
+                        target_id: id,
+                        action: 'LICENSE_UPDATED',
+                        details: `License info updated by admin. Fields: ${sets.join(', ')}.`,
+                    },
+                });
+                res.json({ success: true });
+            }
+            catch (err) {
+                await client.query('ROLLBACK');
+                throw err;
+            }
+            finally {
+                client.release();
+            }
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Update license error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to update license information.' });
+        }
+    }
     // ============================================================
     // Profile-change approval queue (020)
     // ============================================================
@@ -620,7 +806,7 @@ class AdminController {
                 updatedFields.push('phone_number');
             }
             if (changes.date_of_birth) {
-                await client.query(`UPDATE users SET date_of_birth = $1 WHERE id = $2`, [changes.date_of_birth, driverId]);
+                await client.query(`UPDATE users SET date_of_birth = $1, dob_locked = true WHERE id = $2`, [changes.date_of_birth, driverId]);
                 updatedFields.push('date_of_birth');
             }
             if (changes.profile_image_url) {
@@ -655,9 +841,13 @@ class AdminController {
            ON CONFLICT (driver_id) DO UPDATE SET payout_card_id = EXCLUDED.payout_card_id, updated_at = NOW()`, [driverId, changes.payout_card_id]);
                 updatedFields.push('payout_card');
             }
-            // Mark the request APPROVED + unblock the driver.
+            // Mark the request APPROVED + restore the driver's previous state.
+            // Using prev_is_active / prev_bg_status from the saved snapshot so that
+            // approving a non-background field (e.g. profile picture) does NOT show
+            // the green "Background check complete" card — only the separate
+            // "Approve User" action (verifyUser) sets background_check_status = 'APPROVED'.
             await client.query(`UPDATE profile_change_requests SET status = 'APPROVED', reviewed_at = NOW(), reviewed_by_admin_id = $1 WHERE id = $2`, [adminId, id]);
-            await client.query(`UPDATE drivers SET is_active = true, background_check_status = 'APPROVED', verification_feedback_seen = false WHERE user_id = $1`, [driverId]);
+            await client.query(`UPDATE drivers SET is_active = $1, background_check_status = $2, verification_feedback_seen = false WHERE user_id = $3`, [row.prev_is_active ?? false, row.prev_bg_status ?? 'PENDING', driverId]);
             await client.query(`INSERT INTO audit_logs (admin_id, target_id, action, details) VALUES ($1, $2, 'PROFILE_CHANGE_APPROVED', $3)`, [adminId, driverId, JSON.stringify({ request_id: id, updated_fields: updatedFields })]);
             await client.query('COMMIT');
             // Fire-and-forget side effects
@@ -826,6 +1016,465 @@ class AdminController {
         }
     }
     // ============================================================
+    // Document resubmission requirements (024)
+    // ============================================================
+    static async requestDocumentResubmission(req, res) {
+        const { id: driverId } = req.params;
+        const { documentType, reason } = req.body;
+        const adminId = req.user.id;
+        if (!documentType)
+            return res.status(400).json({ error: 'Document type is required.' });
+        if (!reason || !String(reason).trim())
+            return res.status(400).json({ error: 'Reason for resubmission is required.' });
+        const validTypes = ['license_photo_url', 'license_photo_back_url', 'insurance_photo_url',
+            'registration_photo_url', 'inspection_photo_url', 'id_photo_front_url', 'id_photo_back_url'];
+        if (!validTypes.includes(documentType)) {
+            return res.status(400).json({ error: `Invalid document type. Must be one of: ${validTypes.join(', ')}` });
+        }
+        try {
+            // Get the current document URL for this type
+            let currentUrl = null;
+            if (['license_photo_url', 'license_photo_back_url', 'insurance_photo_url', 'registration_photo_url'].includes(documentType)) {
+                const doc = await database_1.pool.query(`SELECT ${documentType} FROM drivers WHERE user_id = $1`, [driverId]);
+                currentUrl = doc.rows[0]?.[documentType] ?? null;
+            }
+            else if (documentType === 'inspection_photo_url') {
+                const doc = await database_1.pool.query(`SELECT inspection_photo_url FROM driver_vehicles WHERE driver_id = $1 LIMIT 1`, [driverId]);
+                currentUrl = doc.rows[0]?.inspection_photo_url ?? null;
+            }
+            else if (['id_photo_front_url', 'id_photo_back_url'].includes(documentType)) {
+                const doc = await database_1.pool.query(`SELECT ${documentType} FROM users WHERE id = $1`, [driverId]);
+                currentUrl = doc.rows[0]?.[documentType] ?? null;
+            }
+            const result = await database_1.pool.query(`INSERT INTO driver_document_requirements
+         (driver_id, document_type, current_document_url, requested_by_admin_id, request_reason)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`, [driverId, documentType, currentUrl, adminId, reason]);
+            // Mark driver as having action required
+            await database_1.pool.query(`UPDATE drivers SET has_action_required = TRUE, last_action_required_at = NOW() WHERE user_id = $1`, [driverId]);
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: driverId,
+                    action: 'DOCUMENT_RESUBMISSION_REQUESTED',
+                    details: `Admin requested resubmission of ${documentType}. Reason: ${reason}`,
+                },
+            });
+            // Fire-and-forget email
+            try {
+                const userInfo = await database_1.pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [driverId]);
+                if (userInfo.rows[0]?.email) {
+                    await email_service_1.EmailService.sendDocumentResubmissionRequestedEmail({ email: userInfo.rows[0].email, full_name: userInfo.rows[0].full_name }, { document_type: documentType, reason });
+                }
+            }
+            catch (e) {
+                console.warn('[ADMIN] ⚠️ Resubmission email failed:', e.message);
+            }
+            // Notify the driver via socket so the Action Required card appears in real time
+            try {
+                app_1.io.to(`driver:${driverId}`).emit('documentRequirementsChanged', {
+                    has_action_required: true,
+                });
+            }
+            catch (e) {
+                console.warn('[ADMIN] ⚠️ Socket notification failed:', e.message);
+            }
+            res.json({ success: true, requirement: result.rows[0] });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Request document resubmission error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to request document resubmission.' });
+        }
+    }
+    static async getDriverDocumentRequirements(req, res) {
+        const { id: driverId } = req.params;
+        try {
+            const result = await database_1.pool.query(`SELECT dr.*, a.full_name AS requested_by_admin_name,
+                r.full_name AS reviewed_by_admin_name
+         FROM driver_document_requirements dr
+         LEFT JOIN users a ON a.id = dr.requested_by_admin_id
+         LEFT JOIN users r ON r.id = dr.reviewed_by_admin_id
+         WHERE dr.driver_id = $1
+         ORDER BY dr.requested_at DESC`, [driverId]);
+            res.json({ requirements: result.rows });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Get document requirements error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve document requirements.' });
+        }
+    }
+    static async reviewDocumentRequirement(req, res) {
+        const { id: requirementId } = req.params;
+        const { decision } = req.body;
+        const adminId = req.user.id;
+        if (!decision || !['approved', 'rejected'].includes(decision)) {
+            return res.status(400).json({ error: 'Valid decision (approved or rejected) is required.' });
+        }
+        try {
+            const reqRow = await database_1.pool.query(`SELECT dr.* FROM driver_document_requirements dr WHERE dr.id = $1 FOR UPDATE`, [requirementId]);
+            if (!reqRow.rowCount)
+                return res.status(404).json({ error: 'Document requirement not found.' });
+            if (reqRow.rows[0].status !== 'submitted') {
+                return res.status(400).json({ error: 'Document requirement must be in submitted status to review.' });
+            }
+            const driverId = reqRow.rows[0].driver_id;
+            const documentType = reqRow.rows[0].document_type;
+            const updated = await database_1.pool.query(`UPDATE driver_document_requirements
+         SET status = 'reviewed', reviewed_at = NOW(), reviewed_by_admin_id = $1, review_decision = $2, updated_at = NOW()
+         WHERE id = $3 RETURNING *`, [adminId, decision, requirementId]);
+            // If approved, update the actual document URL
+            if (decision === 'approved') {
+                const newUrl = reqRow.rows[0].new_document_url;
+                if (newUrl) {
+                    if (['license_photo_url', 'license_photo_back_url', 'insurance_photo_url', 'registration_photo_url'].includes(documentType)) {
+                        await database_1.pool.query(`UPDATE drivers SET ${documentType} = $1, verification_feedback_seen = FALSE WHERE user_id = $2`, [newUrl, driverId]);
+                    }
+                    else if (documentType === 'inspection_photo_url') {
+                        await database_1.pool.query(`UPDATE driver_vehicles SET inspection_photo_url = $1 WHERE driver_id = $2`, [newUrl, driverId]);
+                    }
+                    else if (['id_photo_front_url', 'id_photo_back_url'].includes(documentType)) {
+                        await database_1.pool.query(`UPDATE users SET ${documentType} = $1 WHERE id = $2`, [newUrl, driverId]);
+                    }
+                }
+            }
+            // Check if there are any remaining pending requirements; if not, clear action_required flag
+            const remaining = await database_1.pool.query(`SELECT COUNT(*)::int AS c FROM driver_document_requirements
+         WHERE driver_id = $1 AND status IN ('resubmission_required', 'submitted')`, [driverId]);
+            if (remaining.rows[0].c === 0) {
+                await database_1.pool.query(`UPDATE drivers SET has_action_required = FALSE WHERE user_id = $1`, [driverId]);
+            }
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: driverId,
+                    action: `DOCUMENT_RESUBMISSION_${decision.toUpperCase()}`,
+                    details: `Document ${documentType} resubmission ${decision}.`,
+                },
+            });
+            // Send driver review notification email (fire-and-forget)
+            try {
+                const driverInfo = await database_1.pool.query(`SELECT u.email, u.full_name FROM users u WHERE u.id = $1`, [driverId]);
+                const driver = driverInfo.rows[0];
+                if (driver) {
+                    email_service_1.EmailService.sendDocumentResubmissionReviewedEmail({ email: driver.email, full_name: driver.full_name }, { document_type: documentType, decision });
+                }
+            }
+            catch (emailErr) {
+                console.error('❌ [ADMIN] Document review email error:', emailErr.message);
+            }
+            // Socket notification to driver so the app re-fetches requirements
+            try {
+                app_1.io.to(`driver:${driverId}`).emit('documentRequirementsChanged', {});
+            }
+            catch (socketErr) {
+                console.error('❌ [ADMIN] Document review socket error:', socketErr.message);
+            }
+            res.json({ success: true, requirement: updated.rows[0] });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Review document requirement error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to review document requirement.' });
+        }
+    }
+    // ============================================================
+    // Vehicle submission review (025)
+    // ============================================================
+    static async listVehicleSubmissions(req, res) {
+        try {
+            const { status, limit = '50', offset = '0' } = req.query;
+            const lim = Math.min(parseInt(String(limit), 10) || 50, 200);
+            const off = Math.max(parseInt(String(offset), 10) || 0, 0);
+            const where = [];
+            const vals = [];
+            let i = 1;
+            if (status) {
+                where.push(`s.status = $${i++}`);
+                vals.push(status);
+            }
+            const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+            vals.push(lim, off);
+            const res0 = await database_1.pool.query(`SELECT s.*, u.full_name, u.email
+         FROM driver_vehicle_submissions s
+         JOIN users u ON u.id = s.driver_id
+         ${whereClause}
+         ORDER BY s.submitted_at DESC
+         LIMIT $${i++} OFFSET $${i++}`, vals);
+            const totalRes = await database_1.pool.query(`SELECT COUNT(*)::int AS c FROM driver_vehicle_submissions ${whereClause}`, vals.slice(0, vals.length - 2));
+            res.json({ submissions: res0.rows, total: totalRes.rows[0]?.c ?? 0 });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ List vehicle submissions error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to list vehicle submissions.' });
+        }
+    }
+    static async getVehicleSubmission(req, res) {
+        try {
+            const { id } = req.params;
+            const res0 = await database_1.pool.query(`SELECT s.*, u.full_name, u.email
+         FROM driver_vehicle_submissions s
+         JOIN users u ON u.id = s.driver_id
+         WHERE s.id = $1`, [id]);
+            if (!res0.rowCount) {
+                return res.status(404).json({ error: 'Vehicle submission not found.' });
+            }
+            res.json(res0.rows[0]);
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Get vehicle submission error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve vehicle submission.' });
+        }
+    }
+    static async approveVehicleSubmission(req, res) {
+        const { id } = req.params;
+        const adminId = req.user.id;
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            // Lock the submission row
+            const sub = await client.query(`SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW' FOR UPDATE`, [id]);
+            if (!sub.rowCount) {
+                await client.query('ROLLBACK');
+                client.release();
+                return res.status(404).json({ error: 'Pending vehicle submission not found.' });
+            }
+            const row = sub.rows[0];
+            const driverId = row.driver_id;
+            // 1. Mark the previous active/approved vehicle as INACTIVE
+            await client.query(`UPDATE driver_vehicles
+         SET vehicle_status = 'INACTIVE', updated_at = NOW()
+         WHERE driver_id = $1
+           AND (vehicle_status = 'APPROVED' OR vehicle_status IS NULL)`, [driverId]);
+            // 2. Update or create the approved driver_vehicles row
+            const existingVeh = await client.query(`UPDATE driver_vehicles
+         SET vehicle_status = 'APPROVED', make = $2, model = $3, year = $4,
+             color = $5, interior_color = $6, license_plate_number = $7,
+             license_plate_state = $8, zip_code = $9,
+             registration_photo_url = $10, insurance_photo_url = $11,
+             inspection_photo_url = $12, approved_at = NOW(), updated_at = NOW()
+         WHERE driver_id = $1 AND vehicle_status = 'PENDING_REVIEW'
+         RETURNING id`, [driverId, row.make, row.model, row.year, row.color,
+                row.interior_color, row.license_plate_number,
+                row.license_plate_state, row.zip_code,
+                row.registration_photo_url, row.insurance_photo_url,
+                row.inspection_photo_url]);
+            let vehId = existingVeh.rows[0]?.id;
+            if (!vehId) {
+                const ins = await client.query(`INSERT INTO driver_vehicles
+           (driver_id, vehicle_status, make, model, year, color, interior_color,
+            license_plate_number, license_plate_state, zip_code,
+            registration_photo_url, insurance_photo_url, inspection_photo_url,
+            approved_at, submitted_at)
+           VALUES ($1, 'APPROVED', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+           RETURNING id`, [driverId, row.make, row.model, row.year, row.color,
+                    row.interior_color, row.license_plate_number,
+                    row.license_plate_state, row.zip_code,
+                    row.registration_photo_url, row.insurance_photo_url,
+                    row.inspection_photo_url]);
+                vehId = ins.rows[0].id;
+            }
+            // 3. Mark the submission as APPROVED
+            await client.query(`UPDATE driver_vehicle_submissions
+         SET status = 'APPROVED', reviewed_at = NOW(), reviewed_by_admin_id = $2
+         WHERE id = $1`, [id, adminId]);
+            // 4. Ensure driver is active
+            await client.query(`UPDATE drivers SET is_active = true, verification_feedback_seen = false WHERE user_id = $1`, [driverId]);
+            await client.query('COMMIT');
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: driverId,
+                    action: 'VEHICLE_SUBMISSION_APPROVED',
+                    details: `Vehicle submission ${id} approved. Previous active vehicle marked inactive.`,
+                },
+            });
+            res.json({ success: true, vehicle_id: vehId });
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            console.error(`[ADMIN] ❌ Approve vehicle submission error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to approve vehicle submission.' });
+        }
+        finally {
+            client.release();
+        }
+    }
+    static async rejectVehicleSubmission(req, res) {
+        const { id } = req.params;
+        const { reason } = req.body;
+        const adminId = req.user.id;
+        if (!reason || !String(reason).trim()) {
+            return res.status(400).json({ error: 'Rejection reason is required.' });
+        }
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const sub = await client.query(`SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW' FOR UPDATE`, [id]);
+            if (!sub.rowCount) {
+                await client.query('ROLLBACK');
+                client.release();
+                return res.status(404).json({ error: 'Pending vehicle submission not found.' });
+            }
+            const row = sub.rows[0];
+            // Remove the pending driver_vehicles row
+            await client.query(`DELETE FROM driver_vehicles WHERE driver_id = $1 AND vehicle_status = 'PENDING_REVIEW'`, [row.driver_id]);
+            // Also remove the duplicate pending submission row if exists (created alongside driver_vehicles)
+            await client.query(`DELETE FROM driver_vehicle_submissions
+         WHERE driver_id = $1 AND status = 'PENDING_REVIEW' AND id != $2`, [row.driver_id, id]);
+            await client.query(`UPDATE driver_vehicle_submissions
+         SET status = 'REJECTED', rejection_reason = $2, reviewed_at = NOW(),
+             reviewed_by_admin_id = $3
+         WHERE id = $1`, [id, reason, adminId]);
+            await client.query('COMMIT');
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: row.driver_id,
+                    action: 'VEHICLE_SUBMISSION_REJECTED',
+                    details: `Vehicle submission ${id} rejected: ${reason}`,
+                },
+            });
+            res.json({ success: true });
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            console.error(`[ADMIN] ❌ Reject vehicle submission error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to reject vehicle submission.' });
+        }
+        finally {
+            client.release();
+        }
+    }
+    static async requestVehicleChanges(req, res) {
+        const { id } = req.params;
+        const { reason } = req.body;
+        const adminId = req.user.id;
+        if (!reason || !String(reason).trim()) {
+            return res.status(400).json({ error: 'Change request reason is required.' });
+        }
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const sub = await client.query(`SELECT * FROM driver_vehicle_submissions WHERE id = $1 AND status = 'PENDING_REVIEW' FOR UPDATE`, [id]);
+            if (!sub.rowCount) {
+                await client.query('ROLLBACK');
+                client.release();
+                return res.status(404).json({ error: 'Pending vehicle submission not found.' });
+            }
+            const row = sub.rows[0];
+            const driverId = row.driver_id;
+            // Update submission status with the admin note
+            await client.query(`UPDATE driver_vehicle_submissions
+         SET status = 'RESUBMISSION_REQUIRED', rejection_reason = $2,
+             reviewed_at = NOW(), reviewed_by_admin_id = $3
+         WHERE id = $1`, [id, reason, adminId]);
+            // Update the pending driver_vehicles row
+            await client.query(`UPDATE driver_vehicles
+         SET vehicle_status = 'RESUBMISSION_REQUIRED'
+         WHERE driver_id = $1 AND vehicle_status = 'PENDING_REVIEW'`, [driverId]);
+            // Mark driver as having vehicle action required
+            await client.query(`UPDATE drivers
+         SET has_vehicle_action_required = TRUE,
+             last_vehicle_action_required_at = NOW()
+         WHERE user_id = $1`, [driverId]);
+            // Create a resubmission request record
+            await client.query(`INSERT INTO driver_vehicle_resubmission_requests
+         (driver_id, submission_id, requested_by_admin_id, reason, status)
+         VALUES ($1, $2, $3, $4, 'resubmission_required')`, [driverId, id, adminId, reason]);
+            await client.query('COMMIT');
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: driverId,
+                    action: 'VEHICLE_SUBMISSION_CHANGES_REQUESTED',
+                    details: `Vehicle submission ${id} changes requested: ${reason}`,
+                },
+            });
+            res.json({ success: true });
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            console.error(`[ADMIN] ❌ Request vehicle changes error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to request vehicle changes.' });
+        }
+        finally {
+            client.release();
+        }
+    }
+    /**
+     * Request a full vehicle resubmission for the driver.
+     * Creates a resubmission request, marks action required on the driver,
+     * and sets the driver_vehicles row to RESUBMISSION_REQUIRED.
+     * Unlike requestVehicleChanges (which targets a specific pending submission),
+     * this can be used to request a completely new vehicle submission
+     * even for previously approved/rejected vehicles.
+     */
+    static async requestVehicleResubmission(req, res) {
+        const { id: driverId } = req.params;
+        const { reason } = req.body;
+        const adminId = req.user.id;
+        if (!reason || !String(reason).trim()) {
+            return res.status(400).json({ error: 'Resubmission request reason is required.' });
+        }
+        if (reason.length > 2000) {
+            return res.status(400).json({ error: 'Reason must not exceed 2000 characters.' });
+        }
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            // Verify the target is a driver
+            const driverCheck = await client.query(`SELECT user_id FROM drivers WHERE user_id = $1`, [driverId]);
+            if (!driverCheck.rowCount) {
+                await client.query('ROLLBACK');
+                client.release();
+                return res.status(404).json({ error: 'Driver not found.' });
+            }
+            // Mark any existing driver_vehicles as needing resubmission
+            await client.query(`UPDATE driver_vehicles
+         SET vehicle_status = 'RESUBMISSION_REQUIRED'
+         WHERE driver_id = $1 AND vehicle_status = 'APPROVED'`, [driverId]);
+            // Mark driver as having vehicle action required
+            await client.query(`UPDATE drivers
+         SET has_vehicle_action_required = TRUE,
+             last_vehicle_action_required_at = NOW()
+         WHERE user_id = $1`, [driverId]);
+            // Create a resubmission request
+            const ins = await client.query(`INSERT INTO driver_vehicle_resubmission_requests
+         (driver_id, requested_by_admin_id, reason, status)
+         VALUES ($1, $2, $3, 'resubmission_required')
+         RETURNING id`, [driverId, adminId, reason]);
+            await client.query('COMMIT');
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: driverId,
+                    action: 'VEHICLE_RESUBMISSION_REQUESTED',
+                    details: `Vehicle resubmission requested for driver ${driverId}: ${reason}`,
+                },
+            });
+            // Notify the driver via socket so the Action Required card appears in real time
+            try {
+                app_1.io.to(`driver:${driverId}`).emit('vehicleRequirementsChanged', {
+                    has_action_required: true,
+                });
+            }
+            catch (e) {
+                console.warn('[ADMIN] ⚠️ Socket notification for vehicle failed:', e.message);
+            }
+            res.json({
+                success: true,
+                resubmission_request_id: ins.rows[0].id,
+            });
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            console.error(`[ADMIN] ❌ Request vehicle resubmission error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to request vehicle resubmission.' });
+        }
+        finally {
+            client.release();
+        }
+    }
+    // ============================================================
     // Payouts (020)
     // ============================================================
     static async listPayouts(req, res) {
@@ -852,7 +1501,7 @@ class AdminController {
          ${whereClause}
          ORDER BY p.requested_at DESC
          LIMIT $${i++} OFFSET $${i++}`, vals);
-            const totalRes = await database_1.pool.query(`SELECT COUNT(*)::int AS c FROM payouts ${whereClause}`, vals.slice(0, vals.length - 2));
+            const totalRes = await database_1.pool.query(`SELECT COUNT(*)::int AS c FROM payouts p ${whereClause}`, vals.slice(0, vals.length - 2));
             res.json({ payouts: res0.rows, total: totalRes.rows[0]?.c ?? 0 });
         }
         catch (error) {
@@ -900,6 +1549,69 @@ class AdminController {
             client.release();
         }
     }
+    static async uploadUserDocument(req, res) {
+        const { id } = req.params;
+        const { field, image, mimetype } = req.body;
+        if (!field || !image || !mimetype) {
+            return res.status(400).json({ error: 'Missing required fields: field, image, mimetype' });
+        }
+        const mapping = AdminController.DOCUMENT_FIELDS[field];
+        if (!mapping) {
+            return res.status(400).json({ error: `Unknown document field: ${field}` });
+        }
+        try {
+            const buffer = Buffer.from(image, 'base64');
+            const fileType = field.replace(/_url$/, '');
+            const adminId = req.user?.id || id;
+            const { id: fileId, url } = await storage_service_1.StorageService.upload(buffer, {
+                userId: id,
+                fileType,
+                originalName: field,
+                mimetype,
+            });
+            // Update the database with the portable /api/files/:id URL
+            await database_1.pool.query(`UPDATE ${mapping.table} SET ${mapping.column} = $1 WHERE ${mapping.table === 'users' ? 'id' : 'user_id'} = $2`, [url, id]);
+            console.log(`[ADMIN] Uploaded ${field} for user ${id} -> ${url}`);
+            res.json({ url });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Upload document error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to upload document.' });
+        }
+    }
+    static async deleteUserDocument(req, res) {
+        const { id } = req.params;
+        const { field } = req.body;
+        if (!field) {
+            return res.status(400).json({ error: 'Missing required field: field' });
+        }
+        const mapping = AdminController.DOCUMENT_FIELDS[field];
+        if (!mapping) {
+            return res.status(400).json({ error: `Unknown document field: ${field}` });
+        }
+        try {
+            await database_1.pool.query(`UPDATE ${mapping.table} SET ${mapping.column} = NULL WHERE ${mapping.table === 'users' ? 'id' : 'user_id'} = $1`, [id]);
+            console.log(`[ADMIN] Deleted ${field} for user ${id}`);
+            res.json({ success: true });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Delete document error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to delete document.' });
+        }
+    }
 }
 exports.AdminController = AdminController;
+// ==========================================================================
+// Admin image/document management
+// ==========================================================================
+/** Allowed document fields and which table+column they map to. */
+AdminController.DOCUMENT_FIELDS = {
+    profile_image_url: { table: 'users', column: 'profile_image_url' },
+    license_photo_url: { table: 'drivers', column: 'license_photo_url' },
+    license_photo_back_url: { table: 'drivers', column: 'license_photo_back_url' },
+    insurance_photo_url: { table: 'drivers', column: 'insurance_photo_url' },
+    registration_photo_url: { table: 'drivers', column: 'registration_photo_url' },
+    id_photo_front_url: { table: 'users', column: 'id_photo_front_url' },
+    id_photo_back_url: { table: 'users', column: 'id_photo_back_url' },
+};
 //# sourceMappingURL=admin.controller.js.map

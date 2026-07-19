@@ -11,6 +11,9 @@ const nodemailer_1 = __importDefault(require("nodemailer"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 class EmailService {
+    static formatDocTypes(types) {
+        return types.map(t => this.DOC_TYPE_LABELS[t] || t).join(', ');
+    }
     static async getGmailClient() {
         this.oauth2Client.setCredentials({
             refresh_token: env_1.env.GMAIL_REFRESH_TOKEN,
@@ -351,6 +354,128 @@ class EmailService {
         }
     }
     // ============================================================
+    // Document resubmission emails (024)
+    // ============================================================
+    static async sendDocumentResubmissionRequestedEmail(driver, info) {
+        if (!driver.email)
+            return;
+        const label = this.DOC_TYPE_LABELS[info.document_type] || info.document_type;
+        try {
+            await this.sendEmail({
+                to: driver.email,
+                subject: `Action Required — Update your ${label}`,
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #C65A5A;">Document update needed</h2>
+            <p>Hi ${driver.full_name ?? 'Driver'},</p>
+            <p>Our team has reviewed your documents and needs an updated version of <strong>${label}</strong>.</p>
+            <div style="margin: 16px 0; padding: 14px; border-left: 4px solid #C65A5A; background: #f9f4f4;">
+              <strong>Reason:</strong> ${info.reason}
+            </div>
+            <p>Please open the app, go to your profile, and resubmit the requested document. Once you do, our team will review it promptly.</p>
+            <p style="color: #888; font-size: 12px;">You won't be able to go online until this is resolved.</p>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending document resubmission email:', error);
+        }
+    }
+    static async sendDocumentResubmissionReviewedEmail(driver, info) {
+        if (!driver.email)
+            return;
+        const label = this.DOC_TYPE_LABELS[info.document_type] || info.document_type;
+        try {
+            if (info.decision === 'approved') {
+                await this.sendEmail({
+                    to: driver.email,
+                    subject: `Your ${label} has been approved`,
+                    html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+              <h2 style="color: #5B7760;">Document approved</h2>
+              <p>Hi ${driver.full_name ?? 'Driver'},</p>
+              <p>Your updated <strong>${label}</strong> has been reviewed and approved. All documents are in order.</p>
+            </div>
+          `,
+                });
+            }
+            else {
+                await this.sendEmail({
+                    to: driver.email,
+                    subject: `Action Required — Your ${label} needs revision`,
+                    html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+              <h2 style="color: #C65A5A;">Document needs revision</h2>
+              <p>Hi ${driver.full_name ?? 'Driver'},</p>
+              <p>Unfortunately your updated <strong>${label}</strong> could not be approved. Please open the app and resubmit with a clearer photo.</p>
+            </div>
+          `,
+                });
+            }
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending document review email:', error);
+        }
+    }
+    // ============================================================
+    // Driver document resubmitted — driver confirmation
+    // ============================================================
+    static async sendDriverDocumentResubmittedConfirmationEmail(driver, info) {
+        if (!driver.email)
+            return;
+        const docLabel = this.formatDocTypes(info.document_types);
+        try {
+            await this.sendEmail({
+                to: driver.email,
+                subject: 'Your documents have been received',
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #5B7760;">Documents received</h2>
+            <p>Hi ${driver.full_name ?? 'Driver'},</p>
+            <p>Thank you. Your updated documents have been received successfully:</p>
+            <p><strong>${docLabel}</strong></p>
+            <p>Our team is reviewing your documents now. We'll notify you once the review is complete or if we need any additional information.</p>
+            <p style="color: #888; font-size: 12px;">You don't need to do anything else at this time.</p>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending document confirmation email:', error);
+        }
+    }
+    // ============================================================
+    // Driver document resubmitted — admin notification
+    // ============================================================
+    static async sendAdminDocumentResubmissionNoticeEmail(admin, driver, info) {
+        if (!admin.email)
+            return;
+        const docLabel = this.formatDocTypes(info.document_types);
+        const reviewUrl = `${env_1.env.ADMIN_URL}/users/${driver.id}`;
+        try {
+            await this.sendEmail({
+                to: admin.email,
+                subject: `Document review needed — ${driver.full_name ?? 'Driver'}`,
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #333;">Documents awaiting review</h2>
+            <p>Driver <strong>${driver.full_name ?? 'Unknown'}</strong> (${driver.email ?? ''}) has submitted documents for review.</p>
+            <p><strong>Documents submitted:</strong> ${docLabel}</p>
+            <p><strong>Submitted at:</strong> ${info.submitted_at.toLocaleString()}</p>
+            <p><strong>Status:</strong> Pending Review</p>
+            <div style="margin-top: 24px; text-align: center;">
+              <a href="${reviewUrl}" style="background-color: #5B7760; color: white; padding: 14px 22px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">REVIEW DRIVER</a>
+            </div>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending admin document notice:', error);
+        }
+    }
+    // ============================================================
     // Payout-card + payout emails (020)
     // ============================================================
     static async sendPayoutCardNotice(admin, driver, card) {
@@ -433,7 +558,49 @@ class EmailService {
             console.error('❌ [GMAIL API] Error sending payout receipt email:', error);
         }
     }
+    /**
+     * Notify all admin users that a driver's face check was flagged for review.
+     * `admins` is a list of { email } rows (ADMIN role). Silently skips if no
+     * Gmail credentials are configured.
+     */
+    static async sendFaceCheckFlaggedNotice(admins, info) {
+        const recipients = admins.map((a) => a.email).filter(Boolean);
+        if (recipients.length === 0)
+            return;
+        try {
+            const reasonLabel = info.reason ?? 'unknown';
+            await this.sendEmail({
+                to: recipients.join(','),
+                subject: '⚠️ Driver face check flagged for review',
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #C65A5A;">Face check flagged</h2>
+            <p>A driver's identity verification failed automated checks and needs manual review.</p>
+            <p>
+              Driver: <strong>${info.driverName ?? 'Unknown'}</strong> (${info.driverEmail ?? 'n/a'})<br/>
+              Reason: <strong>${reasonLabel}</strong><br/>
+              Score: ${info.score ?? 'n/a'}<br/>
+              Event ID: ${info.eventId ?? 'n/a'}
+            </p>
+            <p style="color: #888; font-size: 12px;">Review it in the Admin Dashboard → Face Checks.</p>
+          </div>
+        `,
+            });
+        }
+        catch (error) {
+            console.error('❌ [GMAIL API] Error sending face-check flagged notice:', error);
+        }
+    }
 }
 exports.EmailService = EmailService;
 EmailService.oauth2Client = new googleapis_1.google.auth.OAuth2(env_1.env.GMAIL_CLIENT_ID, env_1.env.GMAIL_CLIENT_SECRET, 'https://developers.google.com/oauthplayground');
+EmailService.DOC_TYPE_LABELS = {
+    license_photo_url: 'Driver License (Front)',
+    license_photo_back_url: 'Driver License (Back)',
+    insurance_photo_url: 'Insurance Certificate',
+    registration_photo_url: 'Vehicle Registration',
+    inspection_photo_url: 'Vehicle Inspection',
+    id_photo_front_url: 'ID Card (Front)',
+    id_photo_back_url: 'ID Card (Back)',
+};
 //# sourceMappingURL=email.service.js.map

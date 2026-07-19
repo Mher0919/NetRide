@@ -268,13 +268,19 @@ class AuthController {
     }
     static async requestPhoneOTP(req, res) {
         try {
-            const { phone_number } = zod_1.z.object({ phone_number: zod_1.z.string() }).parse(req.body);
-            const result = await auth_service_1.AuthService.requestPhoneOTP(phone_number);
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const { phone_number, role } = zod_1.z.object({
+                phone_number: zod_1.z.string(),
+                role: zod_1.z.string().optional(),
+            }).parse(req.body);
+            const result = await auth_service_1.AuthService.requestPhoneOTP(userId, phone_number, role);
             res.json(result);
         }
         catch (error) {
             console.error(`[AUTH] ❌ Phone OTP request error: ${error.message}`);
-            res.status(400).json({ error: 'Failed to send SMS code.' });
+            res.status(400).json({ error: error.message || 'Failed to send SMS code.' });
         }
     }
     static async verifyPhoneOTP(req, res) {
@@ -282,11 +288,12 @@ class AuthController {
             const userId = req.user?.id;
             if (!userId)
                 return res.status(401).json({ error: 'Unauthorized' });
-            const { phone_number, code } = zod_1.z.object({
+            const { phone_number, code, role } = zod_1.z.object({
                 phone_number: zod_1.z.string(),
                 code: zod_1.z.string().min(4).max(10),
+                role: zod_1.z.string().optional(),
             }).parse(req.body);
-            const result = await auth_service_1.AuthService.verifyPhoneOTP(userId, phone_number, code);
+            const result = await auth_service_1.AuthService.verifyPhoneOTP(userId, phone_number, code, role);
             res.json(result);
         }
         catch (error) {

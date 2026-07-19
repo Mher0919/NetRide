@@ -35,8 +35,8 @@ export declare const updateProfileSchema: z.ZodObject<{
 }>;
 export declare const verifyIdentitySchema: z.ZodObject<{
     body: z.ZodObject<{
-        id_photo_front_url: z.ZodString;
-        id_photo_back_url: z.ZodString;
+        id_photo_front_url: z.ZodEffects<z.ZodString, string, string>;
+        id_photo_back_url: z.ZodEffects<z.ZodString, string, string>;
         date_of_birth: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         id_photo_front_url: string;

@@ -32,6 +32,7 @@ export declare class AdminController {
      * issued, retraining completed, etc). Writes an audit_log row.
      */
     static clearDangerousFlag(req: AuthRequest, res: Response): Promise<void>;
+    static updateLicense(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static listProfileChanges(req: AuthRequest, res: Response): Promise<void>;
     static getProfileChange(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static approveProfileChange(req: AuthRequest, res: Response): Promise<void>;
@@ -39,6 +40,27 @@ export declare class AdminController {
     static listPayoutCards(req: AuthRequest, res: Response): Promise<void>;
     static approvePayoutCard(req: AuthRequest, res: Response): Promise<void>;
     static rejectPayoutCard(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static requestDocumentResubmission(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static getDriverDocumentRequirements(req: AuthRequest, res: Response): Promise<void>;
+    static reviewDocumentRequirement(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static listVehicleSubmissions(req: AuthRequest, res: Response): Promise<void>;
+    static getVehicleSubmission(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static approveVehicleSubmission(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static rejectVehicleSubmission(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static requestVehicleChanges(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * Request a full vehicle resubmission for the driver.
+     * Creates a resubmission request, marks action required on the driver,
+     * and sets the driver_vehicles row to RESUBMISSION_REQUIRED.
+     * Unlike requestVehicleChanges (which targets a specific pending submission),
+     * this can be used to request a completely new vehicle submission
+     * even for previously approved/rejected vehicles.
+     */
+    static requestVehicleResubmission(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static listPayouts(req: AuthRequest, res: Response): Promise<void>;
     static markPayoutPaid(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    /** Allowed document fields and which table+column they map to. */
+    private static readonly DOCUMENT_FIELDS;
+    static uploadUserDocument(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static deleteUserDocument(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
 }

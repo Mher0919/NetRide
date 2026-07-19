@@ -40,5 +40,45 @@ router.get('/search', auth_middleware_1.authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Failed to search places' });
     }
 });
+/**
+ * GET /api/geospatial/inspection-locations
+ * Query: zip (required)
+ *
+ * Geocodes the ZIP via Nominatim (cached in Redis), validates the
+ * coordinates are within California, then searches for nearby vehicle
+ * inspection stations using the Overpass API with progressive radius
+ * expansion (5 → 10 → 25 → 50 km).
+ */
+router.get('/inspection-locations', auth_middleware_1.authMiddleware, async (req, res) => {
+    try {
+        const rawZip = (req.query.zip ?? '').replace(/\s+/g, '');
+        if (!rawZip) {
+            return res.status(400).json({ error: 'ZIP code is required.' });
+        }
+        if (!/^\d{5}$/.test(rawZip)) {
+            return res.status(400).json({ error: 'ZIP code must be exactly 5 digits.' });
+        }
+        const coords = await geospatial_service_1.GeospatialService.geocodeZip(rawZip);
+        if (!coords) {
+            return res.status(404).json({
+                error: 'This ZIP code could not be found or is outside California. ' +
+                    'NetRide vehicle inspections are currently only available in California.',
+                code: 'ZIP_NOT_IN_CALIFORNIA',
+            });
+        }
+        const stations = await geospatial_service_1.GeospatialService.findNearbyInspections(coords.lat, coords.lon);
+        res.json({
+            zip: rawZip,
+            lat: coords.lat,
+            lon: coords.lon,
+            stations,
+            count: stations.length,
+        });
+    }
+    catch (err) {
+        console.error('[GEOSPATIAL] Inspection locations Controller Error:', err.message);
+        res.status(500).json({ error: 'Failed to find inspection locations.' });
+    }
+});
 exports.default = router;
 //# sourceMappingURL=geospatial.routes.js.map

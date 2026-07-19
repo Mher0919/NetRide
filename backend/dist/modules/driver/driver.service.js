@@ -37,7 +37,6 @@ exports.DriverService = void 0;
 const database_1 = require("../../config/database");
 const email_service_1 = require("../../services/email.service");
 const prisma_service_1 = require("../../services/prisma.service");
-const redis_1 = require("../../config/redis");
 const env_1 = require("../../config/env");
 const card_1 = require("../../utils/card");
 class DriverService {
@@ -48,11 +47,26 @@ class DriverService {
        WHERE u.id = $1`, [userId]);
         const profile = res.rows[0];
         if (profile && profile.user_id) {
-            const vehicleRes = await database_1.pool.query(`SELECT dv.*, v.*
+            // Always return the authoritative active/approved vehicle first.
+            // Legacy vehicles with NULL vehicle_status are treated as APPROVED.
+            const vehicleRes = await database_1.pool.query(`SELECT dv.*, v.make AS catalog_make, v.model AS catalog_model,
+                v.year AS catalog_year, v.category, v.service_class
          FROM driver_vehicles dv
-         JOIN vehicles v ON dv.vehicle_id = v.id
-         WHERE dv.driver_id = $1`, [userId]);
+         LEFT JOIN vehicles v ON dv.vehicle_id = v.id
+         WHERE dv.driver_id = $1
+         ORDER BY
+           CASE
+             WHEN dv.vehicle_status = 'APPROVED' OR dv.vehicle_status IS NULL THEN 0
+             ELSE 1
+           END,
+           dv.submitted_at DESC NULLS LAST,
+           dv.approved_at DESC NULLS LAST,
+           dv.id DESC`, [userId]);
             profile.vehicles = vehicleRes.rows;
+            // Expose the active approved vehicle explicitly so the frontend
+            // never has to guess which row to display.
+            const activeVeh = vehicleRes.rows.find((r) => r.vehicle_status === 'APPROVED' || r.vehicle_status === null);
+            profile.active_vehicle = activeVeh || null;
         }
         // Surface any pending profile change so the driver app can render the
         // red banner without an extra round-trip.
@@ -71,9 +85,19 @@ class DriverService {
                 profile.pending_card_last4 = row.card_last4;
                 profile.pending_card_brand = row.card_brand;
                 profile.pending_changes_summary = Object.keys(changes).filter(k => k !== 'payout_card');
+                // Include pending change values so the frontend can distinguish
+                // approved values from pending-submitted values.
+                const values = {};
+                for (const [k, v] of Object.entries(changes)) {
+                    if (k !== '_reason' && k !== 'payout_card' && k !== 'payout_card_id') {
+                        values[k] = v;
+                    }
+                }
+                profile.pending_changes_values = values;
             }
             else {
                 profile.has_pending_profile_change = false;
+                profile.pending_changes_values = {};
             }
         }
         catch (_err) {
@@ -81,6 +105,200 @@ class DriverService {
             profile.has_pending_profile_change = false;
         }
         return profile;
+    }
+    static async getOnboardingProgress(userId) {
+        const res = await database_1.pool.query(`SELECT onboarding_step, phone_verified, headshot_uploaded, 
+              profile_image_url, full_name, date_of_birth, phone_number,
+              is_verified
+       FROM users WHERE id = $1`, [userId]);
+        if (!res.rowCount)
+            throw new Error('User not found');
+        const u = res.rows[0];
+        // Driver-specific phone (separate from rider phone)
+        const driverPhone = await database_1.pool.query(`SELECT phone_number, phone_verified FROM drivers WHERE user_id = $1`, [userId]);
+        const dp = driverPhone.rows[0];
+        return {
+            onboarding_step: u.onboarding_step ?? 0,
+            phone_verified: dp?.phone_verified || u.phone_verified || false,
+            headshot_uploaded: u.headshot_uploaded || false,
+            profile_image_url: u.profile_image_url,
+            full_name: u.full_name,
+            date_of_birth: u.date_of_birth,
+            phone_number: dp?.phone_number || u.phone_number,
+        };
+    }
+    static async saveOnboardingStep(userId, step, data) {
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            // Validate required data per step
+            switch (step) {
+                case 0: // Headshot
+                    if (!data.profile_image_url)
+                        throw new Error('Please upload a headshot photo.');
+                    await client.query(`UPDATE users SET profile_image_url = $1, headshot_uploaded = true, 
+             onboarding_step = GREATEST(onboarding_step, 1), updated_at = NOW() WHERE id = $2`, [data.profile_image_url, userId]);
+                    break;
+                case 1: // Personal Info
+                    if (!data.full_name || !data.full_name.trim())
+                        throw new Error('Full name is required.');
+                    if (!data.date_of_birth)
+                        throw new Error('Date of birth is required.');
+                    const dob = new Date(data.date_of_birth);
+                    if (isNaN(dob.getTime()))
+                        throw new Error('Invalid date of birth format.');
+                    const age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+                    if (age < 21)
+                        throw new Error('You must be at least 21 years old to drive with NetRide.');
+                    if (dob > new Date())
+                        throw new Error('Date of birth cannot be in the future.');
+                    await client.query(`UPDATE users SET full_name = $1, date_of_birth = $2,
+             onboarding_step = GREATEST(onboarding_step, 2), updated_at = NOW() WHERE id = $3`, [data.full_name.trim(), data.date_of_birth, userId]);
+                    break;
+                case 2: // Phone Verification (handled by auth endpoints, just mark step)
+                    const phoneUser = await client.query(`SELECT phone_verified, phone_number FROM users WHERE id = $1`, [userId]);
+                    const phoneDriver = await client.query(`SELECT phone_verified, phone_number FROM drivers WHERE user_id = $1`, [userId]);
+                    const userVerified = phoneUser.rows[0]?.phone_verified;
+                    const driverVerified = phoneDriver.rows[0]?.phone_verified;
+                    if (!userVerified && !driverVerified) {
+                        throw new Error('Please verify your phone number first.');
+                    }
+                    await client.query(`UPDATE users SET onboarding_step = GREATEST(onboarding_step, 3), updated_at = NOW() WHERE id = $1`, [userId]);
+                    break;
+                case 3: // Identity Documents
+                    if (!data.license_photo_url)
+                        throw new Error('Front of license photo is required.');
+                    if (!data.license_photo_back_url)
+                        throw new Error('Back of license photo is required.');
+                    if (!data.insurance_photo_url)
+                        throw new Error('Insurance certificate is required.');
+                    if (!data.registration_photo_url)
+                        throw new Error('Vehicle registration is required.');
+                    await client.query(`UPDATE drivers SET license_photo_url = $1, license_photo_back_url = $2,
+             insurance_photo_url = $3, registration_photo_url = $4
+             WHERE user_id = $5`, [data.license_photo_url, data.license_photo_back_url,
+                        data.insurance_photo_url, data.registration_photo_url, userId]);
+                    await client.query(`UPDATE users SET onboarding_step = GREATEST(onboarding_step, 4), updated_at = NOW() WHERE id = $1`, [userId]);
+                    break;
+                case 4: // Vehicle Info
+                    if (!data.license_plate_number || !data.license_plate_number.trim())
+                        throw new Error('License plate number is required.');
+                    if (!data.license_plate_state || !data.license_plate_state.trim())
+                        throw new Error('License plate state is required.');
+                    if (!data.zip_code || !data.zip_code.trim())
+                        throw new Error('ZIP code is required.');
+                    const driverExists = await client.query('SELECT 1 FROM drivers WHERE user_id = $1', [userId]);
+                    if (driverExists.rows.length === 0) {
+                        await client.query('INSERT INTO drivers (user_id) VALUES ($1)', [userId]);
+                    }
+                    const existingVeh = await client.query('SELECT id FROM driver_vehicles WHERE driver_id = $1', [userId]);
+                    if (existingVeh.rows.length > 0) {
+                        await client.query(`UPDATE driver_vehicles SET 
+               license_plate_number = $1, license_plate_state = $2, zip_code = $3,
+               make = $4, model = $5, year = $6, color = $7, interior_color = $8
+               WHERE driver_id = $9`, [data.license_plate_number.trim(), data.license_plate_state.trim(),
+                            data.zip_code.trim(), data.make || null, data.model || null,
+                            data.year || null, data.color || null, data.interior_color || null, userId]);
+                    }
+                    else {
+                        await client.query(`INSERT INTO driver_vehicles (driver_id, license_plate_number, license_plate_state, zip_code, make, model, year, color, interior_color)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, [userId, data.license_plate_number.trim(), data.license_plate_state.trim(),
+                            data.zip_code.trim(), data.make || null, data.model || null,
+                            data.year || null, data.color || null, data.interior_color || null]);
+                    }
+                    await client.query(`UPDATE users SET onboarding_step = GREATEST(onboarding_step, 5), updated_at = NOW() WHERE id = $1`, [userId]);
+                    break;
+                default:
+                    throw new Error('Invalid step number.');
+            }
+            await client.query('COMMIT');
+            return this.getOnboardingProgress(userId);
+        }
+        catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        }
+        finally {
+            client.release();
+        }
+    }
+    static async completeOnboarding(userId) {
+        // Verify all steps are complete before allowing final submission
+        const progress = await this.getOnboardingProgress(userId);
+        if (progress.onboarding_step < 5) {
+            throw new Error('Please complete all onboarding steps before submitting.');
+        }
+        const userRes = await database_1.pool.query('SELECT profile_image_url, full_name, date_of_birth, phone_number FROM users WHERE id = $1', [userId]);
+        const user = userRes.rows[0];
+        if (!user)
+            throw new Error('User not found');
+        const driverRes = await database_1.pool.query('SELECT license_photo_url, license_photo_back_url, insurance_photo_url, registration_photo_url FROM drivers WHERE user_id = $1', [userId]);
+        const driver = driverRes.rows[0];
+        if (!driver)
+            throw new Error('Driver record not found');
+        const vehRes = await database_1.pool.query(`SELECT license_plate_number, make, model, year, color 
+       FROM driver_vehicles WHERE driver_id = $1`, [userId]);
+        const vehicle = vehRes.rows[0];
+        // Set background check to PENDING, mark user verification as pending
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query(`UPDATE drivers SET background_check_status = 'PENDING', is_active = false
+         WHERE user_id = $1`, [userId]);
+            await client.query(`UPDATE users SET verification_status = 
+           CASE WHEN verification_status = 'VERIFIED' THEN 'VERIFIED'::verification_status
+                ELSE 'PENDING'::verification_status
+           END,
+           onboarding_step = GREATEST(onboarding_step, 5)
+         WHERE id = $1`, [userId]);
+            await client.query('COMMIT');
+        }
+        catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        }
+        finally {
+            client.release();
+        }
+        // Auto-create vehicle inspection requirement as a post-submission Action Required
+        try {
+            const existingReq = await database_1.pool.query(`SELECT id FROM driver_document_requirements
+         WHERE driver_id = $1 AND document_type = 'inspection_photo_url'`, [userId]);
+            if (existingReq.rows.length === 0) {
+                await database_1.pool.query(`INSERT INTO driver_document_requirements (driver_id, document_type, status)
+           VALUES ($1, 'inspection_photo_url', 'resubmission_required')`, [userId]);
+                await database_1.pool.query(`UPDATE drivers SET has_action_required = TRUE, last_action_required_at = NOW()
+           WHERE user_id = $1`, [userId]);
+            }
+        }
+        catch (reqErr) {
+            console.error(`[DRIVER] ❌ Failed to create vehicle inspection requirement (non-fatal):`, reqErr);
+        }
+        // Notify admin via email (fire-and-forget after confirmed persistence)
+        try {
+            const userEmail = await database_1.pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+            await email_service_1.EmailService.sendDriverRegistrationNotice({
+                personalInfo: {
+                    userId,
+                    full_name: user.full_name,
+                    email: userEmail.rows[0]?.email,
+                    phone_number: user.phone_number,
+                    date_of_birth: user.date_of_birth,
+                    profile_image_url: user.profile_image_url,
+                },
+                identity: {
+                    license_photo_url: driver.license_photo_url,
+                    license_photo_back_url: driver.license_photo_back_url,
+                    insurance_photo_url: driver.insurance_photo_url,
+                    registration_photo_url: driver.registration_photo_url,
+                },
+                vehicle: vehicle || {},
+            });
+        }
+        catch (emailErr) {
+            console.error(`[DRIVER] ❌ Onboarding email notification failed (non-fatal):`, emailErr);
+        }
+        return { success: true, message: 'Onboarding complete. Your background check is now in progress.' };
     }
     static async onboard(userId, data) {
         const client = await database_1.pool.connect();
@@ -95,9 +313,7 @@ class DriverService {
             if (!data.identity.insurance_photo_url || !data.identity.registration_photo_url) {
                 throw new Error('Insurance and car registration photos are mandatory');
             }
-            if (!data.vehicle.inspection_photo_url) {
-                throw new Error('Vehicle inspection certificate is mandatory for registration');
-            }
+            // Vehicle inspection is enforced post-submission, not during registration.
             // Vehicle Year Validation (2011 -> Present)
             const vehicleYear = parseInt(data.vehicle.year);
             if (isNaN(vehicleYear) || vehicleYear < 2011) {
@@ -126,14 +342,11 @@ class DriverService {
                 await client.query('INSERT INTO drivers (user_id) VALUES ($1)', [userId]);
             }
             const driverRes = await client.query(`UPDATE drivers 
-         SET license_number = $1, license_expiry_date = $2, 
-             license_photo_url = $3, license_photo_back_url = $4,
-             insurance_photo_url = $5, registration_photo_url = $6,
+         SET license_photo_url = $1, license_photo_back_url = $2,
+             insurance_photo_url = $3, registration_photo_url = $4,
              background_check_status = 'PENDING', is_active = false 
-         WHERE user_id = $7
+         WHERE user_id = $5
          RETURNING *`, [
-                data.identity.license_number,
-                data.identity.license_expiry_date,
                 data.identity.license_photo_url,
                 data.identity.license_photo_back_url,
                 data.identity.insurance_photo_url,
@@ -142,22 +355,19 @@ class DriverService {
             ]);
             // 3. Create DriverVehicle
             await client.query(`INSERT INTO driver_vehicles (
-          driver_id, vehicle_id, license_plate_number, license_plate_photo_url,
-          car_photo_urls, color, interior_color, make, model, year,
-          inspection_photo_url, inspection_status
+          driver_id, license_plate_number, license_plate_state, zip_code,
+          color, interior_color, make, model, year
         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PENDING')`, [
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, [
                 userId,
-                data.vehicle.vehicle_id ?? null,
                 data.vehicle.license_plate_number,
-                data.vehicle.license_plate_photo_url ?? null,
-                data.vehicle.car_photo_urls,
-                data.vehicle.color,
-                data.vehicle.interior_color,
-                data.vehicle.make,
-                data.vehicle.model,
-                data.vehicle.year,
-                data.vehicle.inspection_photo_url
+                data.vehicle.license_plate_state ?? null,
+                data.vehicle.zip_code ?? null,
+                data.vehicle.color || null,
+                data.vehicle.interior_color || null,
+                data.vehicle.make || null,
+                data.vehicle.model || null,
+                data.vehicle.year || null,
             ]);
             await client.query('COMMIT');
             // 4. Trigger Email Notice to Admin
@@ -265,6 +475,13 @@ class DriverService {
         }
     }
     static async requestVerification(userId, data) {
+        // Reject DOB changes if the field is locked.
+        if (data.date_of_birth) {
+            const user = await database_1.pool.query(`SELECT dob_locked FROM users WHERE id = $1`, [userId]);
+            if (user.rows[0]?.dob_locked) {
+                throw new Error('DOB_LOCKED: Your date of birth has already been verified and cannot be changed.');
+            }
+        }
         const client = await database_1.pool.connect();
         try {
             await client.query('BEGIN');
@@ -402,27 +619,14 @@ class DriverService {
     // ============================================================
     // Profile-change approval queue (020)
     // ============================================================
-    static async submitProfileChange(userId, changes) {
-        // Reject if the driver already has an open PENDING request.
-        const open = await database_1.pool.query(`SELECT id FROM profile_change_requests WHERE driver_id = $1 AND status = 'PENDING' LIMIT 1`, [userId]);
-        if (open.rowCount && open.rowCount > 0) {
-            throw new Error('PROFILE_CHANGE_PENDING: A previous change is still awaiting admin review.');
-        }
-        // 24-hour rate limit per driver (any status). Uses Redis with a fallback
-        // to "fail closed" — if Redis is down we refuse rather than allow abuse.
-        const rateKey = `profile-change:rate:${userId}`;
-        try {
-            const count = await redis_1.redis.incr(rateKey);
-            if (count === 1)
-                await redis_1.redis.expire(rateKey, 24 * 60 * 60);
-            if (count > 1)
-                throw new Error('RATE_LIMITED: You can only submit a profile change once every 24 hours.');
-        }
-        catch (err) {
-            if (err.message.startsWith('RATE_LIMITED'))
-                throw err;
-            console.warn('[DRIVER] Redis unavailable, refusing rate-limit check:', err.message);
-            throw new Error('RATE_LIMITED: Rate-limit service unavailable. Please try again shortly.');
+    static async submitProfileChange(userId, changes, reason) {
+        // ---- Validate incoming changes first ----
+        // Reject DOB changes if the field is locked (approved by admin already).
+        if (changes.date_of_birth) {
+            const user = await database_1.pool.query(`SELECT dob_locked FROM users WHERE id = $1`, [userId]);
+            if (user.rows[0]?.dob_locked) {
+                throw new Error('DOB_LOCKED: Your date of birth has already been verified and cannot be changed.');
+            }
         }
         // If the request contains a payout_card, validate and pre-create the
         // PENDING card row. We keep only last4 + brand + exp + name + zip;
@@ -431,6 +635,8 @@ class DriverService {
         let cardLast4 = null;
         let cardBrand = null;
         let sanitizedChanges = { ...changes };
+        if (reason?.trim())
+            sanitizedChanges._reason = reason.trim();
         if (changes.payout_card) {
             const pc = changes.payout_card;
             const digits = pc.card_number.replace(/\D/g, '');
@@ -464,6 +670,38 @@ class DriverService {
                 throw new Error('PHONE_NOT_VERIFIED: Please verify the new phone number with the OTP we sent before submitting.');
             }
         }
+        // ---- Check for conflicts with existing pending request ----
+        // Only overlapping fields are blocked; non-conflicting fields are merged
+        // into the existing pending request (one open change per driver).
+        const open = await database_1.pool.query(`SELECT id, requested_changes FROM profile_change_requests WHERE driver_id = $1 AND status = 'PENDING' LIMIT 1`, [userId]);
+        if (open.rowCount && open.rowCount > 0) {
+            const existingChanges = open.rows[0].requested_changes ?? {};
+            const newKeys = new Set(Object.keys(sanitizedChanges).filter(k => k !== '_reason'));
+            const existingKeys = new Set(Object.keys(existingChanges).filter(k => k !== '_reason' && k !== 'payout_card' && k !== 'payout_card_id'));
+            const overlapping = [...newKeys].filter(k => existingKeys.has(k));
+            if (overlapping.length > 0) {
+                // Clean up the just-inserted card if any
+                if (payoutCardId)
+                    await database_1.pool.query(`DELETE FROM payout_cards WHERE id = $1`, [payoutCardId]);
+                throw new Error(`PROFILE_CHANGE_PENDING: A change for "${overlapping[0]}" is already awaiting admin review.`);
+            }
+            // Non-overlapping fields: merge into the existing pending request.
+            const mergedReason = reason?.trim()
+                ? (existingChanges._reason ? `${existingChanges._reason}; ${reason.trim()}` : reason.trim())
+                : existingChanges._reason;
+            const mergedChanges = { ...existingChanges, ...sanitizedChanges };
+            if (mergedReason)
+                mergedChanges._reason = mergedReason;
+            await database_1.pool.query(`UPDATE profile_change_requests SET requested_changes = $1 WHERE id = $2`, [mergedChanges, open.rows[0].id]);
+            return {
+                request_id: open.rows[0].id,
+                status: 'PENDING',
+                has_pending: true,
+                queued_changes: Object.keys(sanitizedChanges).filter(k => k !== '_reason'),
+                card_last4: cardLast4,
+                card_brand: cardBrand,
+            };
+        }
         // Snapshot the driver state so a future rejection can restore it.
         const driverRes = await database_1.pool.query(`SELECT is_active, background_check_status FROM drivers WHERE user_id = $1`, [userId]);
         const prevIsActive = driverRes.rows[0]?.is_active ?? false;
@@ -484,7 +722,7 @@ class DriverService {
             await client.query('ROLLBACK');
             // Race: another PENDING row won the EXCLUDE constraint
             if (err.message?.includes('one_open_change_per_driver')) {
-                throw new Error('PROFILE_CHANGE_PENDING: A previous change is still awaiting admin review.');
+                throw new Error('PROFILE_CHANGE_PENDING: A profile change is already awaiting admin review.');
             }
             throw err;
         }
@@ -637,6 +875,271 @@ class DriverService {
        FROM payouts WHERE driver_id = $1 ORDER BY requested_at DESC LIMIT $2 OFFSET $3`, [userId, limit, offset]);
         const total = await database_1.pool.query(`SELECT COUNT(*)::int AS c FROM payouts WHERE driver_id = $1`, [userId]);
         return { payouts: res.rows, total: total.rows[0]?.c ?? 0 };
+    }
+    // ============================================================
+    // New vehicle submission (025)
+    // ============================================================
+    static async submitNewVehicle(userId, data) {
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const ins = await client.query(`INSERT INTO driver_vehicle_submissions
+         (driver_id, status, make, model, year, color, interior_color,
+          license_plate_number, license_plate_state, zip_code,
+          registration_photo_url, insurance_photo_url, inspection_photo_url)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING *`, [userId, data.make, data.model, data.year, data.color,
+                data.interior_color || null, data.license_plate_number,
+                data.license_plate_state, data.zip_code,
+                data.registration_photo_url, data.insurance_photo_url,
+                data.inspection_photo_url]);
+            // Also create a new driver_vehicles row for the pending vehicle so
+            // the profile can distinguish it from the active vehicle.
+            await client.query(`INSERT INTO driver_vehicles
+         (driver_id, vehicle_status, make, model, year, color, interior_color,
+          license_plate_number, license_plate_state, zip_code,
+          registration_photo_url, insurance_photo_url, inspection_photo_url,
+          submitted_at)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+         ON CONFLICT DO NOTHING`, [userId, data.make, data.model, data.year, data.color,
+                data.interior_color || null, data.license_plate_number,
+                data.license_plate_state, data.zip_code,
+                data.registration_photo_url, data.insurance_photo_url,
+                data.inspection_photo_url]);
+            await client.query('COMMIT');
+            return { success: true, submission: ins.rows[0] };
+        }
+        catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        }
+        finally {
+            client.release();
+        }
+    }
+    static async getPendingVehicleSubmissions(userId) {
+        const res = await database_1.pool.query(`SELECT * FROM driver_vehicle_submissions
+       WHERE driver_id = $1
+       ORDER BY submitted_at DESC`, [userId]);
+        return { submissions: res.rows };
+    }
+    // ============================================================
+    // Vehicle resubmission requirements (026)
+    // ============================================================
+    static async getVehicleResubmissionRequirements(userId) {
+        const reqs = await database_1.pool.query(`SELECT dvrr.id, dvrr.submission_id, dvrr.reason, dvrr.status,
+              dvrr.created_at, dvrr.updated_at,
+              COALESCE(dv.vehicle_status, 'APPROVED') AS current_vehicle_status,
+              dv.make, dv.model, dv.year, dv.color,
+              dv.license_plate_number, dv.license_plate_state, dv.zip_code
+       FROM driver_vehicle_resubmission_requests dvrr
+       LEFT JOIN driver_vehicles dv ON dv.driver_id = dvrr.driver_id
+         AND (dv.vehicle_status = 'RESUBMISSION_REQUIRED' OR dv.vehicle_status = 'PENDING_REVIEW')
+       WHERE dvrr.driver_id = $1
+       ORDER BY dvrr.created_at DESC`, [userId]);
+        const hasActionRequired = reqs.rows.some(r => r.status === 'resubmission_required');
+        return {
+            requirements: reqs.rows,
+            has_action_required: hasActionRequired,
+        };
+    }
+    static async submitVehicleResubmission(userId, data, resubmissionRequestId) {
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            // Insert the submission
+            const ins = await client.query(`INSERT INTO driver_vehicle_submissions
+         (driver_id, status, make, model, year, color, interior_color,
+          license_plate_number, license_plate_state, zip_code,
+          registration_photo_url, insurance_photo_url, inspection_photo_url)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING *`, [userId, data.make, data.model, data.year, data.color,
+                data.interior_color || null, data.license_plate_number,
+                data.license_plate_state, data.zip_code,
+                data.registration_photo_url, data.insurance_photo_url,
+                data.inspection_photo_url]);
+            // Create/update the driver_vehicles row
+            await client.query(`INSERT INTO driver_vehicles
+         (driver_id, vehicle_status, make, model, year, color, interior_color,
+          license_plate_number, license_plate_state, zip_code,
+          registration_photo_url, insurance_photo_url, inspection_photo_url,
+          submitted_at)
+         VALUES ($1, 'PENDING_REVIEW', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+         ON CONFLICT DO NOTHING`, [userId, data.make, data.model, data.year, data.color,
+                data.interior_color || null, data.license_plate_number,
+                data.license_plate_state, data.zip_code,
+                data.registration_photo_url, data.insurance_photo_url,
+                data.inspection_photo_url]);
+            // Update the resubmission request status if specified
+            if (resubmissionRequestId) {
+                await client.query(`UPDATE driver_vehicle_resubmission_requests
+           SET status = 'submitted', updated_at = NOW()
+           WHERE id = $1 AND driver_id = $2`, [resubmissionRequestId, userId]);
+            }
+            // Clear vehicle action required flag
+            await client.query(`UPDATE drivers
+         SET has_vehicle_action_required = FALSE
+         WHERE user_id = $1`, [userId]);
+            await client.query('COMMIT');
+            return { success: true, submission: ins.rows[0] };
+        }
+        catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        }
+        finally {
+            client.release();
+        }
+    }
+    // ============================================================
+    // Active vehicle resolution helpers
+    // ============================================================
+    /**
+     * Returns the driver's authoritative active/approved vehicle.
+     * Legacy rows with NULL vehicle_status are treated as APPROVED.
+     * Returns null if no active vehicle exists.
+     */
+    static async getActiveVehicle(driverId) {
+        const res = await database_1.pool.query(`SELECT dv.*, v.make AS catalog_make, v.model AS catalog_model,
+              v.year AS catalog_year, v.category, v.service_class
+       FROM driver_vehicles dv
+       LEFT JOIN vehicles v ON dv.vehicle_id = v.id
+       WHERE dv.driver_id = $1
+         AND (dv.vehicle_status = 'APPROVED' OR dv.vehicle_status IS NULL)
+       ORDER BY dv.approved_at DESC NULLS LAST, dv.id DESC
+       LIMIT 1`, [driverId]);
+        return res.rows[0] || null;
+    }
+    /**
+     * Returns the latest finalized vehicle submission (Approved or Rejected)
+     * for admin review purposes. This is distinct from the active vehicle.
+     */
+    static async getLatestFinalizedVehicleSubmission(driverId) {
+        const res = await database_1.pool.query(`SELECT s.*, u.full_name AS reviewed_by_admin_name
+       FROM driver_vehicle_submissions s
+       LEFT JOIN users u ON u.id = s.reviewed_by_admin_id
+       WHERE s.driver_id = $1
+         AND s.status IN ('APPROVED', 'REJECTED')
+       ORDER BY s.reviewed_at DESC NULLS LAST, s.submitted_at DESC
+       LIMIT 1`, [driverId]);
+        return res.rows[0] || null;
+    }
+    /**
+     * Returns the latest vehicle submission (any status) for the driver.
+     */
+    static async getLatestVehicleSubmission(driverId) {
+        const res = await database_1.pool.query(`SELECT s.*
+       FROM driver_vehicle_submissions s
+       WHERE s.driver_id = $1
+       ORDER BY s.submitted_at DESC
+       LIMIT 1`, [driverId]);
+        return res.rows[0] || null;
+    }
+    // ============================================================
+    // Document resubmission requirements (024)
+    // ============================================================
+    static async getDocumentRequirements(userId) {
+        const reqs = await database_1.pool.query(`SELECT dr.id, dr.document_type, dr.status, dr.current_document_url,
+              dr.request_reason, dr.requested_at, dr.resubmitted_at,
+              dr.new_document_url, dr.reviewed_at, dr.review_decision
+       FROM driver_document_requirements dr
+       WHERE dr.driver_id = $1
+       ORDER BY dr.requested_at DESC`, [userId]);
+        // Check if driver has any pending action
+        const hasActionRequired = reqs.rows.some(r => r.status === 'resubmission_required' || r.status === 'submitted');
+        return {
+            requirements: reqs.rows,
+            has_action_required: hasActionRequired,
+        };
+    }
+    /**
+     * Submit one or more new document URLs for admin review.
+     * `newDocumentUrls` must be a non-empty array of strings (URLs).
+     * When multiple URLs are provided they are stored as a JSON array in
+     * `new_document_url` so the admin UI can display all submitted images.
+     */
+    static async resubmitDocument(userId, requirementId, newDocumentUrls) {
+        const req = await database_1.pool.query(`SELECT id, driver_id, status, document_type FROM driver_document_requirements WHERE id = $1`, [requirementId]);
+        if (!req.rowCount)
+            throw new Error('Document requirement not found.');
+        if (req.rows[0].driver_id !== userId)
+            throw new Error('This document requirement does not belong to you.');
+        if (req.rows[0].status !== 'resubmission_required')
+            throw new Error('This requirement is not pending resubmission.');
+        // Store as JSON array for multi-image support, or plain string for single-image backward compat.
+        const documentUrl = newDocumentUrls.length === 1
+            ? newDocumentUrls[0]
+            : JSON.stringify(newDocumentUrls);
+        const updated = await database_1.pool.query(`UPDATE driver_document_requirements
+       SET status = 'submitted', new_document_url = $1, resubmitted_at = NOW(), updated_at = NOW()
+       WHERE id = $2 RETURNING *`, [documentUrl, requirementId]);
+        return { success: true, requirement: updated.rows[0] };
+    }
+    /**
+     * Atomically submit multiple document requirements in a single transaction.
+     * All submissions succeed or none do — partial failures are rolled back.
+     */
+    static async batchResubmitDocuments(userId, submissions) {
+        if (!submissions.length)
+            throw new Error('No submissions provided.');
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            for (const sub of submissions) {
+                const { requirementId, newDocumentUrls } = sub;
+                if (!requirementId || !newDocumentUrls?.length) {
+                    throw new Error(`Invalid submission for requirement ${requirementId}`);
+                }
+                const req = await client.query(`SELECT id, driver_id, status FROM driver_document_requirements WHERE id = $1`, [requirementId]);
+                if (!req.rowCount)
+                    throw new Error(`Requirement ${requirementId} not found.`);
+                if (req.rows[0].driver_id !== userId)
+                    throw new Error(`Requirement ${requirementId} does not belong to you.`);
+                if (req.rows[0].status !== 'resubmission_required') {
+                    throw new Error(`Requirement ${requirementId} is not pending resubmission.`);
+                }
+                const documentUrl = newDocumentUrls.length === 1
+                    ? newDocumentUrls[0]
+                    : JSON.stringify(newDocumentUrls);
+                await client.query(`UPDATE driver_document_requirements
+           SET status = 'submitted', new_document_url = $1, resubmitted_at = NOW(), updated_at = NOW()
+           WHERE id = $2`, [documentUrl, requirementId]);
+            }
+            await client.query('COMMIT');
+            // ── Fire-and-forget notifications (must not block response) ──────
+            try {
+                const driverInfo = await database_1.pool.query(`SELECT u.email, u.full_name FROM users u WHERE u.id = $1`, [userId]);
+                const driver = driverInfo.rows[0] || null;
+                const docTypesResult = await database_1.pool.query(`SELECT document_type FROM driver_document_requirements
+           WHERE driver_id = $1 AND id = ANY($2) ORDER BY document_type`, [userId, submissions.map(s => s.requirementId)]);
+                const docTypes = docTypesResult.rows.map((r) => r.document_type);
+                if (driver) {
+                    // Driver confirmation email
+                    email_service_1.EmailService.sendDriverDocumentResubmittedConfirmationEmail({ email: driver.email, full_name: driver.full_name }, { document_types: docTypes });
+                    // Admin notification email
+                    email_service_1.EmailService.sendAdminDocumentResubmissionNoticeEmail({ email: env_1.env.GMAIL_USER_EMAIL }, {
+                        id: userId,
+                        full_name: driver.full_name,
+                        email: driver.email,
+                    }, {
+                        document_types: docTypes,
+                        submitted_at: new Date(),
+                    });
+                }
+            }
+            catch (notifErr) {
+                // Notifications are best-effort — document submission already succeeded
+                console.error('❌ [DOC SUBMIT] Notification error:', notifErr);
+            }
+            return { success: true };
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            client.release();
+        }
     }
     /**
      * Idempotent ride-completion wallet credit. Safe to call multiple times

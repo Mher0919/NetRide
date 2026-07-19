@@ -4,27 +4,25 @@ exports.DriverController = void 0;
 const driver_service_1 = require("./driver.service");
 const zod_1 = require("zod");
 const vehicleData_service_1 = require("../../services/vehicleData.service");
+// Accepts either a full URL or a relative /api/files/{id} path.
+const fileUrlSchema = () => zod_1.z.string().refine(v => v.startsWith('/api/files/') || zod_1.z.string().url().safeParse(v).success, { message: 'Must be a valid URL or /api/files/{id} path' });
 const OnboardSchema = zod_1.z.object({
     personalInfo: zod_1.z.object({
         full_name: zod_1.z.string().optional(),
         phone_number: zod_1.z.string(),
         date_of_birth: zod_1.z.string(),
-        profile_image_url: zod_1.z.string().url(),
+        profile_image_url: fileUrlSchema(),
     }),
     identity: zod_1.z.object({
-        license_number: zod_1.z.string(),
-        license_expiry_date: zod_1.z.string(),
-        license_photo_url: zod_1.z.string().url(),
-        license_photo_back_url: zod_1.z.string().url(),
-        insurance_photo_url: zod_1.z.string().url(),
-        registration_photo_url: zod_1.z.string().url(),
+        license_photo_url: fileUrlSchema(),
+        license_photo_back_url: fileUrlSchema(),
+        insurance_photo_url: fileUrlSchema(),
+        registration_photo_url: fileUrlSchema(),
     }),
     vehicle: zod_1.z.object({
-        vehicle_id: zod_1.z.string().uuid().optional(),
         license_plate_number: zod_1.z.string(),
-        license_plate_photo_url: zod_1.z.string().url().optional(),
-        car_photo_urls: zod_1.z.array(zod_1.z.string().url()).min(2).max(4),
-        inspection_photo_url: zod_1.z.string().url(),
+        license_plate_state: zod_1.z.string().optional(),
+        zip_code: zod_1.z.string().optional(),
         make: zod_1.z.string().optional(),
         model: zod_1.z.string().optional(),
         year: zod_1.z.number().optional(),
@@ -36,7 +34,7 @@ const UpdateProfileSchema = zod_1.z.object({
     full_name: zod_1.z.string().optional(),
     phone_number: zod_1.z.string().optional(),
     date_of_birth: zod_1.z.string().optional(),
-    profile_image_url: zod_1.z.string().url().optional(),
+    profile_image_url: fileUrlSchema().optional(),
     license_number: zod_1.z.string().optional(),
     license_expiry_date: zod_1.z.string().optional(),
     vehicle_id: zod_1.z.string().uuid().optional(),
@@ -48,8 +46,8 @@ const UpdateProfileSchema = zod_1.z.object({
     interior_color: zod_1.z.string().optional(),
 });
 const VerifyIdentitySchema = zod_1.z.object({
-    license_photo_url: zod_1.z.string().url(),
-    license_photo_back_url: zod_1.z.string().url(),
+    license_photo_url: fileUrlSchema(),
+    license_photo_back_url: fileUrlSchema(),
     date_of_birth: zod_1.z.string().optional(),
     license_number: zod_1.z.string().optional(),
 });
@@ -57,12 +55,12 @@ const ProfileChangeChangesSchema = zod_1.z.object({
     full_name: zod_1.z.string().min(2).max(80).optional(),
     phone_number: zod_1.z.string().regex(/^\+?[0-9 ()\-]{7,20}$/).optional(),
     date_of_birth: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    profile_image_url: zod_1.z.string().url().optional(),
+    profile_image_url: fileUrlSchema().optional(),
     license_number: zod_1.z.string().min(3).max(40).optional(),
     license_plate_number: zod_1.z.string().min(1).max(15).optional(),
-    license_plate_photo_url: zod_1.z.string().url().optional(),
-    inspection_photo_url: zod_1.z.string().url().optional(),
-    car_photo_urls: zod_1.z.array(zod_1.z.string().url()).max(4).optional(),
+    license_plate_photo_url: fileUrlSchema().optional(),
+    inspection_photo_url: fileUrlSchema().optional(),
+    car_photo_urls: zod_1.z.array(fileUrlSchema()).max(4).optional(),
     make: zod_1.z.string().min(1).max(40).optional(),
     model: zod_1.z.string().min(1).max(40).optional(),
     year: zod_1.z.number().int().min(2011).max(new Date().getFullYear() + 1).optional(),
@@ -79,6 +77,7 @@ const ProfileChangeChangesSchema = zod_1.z.object({
 }).refine(c => Object.keys(c).length > 0, 'At least one field must be provided');
 const ProfileChangeRequestSchema = zod_1.z.object({
     changes: ProfileChangeChangesSchema,
+    reason: zod_1.z.string().min(1).max(500).optional(),
 });
 const PayoutCardSchema = zod_1.z.object({
     card_number: zod_1.z.string().min(13).max(19),
@@ -91,7 +90,66 @@ const PayoutCardSchema = zod_1.z.object({
 const PayoutRequestSchema = zod_1.z.object({
     amount_cents: zod_1.z.number().int().positive().max(10000000),
 });
+const SubmitNewVehicleSchema = zod_1.z.object({
+    make: zod_1.z.string().min(1, 'Vehicle make is required'),
+    model: zod_1.z.string().min(1, 'Vehicle model is required'),
+    year: zod_1.z.number().int().min(2011, 'Vehicle must be 2011 or newer'),
+    color: zod_1.z.string().min(1, 'Color is required'),
+    interior_color: zod_1.z.string().optional(),
+    license_plate_number: zod_1.z.string().min(1, 'License plate is required'),
+    license_plate_state: zod_1.z.string().min(1, 'License plate state is required'),
+    zip_code: zod_1.z.string().min(1, 'ZIP code is required'),
+    registration_photo_url: zod_1.z.string().url('Valid registration photo URL is required'),
+    insurance_photo_url: zod_1.z.string().url('Valid insurance photo URL is required'),
+    inspection_photo_url: zod_1.z.string().url('Valid inspection photo URL is required'),
+});
 class DriverController {
+    static async getOnboardingProgress(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Please log in to view your onboarding progress.' });
+            const progress = await driver_service_1.DriverService.getOnboardingProgress(userId);
+            res.json(progress);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Onboarding progress error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to load onboarding progress.' });
+        }
+    }
+    static async saveOnboardingStep(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const { step, data } = req.body;
+            if (typeof step !== 'number' || step < 0 || step > 5) {
+                return res.status(400).json({ error: 'Invalid onboarding step.' });
+            }
+            if (!data || typeof data !== 'object') {
+                return res.status(400).json({ error: 'Step data is required.' });
+            }
+            const result = await driver_service_1.DriverService.saveOnboardingStep(userId, step, data);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Save step error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Failed to save onboarding step.' });
+        }
+    }
+    static async completeOnboarding(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const result = await driver_service_1.DriverService.completeOnboarding(userId);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Complete onboarding error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Failed to complete onboarding. Please ensure all steps are finished.' });
+        }
+    }
     static async getProfile(req, res) {
         try {
             const userId = req.user?.id;
@@ -268,7 +326,7 @@ class DriverController {
             if (!userId)
                 return res.status(401).json({ error: 'Unauthorized' });
             const validated = ProfileChangeRequestSchema.parse(req.body);
-            const result = await driver_service_1.DriverService.submitProfileChange(userId, validated.changes);
+            const result = await driver_service_1.DriverService.submitProfileChange(userId, validated.changes, validated.reason);
             res.json(result);
         }
         catch (error) {
@@ -364,6 +422,115 @@ class DriverController {
         catch (error) {
             console.error(`[DRIVER] ❌ List payouts error: ${error.message}`);
             res.status(500).json({ error: 'Failed to list payouts.' });
+        }
+    }
+    static async getDocumentRequirements(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const result = await driver_service_1.DriverService.getDocumentRequirements(userId);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Document requirements error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve document requirements.' });
+        }
+    }
+    static async resubmitDocument(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const { requirementId, newDocumentUrl, newDocumentUrls } = req.body;
+            const urls = newDocumentUrls ?? (newDocumentUrl ? [newDocumentUrl] : []);
+            if (!requirementId || urls.length === 0) {
+                return res.status(400).json({ error: 'Requirement ID and at least one document URL are required.' });
+            }
+            const result = await driver_service_1.DriverService.resubmitDocument(userId, requirementId, urls);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Document resubmission error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Failed to resubmit document.' });
+        }
+    }
+    static async batchResubmitDocuments(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const { submissions } = req.body;
+            if (!Array.isArray(submissions) || submissions.length === 0) {
+                return res.status(400).json({ error: 'At least one document submission is required.' });
+            }
+            const result = await driver_service_1.DriverService.batchResubmitDocuments(userId, submissions);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Batch document resubmission error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Failed to resubmit documents.' });
+        }
+    }
+    static async submitNewVehicle(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const validated = SubmitNewVehicleSchema.parse(req.body);
+            const result = await driver_service_1.DriverService.submitNewVehicle(userId, validated);
+            res.status(201).json(result);
+        }
+        catch (error) {
+            if (error?.name === 'ZodError') {
+                return res.status(400).json({ error: 'Invalid vehicle data.', details: error.errors });
+            }
+            console.error(`[DRIVER] ❌ Submit new vehicle error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Failed to submit new vehicle.' });
+        }
+    }
+    static async getPendingVehicleSubmissions(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const result = await driver_service_1.DriverService.getPendingVehicleSubmissions(userId);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Pending vehicle error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve pending vehicle submissions.' });
+        }
+    }
+    static async getVehicleResubmissionRequirements(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const result = await driver_service_1.DriverService.getVehicleResubmissionRequirements(userId);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[DRIVER] ❌ Vehicle resubmission requirements error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve vehicle resubmission requirements.' });
+        }
+    }
+    static async submitVehicleResubmission(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const validated = SubmitNewVehicleSchema.parse(req.body);
+            const { resubmissionRequestId } = req.body;
+            const result = await driver_service_1.DriverService.submitVehicleResubmission(userId, validated, resubmissionRequestId);
+            res.status(201).json(result);
+        }
+        catch (error) {
+            if (error?.name === 'ZodError') {
+                return res.status(400).json({ error: 'Invalid vehicle data.', details: error.errors });
+            }
+            console.error(`[DRIVER] ❌ Submit vehicle resubmission error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Failed to submit vehicle resubmission.' });
         }
     }
 }

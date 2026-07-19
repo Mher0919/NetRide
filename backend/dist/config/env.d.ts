@@ -15,7 +15,6 @@ export declare const env: {
     FACE_MIN_LAPLACIAN_VAR: number;
     FACE_CHECK_INTERVAL_HOURS: number;
     FACE_LOCATION_JUMP_MILES: number;
-    FACE_SERVICE_URL: string;
     EMAIL_FROM: string;
     APP_URL: string;
     ADMIN_URL: string;
@@ -28,6 +27,12 @@ export declare const env: {
     MATCH_WORKER_CONCURRENCY: number;
     DISPATCH_FANOUT_SIZE: number;
     DRIVER_SCORE_CACHE_TTL_S: number;
+    LOAD_TEST: boolean;
+    LEGACY_RATE_LIMIT: boolean;
+    LEGACY_SYNC_MATCHING: boolean;
+    LEGACY_SEQUENTIAL_DISPATCH: boolean;
+    LEGACY_DB_SCORE: boolean;
+    LEGACY_INLINE_PG: boolean;
     GOOGLE_MAPS_API_KEY?: string | undefined;
     GMAIL_CLIENT_ID?: string | undefined;
     GMAIL_CLIENT_SECRET?: string | undefined;
@@ -44,4 +49,7 @@ export declare const env: {
     TWILIO_CALLER_ID?: string | undefined;
     SENTRY_DSN?: string | undefined;
     OSRM_URLS?: string | undefined;
+    DIRECT_DATABASE_URL?: string | undefined;
+    GEOAPIFY_API_KEY?: string | undefined;
+    DATABASE_REPLICA_URL?: string | undefined;
 };

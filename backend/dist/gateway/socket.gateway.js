@@ -51,9 +51,33 @@ const geohash = __importStar(require("ngeohash"));
 // have to do is route to the right counterpart room — every other
 // invariant (auth, trip state, payload shape, DoS protection, persistence)
 // is handled here.
+const redis_1 = require("../config/redis");
+const metrics_1 = require("../observability/metrics");
 const MAX_MESSAGE_BODY = 1000;
 const RATE_LIMIT_PER_MINUTE = 30;
 const RATE_WINDOW_MS = 60 * 1000;
+const SOCKET_RATE_LIMIT_LUA = `
+local cutoff = tonumber(ARGV[3]) - tonumber(ARGV[2])
+redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", cutoff)
+local count = redis.call("ZCARD", KEYS[1])
+if count >= tonumber(ARGV[1]) then
+  return {0, count}
+end
+redis.call("ZADD", KEYS[1], ARGV[3], ARGV[4])
+redis.call("PEXPIRE", KEYS[1], tonumber(ARGV[2]))
+return {1, count + 1}
+`;
+async function consumeRateBudget(key) {
+    const now = Date.now();
+    const member = `${now}:${Math.random().toString(36).slice(2, 10)}`;
+    const redisKey = `ratelimit:sock:${key}`;
+    const result = await redis_1.redis.eval(SOCKET_RATE_LIMIT_LUA, 1, redisKey, String(RATE_LIMIT_PER_MINUTE), String(RATE_WINDOW_MS), String(now), member);
+    if (result[0] === 0) {
+        metrics_1.rateLimitedTotal.inc({ bucket: 'socket' });
+        return false;
+    }
+    return true;
+}
 // Strip ASCII control characters except newline + tab so a malicious
 // client can't smuggle ANSI escapes or terminal control sequences into
 // the chat render. We still allow basic whitespace.
@@ -67,23 +91,6 @@ function sanitizeBody(raw) {
     if (cleaned.length > MAX_MESSAGE_BODY)
         return null;
     return cleaned;
-}
-// Per-socket, per-trip sliding-window counter. Keeps the last N
-// timestamps; once they cross RATE_LIMIT_PER_MINUTE we drop the
-// message and emit an explicit rate-limit error so the UI can show a
-// "slow down" toast instead of silently failing.
-const rateBuckets = new Map();
-function consumeRateBudget(key) {
-    const now = Date.now();
-    const cutoff = now - RATE_WINDOW_MS;
-    const bucket = (rateBuckets.get(key) ?? []).filter((t) => t > cutoff);
-    if (bucket.length >= RATE_LIMIT_PER_MINUTE) {
-        rateBuckets.set(key, bucket);
-        return false;
-    }
-    bucket.push(now);
-    rateBuckets.set(key, bucket);
-    return true;
 }
 /** Trip statuses where in-app chat is allowed. */
 function isLiveTripStatus(status) {
@@ -107,7 +114,7 @@ async function relayChatMessage(io, socket, counterpartRole, payload, self) {
         socket.emit('error', 'Missing trip id.');
         return;
     }
-    if (!consumeRateBudget(`${self.id}:${payload.tripId}`)) {
+    if (!(await consumeRateBudget(`${self.id}:${payload.tripId}`))) {
         socket.emit('error', 'You are sending messages too quickly. Please slow down.');
         return;
     }

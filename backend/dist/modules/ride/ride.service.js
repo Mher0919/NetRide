@@ -41,6 +41,7 @@ console.log('[SVC_INIT] FULL findCurrentByDriverId toString:\n' + (ride_reposito
 const locations_service_1 = require("../location/locations.service");
 const geospatial_service_1 = require("../geospatial/geospatial.service");
 const types_1 = require("../../types");
+const env_1 = require("../../config/env");
 const app_1 = require("../../app");
 const database_1 = require("../../config/database");
 const redis_1 = require("../../config/redis");
@@ -49,6 +50,8 @@ const navigation_service_1 = require("../../services/navigation.service");
 const speeding_detector_1 = require("../../services/speeding_detector");
 const driver_service_1 = require("../driver/driver.service");
 const testUser_1 = require("../../utils/testUser");
+const queue_1 = require("../../queue/queue");
+const metrics_1 = require("../../observability/metrics");
 class RideService {
     static async rateRide(data) {
         const client = await database_1.pool.connect();
@@ -159,9 +162,21 @@ class RideService {
         // or if scheduledAt is within the next 15 minutes.
         const isNow = !isScheduled || (scheduledAt && (scheduledAt.getTime() - Date.now() < 15 * 60 * 1000));
         if (isNow) {
-            Promise.resolve().then(() => __importStar(require('../../services/matching.service'))).then(({ matchingService }) => {
-                matchingService.findAndDispatch(app_1.io, trip.id, pickup.lat, pickup.lng, requestedClass, riderId);
-            });
+            if (env_1.env.LEGACY_SYNC_MATCHING) {
+                Promise.resolve().then(() => __importStar(require('../../services/matching.service'))).then(({ matchingService }) => {
+                    matchingService.findAndDispatch(app_1.io, trip.id, pickup.lat, pickup.lng, requestedClass, riderId);
+                });
+            }
+            else {
+                queue_1.matchQueue.add('matchRide', {
+                    tripId: trip.id,
+                    pickupLat: pickup.lat,
+                    pickupLng: pickup.lng,
+                    requestedClass,
+                    riderId,
+                }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
+                metrics_1.matchJobsTotal.inc({ outcome: 'enqueued' });
+            }
         }
         // Update Redis Demand
         redis_1.redis.incr(`demand:count:${requestedClass}`).then(() => {
@@ -227,6 +242,24 @@ class RideService {
         });
         // Cache active trip for trajectory buffering
         await redis_1.redis.set(`driver:${driverId}:active_trip`, tripId, 'EX', 14400); // 4h safety TTL
+        // Step 4: Parallel fan-out — record winner and cancel other offers
+        await redis_1.redis.set(`dispatch:winners:${tripId}`, driverId, 'EX', 300);
+        const dispatchedJson = await redis_1.redis.get(`match:queue:dispatched:${tripId}`);
+        if (dispatchedJson) {
+            const dispatchedDrivers = JSON.parse(dispatchedJson);
+            for (const did of dispatchedDrivers) {
+                if (did !== driverId) {
+                    app_1.io.to(`driver:${did}`).emit('tripUpdate', {
+                        ...trip,
+                        status: types_1.TripStatus.CANCELLED,
+                        cancelReason: 'Another driver accepted this trip',
+                    });
+                    metrics_1.dispatchAcceptOutcomeTotal.inc({ outcome: 'cancelled' });
+                }
+            }
+            await redis_1.redis.del(`match:queue:dispatched:${tripId}`);
+        }
+        await redis_1.redis.del(`dispatch:lock:${tripId}`);
         const driverLoc = await locations_service_1.LocationsService.getDriverLocation(driverId);
         updatedTrip.driver_location = driverLoc;
         // Navigation cache + route_metadata for the pickup leg. We resolve
@@ -244,6 +277,7 @@ class RideService {
         }
         app_1.io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
         app_1.io.to(`driver:${driverId}`).emit('tripUpdate', updatedTrip);
+        metrics_1.dispatchAcceptOutcomeTotal.inc({ outcome: 'accepted' });
         // Broadcast to Admin Monitoring
         app_1.io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
         return updatedTrip;

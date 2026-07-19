@@ -1,5 +1,7 @@
 export declare class EmailService {
     private static oauth2Client;
+    private static DOC_TYPE_LABELS;
+    private static formatDocTypes;
     private static getGmailClient;
     /**
      * Internal helper to send emails using Gmail API but with Nodemailer's
@@ -45,6 +47,36 @@ export declare class EmailService {
         email?: string;
         full_name?: string;
     }, reason: string): Promise<void>;
+    static sendDocumentResubmissionRequestedEmail(driver: {
+        email?: string;
+        full_name?: string;
+    }, info: {
+        document_type: string;
+        reason: string;
+    }): Promise<void>;
+    static sendDocumentResubmissionReviewedEmail(driver: {
+        email?: string;
+        full_name?: string;
+    }, info: {
+        document_type: string;
+        decision: string;
+    }): Promise<void>;
+    static sendDriverDocumentResubmittedConfirmationEmail(driver: {
+        email?: string;
+        full_name?: string;
+    }, info: {
+        document_types: string[];
+    }): Promise<void>;
+    static sendAdminDocumentResubmissionNoticeEmail(admin: {
+        email?: string;
+    }, driver: {
+        id: string;
+        full_name?: string;
+        email?: string;
+    }, info: {
+        document_types: string[];
+        submitted_at: Date;
+    }): Promise<void>;
     static sendPayoutCardNotice(admin: {
         email?: string;
     }, driver: {
@@ -78,5 +110,19 @@ export declare class EmailService {
         fee_cents: number;
         net_cents: number;
         reference?: string | null;
+    }): Promise<void>;
+    /**
+     * Notify all admin users that a driver's face check was flagged for review.
+     * `admins` is a list of { email } rows (ADMIN role). Silently skips if no
+     * Gmail credentials are configured.
+     */
+    static sendFaceCheckFlaggedNotice(admins: {
+        email?: string;
+    }[], info: {
+        driverName?: string;
+        driverEmail?: string;
+        reason?: string;
+        score?: number;
+        eventId?: string;
     }): Promise<void>;
 }

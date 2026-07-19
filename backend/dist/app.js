@@ -49,10 +49,12 @@ const database_1 = require("./config/database");
 const auth_service_1 = require("./modules/auth/auth.service");
 const socket_gateway_1 = require("./gateway/socket.gateway");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
+const identifyUser_middleware_1 = require("./middleware/identifyUser.middleware");
 const sentry_1 = require("./observability/sentry");
 const logger_1 = require("./observability/logger");
 const pinoHttp_1 = require("./middleware/pinoHttp");
 const health_controller_1 = __importDefault(require("./health/health.controller"));
+const files_routes_1 = __importDefault(require("./routes/files.routes"));
 const metrics_1 = require("./observability/metrics");
 // Sentry must initialize before any other module that may throw at
 // import time so it can capture those errors.
@@ -79,13 +81,32 @@ const io = new socket_io_1.Server(httpServer, {
     },
 });
 exports.io = io;
+// Step 10: Socket.IO redis adapter for multi-instance support.
+// Uses separate pub/sub clients so regular Redis commands don't
+// conflict with socket message broadcasting.
+const redis_adapter_1 = require("@socket.io/redis-adapter");
+const redisPubSub_1 = require("./config/redisPubSub");
+try {
+    io.adapter((0, redis_adapter_1.createAdapter)(redisPubSub_1.pubClient, redisPubSub_1.subClient));
+}
+catch (adapterErr) {
+    console.warn(`[SERVER] ⚠️ Socket.IO Redis adapter failed (non-fatal): ${adapterErr.message}`);
+    console.warn('[SERVER] ⚠️ Multi-instance Socket.IO scaling disabled. Running in single-instance mode.');
+}
 app.use((0, cors_1.default)());
+// Trust Render proxy so req.ip resolves individual client IPs
+// instead of the proxy IP. This fixes rate-limit key collisions
+// where all users share one rate-limit bucket behind Render.
+app.set('trust proxy', 1);
 app.use(express_1.default.json({ limit: '50mb' }));
 app.use(express_1.default.urlencoded({ limit: '50mb', extended: true }));
 // Request-id + child logger context. Mount BEFORE rate-limit so even
 // 429s get a log line and a metric.
 app.use(pinoHttp_1.requestContext);
 app.use(pinoHttp_1.requestLogger);
+// Optional auth — extracts user from JWT if present (no rejection).
+// Must run BEFORE rate-limit so authenticated requests use user-based keys.
+app.use(identifyUser_middleware_1.identifyUser);
 app.use(rateLimit_middleware_1.rateLimitMiddleware);
 // Serve static files from the uploads directory
 app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../uploads')));
@@ -145,6 +166,7 @@ app.use('/api/geospatial', geospatial_routes_1.default);
 app.use('/api/navigation', navigation_routes_1.default);
 app.use('/api/admin', admin_routes_1.default);
 app.use('/api/face', face_routes_1.default);
+app.use('/api/files', files_routes_1.default);
 app.post('/api/upload', upload_service_1.UploadService.upload);
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -329,6 +351,98 @@ async function runMigrations() {
             await database_1.pool.query(schema);
             console.log('✅ Profile-change + wallet + payouts schema (020) applied successfully');
         }
+        // Scaling indexes (021).
+        const hasIdxDriversActive = await database_1.pool.query("SELECT 1 FROM pg_indexes WHERE indexname = 'idx_drivers_active_class'");
+        if (hasIdxDriversActive.rowCount === 0) {
+            console.log('⚡ Applying scaling indexes (021)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/021_scaling_indexes.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Scaling indexes (021) applied');
+        }
+        // Onboarding step tracking + phone verification flag + plate state + zip (022).
+        const hasOnboardingStep = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'onboarding_step'");
+        if (hasOnboardingStep.rowCount === 0) {
+            console.log('⚡ Applying onboarding + phone fields schema (022)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/022_onboarding_phone_fields.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Onboarding + phone fields schema (022) applied');
+        }
+        // Driver-specific phone number + phone_verified columns (023).
+        const hasDriverPhoneColumn = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'drivers' AND column_name = 'phone_number'");
+        if (hasDriverPhoneColumn.rowCount === 0) {
+            console.log('⚡ Adding driver-specific phone columns (023)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/023_driver_phone_separate.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Driver phone columns (023) applied');
+        }
+        // Document resubmission requirements (024).
+        const hasDocRequirements = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'driver_document_requirements'");
+        if (hasDocRequirements.rowCount === 0) {
+            console.log('⚡ Applying document resubmissions schema (024)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/024_document_resubmissions.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Document resubmissions schema (024) applied');
+        }
+        // Vehicle submissions + pending-review status (025).
+        const hasVehicleSubmissions = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'driver_vehicle_submissions'");
+        if (hasVehicleSubmissions.rowCount === 0) {
+            console.log('⚡ Applying vehicle submissions schema (025)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/025_vehicle_submissions.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Vehicle submissions schema (025) applied');
+        }
+        // Vehicle active vehicle + resubmission workflow (026).
+        const hasVehicleResubmission = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'driver_vehicle_resubmission_requests'");
+        if (hasVehicleResubmission.rowCount === 0) {
+            console.log('⚡ Applying vehicle active + resubmission schema (026)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/026_vehicle_active_and_resubmission.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Vehicle active + resubmission schema (026) applied');
+        }
+        // DOB locked column (027).
+        const hasDobLocked = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'dob_locked'");
+        if (hasDobLocked.rowCount === 0) {
+            console.log('⚡ Applying DOB locked schema (027)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/027_add_dob_locked.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ DOB locked schema (027) applied');
+        }
+        // Storage files table (028) — permanent file references.
+        const hasStorageFiles = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'storage_files'");
+        if (hasStorageFiles.rowCount === 0) {
+            console.log('⚡ Applying storage_files schema (028)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/028_storage_files.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Storage files schema (028) applied');
+        }
+        // Make audit_logs.admin_id nullable (029). System-generated events such
+        // as automated face checks have no acting admin, so the column must
+        // allow NULL. Guards on the column's nullability.
+        const adminIdNullable = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_logs' AND column_name = 'admin_id' AND is_nullable = 'YES'");
+        if (adminIdNullable.rowCount === 0) {
+            console.log('⚡ Relaxing audit_logs.admin_id nullability (029)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/20260718_face_audit_admin_nullable.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ audit_logs.admin_id made nullable');
+        }
+        // Face enrollment descriptor column (face-api.js 128-d vector).
+        const hasDescriptor = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'face_enrollment_descriptor'");
+        if (hasDescriptor.rowCount === 0) {
+            console.log('⚡ Adding face_enrollment_descriptor column...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/20260718_face_descriptor.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ face_enrollment_descriptor column added');
+        }
         console.log('🚀 All migrations completed');
     }
     catch (err) {
@@ -347,6 +461,12 @@ const PORT = process.env.PORT || 3000;
 httpServer.listen(Number(PORT), '0.0.0.0', async () => {
     await runMigrations();
     logger_1.logger.info({ port: Number(PORT), env: env_1.env.NODE_ENV }, 'server_listening');
+    // Warm up the in-process face models in the background so the first face
+    // check doesn't pay the (slow) model-load / GitHub-fetch cost on the request
+    // path. Failures are logged but non-fatal.
+    Promise.resolve().then(() => __importStar(require('./services/faceMatcher'))).then(({ loadFaceModels }) => loadFaceModels())
+        .then(() => logger_1.logger.info('face_models_loaded'))
+        .catch((e) => logger_1.logger.warn({ err: e.message }, 'face_models_warmup_failed'));
     logger_1.logger.info({ set: !!env_1.env.JWT_SECRET, length: env_1.env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
     // Pre-cache OSRM routes for the launch market (Hollywood / UCLA /
     // Beverly Hills / Westwood). The coords are landmarks, not

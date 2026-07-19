@@ -41,7 +41,7 @@ export declare class LocationsService {
     static clearTrajectory(tripId: string): Promise<void>;
     /**
      * Finds nearby online drivers within a radius
-     * Filters out drivers whose heartbeats have expired.
+     * Filters out drivers whose heartbeats have expired using pipelined MGET.
      */
     static findNearbyDrivers(loc: Location, radiusKm: number): Promise<{
         id: string;

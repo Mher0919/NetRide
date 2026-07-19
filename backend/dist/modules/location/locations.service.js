@@ -117,7 +117,7 @@ class LocationsService {
     }
     /**
      * Finds nearby online drivers within a radius
-     * Filters out drivers whose heartbeats have expired.
+     * Filters out drivers whose heartbeats have expired using pipelined MGET.
      */
     static async findNearbyDrivers(loc, radiusKm) {
         console.log(`[GEO] Searching nearby drivers. Pickup: lat=${loc.lat}, lng=${loc.lng}, radius=${radiusKm}km`);
@@ -126,20 +126,24 @@ class LocationsService {
             const results = await redis_1.redis.georadius(redis_1.DRIVER_LOCATIONS_KEY, loc.lng, loc.lat, searchRadius, 'km', 'WITHDIST', 'ASC');
             if (!results || results.length === 0)
                 return [];
+            const ids = results.map(([id]) => id);
+            const heartbeatKeys = ids.map((id) => `${redis_1.DRIVER_HEARTBEAT_PREFIX}${id}`);
+            const heartbeats = await redis_1.redis.mget(...heartbeatKeys);
             const nearbyDrivers = [];
-            // Filter out stale drivers using heartbeats
-            for (const [id, distance] of results) {
-                const heartbeat = await redis_1.redis.get(`${redis_1.DRIVER_HEARTBEAT_PREFIX}${id}`);
-                if (heartbeat) {
-                    nearbyDrivers.push({
-                        id,
-                        distance: parseFloat(distance),
-                    });
+            const staleIds = [];
+            results.forEach(([id, distance], i) => {
+                if (heartbeats[i]) {
+                    nearbyDrivers.push({ id, distance: parseFloat(distance) });
                 }
                 else {
-                    // Cleanup stale location from Redis if heartbeat is missing
-                    this.removeDriverLocation(id).catch(() => { });
+                    staleIds.push(id);
                 }
+            });
+            if (staleIds.length > 0) {
+                await redis_1.redis.pipeline()
+                    .zrem(redis_1.DRIVER_LOCATIONS_KEY, ...staleIds)
+                    .del(...staleIds.map((id) => `${redis_1.DRIVER_HEARTBEAT_PREFIX}${id}`))
+                    .exec();
             }
             return nearbyDrivers;
         }
