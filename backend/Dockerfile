@@ -5,13 +5,20 @@ WORKDIR /app
 
 # System libs required by `canvas` (face-api.js image decoding in Node)
 # and build tooling for native modules (tfjs-node, canvas, prisma).
+# Runtime shared libs (cairo, pango, etc. WITHOUT the -dev suffix) must be
+# present at runtime for canvas.node to load (libcairo.so.2, etc.).
 RUN apk add --no-cache \
     build-base \
     cairo-dev \
+    cairo \
     pango-dev \
+    pango \
     jpeg-dev \
+    jpeg \
     giflib-dev \
+    giflib \
     librsvg-dev \
+    librsvg \
     python3 \
     make \
     g++ \

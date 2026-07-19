@@ -55,6 +55,9 @@ services:
       FACE_LOCATION_JUMP_MILES: 5
       LOAD_TEST: 'false'
       LEGACY_RATE_LIMIT: 'false'
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
     depends_on:
       - postgres
       - redis
@@ -63,6 +66,7 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+      - ./backend/uploads:/app/uploads
 
   match-worker:
     build: ./backend

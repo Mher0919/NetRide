@@ -65,6 +65,7 @@ const App: React.FC = () => {
               <Route path="riders" element={<UserTable role="RIDER" title="Riders Management" />} />
               <Route path="drivers" element={<UserTable role="DRIVER" title="Drivers Management" />} />
               <Route path="users/:id" element={<UserDetail />} />
+              <Route path=":section/users/:id" element={<UserDetail />} />
               <Route path="logs" element={<AuditLogs />} />
               <Route path="speeding" element={<SpeedingViolations />} />
               <Route path="profile-changes" element={<ProfileChanges />} />

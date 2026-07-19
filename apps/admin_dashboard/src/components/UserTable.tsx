@@ -129,7 +129,7 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
       width: 100,
       sortable: false,
       renderCell: (params: GridRenderCellParams) => (
-        <IconButton onClick={() => navigate(`/users/${params.row.id}`)}>
+        <IconButton onClick={() => navigate(`/${role.toLowerCase()}s/users/${params.row.id}`)}>
           <ViewIcon fontSize="small" />
         </IconButton>
       )

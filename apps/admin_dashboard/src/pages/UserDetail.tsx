@@ -52,7 +52,7 @@ import { SpeedingBadge } from '../components/SpeedingBadge';
 import { format } from 'date-fns';
 
 const UserDetail: React.FC = () => {
-  const { id } = useParams();
+  const { id, section } = useParams();
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +73,14 @@ const UserDetail: React.FC = () => {
   const [licenseSaving, setLicenseSaving] = useState(false);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({ open: false, message: '' });
-  const isDriver = !!user?.driver_profile;
+  const [erroredDocs, setErroredDocs] = useState<Record<string, boolean>>({});
+  const [profileImgError, setProfileImgError] = useState(false);
+  const hasDriverProfile = !!user?.driver_profile;
+  // When opened from a specific section, scope the view to that role even if
+  // the account has both rider and driver profiles.
+  const viewIsDriver =
+    section === 'drivers' ? true : section === 'riders' ? false : hasDriverProfile;
+  const isDriver = viewIsDriver;
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
   const fetchUser = async () => {
@@ -322,8 +329,8 @@ const UserDetail: React.FC = () => {
             <Link component={RouterLink} underline="hover" color="inherit" to="/" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
               Admin
             </Link>
-            <Link component={RouterLink} underline="hover" color="inherit" to={user.driver_profile ? '/drivers' : '/riders'} sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
-              {user.driver_profile ? 'Drivers' : 'Riders'}
+            <Link component={RouterLink} underline="hover" color="inherit" to={section === 'riders' ? '/riders' : section === 'drivers' ? '/drivers' : user.driver_profile ? '/drivers' : '/riders'} sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
+              {section === 'riders' ? 'Riders' : section === 'drivers' ? 'Drivers' : user.driver_profile ? 'Drivers' : 'Riders'}
             </Link>
             <Typography color="text.primary" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>User Profile</Typography>
           </Breadcrumbs>
@@ -339,7 +346,8 @@ const UserDetail: React.FC = () => {
           <Paper sx={{ p: 4, borderRadius: 4, border: 'none', position: 'sticky', top: 100 }}>
             <Box sx={{ textAlign: 'center', mb: 4 }}>
               <Avatar 
-                src={user.profile_image_url} 
+                src={profileImgError ? undefined : user.profile_image_url} 
+                imgProps={{ onError: () => setProfileImgError(true) }}
                 sx={{ 
                   width: 140, 
                   height: 140, 
@@ -721,7 +729,7 @@ const UserDetail: React.FC = () => {
                                 ) : null}
                               </Stack>
                             </CardContent>
-                            {doc.url ? (
+                            {doc.url && !erroredDocs[doc.key] ? (
                               <CardMedia
                                 component="img"
                                 height="220"
@@ -729,7 +737,13 @@ const UserDetail: React.FC = () => {
                                 alt={doc.title}
                                 sx={{ objectFit: 'cover', bgcolor: 'white', cursor: 'pointer' }}
                                 onClick={() => window.open(doc.url, '_blank')}
+                                onError={() => setErroredDocs((prev) => ({ ...prev, [doc.key]: true }))}
                               />
+                            ) : doc.url ? (
+                              <Box sx={{ height: 220, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', bgcolor: 'white', gap: 1 }}>
+                                <Typography variant="caption" color="text.disabled" sx={{ fontWeight: 700 }}>IMAGE UNAVAILABLE</Typography>
+                                <Button size="small" variant="text" onClick={() => window.open(doc.url, '_blank')}>Open in new tab</Button>
+                              </Box>
                             ) : (
                               <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'white' }}>
                                 <Typography variant="caption" color="text.disabled" sx={{ fontWeight: 700 }}>DOCUMENT NOT PROVIDED</Typography>
