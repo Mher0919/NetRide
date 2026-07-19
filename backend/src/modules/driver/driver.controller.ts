@@ -364,6 +364,15 @@ export class DriverController {
       res.json(result);
     } catch (error: any) {
       console.error(`[DRIVER] ❌ Price update error: ${error.message}`);
+      // Surface cooldown rejections with a structured code + remaining ms
+      // so the client can display an accurate countdown.
+      if (error?.code === 'COOLDOWN_ACTIVE') {
+        return res.status(429).json({
+          error: error.message,
+          code: 'COOLDOWN_ACTIVE',
+          remainingMs: error.remainingMs,
+        });
+      }
       res.status(400).json({ error: error.message || 'Failed to update pricing.' });
     }
   }

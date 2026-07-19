@@ -4,6 +4,14 @@ import { prisma } from '../../services/prisma.service';
 import { redis } from '../../config/redis';
 import { env } from '../../config/env';
 import { maskCardNumber, detectCardBrand, isValidLuhn } from '../../utils/card';
+import {
+  getCooldownState,
+  PRICE_COOLDOWN_MS,
+  PricingInputs,
+  computeDriverRange,
+  getMarketConditions,
+  resolveCurrentPrice,
+} from '../../services/pricingEngine';
 
 export class DriverService {
   static async getProfile(userId: string) {
@@ -718,28 +726,57 @@ export class DriverService {
 
     if (!driver) throw new Error('Driver profile not found.');
 
-    // If ranges are not calculated yet, run recalculation
+    // If ranges are not calculated yet, derive them on the fly from the
+    // centralized pricing engine (no global recalculation needed).
     if (driver.price_range_min === null || driver.price_range_max === null) {
-      const { fareService } = await import('../../services/fare.service');
-      await fareService.recalculateDriverRanges();
-      const updated = await prisma.driver.findUnique({
-        where: { user_id: userId }
-      });
-      return {
-        price_per_mile: updated?.price_per_mile ? Number(updated.price_per_mile) : 2.00,
-        price_range_min: updated?.price_range_min ? Number(updated.price_range_min) : 1.00,
-        price_range_max: updated?.price_range_max ? Number(updated.price_range_max) : 3.00,
-        recommended_price: updated?.recommended_price ? Number(updated.recommended_price) : 2.00,
-        price_last_changed: updated?.price_last_changed
+      const market = await getMarketConditions();
+      const inputs: PricingInputs = {
+        user_id: driver.user_id,
+        active_class: driver.active_class,
+        rating: Number(driver.rating ?? 5.0),
+        total_rides: driver.total_rides ?? 0,
+        acceptance_count: driver.acceptance_count ?? 0,
+        cancellation_count: driver.cancellation_count ?? 0,
+        is_dangerous: !!driver.is_dangerous,
+        is_flagged: !!driver.is_flagged,
+        last_cancellation_at: driver.last_cancellation_at ?? null,
       };
+      const range = computeDriverRange(inputs, market);
+      const currentPrice = resolveCurrentPrice(
+        driver.price_per_mile != null ? Number(driver.price_per_mile) : null,
+        range
+      );
+      await prisma.driver.update({
+        where: { user_id: userId },
+        data: {
+          price_range_min: range.price_range_min,
+          price_range_max: range.price_range_max,
+          recommended_price: range.recommended_price,
+          price_per_mile: currentPrice,
+        },
+      });
+      driver.price_range_min = range.price_range_min as any;
+      driver.price_range_max = range.price_range_max as any;
+      driver.recommended_price = range.recommended_price as any;
+      driver.price_per_mile = currentPrice as any;
     }
+
+    // Server-derived cooldown state (single source of truth for lock/timer).
+    const cooldown = getCooldownState(driver.price_last_changed);
+    const now = Date.now();
 
     return {
       price_per_mile: driver.price_per_mile ? Number(driver.price_per_mile) : 2.00,
       price_range_min: driver.price_range_min ? Number(driver.price_range_min) : 1.00,
       price_range_max: driver.price_range_max ? Number(driver.price_range_max) : 3.00,
       recommended_price: driver.recommended_price ? Number(driver.recommended_price) : 2.00,
-      price_last_changed: driver.price_last_changed
+      price_last_changed: driver.price_last_changed,
+      // New: authoritative cooldown fields derived from persisted timestamp.
+      cooldown_active: cooldown.cooldownActive,
+      cooldown_until: cooldown.cooldownUntil,
+      cooldown_remaining_ms: cooldown.remainingMs,
+      cooldown_ms: PRICE_COOLDOWN_MS,
+      server_time: now,
     };
   }
 
@@ -750,16 +787,21 @@ export class DriverService {
 
     if (!driver) throw new Error('Driver profile not found.');
 
-    // Enforce 4 hours change limit
-    if (driver.price_last_changed) {
-      const lastChanged = new Date(driver.price_last_changed).getTime();
-      const fourHours = 4 * 60 * 60 * 1000;
-      if (Date.now() - lastChanged < fourHours) {
-        throw new Error('You can only change your driving price once every 4 hours.');
-      }
+    // Enforce 4 hours change limit — SERVER SIDE, using persisted timestamp.
+    // Never trusts client-supplied time.
+    const cooldown = getCooldownState(driver.price_last_changed);
+    if (cooldown.cooldownActive) {
+      const remainingMin = Math.ceil(cooldown.remainingMs / 60000);
+      const err: any = new Error(
+        `You can only change your driving price once every 4 hours. ` +
+        `Please wait about ${remainingMin} more minute(s).`
+      );
+      err.code = 'COOLDOWN_ACTIVE';
+      err.remainingMs = cooldown.remainingMs;
+      throw err;
     }
 
-    // Validate bounds
+    // Validate bounds using centralized engine values (already in DB).
     const min = Number(driver.price_range_min || 1.00);
     const max = Number(driver.price_range_max || 3.00);
     if (pricePerMile < min || pricePerMile > max) {
@@ -780,12 +822,20 @@ export class DriverService {
       }
     });
 
+    // Recompute cooldown after persisting the change.
+    const newCooldown = getCooldownState(updated.price_last_changed);
+
     return {
       price_per_mile: Number(updated.price_per_mile),
       price_range_min: Number(updated.price_range_min),
       price_range_max: Number(updated.price_range_max),
       recommended_price: Number(updated.recommended_price),
-      price_last_changed: updated.price_last_changed
+      price_last_changed: updated.price_last_changed,
+      cooldown_active: newCooldown.cooldownActive,
+      cooldown_until: newCooldown.cooldownUntil,
+      cooldown_remaining_ms: newCooldown.remainingMs,
+      cooldown_ms: PRICE_COOLDOWN_MS,
+      server_time: Date.now(),
     };
   }
 

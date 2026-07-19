@@ -26,6 +26,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionSubscription;
   Timer? _heartbeatTimer;
+  Timer? _cooldownTimer;
+  int _lastKnownRemainingMs = 0;
   Position? _lastPosition;
   bool _shouldFollowUser = true;
   ViewState _state = ViewState.loading;
@@ -43,6 +45,37 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     super.initState();
     _checkPermissions();
     _fetchProfile();
+    _startCooldownTimer();
+  }
+
+  /// Self-refreshing cooldown timer.
+  ///
+  /// The countdown is ALWAYS derived from the backend-persisted
+  /// [price_last_changed] timestamp (see [DriverProvider.remainingCooldownMs]),
+  /// never from a local timer value. This timer simply ticks the UI so the
+  /// remaining time updates every second and the slider auto-unlocks when the
+  /// cooldown elapses — even if the app was backgrounded/closed. A slower
+  /// cadence re-syncs authoritative state from the backend (covering clock
+  /// changes, logout/login, and server-side updates).
+  void _startCooldownTimer() {
+    _cooldownTimer?.cancel();
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      if (!mounted) return;
+      final provider = Provider.of<DriverProvider>(context, listen: false);
+      final remaining = provider.remainingCooldownMs();
+
+      // Re-sync from backend every 60s, or the moment we think it expired,
+      // so the unlock is authoritative and resilient to device clock drift.
+      if (remaining == 0 && _lastKnownRemainingMs > 0) {
+        await provider.fetchPricing();
+      } else if (timer.tick % 60 == 0) {
+        await provider.fetchPricing();
+      }
+      _lastKnownRemainingMs = remaining;
+
+      // Trigger a rebuild so the countdown/locks reflect the new value.
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _fetchProfile() async {
@@ -435,6 +468,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   void dispose() {
     _positionSubscription?.cancel();
     _heartbeatTimer?.cancel();
+    _cooldownTimer?.cancel();
     super.dispose();
   }
 
@@ -1118,17 +1152,19 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
     final double recFraction = (max - min) > 0 ? (rec - min) / (max - min) : 0.5;
 
-    final durationSinceChange = driverProvider.priceLastChanged != null 
-        ? DateTime.now().difference(driverProvider.priceLastChanged!) 
-        : const Duration(hours: 5);
-    final bool isCooldown = durationSinceChange < const Duration(hours: 4);
+    // Authoritative cooldown derived from the backend-persisted
+    // price_last_changed timestamp. We never store elapsed time locally, so
+    // hot restarts / redeploys cannot reset the countdown.
+    final remainingMs = driverProvider.remainingCooldownMs();
+    final bool isCooldown = remainingMs > 0;
 
     String cooldownText = "";
     if (isCooldown) {
-      final remaining = const Duration(hours: 4) - durationSinceChange;
+      final remaining = Duration(milliseconds: remainingMs);
       final hours = remaining.inHours;
       final minutes = remaining.inMinutes % 60;
-      cooldownText = "Locked for ${hours}h ${minutes}m";
+      final seconds = remaining.inSeconds % 60;
+      cooldownText = "Locked ${hours}h ${minutes}m ${seconds}s";
     }
 
     return Container(

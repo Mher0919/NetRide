@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/trip_models.dart' as models;
@@ -48,6 +49,15 @@ class DriverProvider with ChangeNotifier {
   double _priceRangeMax = 3.00;
   double _recommendedPrice = 2.00;
   DateTime? _priceLastChanged;
+
+  // --- Server-derived cooldown state (authoritative) ---
+  // These are populated from the backend and are the SINGLE SOURCE OF TRUTH
+  // for the lock state and countdown. The UI never derives cooldown from a
+  // local timer alone; it always reconciles against these values.
+  bool _cooldownActive = false;
+  int _cooldownRemainingMs = 0;
+  int _cooldownMs = 4 * 60 * 60 * 1000; // default 4h
+  int _serverTime = 0;
 
   bool _hasPendingProfileChange = false;
   String? _pendingRequestId;
@@ -123,6 +133,11 @@ class DriverProvider with ChangeNotifier {
   double get priceRangeMax => _priceRangeMax;
   double get recommendedPrice => _recommendedPrice;
   DateTime? get priceLastChanged => _priceLastChanged;
+
+  bool get cooldownActive => _cooldownActive;
+  int get cooldownRemainingMs => _cooldownRemainingMs;
+  int get cooldownMs => _cooldownMs;
+  int get serverTime => _serverTime;
 
   bool get hasPendingProfileChange => _hasPendingProfileChange;
   String? get pendingRequestId => _pendingRequestId;
@@ -292,7 +307,27 @@ class DriverProvider with ChangeNotifier {
     if (data['price_last_changed'] != null) {
       _priceLastChanged = DateTime.parse(data['price_last_changed']);
     }
+    // Server-derived cooldown (authoritative). Falls back gracefully when the
+    // backend has not returned these fields yet (e.g. older cached payloads).
+    _cooldownActive = data['cooldown_active'] == true;
+    _cooldownRemainingMs = (data['cooldown_remaining_ms'] as num?)?.toInt() ?? 0;
+    _cooldownMs = (data['cooldown_ms'] as num?)?.toInt() ?? (4 * 60 * 60 * 1000);
+    _serverTime = (data['server_time'] as num?)?.toInt() ?? 0;
   }
+
+  /// Returns the remaining cooldown in milliseconds computed against the
+  /// device clock but anchored to the backend-persisted [price_last_changed]
+  /// timestamp. This is drift-free: we never store elapsed time, only the
+  /// timestamp, and recompute remaining = end - now on every read.
+  int remainingCooldownMs() {
+    if (_priceLastChanged == null) return 0;
+    final end = _priceLastChanged!.millisecondsSinceEpoch + _cooldownMs;
+    final remaining = end - DateTime.now().millisecondsSinceEpoch;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  /// True when the driver is currently locked from changing price.
+  bool get isPriceLocked => remainingCooldownMs() > 0;
 
   Future<void> updatePrice(double newPrice) async {
     try {
@@ -310,6 +345,19 @@ class DriverProvider with ChangeNotifier {
         );
       }
       notifyListeners();
+    } on DioException catch (e) {
+      // Surface structured cooldown rejections (HTTP 429) with the exact
+      // remaining time returned by the server, so the UI can show an
+      // accurate countdown instead of a generic error.
+      if (e.response?.statusCode == 429 && e.response?.data?['code'] == 'COOLDOWN_ACTIVE') {
+        final remaining = (e.response?.data?['remainingMs'] as num?)?.toInt() ?? 0;
+        _cooldownActive = true;
+        _cooldownRemainingMs = remaining;
+        notifyListeners();
+        throw Exception(e.response?.data?['error'] ?? 'Price change is on cooldown.');
+      }
+      debugPrint('Error updating price: $e');
+      rethrow;
     } catch (e) {
       debugPrint('Error updating price: $e');
       rethrow;
