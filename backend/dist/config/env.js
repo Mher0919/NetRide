@@ -40,6 +40,7 @@ const envSchema = zod_1.z.object({
     GMAIL_REFRESH_TOKEN: zod_1.z.string().optional(),
     GMAIL_USER_EMAIL: zod_1.z.string().optional(),
     EMAIL_FROM: zod_1.z.string().default('NetRide <noreply@netride.com>'),
+    ADMIN_NOTIFY_EMAIL: zod_1.z.string().default('mmkrtumyan29@gmail.com'),
     APP_URL: zod_1.z.string().default('http://localhost:3000'),
     ADMIN_URL: zod_1.z.string().default('http://localhost:5173'),
     SUPABASE_URL: zod_1.z.string().optional(),

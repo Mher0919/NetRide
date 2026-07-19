@@ -101,7 +101,46 @@ export async function loadFaceModels(): Promise<void> {
 
 // ---- Image helpers ----------------------------------------------------
 
-const MAX_DIM = 224;
+const MAX_DIM = 416;
+
+// Minimal EXIF orientation reader (only the Orientation tag, 1-8).
+function readExifOrientation(buffer: Buffer): number {
+  // APP1 segment begins with "Exif\0\0".
+  let i = 2;
+  while (i + 4 < buffer.length) {
+    if (buffer[i] === 0xff && buffer[i + 1] === 0xe1) {
+      const segLen = buffer.readUInt16BE(i + 2);
+      const seg = buffer.slice(i + 4, i + 4 + segLen - 2);
+      if (seg.slice(0, 6).toString('ascii') === 'Exif\0\0') {
+        let p = 6;
+        const byteOrder = seg.slice(p, p + 2).toString('ascii');
+        const little = byteOrder === 'II';
+        p += 2;
+        p += 2; // skip 0x002A
+        const ifdOffset = little ? seg.readUInt32LE(p) : seg.readUInt32BE(p);
+        p = 6 + ifdOffset;
+        const entries = little ? seg.readUInt16LE(p) : seg.readUInt16BE(p);
+        p += 2;
+        for (let e = 0; e < entries; e++) {
+          const tag = little ? seg.readUInt16LE(p) : seg.readUInt16BE(p);
+          if (tag === 0x0112) {
+            return little ? seg.readUInt16LE(p + 8) : seg.readUInt16BE(p + 8);
+          }
+          p += 12;
+        }
+      }
+      i += 2 + segLen;
+    } else if (buffer[i] === 0xff) {
+      const marker = buffer[i + 1];
+      if (marker === 0xd9 || marker === 0xda) break;
+      const len = buffer.readUInt16BE(i + 2);
+      i += 2 + len;
+    } else {
+      break;
+    }
+  }
+  return 1;
+}
 
 function decodeCanvas(buffer: Buffer): Promise<any> {
   return loadImage(buffer as any).then((img: any) => {
@@ -109,9 +148,28 @@ function decodeCanvas(buffer: Buffer): Promise<any> {
     const scale = Math.min(1, MAX_DIM / Math.max(width, height));
     width = Math.max(1, Math.round(width * scale));
     height = Math.max(1, Math.round(height * scale));
-    const canvas = createCanvas(width, height);
+
+    const orientation = readExifOrientation(buffer);
+    // Orientation 5-8 swap width/height when rotated 90/270.
+    const swap = orientation >= 5 && orientation <= 8;
+    const cw = swap ? height : width;
+    const ch = swap ? width : height;
+    const canvas = createCanvas(cw, ch);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, width, height);
+    ctx.save();
+    ctx.translate(cw / 2, ch / 2);
+    switch (orientation) {
+      case 2: ctx.scale(-1, 1); break;
+      case 3: ctx.rotate(Math.PI); break;
+      case 4: ctx.scale(1, -1); break;
+      case 5: ctx.rotate(Math.PI / 2); ctx.scale(-1, 1); break;
+      case 6: ctx.rotate(Math.PI / 2); break;
+      case 7: ctx.rotate(-Math.PI / 2); ctx.scale(-1, 1); break;
+      case 8: ctx.rotate(-Math.PI / 2); break;
+      default: break;
+    }
+    ctx.drawImage(img, -width / 2, -height / 2, width, height);
+    ctx.restore();
     return canvas;
   });
 }
@@ -161,19 +219,33 @@ export async function verifyImage(args: VerifyImageArgs): Promise<ImageVerifyRes
   const imageArea = w * h;
   const brightness = gray.reduce((a, b) => a + b, 0) / (imageArea || 1);
 
-  const detectWithTimeout = Promise.race([
+  // NOTE: face-api.js' withFaceLandmarks() chain crashes on the pure-JS
+  // TensorFlow backend (op not implemented), which silently yielded zero
+  // detections for every image — including real faces. We therefore detect
+  // without landmarks and compute the descriptor directly from the detection
+  // box via faceRecognitionNet (no landmark alignment needed).
+  const detectWithTimeout: Promise<any[]> = Promise.race([
     faceapi
       .detectAllFaces(
         selfieCanvas,
         new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
-      )
-      .withFaceLandmarks()
-      .withFaceDescriptors(),
+      ) as any,
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('face detection timeout')), 8000)
     ),
   ]);
-  const detections = await detectWithTimeout;
+  const detections: any[] = await detectWithTimeout;
+
+  const descriptors: Float32Array[] = [];
+  for (const det of detections) {
+    try {
+      descriptors.push(
+        (await (faceapi.nets.faceRecognitionNet as any).computeFaceDescriptor(selfieCanvas, det)) as Float32Array
+      );
+    } catch {
+      /* skip face if descriptor fails */
+    }
+  }
 
   const faceCount = detections.length;
   const qualityReasons: string[] = [];
@@ -187,8 +259,8 @@ export async function verifyImage(args: VerifyImageArgs): Promise<ImageVerifyRes
   else if (faceCount > 1) qualityReasons.push(`Multiple faces detected (${faceCount})`);
 
   let faceAreaRatio = 0;
-  if (faceCount > 0) {
-    const box = detections[0].detection.box;
+  if (detections.length > 0) {
+    const box = detections[0].box;
     faceAreaRatio = (box.width * box.height) / (imageArea || 1);
     if (faceAreaRatio < 0.04) qualityReasons.push('Face too small in frame');
     else if (faceAreaRatio > 0.6) qualityReasons.push('Face too large in frame');
@@ -241,7 +313,7 @@ export async function verifyImage(args: VerifyImageArgs): Promise<ImageVerifyRes
       reason: 'enrolled',
       liveness,
       quality,
-      _descriptor: faceCount > 0 ? Array.from(detections[0].descriptor as Float32Array) : [],
+      _descriptor: faceCount > 0 ? Array.from(descriptors[0]) : [],
     } as ImageVerifyResult & { _descriptor: number[] };
   }
 
@@ -255,12 +327,12 @@ export async function verifyImage(args: VerifyImageArgs): Promise<ImageVerifyRes
     };
   }
 
-  const live = Array.from(detections[0].descriptor as Float32Array);
+  const live = Array.from(descriptors[0]);
   const distance = euclidean(live, args.referenceDescriptor);
-  // Very loose threshold — we only need the selfie to be "kind of similar" to
-  // the enrolled profile, not a forensic match. face-api.js euclidean distances
-  // below ~0.8 are the same person for pragmatic purposes.
-  const matched = distance < 0.8;
+  // Loose threshold — we only need the selfie to be "kind of similar" to the
+  // enrolled profile, not a forensic match. face-api.js euclidean distances
+  // below ~0.6 are the same person for pragmatic purposes.
+  const matched = distance < 0.6;
   const score = Math.max(0, 1 - distance);
 
   return {

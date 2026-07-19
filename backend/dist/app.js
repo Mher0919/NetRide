@@ -443,6 +443,15 @@ async function runMigrations() {
             await database_1.pool.query(schema);
             console.log('✅ face_enrollment_descriptor column added');
         }
+        // Face check event reason
+        const hasEventReason = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'face_check_events' AND column_name = 'reason'");
+        if (hasEventReason.rowCount === 0) {
+            console.log('⚡ Patching face_check_events (reason)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/20260719_face_event_reason.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ face_check_events.reason column added');
+        }
         console.log('🚀 All migrations completed');
     }
     catch (err) {

@@ -16,6 +16,7 @@ export declare const env: {
     FACE_CHECK_INTERVAL_HOURS: number;
     FACE_LOCATION_JUMP_MILES: number;
     EMAIL_FROM: string;
+    ADMIN_NOTIFY_EMAIL: string;
     APP_URL: string;
     ADMIN_URL: string;
     SPEEDING_VIOLATION_DURATION_S: number;
