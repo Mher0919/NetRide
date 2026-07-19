@@ -39,10 +39,21 @@ RUN npx prisma generate
 # Build TypeScript
 RUN npm run build
 
-# Pre-download face-api.js model weights so the first face check doesn't
-# need outbound network at request time. The model loader also fetches
-# on demand if these are missing.
-RUN node -e "require('./dist/services/faceMatcher').loadFaceModels().then(()=>console.log('face models ready')).catch(e=>{console.warn('model preload skipped:',e.message)})" || true
+# Pre-bake the face-api.js model weights into the image so the first face
+# check never fetches them from GitHub at request time (which caused request
+# timeouts). faceMatcher.ts reads them from <__dirname>/faceModels, i.e.
+# dist/services/faceModels.
+RUN mkdir -p /app/dist/services/faceModels \
+  && BASE=https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights \
+  && for f in \
+       tiny_face_detector_model-weights_manifest.json \
+       tiny_face_detector_model-shard1 \
+       face_recognition_model-weights_manifest.json \
+       face_recognition_model-shard1 \
+       face_recognition_model-shard2 ; do \
+       curl -fsSL "$BASE/$f" -o "/app/dist/services/faceModels/$f" || echo "WARN: failed to fetch $f"; \
+     done \
+  && ls -la /app/dist/services/faceModels
 
 # Create uploads directory for Render persistent disk
 RUN mkdir -p /app/uploads

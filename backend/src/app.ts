@@ -488,6 +488,14 @@ const PORT = process.env.PORT || 3000;
 httpServer.listen(Number(PORT), '0.0.0.0', async () => {
   await runMigrations();
   logger.info({ port: Number(PORT), env: env.NODE_ENV }, 'server_listening');
+
+  // Warm up the in-process face models in the background so the first face
+  // check doesn't pay the (slow) model-load / GitHub-fetch cost on the request
+  // path. Failures are logged but non-fatal.
+  import('./services/faceMatcher')
+    .then(({ loadFaceModels }) => loadFaceModels())
+    .then(() => logger.info('face_models_loaded'))
+    .catch((e) => logger.warn({ err: e.message }, 'face_models_warmup_failed'));
   logger.info({ set: !!env.JWT_SECRET, length: env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
 
   // Pre-cache OSRM routes for the launch market (Hollywood / UCLA /

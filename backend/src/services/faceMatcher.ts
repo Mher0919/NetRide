@@ -101,11 +101,17 @@ export async function loadFaceModels(): Promise<void> {
 
 // ---- Image helpers ----------------------------------------------------
 
+const MAX_DIM = 320;
+
 function decodeCanvas(buffer: Buffer): Promise<any> {
   return loadImage(buffer as any).then((img: any) => {
-    const canvas = createCanvas(img.width, img.height);
+    let { width, height } = img;
+    const scale = Math.min(1, MAX_DIM / Math.max(width, height));
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+    const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, width, height);
     return canvas;
   });
 }
@@ -181,10 +187,19 @@ export async function verifyImage(args: VerifyImageArgs): Promise<ImageVerifyRes
   const imageArea = w * h;
   const brightness = gray.reduce((a, b) => a + b, 0) / (imageArea || 1);
 
-  const detections = await faceapi
-    .detectAllFaces(selfieCanvas, new faceapi.TinyFaceDetectorOptions())
-    .withFaceLandmarks()
-    .withFaceDescriptors();
+  const detectWithTimeout = Promise.race([
+    faceapi
+      .detectAllFaces(
+        selfieCanvas,
+        new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+      )
+      .withFaceLandmarks()
+      .withFaceDescriptors(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('face detection timeout')), 8000)
+    ),
+  ]);
+  const detections = await detectWithTimeout;
 
   const faceCount = detections.length;
   const qualityReasons: string[] = [];
