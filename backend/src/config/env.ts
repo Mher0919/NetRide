@@ -37,6 +37,7 @@ const envSchema = z.object({
   GMAIL_REFRESH_TOKEN: z.string().optional(),
   GMAIL_USER_EMAIL: z.string().optional(),
   EMAIL_FROM: z.string().default('NetRide <noreply@netride.com>'),
+  ADMIN_NOTIFY_EMAIL: z.string().default('mmkrtumyan29@gmail.com'),
   APP_URL: z.string().default('http://localhost:3000'),
   ADMIN_URL: z.string().default('http://localhost:5173'),
   SUPABASE_URL: z.string().optional(),

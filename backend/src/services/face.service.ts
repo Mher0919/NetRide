@@ -325,10 +325,8 @@ export const FaceService = {
           [args.userId],
         );
         const drow = driverRes.rows[0] || {};
-        const adminRes = await pool.query(
-          `SELECT email FROM users WHERE role = 'ADMIN'`,
-        );
-        await EmailService.sendFaceCheckFlaggedNotice(adminRes.rows, {
+        const adminEmail = env.ADMIN_NOTIFY_EMAIL;
+        await EmailService.sendFaceCheckFlaggedNotice([{ email: adminEmail }], {
           driverName: drow.full_name,
           driverEmail: drow.email,
           reason: result.reason,
