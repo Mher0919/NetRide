@@ -257,7 +257,10 @@ export async function verifyImage(args: VerifyImageArgs): Promise<ImageVerifyRes
 
   const live = Array.from(detections[0].descriptor as Float32Array);
   const distance = euclidean(live, args.referenceDescriptor);
-  const matched = distance < 0.6; // face-api.js euclidean; ~0.6 is a relaxed threshold
+  // Very loose threshold — we only need the selfie to be "kind of similar" to
+  // the enrolled profile, not a forensic match. face-api.js euclidean distances
+  // below ~0.8 are the same person for pragmatic purposes.
+  const matched = distance < 0.8;
   const score = Math.max(0, 1 - distance);
 
   return {

@@ -74,6 +74,10 @@ const FaceChecks: React.FC = () => {
     setNotes('');
   };
 
+  const selfieSrc = (e: any) => e?.captured_clip_url || e?.selfie_url || null;
+  const fmtScore = (s: any) =>
+    s == null ? '—' : (typeof s === 'number' ? s : Number(s)).toFixed(3);
+
   const handleDecision = async (dec: 'APPROVED' | 'REJECTED') => {
     if (!selected) return;
     setActionLoading(true);
@@ -148,10 +152,10 @@ const FaceChecks: React.FC = () => {
                     </Stack>
                   </TableCell>
                   <TableCell>
-                    {e.selfie_url ? (
+                    {selfieSrc(e) ? (
                       <Avatar
                         variant="rounded"
-                        src={e.selfie_url}
+                        src={selfieSrc(e)}
                         alt="selfie"
                         sx={{ width: 56, height: 56 }}
                       />
@@ -163,12 +167,12 @@ const FaceChecks: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={REASON_LABELS[e.reason] || e.reason}
+                      label={REASON_LABELS[e.reason] || e.reason || 'Unknown'}
                       color={e.reason === 'face_mismatch' ? 'error' : 'warning'}
                       size="small"
                     />
                   </TableCell>
-                  <TableCell>{typeof e.match_score === 'number' ? e.match_score.toFixed(3) : '—'}</TableCell>
+                  <TableCell>{fmtScore(e.match_score)}</TableCell>
                   <TableCell>
                     {e.created_at ? format(new Date(e.created_at), 'MMM d, HH:mm') : '—'}
                   </TableCell>
@@ -201,16 +205,17 @@ const FaceChecks: React.FC = () => {
                 </Box>
               </Stack>
 
-              {selected.selfie_url && (
+              {selfieSrc(selected) && (
                 <Box>
                   <Typography variant="caption" color="text.secondary">
-                    Captured selfie
+                    Captured selfie (what the driver submitted)
                   </Typography>
                   <Avatar
                     variant="rounded"
-                    src={selected.selfie_url}
+                    src={selfieSrc(selected)}
                     alt="selfie"
-                    sx={{ width: '100%', height: 240, mt: 0.5 }}
+                    sx={{ width: '100%', height: 240, mt: 0.5, cursor: 'pointer' }}
+                    onClick={() => window.open(selfieSrc(selected), '_blank')}
                   />
                 </Box>
               )}
@@ -218,15 +223,30 @@ const FaceChecks: React.FC = () => {
               <Stack direction="row" spacing={2}>
                 <Box>
                   <Typography variant="caption" color="text.secondary">Reason</Typography>
-                  <Typography>{REASON_LABELS[selected.reason] || selected.reason}</Typography>
+                  <Typography>{REASON_LABELS[selected.reason] || selected.reason || 'Unknown'}</Typography>
                 </Box>
                 <Box>
                   <Typography variant="caption" color="text.secondary">Score</Typography>
                   <Typography>
-                    {typeof selected.match_score === 'number' ? selected.match_score.toFixed(3) : '—'}
+                    {fmtScore(selected.match_score)}
                   </Typography>
                 </Box>
               </Stack>
+
+              {selected.reference_image_url && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Enrolled profile reference
+                  </Typography>
+                  <Avatar
+                    variant="rounded"
+                    src={selected.reference_image_url}
+                    alt="reference"
+                    sx={{ width: '100%', height: 240, mt: 0.5, cursor: 'pointer' }}
+                    onClick={() => window.open(selected.reference_image_url, '_blank')}
+                  />
+                </Box>
+              )}
 
               {selected.quality && (
                 <Box>

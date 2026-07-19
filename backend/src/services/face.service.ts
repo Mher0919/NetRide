@@ -208,6 +208,7 @@ export const FaceService = {
     deviceId?: string | null;
     lat?: number | null;
     lng?: number | null;
+    capturedClipUrl?: string | null;
   }): Promise<ImageVerifyResult & { flagged: boolean; eventId: string | null }> {
     let result: ImageVerifyResult;
     try {
@@ -240,14 +241,28 @@ export const FaceService = {
       };
     }
 
-    // Combined decision: quality AND (match OR enrollment) AND liveness must
-    // pass. In enrollment mode the selfie is its own reference, so a 1:1
-    // self-match is expected and we decide on quality + liveness only.
-    const qualityPassed = result.quality?.passed ?? false;
+    // Lightweight decision: the only thing that matters is "does the selfie
+    // look kind of like the enrolled profile?". So:
+    //   - a face must be detected, and
+    //   - if we have a stored reference, its descriptor must be within a loose
+    //     distance of the selfie (0.8 euclidean).
+    // First-time users (no reference yet) simply enroll and pass. We no longer
+    // hard-block on quality/liveness heuristics — those just inform the admin.
+    const faceDetected = (result.quality?.face_count ?? 0) > 0;
     const matchPassed = args.isEnrollment ? true : result.match === true;
-    const livenessPassed = result.liveness?.passed ?? false;
-    const passed = qualityPassed && matchPassed && livenessPassed;
+    const passed = faceDetected && matchPassed;
     const flagged = !passed;
+
+    let reason: string;
+    if (!faceDetected) {
+      reason = 'no_face_in_selfie';
+    } else if (args.isEnrollment) {
+      reason = 'enrolled';
+    } else if (!matchPassed) {
+      reason = 'face_mismatch';
+    } else {
+      reason = 'match';
+    }
 
     // On a successful enrollment, persist the freshly computed descriptor
     // so subsequent checks can run a real identity match.
@@ -270,15 +285,17 @@ export const FaceService = {
 
     const eventRes = await pool.query(
       `INSERT INTO face_check_events
-        (user_id, status, match_score,
+        (user_id, status, match_score, reason, captured_clip_url,
          liveness_face_frames, liveness_motion_px, liveness_blink_count, liveness_laplacian_var,
          device_id, lat, lng)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
         args.userId,
         flagged ? 'FLAGGED' : 'PASS',
         result.score,
+        reason,
+        args.capturedClipUrl || null,
         result.liveness?.passed ? 1 : 0,
         0,
         0,
@@ -298,9 +315,9 @@ export const FaceService = {
         JSON.stringify({
           status: flagged ? 'FLAGGED' : 'PASS',
           score: result.score,
-          reason: result.reason,
+          reason: reason,
           liveness_confidence: result.liveness?.confidence,
-          quality_passed: qualityPassed,
+          quality_passed: result.quality?.passed ?? false,
           event_id: eventId,
         }),
       ],
@@ -312,7 +329,7 @@ export const FaceService = {
           user_id: args.userId,
           event_id: eventId,
           score: result.score,
-          reason: result.reason,
+          reason: reason,
         });
       } catch {
         // io may not be initialized in test contexts.
@@ -329,7 +346,7 @@ export const FaceService = {
         await EmailService.sendFaceCheckFlaggedNotice([{ email: adminEmail }], {
           driverName: drow.full_name,
           driverEmail: drow.email,
-          reason: result.reason,
+          reason: reason,
           score: result.score,
           eventId,
         });
