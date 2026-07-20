@@ -32,12 +32,11 @@ FROM ghcr.io/project-osrm/osrm-backend:latest AS osrm-builder
 WORKDIR /osrm
 ARG REGION
 COPY --from=pbf-fetcher /osrm/region.osm.pbf /osrm/region.osm.pbf
-# osrm-customize (MLD) can exit non-zero on benign "unreachable boundary
-# node" warnings, so we don't gate the rename on its exit code — the output
-# file is still written. Verify it exists before renaming.
+# CH pipeline: extract then contract. The @osrm/osrm engine loads with
+# algorithm:'CH' (see local-osrm.engine.ts), so the baked graph MUST be CH.
+# osrm-contract exits 0 on success; guard the rename on the file existing.
 RUN osrm-extract -p /opt/car.lua region.osm.pbf && \
-    osrm-partition region.osrm && \
-    osrm-customize region.osrm; \
+    osrm-contract region.osrm; \
     if [ ! -f region.osrm ]; then echo "ERROR: region.osrm not produced"; exit 1; fi && \
     mv region.osrm /osrm/${REGION}.osrm
 
