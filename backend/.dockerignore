@@ -1,0 +1,7 @@
+# Keep the build context small and avoid shipping local OSRM artifacts.
+data/*.pbf
+**/node_modules
+**/.git
+**/.github
+.git
+*.md

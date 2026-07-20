@@ -40,6 +40,7 @@ RUN if [ -s "./data/${REGION}.osrm" ]; then \
       osrm-extract -p /opt/car.lua region.osm.pbf && \
       osrm-contract region.osrm; \
       if [ ! -s "region.osrm.hsgr" ]; then echo "ERROR: contracted graph (region.osrm.hsgr) not produced"; ls -la /osrm; exit 1; fi && \
+      touch region.osrm && \
       for f in region.osrm*; do mv "$f" "/osrm/${REGION}.osrm${f#region.osrm}"; done; \
     fi
 
@@ -61,7 +62,31 @@ RUN npm install || npm install --no-optional
 
 COPY . .
 # The road network from the osrm-builder stage (pre-baked or freshly built).
+# Copy the full family: base .osrm plus all sidecar files (la.osrm.hsgr, ...).
 COPY --from=osrm-builder /osrm/${REGION}.osrm ./data/${REGION}.osrm
+COPY --from=osrm-builder /osrm/${REGION}.osrm.hsgr ./data/${REGION}.osrm.hsgr
+COPY --from=osrm-builder /osrm/${REGION}.osrm.ebg ./data/${REGION}.osrm.ebg
+COPY --from=osrm-builder /osrm/${REGION}.osrm.ebg_nodes ./data/${REGION}.osrm.ebg_nodes
+COPY --from=osrm-builder /osrm/${REGION}.osrm.edges ./data/${REGION}.osrm.edges
+COPY --from=osrm-builder /osrm/${REGION}.osrm.enw ./data/${REGION}.osrm.enw
+COPY --from=osrm-builder /osrm/${REGION}.osrm.geometry ./data/${REGION}.osrm.geometry
+COPY --from=osrm-builder /osrm/${REGION}.osrm.nbg_nodes ./data/${REGION}.osrm.nbg_nodes
+COPY --from=osrm-builder /osrm/${REGION}.osrm.icd ./data/${REGION}.osrm.icd
+COPY --from=osrm-builder /osrm/${REGION}.osrm.names ./data/${REGION}.osrm.names
+COPY --from=osrm-builder /osrm/${REGION}.osrm.ramIndex ./data/${REGION}.osrm.ramIndex
+COPY --from=osrm-builder /osrm/${REGION}.osrm.fileIndex ./data/${REGION}.osrm.fileIndex
+COPY --from=osrm-builder /osrm/${REGION}.osrm.properties ./data/${REGION}.osrm.properties
+COPY --from=osrm-builder /osrm/${REGION}.osrm.timestamp ./data/${REGION}.osrm.timestamp
+COPY --from=osrm-builder /osrm/${REGION}.osrm.datasource_names ./data/${REGION}.osrm.datasource_names
+COPY --from=osrm-builder /osrm/${REGION}.osrm.restrictions ./data/${REGION}.osrm.restrictions
+COPY --from=osrm-builder /osrm/${REGION}.osrm.tld ./data/${REGION}.osrm.tld
+COPY --from=osrm-builder /osrm/${REGION}.osrm.tls ./data/${REGION}.osrm.tls
+COPY --from=osrm-builder /osrm/${REGION}.osrm.cnbg ./data/${REGION}.osrm.cnbg
+COPY --from=osrm-builder /osrm/${REGION}.osrm.cnbg_to_ebg ./data/${REGION}.osrm.cnbg_to_ebg
+COPY --from=osrm-builder /osrm/${REGION}.osrm.maneuver_overrides ./data/${REGION}.osrm.maneuver_overrides
+COPY --from=osrm-builder /osrm/${REGION}.osrm.turn_penalties_index ./data/${REGION}.osrm.turn_penalties_index
+COPY --from=osrm-builder /osrm/${REGION}.osrm.turn_weight_penalties ./data/${REGION}.osrm.turn_weight_penalties
+COPY --from=osrm-builder /osrm/${REGION}.osrm.turn_duration_penalties ./data/${REGION}.osrm.turn_duration_penalties
 
 RUN npx prisma generate && npm run build
 
