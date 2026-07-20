@@ -7,6 +7,8 @@
     "start": "ts-node src/app.ts",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "build": "tsc",
+    "test": "node run-tests.cjs",
+    "bench:routing": "ts-node src/modules/routing/__tests__/benchmark.routing.ts",
     "match-worker": "ts-node src/queue/matchWorker.ts",
     "cron-worker": "ts-node src/queue/cronWorker.ts"
   },

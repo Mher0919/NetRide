@@ -43,15 +43,14 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       _loadingEstimate = true;
     });
     try {
-      final response = await ApiService.dio.post('/ride/estimate', data: {
-        'pickup': pickup.toJson(),
-        'destination': destination.toJson(),
-        'requestedClass': _selectedClass.toString().split('.').last,
+      final response = await ApiService.dio.post('/routing/plan', data: {
+        'origin': [pickup.lat, pickup.lng],
+        'destination': [destination.lat, destination.lng],
+        'vehicleClass': _selectedClass.toString().split('.').last,
       });
       final data = response.data;
       setState(() {
-        _maxFare = (data['maxFare'] as num).toDouble();
-        _savingLikelihood = (data['savingLikelihood'] as num).toInt();
+        _maxFare = (data['fare']['totalFare'] as num).toDouble();
         _loadingEstimate = false;
       });
     } catch (e) {

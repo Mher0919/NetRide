@@ -96,6 +96,55 @@ export const socketEventsTotal = new client.Counter({
   registers: [register],
 });
 
+// --- Routing pipeline ------------------------------------------------------
+
+/** Total routing plan requests, labeled by cache hit and engine. */
+export const routingRequestsTotal = new client.Counter({
+  name: 'netride_routing_requests_total',
+  help: 'Routing plan requests, labeled by cache hit and engine.',
+  labelNames: ['cache', 'engine'] as const, // cache: hit|miss ; engine: osrm|geoapify|synthetic|nearby
+  registers: [register],
+});
+
+/** End-to-end routing pipeline latency (validation + cache + engine + fare). */
+export const routingDurationSeconds = new client.Histogram({
+  name: 'netride_routing_duration_seconds',
+  help: 'End-to-end routing plan latency in seconds.',
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  registers: [register],
+});
+
+/** Cache lookup latency (Redis GET + nearby geohash fan-out). */
+export const routingCacheLookupSeconds = new client.Histogram({
+  name: 'netride_routing_cache_lookup_seconds',
+  help: 'Routing cache lookup latency in seconds.',
+  buckets: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05],
+  registers: [register],
+});
+
+/** Routing engine (OSRM/Geoapify) call latency, excludes cache hits. */
+export const routingEngineSeconds = new client.Histogram({
+  name: 'netride_routing_engine_seconds',
+  help: 'Routing engine call latency in seconds.',
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  registers: [register],
+});
+
+/** Fare calculation latency — should be sub-millisecond. */
+export const routingFareSeconds = new client.Histogram({
+  name: 'netride_routing_fare_seconds',
+  help: 'Fare calculation latency in seconds.',
+  buckets: [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01],
+  registers: [register],
+});
+
+/** Count of synthetic fallback routes (engine unreachable). */
+export const routingFallbackTotal = new client.Counter({
+  name: 'netride_routing_fallback_total',
+  help: 'Count of routes served by the synthetic fallback engine.',
+  registers: [register],
+});
+
 // --- Redis / Postgres health ----------------------------------------------
 
 export const dependencyUp = new client.Gauge({

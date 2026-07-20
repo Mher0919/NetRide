@@ -14,9 +14,88 @@ const BASE_FARE = 3.50;       // Upgraded Base fare for Premium Startup
 const PER_KM_RATE = 1.50;     // Upgraded Rate per KM
 const MIN_FARE = 7.00;        // Minimum fare
 
+export interface FareInput {
+  /** Trip distance in meters. */
+  distanceMeters: number;
+  /** Expected trip duration in seconds (for the time component). */
+  durationSeconds: number;
+  vehicleClass: VehicleClass;
+}
+
+export interface FareBreakdown {
+  baseFare: number;
+  distanceFare: number;
+  timeFare: number;
+  bookingFee: number;
+  surgeMultiplier: number;
+  serviceFee: number;
+  taxes: number;
+  totalFare: number;
+  currency: 'USD';
+}
+export type { FareBreakdown as FareBreakdownType };
+
+// Pure, in-memory fare constants — no I/O, computed in microseconds.
+const BOOKING_FEE = 1.50;
+const PER_MINUTE_RATE = 0.35;
+const SERVICE_FEE_RATE = 0.10;   // 10% of (base + distance + time)
+const TAX_RATE = 0.0875;         // 8.75% (CA statewide + local)
+
+const CLASS_DISTANCE_MULTIPLIER: Record<VehicleClass, number> = {
+  [VehicleClass.CORE]: 1.0,
+  [VehicleClass.ELITE]: 1.6,
+  [VehicleClass.PRESTIGE]: 2.4,
+};
+
+/** Round to 2 decimal places. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export const fareService = {
   /**
+   * Fast, deterministic, in-memory fare computation for the routing hot
+   * path. No database, no network — only arithmetic. Takes microseconds.
+   *
+   * Returns a full itemized breakdown so the rider UI can render an
+   * Uber-style fare card instantly.
+   */
+  computeFare(input: FareInput): FareBreakdown {
+    const distanceKm = input.distanceMeters / 1000;
+    const durationMinutes = input.durationSeconds / 60;
+    const classMultiplier = CLASS_DISTANCE_MULTIPLIER[input.vehicleClass] ?? 1.0;
+
+    const baseFare = BASE_FARE * classMultiplier;
+    const distanceFare = distanceKm * PER_KM_RATE * classMultiplier;
+    const timeFare = durationMinutes * PER_MINUTE_RATE * classMultiplier;
+    // Surge is 1.0 on the planning path; recomputed from live market at
+    // request time by calculateRiderPriceEstimate when dynamic pricing applies.
+    const surgeMultiplier = 1.0;
+    const bookingFee = BOOKING_FEE;
+
+    const subtotal = baseFare + distanceFare + timeFare + bookingFee;
+    const serviceFee = subtotal * SERVICE_FEE_RATE;
+    const taxable = subtotal + serviceFee;
+    const taxes = taxable * TAX_RATE;
+    const totalFareRaw = taxable + taxes;
+    const totalFare = Math.max(MIN_FARE * classMultiplier, round2(totalFareRaw));
+
+    return {
+      baseFare: round2(baseFare),
+      distanceFare: round2(distanceFare),
+      timeFare: round2(timeFare),
+      bookingFee: round2(bookingFee),
+      surgeMultiplier,
+      serviceFee: round2(serviceFee),
+      taxes: round2(taxes),
+      totalFare,
+      currency: 'USD',
+    };
+  },
+
+  /**
    * Calculates the estimated fare based on distance and vehicle class.
+   * Retained for non-hot-path callers (admin, tests).
    */
   calculateFare(distanceKm: number, vehicleClass: VehicleClass = VehicleClass.CORE): number {
     let typeMultiplier = 1.0;

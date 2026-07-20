@@ -266,16 +266,17 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     if (_pickup == null || _destination == null) return;
 
     try {
-      final route = await _routingService.getRoute(
-        LatLng(_pickup!.lat, _pickup!.lng),
-        LatLng(_destination!.lat, _destination!.lng),
+      final plan = await _routingService.plan(
+        origin: LatLng(_pickup!.lat, _pickup!.lng),
+        destination: LatLng(_destination!.lat, _destination!.lng),
+        vehicleClass: _selectedClass.toString().split('.').last,
       );
 
       if (mounted) {
         setState(() {
-          _routePoints = route['points_list'] as List<LatLng>;
+          _routePoints = plan.points;
         });
-        
+
         final bounds = LatLngBounds.fromPoints([
           LatLng(_pickup!.lat, _pickup!.lng),
           LatLng(_destination!.lat, _destination!.lng),
@@ -288,7 +289,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
 
     // Once both endpoints exist, open the in-map ride-selection panel and
-    // fetch the highest nearby-driver price for each ride type.
+    // fetch the ride options for every class in a single batch call.
     if (_pickup != null && _destination != null && !_panelOpen) {
       _openRidePanel();
     }
@@ -305,31 +306,39 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     await _fetchAllEstimates();
   }
 
+  /// Pull a full ride-option set (route geometry + fare per class) using the
+  /// new combined /routing/plan endpoint. Three parallel class requests,
+  /// each a single round trip — no sequential /ride/estimate DB lookups.
   Future<void> _fetchAllEstimates() async {
     if (_pickup == null || _destination == null) return;
     setState(() => _loadingEstimates = true);
     const classes = models.VehicleClass.values;
-    Map<models.VehicleClass, Map<String, dynamic>> results = {};
-    for (final c in classes) {
+
+    final results = <models.VehicleClass, Map<String, dynamic>>{};
+    await Future.wait(classes.map((c) async {
       try {
-        final response = await ApiService.dio.post('/ride/estimate', data: {
-          'pickup': _pickup!.toJson(),
-          'destination': _destination!.toJson(),
-          'requestedClass': c.toString().split('.').last,
-        });
-        final data = response.data as Map<String, dynamic>?;
-        if (data != null && data['maxFare'] != null) {
-          results[c] = {
-            'maxFare': (data['maxFare'] as num).toDouble(),
-            'savingLikelihood': (data['savingLikelihood'] as num?)?.toInt() ?? 0,
-            'distanceKm': (data['distance_km'] as num?)?.toDouble() ?? 0.0,
-          };
+        final plan = await _routingService.plan(
+          origin: LatLng(_pickup!.lat, _pickup!.lng),
+          destination: LatLng(_destination!.lat, _destination!.lng),
+          vehicleClass: c.toString().split('.').last,
+        );
+        // Dedupe the geometry from the most recent plan so the map stays
+        // in sync with the selected class without a second route call.
+        if (mounted && c == _selectedClass) {
+          setState(() => _routePoints = plan.points);
         }
+        results[c] = {
+          'maxFare': (plan.fare['totalFare'] as num?)?.toDouble() ?? 0.0,
+          'savingLikelihood': 0,
+          'distanceKm': plan.distanceMeters / 1000.0,
+          'engine': plan.engine,
+          'etaSeconds': plan.etaSeconds,
+        };
       } catch (e) {
         debugPrint('Estimate error for $c: $e');
       }
-    }
-    // Guarantee every class has at least a fallback so the UI never crashes.
+    }));
+
     for (final c in classes) {
       results.putIfAbsent(c, () => {'maxFare': 0.0, 'savingLikelihood': 0, 'distanceKm': 0.0});
     }
