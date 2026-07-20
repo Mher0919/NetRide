@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/trip_models.dart';
 import '../services/api_service.dart';
@@ -41,15 +42,16 @@ class RideProvider with ChangeNotifier {
     print('Token: $token');
     print('-------------------');
 
-    _socket = IO.io(url, IO.OptionBuilder()
-      .setTransports(['websocket']) // Force websocket
-      .enableForceNew() // Ensure fresh connection
-      .enableReconnection()
-      .setAuth({
-        'token': token,
-        'role': 'RIDER'
-      })
-      .build());
+    _socket = IO.io(url, <String, dynamic>{
+      'transports': ['websocket'], // Force websocket
+      'forceNew': true, // Ensure fresh connection
+      'reconnection': true,
+      'reconnectionAttempts': double.infinity,
+      'reconnectionDelay': 1000,
+      'reconnectionDelayMax': 15000,
+      'randomizationFactor': 0.5,
+      'auth': {'token': token, 'role': 'RIDER'},
+    });
 
     _socket!.onConnect((_) {
       print('Rider connected to socket');
@@ -64,7 +66,12 @@ class RideProvider with ChangeNotifier {
     });
 
     _socket!.onConnectError((err) {
-      print('Rider Connect Error: $err');
+      final errStr = err.toString();
+      if (errStr.contains('Failed host lookup') || errStr.contains('No address associated')) {
+        print('Rider Connect Error — DNS resolution failed for netride.onrender.com. Retrying...');
+      } else {
+        print('Rider Connect Error: $err');
+      }
       _isConnected = false;
       notifyListeners();
     });
@@ -221,6 +228,17 @@ class RideProvider with ChangeNotifier {
 
   Future<void> submitTip(String rideId, double amount) async {
     await ApiService.dio.post('/ride/$rideId/tip', data: {'amount': amount});
+  }
+
+  Future<void> onAppForegrounded() async {
+    if (_socket == null || !_socket!.connected) {
+      debugPrint('[RIDE] Socket disconnected on foreground — reinitializing');
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token');
+      if (token != null) {
+        initSocket(token);
+      }
+    }
   }
 
   @override

@@ -922,29 +922,25 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     ),
                     const SizedBox(height: 12),
                     if (driverProvider.recommendation != null)
-                      GestureDetector(
-                        onTap: () => _showModeSelector(driverProvider),
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 40),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFC79A4A),
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  driverProvider.recommendation!['reason'],
-                                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
-                                ),
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFC79A4A),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                driverProvider.recommendation!['reason'],
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                               ),
-                              const Icon(Icons.chevron_right_rounded, color: Colors.white),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                   ],
@@ -955,109 +951,27 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
               Positioned(
                 bottom: driverProvider.incomingRequest != null ? 360 : 40,
                 left: 20,
-                child: GestureDetector(
-                  onTap: () => _showModeSelector(driverProvider),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFD8D2CA)),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.layers_outlined, size: 18, color: Color(0xFF5B7760)),
-                        const SizedBox(width: 10),
-                        Text(
-                          'MODE: ${driverProvider.activeClass.toString().split('.').last}',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
-                        ),
-                      ],
-                    ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFD8D2CA)),
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.layers_outlined, size: 18, color: Color(0xFF5B7760)),
+                      const SizedBox(width: 10),
+                      Text(
+                        'MODE: ${driverProvider.activeClass.toString().split('.').last}',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+                      ),
+                    ],
                   ),
                 ),
               ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showModeSelector(DriverProvider provider) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(32),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Operating Mode',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Choose which service class you want to drive for. Some modes require specific vehicle eligibility.',
-              style: TextStyle(color: const Color(0xFF2F3A32).withOpacity(0.6), fontSize: 14),
-            ),
-            const SizedBox(height: 32),
-            _buildModeOption(provider, 'NetRide Core', 'Standard everyday rides', models.VehicleClass.CORE),
-            const SizedBox(height: 12),
-            _buildModeOption(provider, 'NetRide Elite', 'Premium luxury sedan rides', models.VehicleClass.ELITE),
-            const SizedBox(height: 12),
-            _buildModeOption(provider, 'NetRide Prestige', 'Large luxury SUV rides', models.VehicleClass.PRESTIGE),
-            const SizedBox(height: 32),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModeOption(DriverProvider provider, String title, String sub, models.VehicleClass vClass) {
-    final isSelected = provider.activeClass == vClass;
-    return GestureDetector(
-      onTap: () async {
-        try {
-          await provider.updateOperatingClass(vClass);
-          if (mounted) Navigator.pop(context);
-        } catch (e) {
-          if (mounted) {
-            Navigator.pop(context);
-            _showError(e.toString().replaceAll('Exception: ', ''));
-          }
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF5B7760).withOpacity(0.05) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: isSelected ? const Color(0xFF5B7760) : const Color(0xFFD8D2CA)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                  const SizedBox(height: 2),
-                  Text(sub, style: TextStyle(fontSize: 12, color: const Color(0xFF2F3A32).withOpacity(0.5))),
-                ],
-              ),
-            ),
-            if (isSelected)
-              const Icon(Icons.check_circle, color: Color(0xFF5B7760))
-            else
-              const Icon(Icons.circle_outlined, color: Color(0xFFD8D2CA)),
           ],
         ),
       ),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/trip_models.dart' as models;
 import '../services/api_service.dart';
@@ -244,6 +245,17 @@ class DriverProvider with ChangeNotifier {
     }
     _lastForegroundRevalidation = now;
     debugPrint('[CACHE] App foregrounded — revalidating critical state');
+
+    // If the socket is disconnected (e.g. transient DNS failure),
+    // re-initialize it so the built-in reconnector gets a fresh start.
+    if (_socket == null || !_socket!.connected) {
+      debugPrint('[CACHE] Socket disconnected on foreground — reinitializing');
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token');
+      if (token != null) {
+        initSocket(token);
+      }
+    }
 
     try {
       // Revalidate compliance-critical data in parallel
@@ -637,15 +649,16 @@ class DriverProvider with ChangeNotifier {
     final url = 'https://netride.onrender.com';
     print('--- DRIVER SOCKET INIT ---');
 
-    _socket = IO.io(url, IO.OptionBuilder()
-      .setTransports(['websocket'])
-      .enableForceNew()
-      .enableReconnection()
-      .setAuth({
-        'token': token,
-        'role': 'DRIVER'
-      })
-      .build());
+    _socket = IO.io(url, <String, dynamic>{
+      'transports': ['websocket'],
+      'forceNew': true,
+      'reconnection': true,
+      'reconnectionAttempts': double.infinity,
+      'reconnectionDelay': 1000,
+      'reconnectionDelayMax': 15000,
+      'randomizationFactor': 0.5,
+      'auth': {'token': token, 'role': 'DRIVER'},
+    });
 
     _socket!.onConnect((_) {
       print('Driver connected to socket');
@@ -662,7 +675,12 @@ class DriverProvider with ChangeNotifier {
     });
 
     _socket!.onConnectError((err) {
-      print('Driver Connect Error: $err');
+      final errStr = err.toString();
+      if (errStr.contains('Failed host lookup') || errStr.contains('No address associated')) {
+        print('Driver Connect Error — DNS resolution failed for netride.onrender.com. Retrying...');
+      } else {
+        print('Driver Connect Error: $err');
+      }
       _isConnected = false;
       notifyListeners();
     });

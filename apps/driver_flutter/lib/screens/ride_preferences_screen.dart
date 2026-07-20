@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/trip_models.dart' as models;
 import '../providers/driver_provider.dart';
-import '../theme/app_theme.dart';
 
 /// Ride-type preference labels (UI-facing). The backend uses the internal
 /// codes CORE / ELITE / PRESTIGE; these are the premium-product names.
@@ -156,6 +156,18 @@ class _RidePreferencesScreenState extends State<RidePreferencesScreen> {
                 ),
                 const SizedBox(height: 20),
                 Text(
+                  'OPERATING MODE',
+                  style: GoogleFonts.inter(
+                    color: Colors.grey[500],
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildOperatingModeSelector(provider),
+                const SizedBox(height: 20),
+                Text(
                   'RIDE PREFERENCES',
                   style: GoogleFonts.inter(
                     color: Colors.grey[500],
@@ -206,6 +218,109 @@ class _RidePreferencesScreenState extends State<RidePreferencesScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildOperatingModeSelector(DriverProvider provider) {
+    final allModes = [
+      ('CORE', 'NetRide Core', 'Standard everyday rides'),
+      ('ELITE', 'NetRide Elite', 'Premium luxury sedan rides'),
+      ('PRESTIGE', 'NetRide Prestige', 'Large luxury SUV rides'),
+    ];
+
+    // Only show modes up to the vehicle's classification
+    final classOrder = ['CORE', 'ELITE', 'PRESTIGE'];
+    final maxIdx = classOrder.indexOf(provider.vehicleClass);
+    final availableModes = allModes.take(maxIdx + 1).toList();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFD8D2CA)),
+      ),
+      child: Column(
+        children: [
+          for (final mode in availableModes) ...[
+            if (mode != availableModes.first)
+              Divider(height: 1, color: const Color(0xFFD8D2CA).withOpacity(0.5)),
+            InkWell(
+              onTap: () async {
+                final newClass = mode.$1 == 'CORE'
+                    ? models.VehicleClass.CORE
+                    : mode.$1 == 'ELITE'
+                        ? models.VehicleClass.ELITE
+                        : models.VehicleClass.PRESTIGE;
+                try {
+                  await provider.updateOperatingClass(newClass);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Switched to ${mode.$2}'),
+                        backgroundColor: const Color(0xFF5B7760),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(e.toString().replaceAll('Exception: ', '')),
+                        backgroundColor: Colors.red,
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            mode.$2,
+                            style: GoogleFonts.inter(
+                              color: const Color(0xFF2F3A32),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            mode.$3,
+                            style: GoogleFonts.inter(color: Colors.grey[600], fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (provider.activeClass.toString().split('.').last == mode.$1)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF5B7760).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'ACTIVE',
+                          style: TextStyle(
+                            color: Color(0xFF5B7760),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

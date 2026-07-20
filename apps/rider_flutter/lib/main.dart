@@ -128,13 +128,36 @@ class NetRideRider extends StatefulWidget {
   State<NetRideRider> createState() => _NetRideRiderState();
 }
 
-class _NetRideRiderState extends State<NetRideRider> {
+class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver {
   late AppLinks _appLinks;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initDeepLinks();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('[LIFECYCLE] Rider app returned to foreground');
+      try {
+        final context = ApiService.navigatorKey.currentContext;
+        if (context != null) {
+          final provider = Provider.of<RideProvider>(context, listen: false);
+          provider.onAppForegrounded();
+        }
+      } catch (e) {
+        debugPrint('[LIFECYCLE] Foreground callback error: $e');
+      }
+    }
   }
 
   void _initDeepLinks() {
