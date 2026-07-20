@@ -44,6 +44,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   String? _rejectionReason;
   bool _feedbackSeen = true;
 
+  // Ride-selection panel state (kept on the map, never navigates away).
+  bool _panelOpen = false;
+  bool _loadingEstimates = false;
+  bool _requesting = false;
+  models.VehicleClass _selectedClass = models.VehicleClass.CORE;
+  Map<models.VehicleClass, Map<String, dynamic>> _estimates = {};
+  bool _hasNavigatedToTrip = false;
+
   @override
   void initState() {
     super.initState();
@@ -278,12 +286,97 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     } catch (e) {
       debugPrint('Route error: $e');
     }
+
+    // Once both endpoints exist, open the in-map ride-selection panel and
+    // fetch the highest nearby-driver price for each ride type.
+    if (_pickup != null && _destination != null && !_panelOpen) {
+      _openRidePanel();
+    }
+  }
+
+  Future<void> _openRidePanel() async {
+    if (_verificationStatus == 'PENDING') return;
+    setState(() {
+      _panelOpen = true;
+      _loadingEstimates = true;
+      _estimates = {};
+      _selectedClass = models.VehicleClass.CORE;
+    });
+    await _fetchAllEstimates();
+  }
+
+  Future<void> _fetchAllEstimates() async {
+    if (_pickup == null || _destination == null) return;
+    setState(() => _loadingEstimates = true);
+    const classes = models.VehicleClass.values;
+    Map<models.VehicleClass, Map<String, dynamic>> results = {};
+    for (final c in classes) {
+      try {
+        final response = await ApiService.dio.post('/ride/estimate', data: {
+          'pickup': _pickup!.toJson(),
+          'destination': _destination!.toJson(),
+          'requestedClass': c.toString().split('.').last,
+        });
+        final data = response.data as Map<String, dynamic>?;
+        if (data != null && data['maxFare'] != null) {
+          results[c] = {
+            'maxFare': (data['maxFare'] as num).toDouble(),
+            'savingLikelihood': (data['savingLikelihood'] as num?)?.toInt() ?? 0,
+            'distanceKm': (data['distance_km'] as num?)?.toDouble() ?? 0.0,
+          };
+        }
+      } catch (e) {
+        debugPrint('Estimate error for $c: $e');
+      }
+    }
+    // Guarantee every class has at least a fallback so the UI never crashes.
+    for (final c in classes) {
+      results.putIfAbsent(c, () => {'maxFare': 0.0, 'savingLikelihood': 0, 'distanceKm': 0.0});
+    }
+    if (mounted) {
+      setState(() {
+        _estimates = results;
+        _loadingEstimates = false;
+      });
+    }
+  }
+
+  void _confirmRide() {
+    if (_pickup == null || _destination == null) return;
+    setState(() => _requesting = true);
+    Provider.of<RideProvider>(context, listen: false).requestRide(
+      _pickup!,
+      _destination!,
+      requestedClass: _selectedClass,
+    );
+  }
+
+  void _closePanel() {
+    if (_requesting) {
+      Provider.of<RideProvider>(context, listen: false).cancelRide();
+    }
+    setState(() {
+      _panelOpen = false;
+      _requesting = false;
+      _destination = null;
+      _routePoints = [];
+      _shouldFollowUser = true;
+      _hasNavigatedToTrip = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final rideProvider = Provider.of<RideProvider>(context);
     final theme = Theme.of(context);
+
+    // When a driver accepts, leave the map and go to the active trip screen.
+    if (rideProvider.status == models.TripStatus.ACCEPTED && !_hasNavigatedToTrip && _requesting) {
+      _hasNavigatedToTrip = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.pushReplacementNamed(context, '/trip');
+      });
+    }
 
     return Scaffold(
       body: StateContainer(
@@ -472,7 +565,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
 
-            if (_pickup != null && _destination != null && _verificationStatus != 'PENDING')
+            if (_panelOpen && _pickup != null && _destination != null)
+              _buildRidePanel(theme)
+            else if (_pickup != null && _destination != null && _verificationStatus != 'PENDING')
               Positioned(
                 bottom: 40,
                 left: 20,
@@ -482,18 +577,162 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pushNamed(
-                          context,
-                          '/ride_request',
-                          arguments: {'pickup': _pickup, 'destination': _destination},
-                        );
-                      },
-                      child: const Text('Confirm NetRide'),
+                      onPressed: _openRidePanel,
+                      child: const Text('See Ride Options'),
                     ),
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRidePanel(ThemeData theme) {
+    final classes = models.VehicleClass.values;
+    final rideProvider = Provider.of<RideProvider>(context);
+    final searching = _requesting && rideProvider.status == models.TripStatus.REQUESTED;
+
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 24, offset: const Offset(0, -8))],
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    searching ? 'Finding your driver…' : 'Choose your ride',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF2F3A32)),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20, color: Color(0xFF2F3A32)),
+                  onPressed: _closePanel,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (_loadingEstimates)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: CircularProgressIndicator(color: Color(0xFF5B7760)),
+              )
+            else if (searching)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Column(
+                  children: [
+                    SizedBox(width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFF5B7760))),
+                    SizedBox(height: 16),
+                    Text('Matching you with nearby drivers…', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF2F3A32))),
+                  ],
+                ),
+              )
+            else
+              Column(
+                children: [
+                  ...classes.map((c) => _buildRideCard(c, theme)).toList(),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: ElevatedButton(
+                      onPressed: _confirmRide,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2F3A32),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: Text(
+                        'Confirm NetRide ${_selectedClass.toString().split('.').last}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.5),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRideCard(models.VehicleClass c, ThemeData theme) {
+    final est = _estimates[c] ?? {'maxFare': 0.0, 'savingLikelihood': 0};
+    final isSelected = _selectedClass == c;
+    final name = c.toString().split('.').last;
+    final IconData icon = c == models.VehicleClass.ELITE
+        ? Icons.stars_rounded
+        : c == models.VehicleClass.PRESTIGE
+            ? Icons.workspace_premium_rounded
+            : Icons.directions_car_filled_outlined;
+    final price = (est['maxFare'] as num?)?.toDouble() ?? 0.0;
+    final saving = (est['savingLikelihood'] as num?)?.toInt() ?? 0;
+
+    return GestureDetector(
+      onTap: () => setState(() => _selectedClass = c),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF5B7760).withOpacity(0.08) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF5B7760) : const Color(0xFFD8D2CA),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: isSelected ? const Color(0xFF5B7760) : const Color(0xFF5B7760).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: isSelected ? Colors.white : const Color(0xFF5B7760), size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'NetRide $name',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Color(0xFF2F3A32)),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    saving > 0 ? 'You\'re $saving% likely to pay less' : 'Based on nearby drivers',
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('Max', style: TextStyle(fontSize: 10, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
+                Text(
+                  '\$${price.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF2F3A32), letterSpacing: -0.5),
+                ),
+              ],
+            ),
           ],
         ),
       ),

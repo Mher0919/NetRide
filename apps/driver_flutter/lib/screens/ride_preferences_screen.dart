@@ -7,9 +7,9 @@ import '../theme/app_theme.dart';
 /// Ride-type preference labels (UI-facing). The backend uses the internal
 /// codes CORE / ELITE / PRESTIGE; these are the premium-product names.
 const Map<String, String> _rideTypeLabels = {
-  'CORE': 'NetRide Basic',
-  'ELITE': 'NetRide Lux',
-  'PRESTIGE': 'NetRide Lux SUV',
+  'CORE': 'NetRide Core',
+  'ELITE': 'NetRide Elite',
+  'PRESTIGE': 'NetRide Prestige',
 };
 
 const Map<String, String> _rideTypeSubtitles = {

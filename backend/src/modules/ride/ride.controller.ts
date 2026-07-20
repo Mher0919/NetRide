@@ -77,11 +77,15 @@ export class RideController {
     try {
       const validatedData = EstimateRideSchema.parse(req.body);
 
-      // Calculate distance using OSRM routing
-      const route = await GeospatialService.getRoute(
-        [validatedData.pickup.lat, validatedData.pickup.lng],
-        [validatedData.destination.lat, validatedData.destination.lng]
-      ).catch(() => null);
+      // Calculate distance using OSRM routing, but never block the request on
+      // a slow/unreachable router — fall back to a synthetic distance fast.
+      const route = await Promise.race<unknown>([
+        GeospatialService.getRoute(
+          [validatedData.pickup.lat, validatedData.pickup.lng],
+          [validatedData.destination.lat, validatedData.destination.lng]
+        ).catch(() => null),
+        new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]).catch(() => null) as any;
 
       const distanceKm = route ? (route.distance / 1000) : 10.0; // fallback to 10km
 

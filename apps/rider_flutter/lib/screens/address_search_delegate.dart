@@ -222,9 +222,20 @@ class AddressSearchDelegate extends SearchDelegate<AddressSearchResult?> {
       );
 
       final List<dynamic> data = response.data;
-      return data
+      final results = data
           .map((json) => AddressSearchResult.fromJson(json as Map<String, dynamic>))
           .toList();
+      // Guarantee nearest-first ordering even if the backend didn't sort
+      // (e.g. when the rider's location wasn't available at query time).
+      results.sort((a, b) {
+        final da = a.distanceMiles;
+        final db = b.distanceMiles;
+        if (da == null && db == null) return 0;
+        if (da == null) return 1;
+        if (db == null) return -1;
+        return da.compareTo(db);
+      });
+      return results;
     } catch (e) {
       debugPrint('[SEARCH] ❌ Search failed: $e');
       return [];
