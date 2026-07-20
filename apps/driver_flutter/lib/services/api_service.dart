@@ -38,7 +38,7 @@ class ApiService {
         final prefs = await SharedPreferences.getInstance();
         final token = prefs.getString('jwt_token');
 
-        debugPrint('[API DEBUG] 🛰️ ${options.method} ${options.baseUrl}${options.path}');
+        debugPrint('[API DEBUG] 🛰️ ${options.method} ${options.uri}');
 
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';

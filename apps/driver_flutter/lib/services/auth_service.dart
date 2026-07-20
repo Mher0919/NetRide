@@ -479,7 +479,7 @@ class AuthService {
   /// Authoritative onboarding/role resolution from the backend. The frontend
   /// must never decide onboarding completion from local/cache state alone.
   static Future<Map<String, dynamic>> getOnboardingStatus() async {
-    final response = await ApiService.dio.get('auth/onboarding-status');
+    final response = await ApiService.dio.get('/auth/onboarding-status');
     return response.data as Map<String, dynamic>;
   }
 
@@ -500,7 +500,7 @@ class AuthService {
   /// Canonical application identity, used to assert correct OAuth branding.
   static Future<String> getAppName() async {
     try {
-      final response = await ApiService.dio.get('auth/config');
+      final response = await ApiService.dio.get('/auth/config');
       final name = response.data['app_name'];
       if (name is String && name.isNotEmpty) return name;
     } catch (_) {
