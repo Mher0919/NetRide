@@ -28,18 +28,13 @@ class RoutingService {
         final data = response.data;
         if (data != null && data['geometry'] != null) {
           final geometry = data['geometry'];
-          List<LatLng> points = [];
-
-          if (geometry['type'] == 'LineString' && geometry['coordinates'] != null) {
-            final coords = geometry['coordinates'] as List;
-            points = coords.map((c) => LatLng(c[1] as double, c[0] as double)).toList();
-          }
+          List<LatLng> points = _flattenGeometry(geometry);
 
           return {
             'points_list': points,
-            'distance': (data['distance'] as num).toDouble(),
-            'duration': (data['eta'] as num).toDouble(), // Use ML-corrected ETA
-            'osrm_duration': (data['osrm_duration'] as num).toDouble(),
+            'distance': (data['distance'] as num?)?.toDouble() ?? 0.0,
+            'duration': (data['eta'] as num?)?.toDouble() ?? 0.0,
+            'osrm_duration': (data['osrm_duration'] as num?)?.toDouble() ?? 0.0,
             'engine': data['engine'] ?? 'Backend-Gateway',
             'cache_hit': data['cache_hit'] ?? false,
           };
@@ -51,6 +46,43 @@ class RoutingService {
 
     // High-Quality Local Fallback
     return _calculateLocalPremiumFallback(start, end);
+  }
+
+  /// Flatten a GeoJSON geometry (LineString or MultiLineString) — or a
+  /// Geoapify-style FeatureCollection/Feature — into a single list of LatLng
+  /// points following the actual road geometry.
+  List<LatLng> _flattenGeometry(dynamic geometry) {
+    List<LatLng> out = [];
+
+    void addLine(List coords) {
+      for (final c in coords) {
+        if (c is List && c.length >= 2) {
+          // GeoJSON coordinates are [lng, lat]
+          out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+        }
+      }
+    }
+
+    if (geometry is Map) {
+      final type = geometry['type'];
+      if (type == 'LineString') {
+        addLine(geometry['coordinates'] as List);
+      } else if (type == 'MultiLineString') {
+        for (final line in (geometry['coordinates'] as List)) {
+          addLine(line as List);
+        }
+      } else if (type == 'FeatureCollection') {
+        final features = geometry['features'] as List? ?? [];
+        for (final f in features) {
+          final g = (f as Map)['geometry'];
+          if (g != null) out.addAll(_flattenGeometry(g));
+        }
+      } else if (type == 'Feature') {
+        final g = geometry['geometry'];
+        if (g != null) out.addAll(_flattenGeometry(g));
+      }
+    }
+    return out;
   }
 
   Map<String, dynamic> _calculateLocalPremiumFallback(LatLng start, LatLng end) {

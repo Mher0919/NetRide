@@ -136,65 +136,78 @@ export const fareService = {
     const conditions = conditionsStr ? JSON.parse(conditionsStr) : { xShift: 0.0 };
     const xShift = conditions.xShift || 0.0;
 
-    // Default max price for classes if no drivers are found
+    // Default $/mile per package (used only when there is zero pricing data).
     let classBaseBarrier = 3.00;
     if (requestedClass === VehicleClass.ELITE) classBaseBarrier = 6.00;
     else if (requestedClass === VehicleClass.PRESTIGE) classBaseBarrier = 10.00;
 
+    // Pull a price-per-mile for a driver row, falling back to the midpoint of
+    // their stored range, then to the package default.
+    const priceFor = (d: any): number => {
+      if (d.price_per_mile) return Number(d.price_per_mile);
+      const min = Number(d.price_range_min || (1.00 + xShift));
+      const max = Number(d.price_range_max || (classBaseBarrier + xShift));
+      return Math.round(((min + max) / 2) * 4) / 4;
+    };
+
+    const summarize = (prices: number[]) => {
+      prices.sort((a, b) => a - b);
+      maxPricePerMile = prices[prices.length - 1];
+      const mid = Math.floor(prices.length / 2);
+      medianPricePerMile = prices.length % 2 === 0
+        ? (prices[mid - 1] + prices[mid]) / 2
+        : prices[mid];
+      const cheaperCount = prices.filter(p => p < maxPricePerMile).length;
+      savingLikelihood = prices.length > 1
+        ? Math.round((cheaperCount / prices.length) * 100)
+        : 0;
+    };
+
     if (driverIds.length > 0) {
-      const drivers = await prisma.driver.findMany({
-        where: {
-          user_id: { in: driverIds },
-          active_class: requestedClass
-        }
+      // Tier 1: online drivers of this class near the pickup.
+      const onlineDrivers = await prisma.driver.findMany({
+        where: { user_id: { in: driverIds }, active_class: requestedClass }
       });
-
-      if (drivers.length > 0) {
-        const prices = drivers.map(d => {
-          if (d.price_per_mile) return Number(d.price_per_mile);
-          const min = Number(d.price_range_min || (1.00 + xShift));
-          const max = Number(d.price_range_max || (classBaseBarrier + xShift));
-          return Math.round(((min + max) / 2) * 4) / 4;
-        });
-
-        prices.sort((a, b) => a - b);
-        maxPricePerMile = prices[prices.length - 1];
-
-        // Find median
-        const mid = Math.floor(prices.length / 2);
-        if (prices.length % 2 === 0) {
-          medianPricePerMile = (prices[mid - 1] + prices[mid]) / 2;
-        } else {
-          medianPricePerMile = prices[mid];
-        }
-
-        // Likelihood of paying less = percentage of drivers cheaper than maxPricePerMile
-        const cheaperCount = prices.filter(p => p < maxPricePerMile).length;
-        savingLikelihood = prices.length > 1 
-          ? Math.round((cheaperCount / prices.length) * 100) 
-          : 0; // if only 1 driver, likelihood is 0% (always pay exactly that driver's price)
-      } else {
-        // No drivers of this specific class, default to base barrier + shift
-        maxPricePerMile = classBaseBarrier + xShift;
-        medianPricePerMile = Math.round((((1.00 + xShift) + maxPricePerMile) / 2) * 4) / 4;
-        savingLikelihood = 50;
+      if (onlineDrivers.length > 0) {
+        summarize(onlineDrivers.map(priceFor));
+        return _finalizeEstimate(maxPricePerMile, medianPricePerMile, savingLikelihood, distanceMiles);
       }
-    } else {
-      // No nearby drivers at all
-      maxPricePerMile = classBaseBarrier + xShift;
-      medianPricePerMile = Math.round((((1.00 + xShift) + maxPricePerMile) / 2) * 4) / 4;
-      savingLikelihood = 50;
     }
 
-    const calculatedMaxFare = maxPricePerMile * distanceMiles;
-    // Base minimum fare is 5.00
-    const finalMaxFare = Math.round(Math.max(5.00, calculatedMaxFare) * 100) / 100;
+    // Tier 2: no drivers online nearby — use the latest drivers of this class
+    // that have been online (the whole fleet for that package) so the rider
+    // still sees a real, data-driven price instead of $0.
+    const fleetDrivers = await prisma.driver.findMany({
+      where: { active_class: requestedClass },
+      take: 200,
+    });
+    if (fleetDrivers.length > 0) {
+      summarize(fleetDrivers.map(priceFor));
+      return _finalizeEstimate(maxPricePerMile, medianPricePerMile, savingLikelihood, distanceMiles);
+    }
 
-    return {
-      maxFare: finalMaxFare,
-      savingLikelihood,
-      medianPricePerMile: Math.round(medianPricePerMile * 100) / 100
-    };
+    // Tier 3: absolutely no pricing data anywhere — use the package default
+    // $/mile so the estimate is always a sensible, non-zero number.
+    maxPricePerMile = classBaseBarrier + xShift;
+    medianPricePerMile = Math.round((((1.00 + xShift) + maxPricePerMile) / 2) * 4) / 4;
+    savingLikelihood = 50;
+    return _finalizeEstimate(maxPricePerMile, medianPricePerMile, savingLikelihood, distanceMiles);
   }
 };
+
+// Build the estimate response, guaranteeing a non-zero max fare.
+function _finalizeEstimate(
+  maxPricePerMile: number,
+  medianPricePerMile: number,
+  savingLikelihood: number,
+  distanceMiles: number
+): { maxFare: number; savingLikelihood: number; medianPricePerMile: number } {
+  const calculatedMaxFare = maxPricePerMile * distanceMiles;
+  const finalMaxFare = Math.round(Math.max(5.00, calculatedMaxFare) * 100) / 100;
+  return {
+    maxFare: finalMaxFare,
+    savingLikelihood,
+    medianPricePerMile: Math.round(medianPricePerMile * 100) / 100,
+  };
+}
 

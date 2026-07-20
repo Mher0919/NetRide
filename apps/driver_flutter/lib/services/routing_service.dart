@@ -7,7 +7,7 @@ class RoutingService {
   final Dio _dio = Dio();
 
   // API Gateway URL
-  final String _baseUrl = 'https://netride.onrender.com';
+  final String _baseUrl = 'http://10.0.2.2:3000';
 
   Future<Map<String, dynamic>> getRoute(LatLng start, LatLng end) async {
     try {
@@ -117,15 +117,7 @@ class RoutingService {
 
   Map<String, dynamic> _hydrate(Map<String, dynamic> data) {
     final geometry = data['geometry'];
-    List<LatLng> points = [];
-    if (geometry is Map &&
-        geometry['type'] == 'LineString' &&
-        geometry['coordinates'] != null) {
-      final coords = geometry['coordinates'] as List;
-      points = coords
-          .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
-          .toList();
-    }
+    final points = _flattenGeometry(geometry);
     return {
       'points_list': points,
       'distance': (data['distance'] as num?)?.toDouble() ?? 0.0,
@@ -137,6 +129,39 @@ class RoutingService {
       'speedLimitsByRoad': (data['speedLimitsByRoad'] as Map?) ?? const {},
       'cachedAt': data['cachedAt'],
     };
+  }
+
+  /// Flatten a GeoJSON geometry (LineString or MultiLineString) — or a
+  /// Geoapify-style FeatureCollection/Feature — into road-following points.
+  List<LatLng> _flattenGeometry(dynamic geometry) {
+    final List<LatLng> out = [];
+    void addLine(List coords) {
+      for (final c in coords) {
+        if (c is List && c.length >= 2) {
+          out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+        }
+      }
+    }
+
+    if (geometry is Map) {
+      final type = geometry['type'];
+      if (type == 'LineString') {
+        addLine(geometry['coordinates'] as List);
+      } else if (type == 'MultiLineString') {
+        for (final line in (geometry['coordinates'] as List)) {
+          addLine(line as List);
+        }
+      } else if (type == 'FeatureCollection') {
+        for (final f in (geometry['features'] as List? ?? [])) {
+          final g = (f as Map)['geometry'];
+          if (g != null) out.addAll(_flattenGeometry(g));
+        }
+      } else if (type == 'Feature') {
+        final g = geometry['geometry'];
+        if (g != null) out.addAll(_flattenGeometry(g));
+      }
+    }
+    return out;
   }
 
   Map<String, dynamic> calculateLocalFallback(LatLng start, LatLng end) {

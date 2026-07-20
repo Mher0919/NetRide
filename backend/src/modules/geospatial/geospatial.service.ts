@@ -463,7 +463,12 @@ export class GeospatialService {
     this.isOsrmOnline = true;
     const feature = response.data.features[0];
     const props = feature.properties;
-    const distance = props.distance.value;
+    // Geoapify returns `distance` either as a bare number (meters) or as an
+    // object { value, units }. Normalize both shapes.
+    const distance =
+      typeof props.distance === 'number'
+        ? props.distance
+        : Number(props.distance?.value ?? props.distance);
     const duration = props.time;
     const multiplier = MLEtaService.predictMultiplier(start[0], start[1], distance);
     const rawSteps = this.geoapifyStepsToOsrm(props.legs?.[0]?.steps ?? []);
