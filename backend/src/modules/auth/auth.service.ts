@@ -236,17 +236,32 @@ export class AuthService {
     }
 
     const hasDriverRow = await pool.query(
-      'SELECT onboarding_step, phone_verified FROM drivers WHERE user_id = $1',
+      'SELECT onboarding_step, phone_number, phone_verified FROM drivers WHERE user_id = $1',
       [userId]
     );
     const driver = hasDriverRow.rows[0];
 
-    const riderPhoneVerified = !!user.phone_verified;
+    // A dual-role user who verified their phone on the DRIVER profile but not
+    // the RIDER (users) row must still be considered phone-verified for the
+    // rider app. Backfill the rider row so onboarding routing is consistent
+    // and the user is taken straight into the main app instead of being
+    // trapped on a phone-verify step that keeps auto-confirming.
+    let riderPhoneVerified = !!user.phone_verified;
+    const driverPhone = driver?.phone_number;
+    const driverVerified = !!driver?.phone_verified;
+    if (!riderPhoneVerified && driverVerified && driverPhone) {
+      await pool.query(
+        `UPDATE users SET phone_number = $1, is_verified = true, phone_verified = true WHERE id = $2`,
+        [driverPhone, userId]
+      );
+      riderPhoneVerified = true;
+    }
+
     const riderOnboardingComplete = riderPhoneVerified;
 
     const driverExists = !!driver;
     const driverStep = driver?.onboarding_step ?? 0;
-    const driverPhoneVerified = !!driver?.phone_verified || riderPhoneVerified;
+    const driverPhoneVerified = driverVerified || riderPhoneVerified;
     const driverOnboardingComplete = driverExists && driverStep >= 5;
 
     const roles: string[] = ['RIDER'];
@@ -256,7 +271,7 @@ export class AuthService {
       rider: {
         onboarding_complete: riderOnboardingComplete,
         phone_verified: riderPhoneVerified,
-        phone_required: !user.phone_number,
+        phone_required: !user.phone_number && !riderPhoneVerified,
       },
       driver: {
         onboarding_complete: driverOnboardingComplete,
