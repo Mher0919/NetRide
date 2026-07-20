@@ -14,7 +14,8 @@ WORKDIR /osrm
 # Default: SoCal extract. Override REGION / OSM_PBF to target elsewhere.
 ARG REGION=socal
 ARG OSM_PBF=https://download.geofabrik.de/north-america/us/california/socal-latest.osm.pbf
-RUN curl -L -o region.osm.pbf "${OSM_PBF}"
+# The osrm-backend image is Debian-based and ships wget, not curl.
+RUN wget -q -O region.osm.pbf "${OSM_PBF}"
 RUN osrm-extract -p /opt/car.lua region.osm.pbf && \
     osrm-partition region.osrm && \
     osrm-customize region.osrm
