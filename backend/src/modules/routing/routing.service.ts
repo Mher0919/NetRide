@@ -181,10 +181,31 @@ export class RoutingService {
       const route = await this.routeCached(request.origin, request.destination);
 
       const fareStart = process.hrtime.bigint();
+
+      // Fetch the highest default latest price per mile for this class from
+      // the cached pricing engine conditions. Fall through gracefully to the
+      // static rate when no pricing data is available.
+      let pricePerMile: number | undefined;
+      try {
+        const conditionsRaw = await this.withRedisTimeout(() => redis.get('pricing:system_conditions'));
+        if (conditionsRaw) {
+          const conditions = JSON.parse(conditionsRaw) as { xShift?: number };
+          const xShift = conditions.xShift ?? 0;
+          const classBarriers: Record<string, number> = {
+            [VehicleClass.CORE]: 3.0,
+            [VehicleClass.ELITE]: 6.0,
+            [VehicleClass.PRESTIGE]: 10.0,
+          };
+          const baseBarrier = classBarriers[request.vehicleClass] ?? 3.0;
+          pricePerMile = Math.round((baseBarrier + xShift) * 100) / 100;
+        }
+      } catch (_) { /* use static rate */ }
+
       const fare = fareService.computeFare({
         distanceMeters: route.distanceMeters,
         durationSeconds: route.durationSeconds,
         vehicleClass: request.vehicleClass,
+        pricePerMile,
       });
       routingFareSeconds.observe(Number(process.hrtime.bigint() - fareStart) / 1e9);
 

@@ -20,6 +20,12 @@ export interface FareInput {
   /** Expected trip duration in seconds (for the time component). */
   durationSeconds: number;
   vehicleClass: VehicleClass;
+  /**
+   * Price per mile from the dynamic pricing engine.
+   * When set, replaces the static PER_KM_RATE for the distance component,
+   * using the highest default latest price in the class range.
+   */
+  pricePerMile?: number;
 }
 
 export interface FareBreakdown {
@@ -62,11 +68,14 @@ export const fareService = {
    */
   computeFare(input: FareInput): FareBreakdown {
     const distanceKm = input.distanceMeters / 1000;
+    const distanceMiles = distanceKm * 0.621371;
     const durationMinutes = input.durationSeconds / 60;
     const classMultiplier = CLASS_DISTANCE_MULTIPLIER[input.vehicleClass] ?? 1.0;
 
     const baseFare = BASE_FARE * classMultiplier;
-    const distanceFare = distanceKm * PER_KM_RATE * classMultiplier;
+    const distanceFare = input.pricePerMile != null
+      ? distanceMiles * input.pricePerMile * classMultiplier
+      : distanceKm * PER_KM_RATE * classMultiplier;
     const timeFare = durationMinutes * PER_MINUTE_RATE * classMultiplier;
     // Surge is 1.0 on the planning path; recomputed from live market at
     // request time by calculateRiderPriceEstimate when dynamic pricing applies.
