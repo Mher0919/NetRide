@@ -44,9 +44,9 @@ test('computeFare is deterministic and itemized', () => {
   });
   assert.equal(fare.currency, 'USD');
   // base 3.50 + distance 5km*1.50=7.50 + time 10min*0.35=3.50 + booking 1.50
-  // = 15.00; service 10% = 1.50; taxes 8.75% of 16.50 = 1.44375
-  // total = 16.50 + 1.44375 = 17.94375 -> 17.94
-  assert.ok(Math.abs(fare.totalFare - 17.94) < 0.02, `total=${fare.totalFare}`);
+  // = 16.00; service 10% = 1.60; taxable = 17.60; taxes 8.75% = 1.54
+  // total = 17.60 + 1.54 = 19.14
+  assert.ok(Math.abs(fare.totalFare - 19.14) < 0.02, `total=${fare.totalFare}`);
   assert.ok(fare.baseFare > 0 && fare.distanceFare > 0 && fare.timeFare > 0);
 });
 
@@ -76,11 +76,21 @@ test('computeFare runs in microseconds (no I/O)', () => {
 // ---- Synthetic fallback is road-shaped (never a straight 2-point line) --
 
 test('synthetic fallback returns a multi-point road-shaped geometry', async () => {
-  // Force the synthetic path by making the engine unreachable. We stub the
-  // private compute via a subclass override of the engine fetch.
+  // Force the synthetic path by making the engine + cache no-ops so the
+  // test runs in milliseconds with no network/Redis dependency.
   const svc = RoutingService as any;
   const origFetch = svc.fetchOsrm;
+  const origWrite = svc.withRedisTimeout;
+  const origGeo = svc.fetchGeoapify;
+  // Drop the real API key so we exercise the OSRM branch, then make the
+  // engine throw to force the road-shaped synthetic fallback.
+  const hadGeoKey = 'GEOAPIFY_API_KEY' in process.env;
+  delete process.env.GEOAPIFY_API_KEY;
   svc.fetchOsrm = async () => { throw new Error('offline'); };
+  svc.fetchGeoapify = async () => { throw new Error('offline'); };
+  svc.withRedisTimeout = async () => null;
+  const origLookup = svc.lookupCache;
+  svc.lookupCache = async () => null; // skip Redis entirely
   try {
     const plan = await RoutingService.plan({
       origin: [34.05, -118.25],
@@ -93,6 +103,9 @@ test('synthetic fallback returns a multi-point road-shaped geometry', async () =
     assert.ok(plan.fare.totalFare > 0);
   } finally {
     svc.fetchOsrm = origFetch;
+    svc.withRedisTimeout = origWrite;
+    svc.lookupCache = origLookup;
+    svc.fetchGeoapify = origGeo;
   }
 });
 
@@ -108,6 +121,13 @@ test('identical concurrent plans share one computation', async () => {
     await new Promise((r) => setTimeout(r, 30));
     return origCompute.apply(svc, args);
   };
+  // Make cache a no-op so the test isolates the in-flight dedup logic.
+  const origLookup = svc.lookupCache;
+  svc.lookupCache = async () => null;
+  const origWrite = svc.withRedisTimeout;
+  svc.withRedisTimeout = async () => null;
+  const origGeo = svc.fetchGeoapify;
+  svc.fetchGeoapify = async () => { throw new Error('offline'); };
   try {
     const [a, b] = await Promise.all([
       RoutingService.plan({ origin: [34.0, -118.2], destination: [34.1, -118.3], vehicleClass: VehicleClass.CORE }),
@@ -117,5 +137,8 @@ test('identical concurrent plans share one computation', async () => {
     assert.ok(computeCount <= 1, `expected <=1 engine computations, got ${computeCount}`);
   } finally {
     svc.computeRoute = origCompute;
+    svc.lookupCache = origLookup;
+    svc.withRedisTimeout = origWrite;
+    svc.fetchGeoapify = origGeo;
   }
 });

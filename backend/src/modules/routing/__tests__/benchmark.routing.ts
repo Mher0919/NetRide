@@ -57,7 +57,9 @@ async function main() {
 
   const avgTotal = totalMs / ITER;
   const avgFare = fareMs / ITER;
-  // Cache lookup is embedded; estimate from total minus engine+fare.
+  // Cache lookup is embedded in the plan; estimate as the residual after
+  // the isolated fare cost. (A precise cache-only measurement is covered
+  // by the unit tests with a stubbed engine.)
   const avgCache = Math.max(0.01, avgTotal - avgFare);
 
   console.log(`Iterations:        ${ITER}`);

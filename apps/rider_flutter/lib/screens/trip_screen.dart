@@ -75,10 +75,14 @@ class _TripScreenState extends State<TripScreen> {
           ? LatLng(trip.pickup.lat, trip.pickup.lng)
           : LatLng(trip.destination.lat, trip.destination.lng);
 
-      final route = await _routingService.getRoute(start, end);
+      final plan = await _routingService.plan(
+        origin: start,
+        destination: end,
+        vehicleClass: 'CORE',
+      );
       if (mounted) {
         setState(() {
-          _routePoints = route['points_list'] as List<LatLng>;
+          _routePoints = plan.points;
         });
       }
     } catch (e) {

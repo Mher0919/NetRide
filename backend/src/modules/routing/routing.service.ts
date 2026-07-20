@@ -241,7 +241,7 @@ export class RoutingService {
   ): Promise<RoutingResult | null> {
     const start = process.hrtime.bigint();
     try {
-      const exact = await redis.get(exactKey);
+      const exact = await this.withRedisTimeout(() => redis.get(exactKey));
       if (exact) {
         routingCacheLookupSeconds.observe(this.elapsed(start));
         return JSON.parse(exact) as RoutingResult;
@@ -259,16 +259,20 @@ export class RoutingService {
 
       const pipeline = redis.multi();
       for (const k of candidateKeys) pipeline.get(k);
-      const results = (await pipeline.exec()) as Array<[Error | null, string | null]>;
+      const results = (await this.withRedisTimeout(() => pipeline.exec())) as
+        | Array<[Error | null, string | null]>
+        | null;
       routingCacheLookupSeconds.observe(this.elapsed(start));
 
-      for (const [, raw] of results) {
-        if (raw) {
-          const parsed = JSON.parse(raw) as RoutingResult;
-          // Promote the nearby hit into the exact key so the next identical
-          // request is a pure L1 hit.
-          await redis.set(exactKey, raw, 'EX', this.EXACT_TTL_S).catch(() => {});
-          return parsed;
+      if (results) {
+        for (const [, raw] of results) {
+          if (raw) {
+            const parsed = JSON.parse(raw) as RoutingResult;
+            // Promote the nearby hit into the exact key so the next identical
+            // request is a pure L1 hit.
+            await this.withRedisTimeout(() => redis.set(exactKey, raw, 'EX', this.EXACT_TTL_S)).catch(() => {});
+            return parsed;
+          }
         }
       }
       return null;
@@ -292,20 +296,29 @@ export class RoutingService {
     const engineStart = process.hrtime.bigint();
     let result: RoutingResult | null = null;
 
+    // Engine preference order (per the routing-redesign brief):
+    //   1. OSRM  — self-hosted, same docker network, ~20-80ms, returns true
+    //             road geometry, lightweight + free. PRIMARY.
+    //   2. Geoapify — managed fallback when OSRM is unreachable.
+    // OSRM is always attempted first; only if it fails do we try Geoapify,
+    // and only if THAT fails do we synthesize a road-shaped route.
     try {
-      if (env.GEOAPIFY_API_KEY) {
-        result = await this.fetchGeoapify(origin, destination);
-      } else {
-        result = await this.fetchOsrm(origin, destination);
-      }
-    } catch (err: any) {
+      result = await this.fetchOsrm(origin, destination);
+    } catch (osrmErr: any) {
       if (this.osrmOnline) {
-        logger.error({ err: err.message }, 'routing_engine_error');
+        logger.error({ err: osrmErr.message }, 'routing_osrm_error');
         this.osrmOnline = false;
       }
+      if (env.GEOAPIFY_API_KEY) {
+        try {
+          result = await this.fetchGeoapify(origin, destination);
+        } catch (geoErr: any) {
+          logger.warn({ err: geoErr.message }, 'routing_geoapify_error');
+        }
+      }
     }
-
     if (!result) {
+      // Fell through both engines — synthesize a road-shaped route.
       result = this.syntheticRoute(origin, destination);
       routingFallbackTotal.inc();
     }
@@ -319,12 +332,34 @@ export class RoutingService {
       const multi = redis.multi();
       multi.set(exactKey, payload, 'EX', this.EXACT_TTL_S);
       for (const k of nearbyKeys) multi.set(k, payload, 'EX', this.NEARBY_TTL_S);
-      await multi.exec();
+      await this.withRedisTimeout(() => multi.exec());
     } catch (err: any) {
       logger.warn({ err: err.message }, 'routing_cache_write_failed');
     }
 
     return result;
+  }
+
+  /**
+   * Wrap a Redis operation in a short timeout so an unreachable or stalled
+   * Redis can NEVER block the routing hot path. On timeout/error we treat
+   * the value as absent (cache miss) and compute fresh — the service stays
+   * available even if the cache layer is fully down.
+   */
+  private static readonly REDIS_OP_TIMEOUT_MS = 800;
+
+  private static async withRedisTimeout<T>(op: () => Promise<T>): Promise<T | null> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), this.REDIS_OP_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([op(), timeout]);
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private static async fetchOsrm(origin: LatLng, destination: LatLng): Promise<RoutingResult | null> {

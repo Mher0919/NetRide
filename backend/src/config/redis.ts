@@ -8,6 +8,11 @@ const redisUrl = env.REDIS_URL.replace('localhost', '127.0.0.1');
 export const redis = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
   connectTimeout: 5000, // 5 seconds
+  // Bound the reconnect backoff so a downed Redis can never pin the event
+  // loop forever (which would block graceful shutdown / test exits). After
+  // ~10s of failures we stop retrying; the app stays up and the routing
+  // cache degrades to cache-miss automatically.
+  retryStrategy: (times: number) => (times > 10 ? null : Math.min(times * 200, 2000)),
 });
 
 redis.on('error', (err) => {

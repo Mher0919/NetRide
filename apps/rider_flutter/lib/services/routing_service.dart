@@ -31,6 +31,22 @@ class TripPlan {
 class RoutingService {
   final Dio _dio = Dio();
 
+  /// Test seam: lets widget/unit tests inject a fake POST implementation
+  /// without touching the network. Production code never sets this.
+  void setTestPost(Future<Response> Function(
+    String path, {
+    required Object? data,
+    CancelToken? cancelToken,
+    Options? options,
+  }) post) =>
+      _testPost = post;
+  Future<Response> Function(
+    String path, {
+    required Object? data,
+    CancelToken? cancelToken,
+    Options? options,
+  })? _testPost;
+
   // API Gateway URL.
   final String _baseUrl =
       Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://127.0.0.1:3000';
@@ -81,7 +97,9 @@ class RoutingService {
     CancelToken token,
   ) async {
     try {
-      final response = await _dio.post(
+      final response = await (_testPost ??
+          (path, {required data, cancelToken, options}) =>
+              _dio.post(path, data: data, cancelToken: cancelToken, options: options))(
         '$_baseUrl/api/routing/plan',
         data: {
           'origin': [origin.latitude, origin.longitude],
