@@ -538,7 +538,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   radius: 50,
                   backgroundColor: const Color(0xFFF7F4EF),
                   backgroundImage: _profileImageUrl != null ? CachedNetworkImageProvider(resolveFileUrl(_profileImageUrl!)) : null,
-                  child: _profileImageUrl == null ? const Icon(Icons.person, size: 48, color: Color(0xFF5B7760)) : null,
+                  child: _profileImageUrl == null
+                      ? const Icon(Icons.person, size: 48, color: Color(0xFF5B7760))
+                      : null,
+                  onBackgroundImageError: _profileImageUrl != null
+                      ? (_, __) {
+                          if (mounted) {
+                            setState(() => _profileImageUrl = null);
+                          }
+                        }
+                      : null,
                 ),
               ),
               if (_isEditing)
