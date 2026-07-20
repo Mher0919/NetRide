@@ -10,8 +10,7 @@ class ApiService {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
   
   static String get baseUrl {
-    if (kIsWeb) return 'http://127.0.0.1:3000/api/';
-    return Platform.isAndroid ? 'http://10.0.2.2:3000/api/' : 'http://127.0.0.1:3000/api/';
+    return 'https://netride.onrender.com/api/';
   }
 
   static final Dio dio = Dio(

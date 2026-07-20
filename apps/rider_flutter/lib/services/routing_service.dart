@@ -48,8 +48,7 @@ class RoutingService {
   })? _testPost;
 
   // API Gateway URL.
-  final String _baseUrl =
-      Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://127.0.0.1:3000';
+  final String _baseUrl = 'https://netride.onrender.com';
 
   /// In-flight request token per (origin+destination+class) so we can cancel
   /// stale calls when the rider changes the destination mid-typing.
