@@ -61,7 +61,6 @@ services:
     depends_on:
       - postgres
       - redis
-      - osrm-lb
       - face-service
     volumes:
       - ./backend:/app
@@ -84,7 +83,6 @@ services:
     depends_on:
       - postgres
       - redis
-      - osrm-lb
     profiles:
       - scaled
     volumes:
@@ -104,7 +102,6 @@ services:
     depends_on:
       - postgres
       - redis
-      - osrm-lb
     profiles:
       - scaled
     volumes:
@@ -130,6 +127,10 @@ services:
       FACE_MAX_MULTIPLE_FACES: 1
       FACE_LIVENESS_CONFIDENCE: 0.5
 
+  # Optional remote OSRM. The backend now routes IN-PROCESS via the embedded
+  # @osrm/osrm engine (baked into the backend image), so these are only
+  # needed if you prefer a separate routing service. Start with:
+  #   docker compose --profile routing-remote up
   osrm-lb:
     image: nginx:alpine
     ports:
@@ -141,6 +142,8 @@ services:
       - osrm-2
       - osrm-3
     restart: unless-stopped
+    profiles:
+      - routing-remote
 
   osrm-1:
     image: osrm/osrm-backend
@@ -148,6 +151,8 @@ services:
     volumes:
       - ./osrm-data:/data
     restart: unless-stopped
+    profiles:
+      - routing-remote
 
   osrm-2:
     image: osrm/osrm-backend
@@ -155,6 +160,8 @@ services:
     volumes:
       - ./osrm-data:/data
     restart: unless-stopped
+    profiles:
+      - routing-remote
 
   osrm-3:
     image: osrm/osrm-backend
@@ -162,6 +169,8 @@ services:
     volumes:
       - ./osrm-data:/data
     restart: unless-stopped
+    profiles:
+      - routing-remote
 
 volumes:
   pg_data:

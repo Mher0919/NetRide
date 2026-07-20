@@ -5,6 +5,7 @@ export declare const env: {
     REDIS_URL: string;
     JWT_SECRET: string;
     OSRM_URL: string;
+    OSRM_DATA_PATH: string;
     DRIVER_MATCH_RADIUS_KM: number;
     DRIVER_ACCEPT_TIMEOUT_MS: number;
     DRIVER_PICKUP_PROXIMITY_M: number;

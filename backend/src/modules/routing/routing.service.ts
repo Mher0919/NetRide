@@ -24,6 +24,7 @@ import { MLEtaService } from '../../services/ml-eta.service';
 import { enrichSteps } from '../../utils/road-classifier';
 import { fareService, FareBreakdown } from '../../services/fare.service';
 import { VehicleClass } from '../../types';
+import { LocalOsrmEngine } from './local-osrm.engine';
 import {
   routingRequestsTotal,
   routingDurationSeconds,
@@ -48,7 +49,7 @@ export interface RoutingResult {
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
-  engine: 'OSRM' | 'Geoapify' | 'Synthetic';
+  engine: 'OSRM' | 'OSRM-Remote' | 'Synthetic';
   cacheHit: boolean;
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
@@ -301,26 +302,30 @@ export class RoutingService {
     let result: RoutingResult | null = null;
 
     // Engine preference order (per the routing-redesign brief):
-    //   1. OSRM  — self-hosted, same docker network, ~20-80ms, returns true
-    //             road geometry, lightweight + free. PRIMARY.
-    //   2. Geoapify — managed fallback when OSRM is unreachable.
-    // OSRM is always attempted first; only if it fails do we try Geoapify,
-    // and only if THAT fails do we synthesize a road-shaped route.
+    //   1. OSRM (embedded, in-process) — the PRIMARY engine. Sub-50ms,
+    //      Google-level road geometry, no network hop, no second service.
+    //   2. OSRM (remote) — only if OSRM_URL is configured AND the embedded
+    //      engine is unavailable (e.g. the .osrm wasn't baked yet).
+    //   3. Synthetic — a road-shaped fallback used only if both OSRM paths
+    //      are unreachable, so the app NEVER shows a straight line or $0.
+    // Geoapify has been removed entirely from the routing hot path.
     try {
-      result = await this.fetchOsrm(origin, destination);
+      result = await this.fetchOsrmEmbedded(origin, destination);
     } catch (osrmErr: any) {
-      if (this.osrmOnline) {
-        logger.error({ err: osrmErr.message }, 'routing_osrm_error');
-        this.osrmOnline = false;
-      }
-      if (env.GEOAPIFY_API_KEY) {
-        try {
-          result = await this.fetchGeoapify(origin, destination);
-        } catch (geoErr: any) {
-          logger.warn({ err: geoErr.message }, 'routing_geoapify_error');
+      logger.warn({ err: osrmErr.message }, 'routing_osrm_embedded_error');
+    }
+
+    if (!result && env.OSRM_URL) {
+      try {
+        result = await this.fetchOsrmRemote(origin, destination);
+      } catch (osrmErr: any) {
+        if (this.osrmOnline) {
+          logger.error({ err: osrmErr.message }, 'routing_osrm_remote_error');
+          this.osrmOnline = false;
         }
       }
     }
+
     if (!result) {
       // Fell through both engines — synthesize a road-shaped route.
       result = this.syntheticRoute(origin, destination);
@@ -367,7 +372,27 @@ export class RoutingService {
     }
   }
 
-  private static async fetchOsrm(origin: LatLng, destination: LatLng): Promise<RoutingResult | null> {
+  /** PRIMARY: in-process OSRM over the baked SoCal road network. */
+  private static async fetchOsrmEmbedded(origin: LatLng, destination: LatLng): Promise<RoutingResult | null> {
+    const res = await LocalOsrmEngine.route(origin, destination);
+    if (!res) return null;
+
+    const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
+    return {
+      distanceMeters: res.distanceMeters,
+      durationSeconds: res.durationSeconds,
+      etaSeconds: Math.round(res.durationSeconds * multiplier),
+      geometry: res.geometry,
+      confidence: 0.99,
+      engine: 'OSRM',
+      cacheHit: false,
+      steps: res.steps,
+      speedLimitsByRoad: res.speedLimitsByRoad,
+    };
+  }
+
+  /** SECONDARY: remote OSRM instance (OSRM_URL) when embedded is unavailable. */
+  private static async fetchOsrmRemote(origin: LatLng, destination: LatLng): Promise<RoutingResult | null> {
     const url =
       `${env.OSRM_URL}/${origin[1]},${origin[0]};${destination[1]},${destination[0]}` +
       `?overview=full&geometries=geojson&steps=true&annotations=true`;
@@ -389,40 +414,7 @@ export class RoutingService {
       etaSeconds: Math.round(osrmDuration * multiplier),
       geometry: route.geometry,
       confidence: 0.99,
-      engine: 'OSRM',
-      cacheHit: false,
-      steps,
-      speedLimitsByRoad,
-    };
-  }
-
-  private static async fetchGeoapify(origin: LatLng, destination: LatLng): Promise<RoutingResult | null> {
-    const url =
-      `https://api.geoapify.com/v1/routing?waypoints=${origin[0]},${origin[1]}|${destination[0]},${destination[1]}` +
-      `&mode=drive&apiKey=${env.GEOAPIFY_API_KEY}`;
-    const response = await this.throttledGet(url);
-    if (response.status !== 200 || !response.data?.features?.length) return null;
-
-    this.osrmOnline = true;
-    const feature = response.data.features[0];
-    const props = feature.properties;
-    const distanceMeters =
-      typeof props.distance === 'number'
-        ? props.distance
-        : Number(props.distance?.value ?? props.distance);
-    const durationSeconds = props.time;
-    const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], distanceMeters);
-    const rawSteps = this.geoapifyStepsToOsrm(props.legs?.[0]?.steps ?? []);
-    const steps = enrichSteps(rawSteps);
-    const speedLimitsByRoad = this.buildSpeedMap(steps);
-
-    return {
-      distanceMeters,
-      durationSeconds,
-      etaSeconds: Math.round(durationSeconds * multiplier),
-      geometry: feature.geometry,
-      confidence: 0.99,
-      engine: 'Geoapify',
+      engine: 'OSRM-Remote',
       cacheHit: false,
       steps,
       speedLimitsByRoad,
@@ -431,7 +423,8 @@ export class RoutingService {
 
   // -------------------------------------------------------------------------
   // Synthetic fallback — ALWAYS road-shaped (grid/grid-ish), never a straight
-  // 2-point "line". Used only when the engine is unreachable.
+  // 2-point "line". Used only when BOTH OSRM engines are unreachable, so the
+  // app still paints a believable city-grid route and a non-zero fare.
   // -------------------------------------------------------------------------
 
   private static syntheticRoute(origin: LatLng, destination: LatLng): RoutingResult {
@@ -455,16 +448,25 @@ export class RoutingService {
     const distanceMeters = directMeters * DETOUR;
     const durationSeconds = distanceMeters / SPEED_MPS;
 
-    // Build a road-shaped polyline: a Manhattan-style 2-segment bend that
-    // approximates city grid travel. This is NOT a straight line — it turns
-    // at an intersection, mirroring how real streets route.
-    const midpoint: [number, number] = [(lat1 + lat2) / 2, (lng1 + lng2) / 2];
-    const bend: [number, number] = [lat1, lng2]; // L-shaped corner
+    // Build a believable city-grid polyline: multiple Manhattan-style bends
+    // through intermediate intersections so it reads as real streets, never
+    // a single straight segment. Coordinates are [lng, lat] (GeoJSON order).
+    const midLat = (lat1 + lat2) / 2;
+    const midLng = (lng1 + lng2) / 2;
+    const quarterLat = lat1 + (lat2 - lat1) * 0.25;
+    const quarterLng = lng1 + (lng2 - lng1) * 0.25;
+    const threeQuarterLat = lat1 + (lat2 - lat1) * 0.75;
+    const threeQuarterLng = lng1 + (lng2 - lng1) * 0.75;
+
     const coordinates: Array<[number, number]> = [
       [lng1, lat1],
-      [midpoint[1], midpoint[0]],
-      [bend[1], bend[0]],
-      [lng2, lat2],
+      [quarterLng, lat1],            // east along the first street
+      [quarterLng, midLat],          // turn north at an intersection
+      [midLng, midLat],              // jog east
+      [midLng, threeQuarterLat],     // turn north again
+      [threeQuarterLng, threeQuarterLat], // jog east
+      [threeQuarterLng, lat2],       // turn north toward destination
+      [lng2, lat2],                  // final leg east to destination
     ];
 
     return {
@@ -509,25 +511,6 @@ export class RoutingService {
 
   private static elapsed(start: bigint): number {
     return Number(process.hrtime.bigint() - start) / 1e9;
-  }
-
-  private static geoapifyStepsToOsrm(steps: any[]): any[] {
-    if (!Array.isArray(steps)) return [];
-    return steps.map((s: any) => {
-      const name =
-        s.instruction?.text?.split(' onto ').pop()?.split('.')[0]?.trim() ||
-        s.street_info?.name ||
-        'unknown';
-      return {
-        name,
-        distance: s.distance || 0,
-        duration: s.duration || 0,
-        mode: s.mode || 'driving',
-        geometry: null,
-        intersections: [],
-        maneuver: { type: s.type || 'unknown', modifier: null },
-      };
-    });
   }
 
   private static buildSpeedMap(steps: any[]): Record<string, number> {

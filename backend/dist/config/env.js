@@ -16,6 +16,10 @@ const envSchema = zod_1.z.object({
     JWT_SECRET: zod_1.z.string(),
     GOOGLE_MAPS_API_KEY: zod_1.z.string().optional(),
     OSRM_URL: zod_1.z.string().default('http://localhost:5000/route/v1/driving'),
+    // Path to the baked regional OSRM road-network extract used by the
+    // in-process engine (@osrm/osrm). Baked into the image at build time via
+    // scripts/build-osrm.sh (Greater LA / SoCal by default).
+    OSRM_DATA_PATH: zod_1.z.string().default('./data/socal.osrm'),
     DRIVER_MATCH_RADIUS_KM: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     DRIVER_ACCEPT_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15000),
     DRIVER_PICKUP_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15),

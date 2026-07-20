@@ -76,20 +76,17 @@ test('computeFare runs in microseconds (no I/O)', () => {
 // ---- Synthetic fallback is road-shaped (never a straight 2-point line) --
 
 test('synthetic fallback returns a multi-point road-shaped geometry', async () => {
-  // Force the synthetic path by making the engine + cache no-ops so the
-  // test runs in milliseconds with no network/Redis dependency.
+  // Force the synthetic path by making both OSRM engines + cache no-ops so
+  // the test runs in milliseconds with no network/Redis dependency.
   const svc = RoutingService as any;
-  const origFetch = svc.fetchOsrm;
+  const origEmbedded = svc.fetchOsrmEmbedded;
+  const origRemote = svc.fetchOsrmRemote;
   const origWrite = svc.withRedisTimeout;
-  const origGeo = svc.fetchGeoapify;
-  // Drop the real API key so we exercise the OSRM branch, then make the
-  // engine throw to force the road-shaped synthetic fallback.
-  const hadGeoKey = 'GEOAPIFY_API_KEY' in process.env;
-  delete process.env.GEOAPIFY_API_KEY;
-  svc.fetchOsrm = async () => { throw new Error('offline'); };
-  svc.fetchGeoapify = async () => { throw new Error('offline'); };
-  svc.withRedisTimeout = async () => null;
   const origLookup = svc.lookupCache;
+  // Make both OSRM paths throw to force the road-shaped synthetic fallback.
+  svc.fetchOsrmEmbedded = async () => { throw new Error('offline'); };
+  svc.fetchOsrmRemote = async () => { throw new Error('offline'); };
+  svc.withRedisTimeout = async () => null;
   svc.lookupCache = async () => null; // skip Redis entirely
   try {
     const plan = await RoutingService.plan({
@@ -102,10 +99,10 @@ test('synthetic fallback returns a multi-point road-shaped geometry', async () =
     assert.equal(plan.confidence, 0.4);
     assert.ok(plan.fare.totalFare > 0);
   } finally {
-    svc.fetchOsrm = origFetch;
+    svc.fetchOsrmEmbedded = origEmbedded;
+    svc.fetchOsrmRemote = origRemote;
     svc.withRedisTimeout = origWrite;
     svc.lookupCache = origLookup;
-    svc.fetchGeoapify = origGeo;
   }
 });
 

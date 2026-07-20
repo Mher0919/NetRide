@@ -5,6 +5,7 @@ import { env } from '../../config/env';
 import { redis } from '../../config/redis';
 import { MLEtaService } from '../../services/ml-eta.service';
 import { enrichSteps } from '../../utils/road-classifier';
+import { LocalOsrmEngine } from '../routing/local-osrm.engine';
 
 interface InspectionStation {
   display_name: string;
@@ -270,155 +271,278 @@ export class GeospatialService {
     return results.slice(0, 15);
   }
 
+  /**
+   * Search for points of interest near the rider.
+   *
+   * Architecture (the 50–100mi bug fix):
+   *   The previous implementation used Nominatim *text search* over the whole
+   *   state of California. Nominatim is a geocoder, not a nearby-POI finder;
+   *   without a tight proximity bias it returns the most "notable" matches
+   *   statewide, so "coffee" / "Starbucks" / "McDonald's" came back 50–100mi
+   *   away. We now query the **Overpass API** with an `around:<radius>` filter
+   *   centered on the rider — a real spatial POI search that returns the
+   *   literally-nearest coffee shops / restaurants / brands first. Overpass is
+   *   free and OSM-backed (Google-level POI coverage).
+   *
+   *   Nominatim is kept ONLY as a graceful fallback for address-like queries
+   *   (street addresses, intersections) where a geocoder is the right tool
+   *   and no rider location is available.
+   */
   static async searchPlaces(query: string, userLat?: number, userLon?: number): Promise<any[]> {
+    const q = (query || '').trim();
+    if (!q) return [];
+
+    // When we have the rider's location, do a true nearby POI search.
+    if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+      const results = await this.searchPlacesNearby(q, userLat as number, userLon as number);
+      if (results.length > 0) return results;
+      // Fall through to Nominatim only if Overpass found nothing.
+    }
+    return this.searchPlacesNominatim(q, userLat, userLon);
+  }
+
+  /// Map a free-text query to OSM amenity/shop tags for the Overpass search.
+  private static poiTagFilters(query: string): string[] {
+    const ql = query.toLowerCase();
+    const has = (...terms: string[]) => terms.some((t) => ql.includes(t));
+
+    // Brand / chain name matches still resolve to an amenity via `name~`.
+    if (has('coffee', 'cafe', 'espresso', 'starbucks', 'peet', 'blue bottle')) {
+      return ['node["amenity"="cafe"]', 'way["amenity"="cafe"]', 'node["amenity"="coffee_shop"]', 'way["amenity"="coffee_shop"]'];
+    }
+    if (has('restaurant', 'dining', 'dinner', 'lunch')) {
+      return ['node["amenity"="restaurant"]', 'way["amenity"="restaurant"]'];
+    }
+    if (has('fast', 'mcdonald', 'burger', 'kfc', 'wendy', 'taco', 'chipotle', 'subway', 'pizza', 'food')) {
+      return ['node["amenity"="fast_food"]', 'way["amenity"="fast_food"]'];
+    }
+    if (has('bar', 'pub', 'nightclub', 'cocktail', 'beer')) {
+      return ['node["amenity"="bar"]', 'way["amenity"="bar"]', 'node["amenity"="pub"]', 'way["amenity"="pub"]'];
+    }
+    if (has('gas', 'fuel', 'shell', 'chevron', 'arco', '76', 'exxon')) {
+      return ['node["amenity"="fuel"]', 'way["amenity"="fuel"]'];
+    }
+    if (has('hotel', 'motel', 'inn', 'lodging', 'airbnb')) {
+      return ['node["tourism"="hotel"]', 'way["tourism"="hotel"]', 'node["tourism"="motel"]', 'way["tourism"="motel"]'];
+    }
+    if (has('grocery', 'market', 'supermarket', 'whole foods', 'trader', 'target', 'walmart', 'store', 'shop')) {
+      return ['node["shop"="supermarket"]', 'way["shop"="supermarket"]', 'node["shop"="convenience"]', 'way["shop"="convenience"]'];
+    }
+    if (has('park', 'playground', 'garden')) {
+      return ['node["leisure"="park"]', 'way["leisure"="park"]'];
+    }
+    if (has('hospital', 'clinic', 'urgent', 'medical', 'doctor', 'pharmacy', 'cvs', 'walgreens')) {
+      return ['node["amenity"="hospital"]', 'way["amenity"="hospital"]', 'node["amenity"="pharmacy"]', 'way["amenity"="pharmacy"]'];
+    }
+    if (has('school', 'university', 'college', 'campus')) {
+      return ['node["amenity"="school"]', 'way["amenity"="school"]', 'node["amenity"="university"]', 'way["amenity"="university"]'];
+    }
+    if (has('bank', 'atm', 'chase', 'wells', 'bofa', 'citi')) {
+      return ['node["amenity"="bank"]', 'way["amenity"="bank"]', 'node["amenity"="atm"]', 'way["amenity"="atm"]'];
+    }
+    // Generic: broad net so the search still returns something useful.
+    return [
+      'node["amenity"~"cafe|restaurant|fast_food|bar|pub|fuel|bank|pharmacy"]',
+      'way["amenity"~"cafe|restaurant|fast_food|bar|pub|fuel|bank|pharmacy"]',
+      'node["shop"]',
+      'way["shop"]',
+    ];
+  }
+
+  private static async searchPlacesNearby(query: string, lat: number, lon: number): Promise<any[]> {
+    // Search radius in meters. 1500m (≈1mi) captures the nearest options
+    // first; if too few, the caller's Overpass query can be widened here.
+    const radiusM = 2000;
+    const tagFilters = this.poiTagFilters(query);
+
+    // Build a brand/name regex for chain searches (Starbucks, McDonald's…).
+    const brand = query.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const brandClauses =
+      brand.length >= 3
+        ? tagFilters.map((f) => f.replace(/\]$/, `]["name"~"${brand}",i]`))
+        : [];
+
+    const unionParts = [...tagFilters, ...brandClauses];
+    const overpassQuery = [
+      '[out:json][timeout:25];',
+      '(',
+      ...unionParts.map((f) => `${f}(around:${radiusM},${lat},${lon});`),
+      ');',
+      'out center 30;',
+    ].join('');
+
+    const haversineMiles = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+      const R = 3958.8;
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lon - a.lon);
+      const x =
+        Math.sin(dLat / 2) ** 2 +
+        Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
+      return 2 * R * Math.asin(Math.sqrt(x));
+    };
+
     try {
-      // California bounding box (south, north, west, east as Nominatim
-      // expects). Slightly looser than the strict CA polygon so we still
-      // catch coastal places and Sierra edges that border Nevada/Oregon.
-      // Nominatim viewbox is (left, top, right, bottom) i.e. (W, N, E, S).
-      const CA_VIEWBOX = '-124.5,42.0,-114.0,32.5';
-      const CA_SOUTH = 32.5;
-      const CA_NORTH = 42.0;
-      const CA_WEST = -124.5;
-      const CA_EAST = -114.0;
-
-      const params: any = {
-        q: query,
-        format: 'json',
-        addressdetails: 1,
-        limit: 30, // Over-fetch so dedupe + filter still leaves 10+
-        viewbox: CA_VIEWBOX,
-        bounded: 1, // Strict bounding box
-        countrycodes: 'us',
-      };
-
-      const response = await this.axiosClient.get('https://nominatim.openstreetmap.org/search', {
-        params,
-        headers: { 'User-Agent': 'NetRide-Enterprise/1.0' }
+      const form = new URLSearchParams();
+      form.append('data', overpassQuery);
+      const resp = await axios.post('https://overpass-api.de/api/interpreter', form, {
+        headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
+        timeout: 25000,
       });
 
-      let hits: any[] = Array.isArray(response.data) ? response.data : [];
+      const elements: any[] = resp.data?.elements ?? [];
+      const seen = new Set<string>();
+      const results: any[] = [];
 
-      // 1. Drop anything Nominatim resolved to a non-CA state. The
-      // `addressdetails=1` query puts `state` / `state_code` on each hit.
+      for (const el of elements) {
+        const tags = el.tags ?? {};
+        const name = tags.name || tags.brand || tags.operator;
+        if (!name) continue;
+
+        const elLat = el.type === 'node' ? el.lat : el.center?.lat;
+        const elLon = el.type === 'node' ? el.lon : el.center?.lon;
+        if (!Number.isFinite(elLat) || !Number.isFinite(elLon)) continue;
+
+        const key = `${name}|${elLat.toFixed(5)},${elLon.toFixed(5)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const distMiles = haversineMiles({ lat, lon }, { lat: elLat, lon: elLon });
+
+        results.push({
+          display_name: this.formatPoiName(name, tags, elLat, elLon),
+          lat: elLat,
+          lon: elLon,
+          type: tags.amenity || tags.shop || tags.tourism || 'poi',
+          state: 'CA',
+          distance_miles: Math.round(distMiles * 10) / 10,
+          address: {
+            road: tags['addr:street'] ?? '',
+            city: tags['addr:city'] ?? '',
+            state: tags['addr:state'] ?? 'CA',
+            postcode: tags['addr:postcode'] ?? '',
+          },
+        });
+      }
+
+      results.sort((a, b) => a.distance_miles - b.distance_miles);
+      return results.slice(0, 15);
+    } catch (err: any) {
+      console.warn(`[GEOSPATIAL] Overpass POI search failed: ${err.message}`);
+      return [];
+    }
+  }
+
+  private static formatPoiName(name: string, tags: any, lat: number, lon: number): string {
+    const parts = [name];
+    const road = tags['addr:street'];
+    const city = tags['addr:city'] || tags['addr:suburb'] || tags['addr:town'];
+    if (road) parts.push(road);
+    if (city) parts.push(city);
+    if (parts.length === 1) parts.push(`${lat.toFixed(4)}, ${lon.toFixed(4)}`);
+    return parts.join(', ');
+  }
+
+  /// Fallback geocoder (Nominatim) for address-like queries without a rider
+  /// location. Bounded to California so results stay in-region.
+  private static async searchPlacesNominatim(query: string, userLat?: number, userLon?: number): Promise<any[]> {
+    try {
+      const CA_VIEWBOX = '-124.5,42.0,-114.0,32.5';
+      const CA_SOUTH = 32.5, CA_NORTH = 42.0, CA_WEST = -124.5, CA_EAST = -114.0;
+
+      const response = await this.axiosClient.get('https://nominatim.openstreetmap.org/search', {
+        params: {
+          q: query,
+          format: 'json',
+          addressdetails: 1,
+          limit: 20,
+          viewbox: CA_VIEWBOX,
+          bounded: 1,
+          countrycodes: 'us',
+        },
+        headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
+      });
+
+      const hits: any[] = Array.isArray(response.data) ? response.data : [];
       const isCalifornia = (h: any) => {
         const a = h.address || {};
         const state = (a.state || '').toString().toLowerCase();
         const code = (a.state_code || a['ISO3166-2-lvl4'] || '').toString().toLowerCase();
         if (state === 'california' || code === 'us-ca' || code === 'ca') return true;
-        // Belt-and-braces: verify the point itself falls inside the
-        // bounding box (Nominatim sometimes returns a place with a
-        // mismatched state when the user typed an ambiguous query).
-        const lat = parseFloat(h.lat);
-        const lon = parseFloat(h.lon);
+        const lat = parseFloat(h.lat), lon = parseFloat(h.lon);
         if (Number.isFinite(lat) && Number.isFinite(lon)) {
           return lat >= CA_SOUTH && lat <= CA_NORTH && lon >= CA_WEST && lon <= CA_EAST;
         }
         return false;
       };
 
-      let results = hits.filter(isCalifornia);
-
-      // 2. Dedupe by (place name + city). Two cafes on opposite corners
-      // of the same street shouldn't both appear; keep the closest one.
-      const dedupeKey = (h: any) => {
-        const a = h.address || {};
-        const name = (h.display_name || '').split(',')[0].trim().toLowerCase();
-        const city = (a.city || a.town || a.village || a.hamlet || a.suburb || '').toString().toLowerCase();
-        return `${name}::${city}`;
-      };
-
-      const byKey = new Map<string, any>();
       const haversineMiles = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
         const R = 3958.8;
         const toRad = (d: number) => (d * Math.PI) / 180;
-        const dLat = toRad(b.lat - a.lat);
-        const dLng = toRad(b.lon - a.lon);
-        const x =
-          Math.sin(dLat / 2) ** 2 +
-          Math.sin(dLng / 2) ** 2 *
-            Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
+        const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lon - a.lon);
+        const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
         return 2 * R * Math.asin(Math.sqrt(x));
       };
 
-      for (const hit of results) {
-        const key = dedupeKey(hit);
-        if (!key || key === '::') continue;
-        const lat = parseFloat(hit.lat);
-        const lon = parseFloat(hit.lon);
-        const existing = byKey.get(key);
-        if (!existing) {
-          hit._lat = lat;
-          hit._lon = lon;
-          byKey.set(key, hit);
-          continue;
-        }
-        // Keep the closer one to the rider (or the first if no rider loc).
-        if (userLat !== undefined && userLon !== undefined) {
-          const distNew = haversineMiles({ lat, lon }, { lat: userLat, lon: userLon });
-          const distExisting = existing._dist_miles ?? Number.POSITIVE_INFINITY;
-          if (distNew < distExisting) {
-            hit._lat = lat;
-            hit._lon = lon;
-            byKey.set(key, hit);
-          }
-        }
-      }
+      const results = hits.filter(isCalifornia).map((h: any) => {
+        const lat = parseFloat(h.lat), lon = parseFloat(h.lon);
+        return {
+          display_name: h.display_name,
+          lat: h.lat,
+          lon: h.lon,
+          type: h.type,
+          state: 'CA',
+          distance_miles:
+            Number.isFinite(userLat) && Number.isFinite(userLon)
+              ? Math.round(haversineMiles({ lat, lon }, { lat: userLat as number, lon: userLon as number }) * 10) / 10
+              : undefined,
+          address: h.address,
+        };
+      });
 
-      results = Array.from(byKey.values());
-
-      // 3. Score and sort.
-      if (userLat !== undefined && userLon !== undefined) {
-        for (const r of results) {
-          r._dist_miles = haversineMiles(
-            { lat: r._lat, lon: r._lon },
-            { lat: userLat, lon: userLon }
-          );
-        }
-        results.sort((a, b) => (a._dist_miles ?? 0) - (b._dist_miles ?? 0));
-      }
-
-      // 4. Slice to top 10 and tag with `state: 'CA'` so the rider UI
-      // can render its "in California" badge.
-      return results.slice(0, 10).map((item: any) => ({
-        display_name: item.display_name,
-        lat: item.lat,
-        lon: item.lon,
-        type: item.type,
-        state: 'CA',
-        distance_miles:
-          userLat !== undefined && userLon !== undefined
-            ? Math.round((item._dist_miles ?? 0) * 10) / 10
-            : undefined,
-        address: item.address,
-      }));
+      results.sort((a: any, b: any) => (a.distance_miles ?? 0) - (b.distance_miles ?? 0));
+      return results.slice(0, 10);
     } catch (err: any) {
-      console.error(`[GEOSPATIAL] ❌ Search failed: ${err.message}`);
+      console.error(`[GEOSPATIAL] ❌ Nominatim fallback failed: ${err.message}`);
       return [];
     }
   }
 
   private static async fetchAndProcessRoute(start: [number, number], end: [number, number], cacheKey: string, retries = 0): Promise<RouteResponse> {
-    if (!this.isOsrmOnline && retries === 0) {
-      return this.calculateSyntheticRoute(start, end);
-    }
-
+    // Try the embedded in-process OSRM first (primary, Google-level, free).
     try {
-      if (env.GEOAPIFY_API_KEY) {
-        const result = await this.fetchGeoapifyRoute(start, end, cacheKey);
-        if (result) return result;
-      } else {
-        const result = await this.fetchOsrmRoute(start, end, cacheKey);
-        if (result) return result;
+      const res = await LocalOsrmEngine.route(start, end);
+      if (res) {
+        this.isOsrmOnline = true;
+        const multiplier = MLEtaService.predictMultiplier(start[0], start[1], res.distanceMeters);
+        const result: RouteResponse = {
+          distance: res.distanceMeters,
+          osrm_duration: res.durationSeconds,
+          eta: Math.round(res.durationSeconds * multiplier),
+          geometry: res.geometry,
+          steps: res.steps,
+          speedLimitsByRoad: res.speedLimitsByRoad,
+          cache_hit: false,
+          model_multiplier: multiplier,
+          engine: 'OSRM',
+        };
+        await redis.set(cacheKey, JSON.stringify(result), 'EX', 600).catch(() => {});
+        return result;
       }
     } catch (err: any) {
-      if (retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        return this.fetchAndProcessRoute(start, end, cacheKey, retries - 1);
-      }
-      if (this.isOsrmOnline) {
-        console.error(`[GEOSPATIAL] ❌ Router connection lost: ${err.message}`);
-        this.isOsrmOnline = false;
+      console.error(`[GEOSPATIAL] ❌ Embedded OSRM failed: ${err.message}`);
+    }
+
+    // Secondary: remote OSRM_URL if configured.
+    if (env.OSRM_URL) {
+      try {
+        const result = await this.fetchOsrmRoute(start, end, cacheKey);
+        if (result) return result;
+      } catch (err: any) {
+        if (this.isOsrmOnline) {
+          console.error(`[GEOSPATIAL] ❌ Router connection lost: ${err.message}`);
+          this.isOsrmOnline = false;
+        }
       }
     }
 
@@ -454,61 +578,6 @@ export class GeospatialService {
     return result;
   }
 
-  private static async fetchGeoapifyRoute(start: [number, number], end: [number, number], cacheKey: string): Promise<RouteResponse | null> {
-    const url = `https://api.geoapify.com/v1/routing?waypoints=${start[0]},${start[1]}|${end[0]},${end[1]}&mode=drive&apiKey=${env.GEOAPIFY_API_KEY}`;
-    const response = await this.throttledGet(url);
-
-    if (response.status !== 200 || !response.data.features?.length) return null;
-
-    this.isOsrmOnline = true;
-    const feature = response.data.features[0];
-    const props = feature.properties;
-    // Geoapify returns `distance` either as a bare number (meters) or as an
-    // object { value, units }. Normalize both shapes.
-    const distance =
-      typeof props.distance === 'number'
-        ? props.distance
-        : Number(props.distance?.value ?? props.distance);
-    const duration = props.time;
-    const multiplier = MLEtaService.predictMultiplier(start[0], start[1], distance);
-    const rawSteps = this.geoapifyStepsToOsrm(props.legs?.[0]?.steps ?? []);
-    const enrichedSteps = enrichSteps(rawSteps);
-    const speedLimitsByRoad = this.buildSpeedMap(enrichedSteps);
-
-    const result: RouteResponse = {
-      distance,
-      osrm_duration: duration,
-      eta: Math.round(duration * multiplier),
-      geometry: feature.geometry,
-      steps: enrichedSteps,
-      speedLimitsByRoad,
-      cache_hit: false,
-      model_multiplier: multiplier,
-      engine: 'Geoapify'
-    };
-
-    await redis.set(cacheKey, JSON.stringify(result), 'EX', 600);
-    return result;
-  }
-
-  private static geoapifyStepsToOsrm(steps: any[]): any[] {
-    if (!Array.isArray(steps)) return [];
-    return steps.map((s: any) => {
-      const name = s.instruction?.text?.split(' onto ').pop()?.split('.')[0]?.trim()
-        || s.street_info?.name
-        || 'unknown';
-      return {
-        name,
-        distance: s.distance || 0,
-        duration: s.duration || 0,
-        mode: s.mode || 'driving',
-        geometry: null,
-        intersections: [],
-        maneuver: { type: s.type || 'unknown', modifier: null },
-      };
-    });
-  }
-
   private static buildSpeedMap(steps: any[]): Record<string, number> {
     const map: Record<string, number> = {};
     for (const step of steps) {
@@ -540,11 +609,29 @@ export class GeospatialService {
     const distance = R * c * detour;
     const duration = distance / speed;
 
+    // Road-shaped (Manhattan/grid) polyline — never a single straight line.
+    const midLat = (lat1 + lat2) / 2;
+    const midLng = (lon1 + lon2) / 2;
+    const qLat = lat1 + (lat2 - lat1) * 0.25;
+    const qLng = lon1 + (lon2 - lon1) * 0.25;
+    const tLat = lat1 + (lat2 - lat1) * 0.75;
+    const tLng = lon1 + (lon2 - lon1) * 0.75;
+    const coordinates: Array<[number, number]> = [
+      [lon1, lat1],
+      [qLng, lat1],
+      [qLng, midLat],
+      [midLng, midLat],
+      [midLng, tLat],
+      [tLng, tLat],
+      [tLng, lat2],
+      [lon2, lat2],
+    ];
+
     return {
       distance,
       osrm_duration: duration,
       eta: Math.round(duration * 1.2),
-      geometry: { type: 'LineString', coordinates: [[lon1, lat1], [lon2, lat2]] },
+      geometry: { type: 'LineString', coordinates },
       steps: [],
       speedLimitsByRoad: {},
       cache_hit: false,

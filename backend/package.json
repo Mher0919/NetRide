@@ -9,6 +9,7 @@
     "build": "tsc",
     "test": "node run-tests.cjs",
     "bench:routing": "ts-node src/modules/routing/__tests__/benchmark.routing.ts",
+    "build:osrm": "bash scripts/build-osrm.sh",
     "match-worker": "ts-node src/queue/matchWorker.ts",
     "cron-worker": "ts-node src/queue/cronWorker.ts"
   },
@@ -46,6 +47,9 @@
     "twilio": "^6.0.2",
     "uuid": "^14.0.0",
     "zod": "^3.22.4"
+  },
+  "optionalDependencies": {
+    "@osrm/osrm": "^5.27.2"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

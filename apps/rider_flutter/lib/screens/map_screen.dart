@@ -306,6 +306,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     await _fetchAllEstimates();
   }
 
+  /// Local fare estimate mirroring the backend formula, used as a safety net
+  /// so a class never displays $0 if the backend fare is missing.
+  static double _localFare(double distanceMeters, double durationSeconds) {
+    const base = 3.50, perKm = 1.50, perMin = 0.35, booking = 1.50;
+    final distanceKm = distanceMeters / 1000.0;
+    final minutes = durationSeconds / 60.0;
+    final subtotal = base + distanceKm * perKm + minutes * perMin + booking;
+    final service = subtotal * 0.10;
+    final taxes = (subtotal + service) * 0.0875;
+    return (subtotal + service + taxes);
+  }
+
   /// Pull a full ride-option set (route geometry + fare per class) using the
   /// new combined /routing/plan endpoint. Three parallel class requests,
   /// each a single round trip — no sequential /ride/estimate DB lookups.
@@ -328,7 +340,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           setState(() => _routePoints = plan.points);
         }
         results[c] = {
-          'maxFare': (plan.fare['totalFare'] as num?)?.toDouble() ?? 0.0,
+          'maxFare': (plan.fare['totalFare'] as num?)?.toDouble() ??
+              _localFare(plan.distanceMeters, plan.durationSeconds),
           'savingLikelihood': 0,
           'distanceKm': plan.distanceMeters / 1000.0,
           'engine': plan.engine,

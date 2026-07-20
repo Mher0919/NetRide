@@ -50,7 +50,13 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       });
       final data = response.data;
       setState(() {
-        _maxFare = (data['fare']['totalFare'] as num).toDouble();
+        final fare = data['fare'];
+        _maxFare = (fare != null && fare['totalFare'] != null)
+            ? (fare['totalFare'] as num).toDouble()
+            : _localFareFor(
+                (data['distanceMeters'] as num?)?.toDouble() ?? 0.0,
+                (data['durationSeconds'] as num?)?.toDouble() ?? 0.0,
+              );
         _loadingEstimate = false;
       });
     } catch (e) {
@@ -73,6 +79,18 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
     if (_selectedClass == models.VehicleClass.ELITE) multiplier = 1.6;
     if (_selectedClass == models.VehicleClass.PRESTIGE) multiplier = 2.4;
     return _baseFare * multiplier;
+  }
+
+  /// Local fare estimate (mirrors the backend formula) used as a safety net
+  /// so the confirm screen never shows $0 if the backend fare is missing.
+  double _localFareFor(double distanceMeters, double durationSeconds) {
+    const base = 3.50, perKm = 1.50, perMin = 0.35, booking = 1.50;
+    final distanceKm = distanceMeters / 1000.0;
+    final minutes = durationSeconds / 60.0;
+    final subtotal = base + distanceKm * perKm + minutes * perMin + booking;
+    final service = subtotal * 0.10;
+    final taxes = (subtotal + service) * 0.0875;
+    return (subtotal + service + taxes);
   }
 
   Future<void> _pickDateTime() async {
