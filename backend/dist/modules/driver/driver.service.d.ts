@@ -59,7 +59,12 @@ export declare class DriverService {
         price_range_min: number;
         price_range_max: number;
         recommended_price: number;
-        price_last_changed: Date | null | undefined;
+        price_last_changed: Date | null;
+        cooldown_active: boolean;
+        cooldown_until: number | null;
+        cooldown_remaining_ms: number;
+        cooldown_ms: number;
+        server_time: number;
     }>;
     static updatePrice(userId: string, pricePerMile: number): Promise<{
         price_per_mile: number;
@@ -67,6 +72,11 @@ export declare class DriverService {
         price_range_max: number;
         recommended_price: number;
         price_last_changed: Date | null;
+        cooldown_active: boolean;
+        cooldown_until: number | null;
+        cooldown_remaining_ms: number;
+        cooldown_ms: number;
+        server_time: number;
     }>;
     static submitProfileChange(userId: string, changes: any, reason?: string): Promise<{
         request_id: any;

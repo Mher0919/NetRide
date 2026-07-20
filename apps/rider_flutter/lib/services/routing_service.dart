@@ -181,23 +181,56 @@ class RoutingService {
 
     final directDistance = const Distance().as(LengthUnit.Meter, start, end);
     final streetDist = directDistance * detourFactor;
+    final durationSeconds = streetDist / urbanSpeedMps;
 
-    // L-shaped (road-shaped, NOT straight) fallback path.
+    // Road-shaped (Manhattan-style) fallback path — two bends through a
+    // midpoint corner so it reads as city-grid travel, never a straight line.
+    final midLat = (start.latitude + end.latitude) / 2;
+    final midLng = (start.longitude + end.longitude) / 2;
     final points = [
       start,
-      LatLng(start.latitude, end.longitude),
+      LatLng(midLat, start.longitude),
+      LatLng(midLat, midLng),
+      LatLng(end.latitude, midLng),
       end,
     ];
 
     return TripPlan(
       points: points,
       distanceMeters: streetDist,
-      durationSeconds: streetDist / urbanSpeedMps,
-      etaSeconds: (streetDist / urbanSpeedMps) * 1.2,
-      fare: {},
+      durationSeconds: durationSeconds,
+      etaSeconds: durationSeconds * 1.2,
+      // Compute a local fare so the rider never sees $0 while offline.
+      fare: _localFare(streetDist, durationSeconds),
       engine: 'Local-Premium-Fallback',
       cacheHit: false,
       decodeMicros: 0,
     );
+  }
+
+  /// Mirror of the backend in-memory fare formula so the offline fallback
+  /// still shows a realistic, non-zero price.
+  Map<String, dynamic> _localFare(double distanceMeters, double durationSeconds) {
+    const base = 3.50;
+    const perKm = 1.50;
+    const perMin = 0.35;
+    const booking = 1.50;
+    final distanceKm = distanceMeters / 1000;
+    final minutes = durationSeconds / 60;
+    final subtotal = base + distanceKm * perKm + minutes * perMin + booking;
+    final service = subtotal * 0.10;
+    final taxes = (subtotal + service) * 0.0875;
+    final total = (subtotal + service + taxes);
+    return {
+      'baseFare': base,
+      'distanceFare': distanceKm * perKm,
+      'timeFare': minutes * perMin,
+      'bookingFee': booking,
+      'surgeMultiplier': 1.0,
+      'serviceFee': service,
+      'taxes': taxes,
+      'totalFare': double.parse(total.toStringAsFixed(2)),
+      'currency': 'USD',
+    };
   }
 }

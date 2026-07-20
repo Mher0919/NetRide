@@ -39,12 +39,64 @@ const types_1 = require("../types");
 const prisma_service_1 = require("./prisma.service");
 const redis_1 = require("../config/redis");
 const locations_service_1 = require("../modules/location/locations.service");
+const pricingEngine_1 = require("./pricingEngine");
 const BASE_FARE = 3.50; // Upgraded Base fare for Premium Startup
 const PER_KM_RATE = 1.50; // Upgraded Rate per KM
 const MIN_FARE = 7.00; // Minimum fare
+// Pure, in-memory fare constants — no I/O, computed in microseconds.
+const BOOKING_FEE = 1.50;
+const PER_MINUTE_RATE = 0.35;
+const SERVICE_FEE_RATE = 0.10; // 10% of (base + distance + time)
+const TAX_RATE = 0.0875; // 8.75% (CA statewide + local)
+const CLASS_DISTANCE_MULTIPLIER = {
+    [types_1.VehicleClass.CORE]: 1.0,
+    [types_1.VehicleClass.ELITE]: 1.6,
+    [types_1.VehicleClass.PRESTIGE]: 2.4,
+};
+/** Round to 2 decimal places. */
+function round2(n) {
+    return Math.round(n * 100) / 100;
+}
 exports.fareService = {
     /**
+     * Fast, deterministic, in-memory fare computation for the routing hot
+     * path. No database, no network — only arithmetic. Takes microseconds.
+     *
+     * Returns a full itemized breakdown so the rider UI can render an
+     * Uber-style fare card instantly.
+     */
+    computeFare(input) {
+        const distanceKm = input.distanceMeters / 1000;
+        const durationMinutes = input.durationSeconds / 60;
+        const classMultiplier = CLASS_DISTANCE_MULTIPLIER[input.vehicleClass] ?? 1.0;
+        const baseFare = BASE_FARE * classMultiplier;
+        const distanceFare = distanceKm * PER_KM_RATE * classMultiplier;
+        const timeFare = durationMinutes * PER_MINUTE_RATE * classMultiplier;
+        // Surge is 1.0 on the planning path; recomputed from live market at
+        // request time by calculateRiderPriceEstimate when dynamic pricing applies.
+        const surgeMultiplier = 1.0;
+        const bookingFee = BOOKING_FEE;
+        const subtotal = baseFare + distanceFare + timeFare + bookingFee;
+        const serviceFee = subtotal * SERVICE_FEE_RATE;
+        const taxable = subtotal + serviceFee;
+        const taxes = taxable * TAX_RATE;
+        const totalFareRaw = taxable + taxes;
+        const totalFare = Math.max(MIN_FARE * classMultiplier, round2(totalFareRaw));
+        return {
+            baseFare: round2(baseFare),
+            distanceFare: round2(distanceFare),
+            timeFare: round2(timeFare),
+            bookingFee: round2(bookingFee),
+            surgeMultiplier,
+            serviceFee: round2(serviceFee),
+            taxes: round2(taxes),
+            totalFare,
+            currency: 'USD',
+        };
+    },
+    /**
      * Calculates the estimated fare based on distance and vehicle class.
+     * Retained for non-hot-path callers (admin, tests).
      */
     calculateFare(distanceKm, vehicleClass = types_1.VehicleClass.CORE) {
         let typeMultiplier = 1.0;
@@ -64,142 +116,58 @@ exports.fareService = {
         return Math.round(finalFare * 100) / 100; // Round to 2 decimal places
     },
     /**
-     * Recalculates price ranges and barriers for all drivers every 30 minutes.
-     * Considers rating, completed rides, flags, dangerous status, and dynamic global conditions.
+     * Recalculates price ranges and barriers for all drivers.
+     * Delegates ALL range math to the centralized, deterministic pricing engine.
+     * Considers rating, completed rides, flags, dangerous status, reliability,
+     * and live (non-random) market conditions.
      */
     async recalculateDriverRanges() {
         console.log('[PRICING] ⏳ Recalculating driver pricing ranges...');
         try {
-            // 1. Simulate/determine global system shift conditions
-            // Weather: sunny (70%), rainy (20%), stormy (10%)
-            const weatherRand = Math.random();
-            const weather = weatherRand < 0.7 ? 'sunny' : weatherRand < 0.9 ? 'rainy' : 'stormy';
-            // Traffic: low (40%), medium (40%), high (20%)
-            const trafficRand = Math.random();
-            const traffic = trafficRand < 0.4 ? 'low' : trafficRand < 0.8 ? 'medium' : 'high';
-            // Active requests in last 30 minutes
-            const activeRequestsRes = await prisma_service_1.prisma.$queryRawUnsafe("SELECT COUNT(*)::int as count FROM rides WHERE created_at > NOW() - INTERVAL '30 minutes'");
-            const activeRequests = activeRequestsRes[0]?.count || 0;
-            // Online drivers in Redis
-            const onlineDrivers = await redis_1.redis.zcard(redis_1.DRIVER_LOCATIONS_KEY);
-            // Demand/Supply Ratio
-            const demandRatio = activeRequests / Math.max(1, onlineDrivers);
-            // Shift amounts
-            let weatherShift = 0.00;
-            if (weather === 'rainy')
-                weatherShift = 0.50;
-            else if (weather === 'stormy')
-                weatherShift = 1.00;
-            let trafficShift = 0.00;
-            if (traffic === 'medium')
-                trafficShift = 0.25;
-            else if (traffic === 'high')
-                trafficShift = 0.75;
-            let demandShift = 0.00;
-            if (demandRatio >= 1.5)
-                demandShift = 0.50;
-            else if (demandRatio <= 0.5)
-                demandShift = -0.25;
-            const xShift = weatherShift + trafficShift + demandShift;
-            // Store current conditions in Redis for visibility
+            const market = await (0, pricingEngine_1.getMarketConditions)();
+            // Store current conditions in Redis for visibility / rider estimates.
             const conditions = {
-                weather,
-                traffic,
-                activeRequests,
-                onlineDrivers,
-                xShift,
-                timestamp: Date.now()
+                xShift: market.xShift,
+                demandRatio: market.demandRatio,
+                activeRequests: market.activeRequests,
+                onlineDrivers: market.onlineDrivers,
+                hourOfDay: market.hourOfDay,
+                reasons: market.reasons,
+                timestamp: Date.now(),
             };
             await redis_1.redis.set('pricing:system_conditions', JSON.stringify(conditions), 'EX', 3600);
-            console.log(`[PRICING] 🌍 Global shift conditions updated: Shift=\$${xShift.toFixed(2)}/mile. Weather: ${weather}, Traffic: ${traffic}, Demand ratio: ${demandRatio.toFixed(2)}`);
-            // 2. Fetch all drivers
-            const drivers = await prisma_service_1.prisma.driver.findMany({
-                include: {
-                    user: true
-                }
-            });
+            console.log(`[PRICING] 🌍 Market shift xShift=$${market.xShift.toFixed(2)}/mi (demandRatio ${market.demandRatio.toFixed(2)}, ${market.reasons.join('; ')})`);
+            const drivers = await prisma_service_1.prisma.driver.findMany();
             const { io } = await Promise.resolve().then(() => __importStar(require('../app')));
             for (const driver of drivers) {
-                // Base barrier for vehicle class
-                let baseBarrier = 3.00; // CORE / Regular
-                if (driver.active_class === types_1.VehicleClass.ELITE)
-                    baseBarrier = 6.00;
-                else if (driver.active_class === types_1.VehicleClass.PRESTIGE)
-                    baseBarrier = 10.00;
-                let barrierMultiplier = 1.0;
-                // Rating adjustment
-                const rating = Number(driver.rating || 5.00);
-                if (rating < 4.8 && rating >= 4.5) {
-                    barrierMultiplier *= 0.90; // 10% reduction
-                }
-                else if (rating < 4.5 && rating >= 4.0) {
-                    barrierMultiplier *= 0.75; // 25% reduction
-                }
-                else if (rating < 4.0) {
-                    barrierMultiplier *= 0.50; // 50% reduction
-                }
-                // Flagged/Dangerous driver adjustments
-                if (driver.is_dangerous) {
-                    barrierMultiplier *= 0.50; // 50% reduction for dangerous driving
-                }
-                if (driver.is_flagged) {
-                    barrierMultiplier *= 0.70; // 30% reduction for general flags
-                }
-                // Completed rides experience adjustment
-                const totalRides = driver.total_rides || 0;
-                if (totalRides < 10) {
-                    barrierMultiplier *= 0.90; // 10% reduction for inexperienced drivers
-                }
-                // Calculate final adjusted max barrier before shift
-                const baseBarrierAdjusted = baseBarrier * barrierMultiplier;
-                // Apply shift
-                let min = 1.00 + xShift;
-                let max = baseBarrierAdjusted + xShift;
-                // Round ranges to nearest 25 cents
-                min = Math.round(min * 4) / 4;
-                max = Math.round(max * 4) / 4;
-                // Enforce bounds
-                if (min < 1.00)
-                    min = 1.00;
-                // Enforce difference of AT LEAST 2.00
-                if (max - min < 2.00) {
-                    max = min + 2.00;
-                }
-                // Calculate recommended price depending on the demand factor
-                const demandFactor = Math.min(1.0, Math.max(0.0, demandRatio / 2.0));
-                let recommendedPrice = min + (max - min) * demandFactor;
-                recommendedPrice = Math.round(recommendedPrice * 4) / 4;
-                if (recommendedPrice < min)
-                    recommendedPrice = min;
-                if (recommendedPrice > max)
-                    recommendedPrice = max;
-                // Driver custom price per mile logic
-                let currentPrice = driver.price_per_mile ? Number(driver.price_per_mile) : null;
-                if (currentPrice === null) {
-                    // First time driving: assign middle of the range
-                    currentPrice = Math.round(((min + max) / 2) * 4) / 4;
-                }
-                else {
-                    // Clamp to new range
-                    currentPrice = Math.max(min, Math.min(max, currentPrice));
-                }
-                // Save back to DB
+                const inputs = {
+                    user_id: driver.user_id,
+                    active_class: driver.active_class,
+                    rating: Number(driver.rating ?? 5.0),
+                    total_rides: driver.total_rides ?? 0,
+                    acceptance_count: driver.acceptance_count ?? 0,
+                    cancellation_count: driver.cancellation_count ?? 0,
+                    is_dangerous: !!driver.is_dangerous,
+                    is_flagged: !!driver.is_flagged,
+                    last_cancellation_at: driver.last_cancellation_at ?? null,
+                };
+                const range = (0, pricingEngine_1.computeDriverRange)(inputs, market);
+                const currentPrice = (0, pricingEngine_1.resolveCurrentPrice)(driver.price_per_mile != null ? Number(driver.price_per_mile) : null, range);
                 await prisma_service_1.prisma.driver.update({
                     where: { user_id: driver.user_id },
                     data: {
-                        price_range_min: min,
-                        price_range_max: max,
-                        recommended_price: recommendedPrice,
-                        price_per_mile: currentPrice
-                    }
+                        price_range_min: range.price_range_min,
+                        price_range_max: range.price_range_max,
+                        recommended_price: range.recommended_price,
+                        price_per_mile: currentPrice,
+                    },
                 });
-                // Notify driver socket if connected
                 io.to(`driver:${driver.user_id}`).emit('pricingUpdate', {
                     price_per_mile: currentPrice,
-                    price_range_min: min,
-                    price_range_max: max,
-                    recommended_price: recommendedPrice,
-                    price_last_changed: driver.price_last_changed
+                    price_range_min: range.price_range_min,
+                    price_range_max: range.price_range_max,
+                    recommended_price: range.recommended_price,
+                    price_last_changed: driver.price_last_changed,
                 });
             }
             console.log(`[PRICING] ✅ Recalculated pricing ranges for ${drivers.length} drivers.`);
@@ -223,64 +191,70 @@ exports.fareService = {
         const conditionsStr = await redis_1.redis.get('pricing:system_conditions');
         const conditions = conditionsStr ? JSON.parse(conditionsStr) : { xShift: 0.0 };
         const xShift = conditions.xShift || 0.0;
-        // Default max price for classes if no drivers are found
+        // Default $/mile per package (used only when there is zero pricing data).
         let classBaseBarrier = 3.00;
         if (requestedClass === types_1.VehicleClass.ELITE)
             classBaseBarrier = 6.00;
         else if (requestedClass === types_1.VehicleClass.PRESTIGE)
             classBaseBarrier = 10.00;
-        if (driverIds.length > 0) {
-            const drivers = await prisma_service_1.prisma.driver.findMany({
-                where: {
-                    user_id: { in: driverIds },
-                    active_class: requestedClass
-                }
-            });
-            if (drivers.length > 0) {
-                const prices = drivers.map(d => {
-                    if (d.price_per_mile)
-                        return Number(d.price_per_mile);
-                    const min = Number(d.price_range_min || (1.00 + xShift));
-                    const max = Number(d.price_range_max || (classBaseBarrier + xShift));
-                    return Math.round(((min + max) / 2) * 4) / 4;
-                });
-                prices.sort((a, b) => a - b);
-                maxPricePerMile = prices[prices.length - 1];
-                // Find median
-                const mid = Math.floor(prices.length / 2);
-                if (prices.length % 2 === 0) {
-                    medianPricePerMile = (prices[mid - 1] + prices[mid]) / 2;
-                }
-                else {
-                    medianPricePerMile = prices[mid];
-                }
-                // Likelihood of paying less = percentage of drivers cheaper than maxPricePerMile
-                const cheaperCount = prices.filter(p => p < maxPricePerMile).length;
-                savingLikelihood = prices.length > 1
-                    ? Math.round((cheaperCount / prices.length) * 100)
-                    : 0; // if only 1 driver, likelihood is 0% (always pay exactly that driver's price)
-            }
-            else {
-                // No drivers of this specific class, default to base barrier + shift
-                maxPricePerMile = classBaseBarrier + xShift;
-                medianPricePerMile = Math.round((((1.00 + xShift) + maxPricePerMile) / 2) * 4) / 4;
-                savingLikelihood = 50;
-            }
-        }
-        else {
-            // No nearby drivers at all
-            maxPricePerMile = classBaseBarrier + xShift;
-            medianPricePerMile = Math.round((((1.00 + xShift) + maxPricePerMile) / 2) * 4) / 4;
-            savingLikelihood = 50;
-        }
-        const calculatedMaxFare = maxPricePerMile * distanceMiles;
-        // Base minimum fare is 5.00
-        const finalMaxFare = Math.round(Math.max(5.00, calculatedMaxFare) * 100) / 100;
-        return {
-            maxFare: finalMaxFare,
-            savingLikelihood,
-            medianPricePerMile: Math.round(medianPricePerMile * 100) / 100
+        // Pull a price-per-mile for a driver row, falling back to the midpoint of
+        // their stored range, then to the package default.
+        const priceFor = (d) => {
+            if (d.price_per_mile)
+                return Number(d.price_per_mile);
+            const min = Number(d.price_range_min || (1.00 + xShift));
+            const max = Number(d.price_range_max || (classBaseBarrier + xShift));
+            return Math.round(((min + max) / 2) * 4) / 4;
         };
+        const summarize = (prices) => {
+            prices.sort((a, b) => a - b);
+            maxPricePerMile = prices[prices.length - 1];
+            const mid = Math.floor(prices.length / 2);
+            medianPricePerMile = prices.length % 2 === 0
+                ? (prices[mid - 1] + prices[mid]) / 2
+                : prices[mid];
+            const cheaperCount = prices.filter(p => p < maxPricePerMile).length;
+            savingLikelihood = prices.length > 1
+                ? Math.round((cheaperCount / prices.length) * 100)
+                : 0;
+        };
+        if (driverIds.length > 0) {
+            // Tier 1: online drivers of this class near the pickup.
+            const onlineDrivers = await prisma_service_1.prisma.driver.findMany({
+                where: { user_id: { in: driverIds }, active_class: requestedClass }
+            });
+            if (onlineDrivers.length > 0) {
+                summarize(onlineDrivers.map(priceFor));
+                return _finalizeEstimate(maxPricePerMile, medianPricePerMile, savingLikelihood, distanceMiles);
+            }
+        }
+        // Tier 2: no drivers online nearby — use the latest drivers of this class
+        // that have been online (the whole fleet for that package) so the rider
+        // still sees a real, data-driven price instead of $0.
+        const fleetDrivers = await prisma_service_1.prisma.driver.findMany({
+            where: { active_class: requestedClass },
+            take: 200,
+        });
+        if (fleetDrivers.length > 0) {
+            summarize(fleetDrivers.map(priceFor));
+            return _finalizeEstimate(maxPricePerMile, medianPricePerMile, savingLikelihood, distanceMiles);
+        }
+        // Tier 3: absolutely no pricing data anywhere — use the package default
+        // $/mile so the estimate is always a sensible, non-zero number.
+        maxPricePerMile = classBaseBarrier + xShift;
+        medianPricePerMile = Math.round((((1.00 + xShift) + maxPricePerMile) / 2) * 4) / 4;
+        savingLikelihood = 50;
+        return _finalizeEstimate(maxPricePerMile, medianPricePerMile, savingLikelihood, distanceMiles);
     }
 };
+// Build the estimate response, guaranteeing a non-zero max fare.
+function _finalizeEstimate(maxPricePerMile, medianPricePerMile, savingLikelihood, distanceMiles) {
+    const calculatedMaxFare = maxPricePerMile * distanceMiles;
+    const finalMaxFare = Math.round(Math.max(5.00, calculatedMaxFare) * 100) / 100;
+    return {
+        maxFare: finalMaxFare,
+        savingLikelihood,
+        medianPricePerMile: Math.round(medianPricePerMile * 100) / 100,
+    };
+}
 //# sourceMappingURL=fare.service.js.map

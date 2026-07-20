@@ -30,16 +30,21 @@ class AuthService {
         }
         const driverRes = await database_1.pool.query(`SELECT phone_number, phone_verified FROM drivers WHERE user_id = $1`, [userId]);
         if (driverRes.rows[0]?.phone_number === phoneNumber && driverRes.rows[0]?.phone_verified) {
+            // Same user, phone verified on the DRIVER profile. Mirror it onto the
+            // RIDER profile (users row) so the rider onboarding is also satisfied
+            // and the app routes straight into the main screen instead of looping
+            // on a phone-verify step that the backend keeps auto-confirming.
+            await database_1.pool.query(`UPDATE users SET phone_number = $1, is_verified = true, phone_verified = true WHERE id = $2`, [phoneNumber, userId]);
             return { auto_verified: true, message: 'Phone already verified on your account.' };
         }
         // 2. Check if phone belongs to a DIFFERENT user
         const otherUser = await database_1.pool.query('SELECT id FROM users WHERE phone_number = $1 AND id != $2', [phoneNumber, userId]);
         if (otherUser.rows.length > 0) {
-            throw new Error('This phone number is already associated with another account');
+            throw new Error('This number is already registered to another account');
         }
         const otherDriver = await database_1.pool.query('SELECT user_id FROM drivers WHERE phone_number = $1 AND user_id != $2', [phoneNumber, userId]);
         if (otherDriver.rows.length > 0) {
-            throw new Error('This phone number is already associated with another account');
+            throw new Error('This number is already registered to another account');
         }
         // 3. Normal Twilio flow
         return sms_service_1.SmsService.sendVerificationCode(phoneNumber);
@@ -100,7 +105,11 @@ class AuthService {
             await database_1.pool.query('UPDATE users SET is_active = true WHERE id = $1', [user.id]);
             user.is_active = true;
         }
-        const token = this.generateToken(user);
+        // Resolve the active role from the application context the client
+        // supplies (app_role). This prevents a dual-role user who first signed up
+        // as a Rider from receiving a RIDER token when launching the Driver App.
+        const active = await this.resolveActiveRole(user.id, data.app_role);
+        const token = this.generateToken(user, active.role);
         const phoneNumberRequired = !user.phone_number;
         // ADMIN 2FA Check
         if (user.role === types_1.UserRole.ADMIN) {
@@ -133,7 +142,8 @@ class AuthService {
         const diffTime = Math.abs(now.getTime() - passwordChangedAt.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         const passwordExpired = diffDays > expirationDays;
-        return { user, token, phone_number_required: phoneNumberRequired, password_expired: passwordExpired };
+        const onboarding = await this.getOnboardingStatus(user.id);
+        return { user, token, phone_number_required: phoneNumberRequired, password_expired: passwordExpired, onboarding };
     }
     static async changePassword(userId, data) {
         const userRes = await database_1.pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
@@ -169,6 +179,51 @@ class AuthService {
         await database_1.pool.query('UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2', [newHash, userId]);
         await redis_1.redis.del(`reset_token:${token}`);
         return { message: 'Password reset successfully' };
+    }
+    static async getOnboardingStatus(userId) {
+        const userRes = await database_1.pool.query(`SELECT id, role, phone_number, phone_verified, onboarding_step
+       FROM users WHERE id = $1`, [userId]);
+        const user = userRes.rows[0];
+        if (!user) {
+            throw new Error('User not found');
+        }
+        const hasDriverRow = await database_1.pool.query('SELECT phone_number, phone_verified FROM drivers WHERE user_id = $1', [userId]);
+        const driver = hasDriverRow.rows[0];
+        // A dual-role user who verified their phone on the DRIVER profile but not
+        // the RIDER (users) row must still be considered phone-verified for the
+        // rider app. Backfill the rider row so onboarding routing is consistent
+        // and the user is taken straight into the main app instead of being
+        // trapped on a phone-verify step that keeps auto-confirming.
+        let riderPhoneVerified = !!user.phone_verified;
+        const driverPhone = driver?.phone_number;
+        const driverVerified = !!driver?.phone_verified;
+        if (!riderPhoneVerified && driverVerified && driverPhone) {
+            await database_1.pool.query(`UPDATE users SET phone_number = $1, is_verified = true, phone_verified = true WHERE id = $2`, [driverPhone, userId]);
+            riderPhoneVerified = true;
+        }
+        const riderOnboardingComplete = riderPhoneVerified;
+        const driverExists = !!driver;
+        const driverPhoneVerified = driverVerified || riderPhoneVerified;
+        // The rider-facing endpoint only needs to report completion for the
+        // active app profile; driver step gating is enforced elsewhere. We mark
+        // the driver profile complete when a verified driver row exists.
+        const driverOnboardingComplete = driverExists && driverVerified;
+        const roles = ['RIDER'];
+        if (driverExists)
+            roles.push('DRIVER');
+        return {
+            rider: {
+                onboarding_complete: riderOnboardingComplete,
+                phone_verified: riderPhoneVerified,
+                phone_required: !user.phone_number && !riderPhoneVerified,
+            },
+            driver: {
+                onboarding_complete: driverOnboardingComplete,
+                phone_verified: driverPhoneVerified,
+                exists: driverExists,
+            },
+            roles,
+        };
     }
     static async requestEmailChange(userId, newEmail) {
         const userRes = await database_1.pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
@@ -250,9 +305,11 @@ class AuthService {
                 }
             }
         }
-        const token = this.generateToken(user);
+        const active = await this.resolveActiveRole(user.id, data.role);
+        const token = this.generateToken(user, active.role);
         const phoneNumberRequired = !user.phone_number;
-        return { user, token, phone_number_required: phoneNumberRequired };
+        const onboarding = await this.getOnboardingStatus(user.id);
+        return { user, token, phone_number_required: phoneNumberRequired, onboarding };
     }
     static async requestOTP(email) {
         await otp_service_1.OTPService.generateOTP(email);
@@ -293,9 +350,11 @@ class AuthService {
                 }
             }
         }
-        const token = this.generateToken(user);
+        const active = await this.resolveActiveRole(user.id, data.role);
+        const token = this.generateToken(user, active.role);
         const phoneNumberRequired = !user.phone_number;
-        return { user, token, phone_number_required: phoneNumberRequired };
+        const onboarding = await this.getOnboardingStatus(user.id);
+        return { user, token, phone_number_required: phoneNumberRequired, onboarding };
     }
     static async requestPasswordChange(userId, currentPassword) {
         const userRes = await database_1.pool.query('SELECT * FROM users WHERE id = $1', [userId]);
@@ -348,8 +407,60 @@ class AuthService {
         const token = this.generateToken(user);
         return { user, token };
     }
-    static generateToken(user) {
-        return jsonwebtoken_1.default.sign({ id: user.id, role: user.role, email: user.email }, env_1.env.JWT_SECRET, { expiresIn: '30d', algorithm: 'HS256' });
+    static generateToken(user, roleOverride) {
+        // The `role` claim MUST reflect the active application session, not the
+        // frozen `users.role` column. For dual-role users (same email owning both
+        // a Rider and a Driver profile), the active role is decided by the
+        // application that initiated the session, not by which profile was
+        // created first. `roleOverride` is the authoritative active role derived
+        // via resolveActiveRole() from the client's app context.
+        const role = roleOverride ?? user.role;
+        return jsonwebtoken_1.default.sign({ id: user.id, role, email: user.email }, env_1.env.JWT_SECRET, { expiresIn: '30d', algorithm: 'HS256' });
+    }
+    /**
+     * Resolve the ACTIVE session role from the connecting application's context.
+     *
+     * A single authenticated identity may own both a Rider profile (the `users`
+     * row) and a Driver profile (the `drivers` row). The backend must never
+     * guess the active role from `users.role` alone — it must use the explicit
+     * application context supplied by the client (`appRoleHint`, e.g. "DRIVER"
+     * from the Driver App, "RIDER" from the Rider App), and only honor it when
+     * the user actually holds that profile.
+     *
+     * Returns the resolved role plus the resolved profile ids so downstream
+     * realtime/presence/matching logic always operates on the correct profile.
+     */
+    static async resolveActiveRole(userId, appRoleHint) {
+        const hint = (appRoleHint ?? '').toString().trim().toUpperCase();
+        const driverRes = await database_1.pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [userId]);
+        const hasDriverProfile = driverRes.rows.length > 0;
+        // Rider profile is the users row itself; it always exists for an
+        // authenticated user.
+        const riderId = userId;
+        const driverId = hasDriverProfile ? userId : null;
+        let role;
+        if (hint === 'ADMIN') {
+            role = 'ADMIN';
+        }
+        else if (hint === 'DRIVER' && hasDriverProfile) {
+            role = 'DRIVER';
+        }
+        else if (hint === 'RIDER') {
+            role = 'RIDER';
+        }
+        else if (hint === 'DRIVER') {
+            // Driver app context but no driver profile yet — they are about to
+            // start driver onboarding. Resolve as RIDER-identity-bearing until the
+            // driver profile exists; the app routing will send them to onboarding.
+            role = 'RIDER';
+        }
+        else if (hasDriverProfile) {
+            role = 'RIDER';
+        }
+        else {
+            role = 'RIDER';
+        }
+        return { role, driverId, riderId };
     }
     static verifyToken(token) {
         return jsonwebtoken_1.default.verify(token, env_1.env.JWT_SECRET, { algorithms: ['HS256'] });

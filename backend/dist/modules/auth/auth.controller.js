@@ -21,6 +21,7 @@ const LoginPasswordSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string(),
     trusted_device_token: zod_1.z.string().nullable().optional(),
+    app_role: zod_1.z.string().optional(),
 });
 const ChangePasswordSchema = zod_1.z.object({
     currentPassword: zod_1.z.string().optional(),
@@ -56,8 +57,8 @@ class AuthController {
     }
     static async loginPassword(req, res) {
         try {
-            const { email, password, trusted_device_token } = LoginPasswordSchema.parse(req.body);
-            const result = await auth_service_1.AuthService.loginWithPassword({ email, password, trusted_device_token });
+            const { email, password, trusted_device_token, app_role } = LoginPasswordSchema.parse(req.body);
+            const result = await auth_service_1.AuthService.loginWithPassword({ email, password, trusted_device_token, app_role });
             res.json(result);
         }
         catch (error) {
@@ -325,6 +326,30 @@ class AuthController {
             console.error(`[AUTH] ❌ Admin 2FA verification error: ${error.message}`);
             res.status(401).json({ error: 'Invalid administrative security code.' });
         }
+    }
+    static async getOnboardingStatus(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const status = await auth_service_1.AuthService.getOnboardingStatus(userId);
+            res.json(status);
+        }
+        catch (error) {
+            console.error(`[AUTH] ❌ Onboarding status error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to determine onboarding status.' });
+        }
+    }
+    static async getPublicConfig(req, res) {
+        // Exposes the canonical application identity so clients can assert the
+        // correct OAuth branding ("Logging in for NetRide"). The actual consent
+        // screen name is configured in Supabase Auth → Providers → Google and the
+        // Google Cloud OAuth consent screen, but this guarantees clients render
+        // the right product name everywhere.
+        res.json({
+            app_name: 'NetRide',
+            auth_brand: 'NetRide',
+        });
     }
 }
 exports.AuthController = AuthController;

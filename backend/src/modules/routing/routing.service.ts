@@ -210,20 +210,24 @@ export class RoutingService {
   ): Promise<RoutingResult> {
     const exactKey = this.exactKey(origin, destination);
 
-    // 1. Dedupe in-flight identical requests.
-    const inflight = this.inFlight.get(exactKey);
-    if (inflight) return inflight;
+    // 1. Dedupe in-flight identical requests. The reservation is set
+    //    *synchronously* (before the first await) so that two requests that
+    //    arrive on the same tick share one computation rather than both
+    //    slipping past the check and hitting the engine twice.
+    const existing = this.inFlight.get(exactKey);
+    if (existing) return existing;
 
-    // 2. Try exact cache, then nearby cache (geohash neighbor reuse).
-    const cached = await this.lookupCache(origin, destination, exactKey);
-    if (cached) {
-      cached.cacheHit = true;
-      return cached;
-    }
+    const promise = (async () => {
+      // 2. Try exact cache, then nearby cache (geohash neighbor reuse).
+      const cached = await this.lookupCache(origin, destination, exactKey);
+      if (cached) {
+        cached.cacheHit = true;
+        return cached;
+      }
+      // 3. Compute (single in-flight promise shared by all duplicates).
+      return this.computeRoute(origin, destination, exactKey);
+    })().finally(() => this.inFlight.delete(exactKey));
 
-    // 3. Compute (single in-flight promise shared by all duplicates).
-    const promise = this.computeRoute(origin, destination, exactKey)
-      .finally(() => this.inFlight.delete(exactKey));
     this.inFlight.set(exactKey, promise);
     return promise;
   }
@@ -353,8 +357,9 @@ export class RoutingService {
     const timeout = new Promise<null>((resolve) => {
       timer = setTimeout(() => resolve(null), this.REDIS_OP_TIMEOUT_MS);
     });
+    const opPromise = op().catch(() => null as T | null);
     try {
-      return await Promise.race([op(), timeout]);
+      return await Promise.race([opPromise, timeout]);
     } catch {
       return null;
     } finally {

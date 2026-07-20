@@ -17,4 +17,6 @@ export declare class AuthController {
     static verifyPhoneOTP(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static requestAdmin2FA(req: Request, res: Response): Promise<void>;
     static verifyAdmin2FA(req: Request, res: Response): Promise<void>;
+    static getOnboardingStatus(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static getPublicConfig(req: Request, res: Response): Promise<void>;
 }

@@ -9,7 +9,10 @@ class UserRepository {
         return res.rows[0] || null;
     }
     static async findById(id) {
-        const res = await database_1.pool.query('SELECT id, email, phone_number, full_name, role, is_verified, profile_image_url, date_of_birth, created_at FROM users WHERE id = $1', [id]);
+        const res = await database_1.pool.query(`SELECT id, email, phone_number, full_name, role, is_verified, profile_image_url,
+              date_of_birth, created_at, verification_status, onboarding_step,
+              phone_verified, headshot_uploaded
+       FROM users WHERE id = $1`, [id]);
         return res.rows[0] || null;
     }
     static async create(data) {
@@ -53,7 +56,7 @@ class UserRepository {
         if (fields.length === 0)
             return this.findById(id);
         values.push(id);
-        const res = await database_1.pool.query(`UPDATE users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING id, email, phone_number, full_name, role, is_verified, profile_image_url, id_photo_front_url, id_photo_back_url, date_of_birth, created_at`, values);
+        const res = await database_1.pool.query(`UPDATE users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING id, email, phone_number, full_name, role, is_verified, profile_image_url, id_photo_front_url, id_photo_back_url, date_of_birth, created_at, verification_status, onboarding_step, phone_verified, headshot_uploaded`, values);
         return res.rows[0] || null;
     }
 }

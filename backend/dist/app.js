@@ -66,6 +66,7 @@ const driver_routes_1 = __importDefault(require("./modules/driver/driver.routes"
 const ride_routes_1 = __importDefault(require("./modules/ride/ride.routes"));
 const geospatial_routes_1 = __importDefault(require("./modules/geospatial/geospatial.routes"));
 const navigation_routes_1 = __importDefault(require("./modules/navigation/navigation.routes"));
+const routing_routes_1 = __importDefault(require("./modules/routing/routing.routes"));
 const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
 const geospatial_service_1 = require("./modules/geospatial/geospatial.service");
 const upload_service_1 = require("./services/upload.service");
@@ -138,7 +139,7 @@ app.get('/api/ping', (req, res) => {
     res.json({ status: 'pong', time: new Date().toISOString() });
 });
 // Middleware for Socket.io auth
-io.use((socket, next) => {
+io.use(async (socket, next) => {
     const token = socket.handshake.auth.token || socket.handshake.headers.authorization;
     if (!token) {
         return next(new Error('Authentication error: No token provided'));
@@ -146,7 +147,28 @@ io.use((socket, next) => {
     try {
         const pureToken = token.toString().replace('Bearer ', '');
         const decoded = auth_service_1.AuthService.verifyToken(pureToken);
-        socket.user = decoded;
+        // Resolve the ACTIVE session role from the application context supplied
+        // by the connecting client (e.g. the Driver App sends `role: 'driver'`,
+        // the Rider App sends `role: 'rider'`). This is the single source of
+        // truth for which "hat" the user is wearing during this connection and
+        // MUST NOT be inferred from the frozen `users.role` column alone. A
+        // dual-role user (same email owning both profiles) is identified by the
+        // app they launched, never by account-existence order.
+        const appRoleHint = socket.handshake.auth.role;
+        const active = await auth_service_1.AuthService.resolveActiveRole(decoded.id, appRoleHint);
+        socket.user = {
+            id: decoded.id,
+            // Active application/session role — used for all downstream branching,
+            // logging, presence, and ride-matching.
+            role: active.role,
+            // The role carried in the JWT claim (legacy/frozen `users.role`). Kept
+            // for reference only; `role` above is authoritative for this session.
+            jwtRole: decoded.role,
+            driverId: active.driverId,
+            riderId: active.riderId,
+            // Stable per-connection session id for tracing/logging.
+            sessionId: socket.id,
+        };
         next();
     }
     catch (err) {
@@ -163,6 +185,7 @@ app.use('/api/driver', driver_routes_1.default);
 app.use('/api/ride', ride_routes_1.default);
 app.use('/api/geospatial', geospatial_routes_1.default);
 app.use('/api/navigation', navigation_routes_1.default);
+app.use('/api/routing', routing_routes_1.default);
 app.use('/api/admin', admin_routes_1.default);
 app.use('/api/files', files_routes_1.default);
 app.post('/api/upload', upload_service_1.UploadService.upload);
@@ -321,15 +344,6 @@ async function runMigrations() {
             await database_1.pool.query(schema);
             console.log('✅ Database security (016) applied successfully');
         }
-        // Face verification schema (018)
-        const hasFaceEnrollment = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'face_enrollment_url'");
-        if (hasFaceEnrollment.rowCount === 0) {
-            console.log('⚡ Patching face verification schema (018)...');
-            const schemaPath = path_1.default.join(__dirname, '../migrations/018_add_face_verification.sql');
-            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
-            await database_1.pool.query(schema);
-            console.log('✅ Face verification schema (018) applied successfully');
-        }
         // Navigation + safety schema (019): route_metadata on rides and
         // the speeding_violations ledger for the dangerous-driver flag.
         const hasRouteMetadata = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'rides' AND column_name = 'route_metadata'");
@@ -421,34 +435,16 @@ async function runMigrations() {
             await database_1.pool.query(schema);
             console.log('✅ Storage files schema (028) applied');
         }
-        // Make audit_logs.admin_id nullable (029). System-generated events such
-        // as automated face checks have no acting admin, so the column must
-        // allow NULL. Guards on the column's nullability.
+        // Make audit_logs.admin_id nullable (029). System-generated events
+        // (no acting admin) can be recorded, so the column must allow NULL.
+        // Guards on the column's current nullability.
         const adminIdNullable = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_logs' AND column_name = 'admin_id' AND is_nullable = 'YES'");
         if (adminIdNullable.rowCount === 0) {
             console.log('⚡ Relaxing audit_logs.admin_id nullability (029)...');
-            const schemaPath = path_1.default.join(__dirname, '../migrations/20260718_face_audit_admin_nullable.sql');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/029_audit_logs_admin_nullable.sql');
             const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
             await database_1.pool.query(schema);
             console.log('✅ audit_logs.admin_id made nullable');
-        }
-        // Face enrollment descriptor column (face-api.js 128-d vector).
-        const hasDescriptor = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'face_enrollment_descriptor'");
-        if (hasDescriptor.rowCount === 0) {
-            console.log('⚡ Adding face_enrollment_descriptor column...');
-            const schemaPath = path_1.default.join(__dirname, '../migrations/20260718_face_descriptor.sql');
-            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
-            await database_1.pool.query(schema);
-            console.log('✅ face_enrollment_descriptor column added');
-        }
-        // Face check event reason
-        const hasEventReason = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'face_check_events' AND column_name = 'reason'");
-        if (hasEventReason.rowCount === 0) {
-            console.log('⚡ Patching face_check_events (reason)...');
-            const schemaPath = path_1.default.join(__dirname, '../migrations/20260719_face_event_reason.sql');
-            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
-            await database_1.pool.query(schema);
-            console.log('✅ face_check_events.reason column added');
         }
         // User block + rating flag (030)
         const hasBlockedReason = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'blocked_reason'");

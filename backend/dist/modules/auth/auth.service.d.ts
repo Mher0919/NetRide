@@ -28,6 +28,7 @@ export declare class AuthService {
         email: string;
         password?: string;
         trusted_device_token?: string | null;
+        app_role?: string;
     }): Promise<{
         otp_required: boolean;
         email: any;
@@ -36,11 +37,25 @@ export declare class AuthService {
         token?: undefined;
         phone_number_required?: undefined;
         password_expired?: undefined;
+        onboarding?: undefined;
     } | {
         user: any;
         token: string;
         phone_number_required: boolean;
         password_expired: boolean;
+        onboarding: {
+            rider: {
+                onboarding_complete: boolean;
+                phone_verified: boolean;
+                phone_required: boolean;
+            };
+            driver: {
+                onboarding_complete: boolean;
+                phone_verified: boolean;
+                exists: boolean;
+            };
+            roles: string[];
+        };
         otp_required?: undefined;
         email?: undefined;
         message?: undefined;
@@ -56,6 +71,19 @@ export declare class AuthService {
     }>;
     static resetPassword(token: string, newPassword: string): Promise<{
         message: string;
+    }>;
+    static getOnboardingStatus(userId: string): Promise<{
+        rider: {
+            onboarding_complete: boolean;
+            phone_verified: boolean;
+            phone_required: boolean;
+        };
+        driver: {
+            onboarding_complete: boolean;
+            phone_verified: boolean;
+            exists: boolean;
+        };
+        roles: string[];
     }>;
     static requestEmailChange(userId: string, newEmail: string): Promise<{
         message: string;
@@ -73,6 +101,19 @@ export declare class AuthService {
         user: any;
         token: string;
         phone_number_required: boolean;
+        onboarding: {
+            rider: {
+                onboarding_complete: boolean;
+                phone_verified: boolean;
+                phone_required: boolean;
+            };
+            driver: {
+                onboarding_complete: boolean;
+                phone_verified: boolean;
+                exists: boolean;
+            };
+            roles: string[];
+        };
     }>;
     static requestOTP(email: string): Promise<{
         message: string;
@@ -86,6 +127,19 @@ export declare class AuthService {
         user: any;
         token: string;
         phone_number_required: boolean;
+        onboarding: {
+            rider: {
+                onboarding_complete: boolean;
+                phone_verified: boolean;
+                phone_required: boolean;
+            };
+            driver: {
+                onboarding_complete: boolean;
+                phone_verified: boolean;
+                exists: boolean;
+            };
+            roles: string[];
+        };
     }>;
     static requestPasswordChange(userId: string, currentPassword: string): Promise<{
         message: string;
@@ -106,6 +160,24 @@ export declare class AuthService {
         user: any;
         token: string;
     }>;
-    static generateToken(user: any): string;
+    static generateToken(user: any, roleOverride?: string): string;
+    /**
+     * Resolve the ACTIVE session role from the connecting application's context.
+     *
+     * A single authenticated identity may own both a Rider profile (the `users`
+     * row) and a Driver profile (the `drivers` row). The backend must never
+     * guess the active role from `users.role` alone — it must use the explicit
+     * application context supplied by the client (`appRoleHint`, e.g. "DRIVER"
+     * from the Driver App, "RIDER" from the Rider App), and only honor it when
+     * the user actually holds that profile.
+     *
+     * Returns the resolved role plus the resolved profile ids so downstream
+     * realtime/presence/matching logic always operates on the correct profile.
+     */
+    static resolveActiveRole(userId: string, appRoleHint?: string | null): Promise<{
+        role: string;
+        driverId: string | null;
+        riderId: string | null;
+    }>;
     static verifyToken(token: string): any;
 }

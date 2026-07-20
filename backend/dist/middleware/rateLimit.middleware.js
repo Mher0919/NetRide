@@ -22,13 +22,19 @@ return {1, count + 1, 0}
 async function consume(key, rule) {
     const now = Date.now();
     const member = `${now}:${Math.random().toString(36).slice(2, 10)}`;
-    const result = await redis_1.redis.eval(SLIDING_WINDOW_LUA, 1, key, String(rule.max), String(rule.windowMs), String(now), member);
-    const [allowed, count, retryMs] = result;
-    return {
-        allowed: allowed === 1,
-        remaining: Math.max(0, rule.max - count),
-        retryAfterMs: retryMs,
-    };
+    try {
+        const result = await redis_1.redis.eval(SLIDING_WINDOW_LUA, 1, key, String(rule.max), String(rule.windowMs), String(now), member);
+        const [allowed, count, retryMs] = result;
+        return {
+            allowed: allowed === 1,
+            remaining: Math.max(0, rule.max - count),
+            retryAfterMs: retryMs,
+        };
+    }
+    catch {
+        // Fail open: if Redis is unavailable, never block legitimate traffic.
+        return { allowed: true, remaining: rule.max, retryAfterMs: 0 };
+    }
 }
 const legacyIpLimiter = async (req, res, next) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
@@ -45,6 +51,7 @@ const legacyIpLimiter = async (req, res, next) => {
     }
     catch (err) {
         logger_1.logger.error({ err }, 'rate_limit_legacy_error');
+        // Fail open on Redis failure.
         next();
     }
 };
