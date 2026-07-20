@@ -12,15 +12,18 @@
 # Default: Los Angeles County only (~60MB) — covers the core operating area
 # with identical road quality but a ~10x lighter/faster build than SoCal.
 # Override OSM_PBF / REGION to target a larger area when needed.
-# The downloaded PBF is cached across builds (BuildKit cache mount) so a
-# code-only redeploy never re-downloads it.
+# NOTE: we deliberately do NOT cache the PBF — a partial/corrupt download
+# would poison the build. The expensive osrm-extract output IS cached
+# separately below, so code-only redeploys stay fast.
 FROM node:20-alpine AS pbf-fetcher
 WORKDIR /osrm
 ARG REGION=la
 ARG OSM_PBF=https://download.geofabrik.de/north-america/us/california/los-angeles-latest.osm.pbf
-RUN --mount=type=cache,target=/osrm/cache \
-    wget -q -O /osrm/cache/region.osm.pbf "${OSM_PBF}" && \
-    cp /osrm/cache/region.osm.pbf /osrm/region.osm.pbf
+# --tries/--timeout + timestamping-free; verify the file is non-trivial.
+RUN wget -q --tries=3 --timeout=60 -O region.osm.pbf "${OSM_PBF}" && \
+    if [ ! -s region.osm.pbf ] || [ "$(stat -c%s region.osm.pbf)" -lt 1000000 ]; then \
+      echo "ERROR: downloaded PBF is missing or too small"; exit 1; \
+    fi
 
 # ---- Stage 2: build the OSRM road-network extract --------------------------
 FROM ghcr.io/project-osrm/osrm-backend:latest AS osrm-builder
@@ -31,15 +34,15 @@ ARG REGION=la
 COPY --from=pbf-fetcher /osrm/region.osm.pbf /osrm/region.osm.pbf
 # Cache the extract output so a code-only redeploy reuses the built network
 # instead of re-running osrm-extract/partition/customize (the slow part).
-RUN --mount=type=cache,target=/osrm/cache \
-    if [ -f /osrm/cache/${REGION}.osrm ]; then \
-      cp /osrm/cache/${REGION}.osrm /osrm/${REGION}.osrm; \
+RUN --mount=type=cache,target=/osrm/cache2 \
+    if [ -f /osrm/cache2/${REGION}.osrm ] && [ "$(stat -c%s /osrm/cache2/${REGION}.osrm 2>/dev/null || echo 0)" -gt 1000000 ]; then \
+      cp /osrm/cache2/${REGION}.osrm /osrm/${REGION}.osrm; \
     else \
       osrm-extract -p /opt/car.lua region.osm.pbf && \
       osrm-partition region.osrm && \
       osrm-customize region.osrm && \
       mv region.osrm /osrm/${REGION}.osrm && \
-      cp /osrm/${REGION}.osrm /osrm/cache/${REGION}.osrm; \
+      cp /osrm/${REGION}.osrm /osrm/cache2/${REGION}.osrm; \
     fi
 
 # ---- Stage 2: build the Node backend ---------------------------------------
