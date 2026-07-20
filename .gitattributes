@@ -1,1 +1,24 @@
 backend/data/la.osrm filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.hsgr filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.ebg filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.ebg_nodes filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.edges filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.enw filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.geometry filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.nbg_nodes filter=lfs diff=lfs merge=lfs merge=lfs -text
+backend/data/la.osrm.icd filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.names filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.ramIndex filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.fileIndex filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.properties filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.timestamp filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.datasource_names filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.restrictions filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.tld filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.tls filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.cnbg filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.cnbg_to_ebg filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.maneuver_overrides filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.turn_penalties_index filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.turn_weight_penalties filter=lfs diff=lfs merge=lfs -text
+backend/data/la.osrm.turn_duration_penalties filter=lfs diff=lfs merge=lfs -text
