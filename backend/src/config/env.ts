@@ -12,8 +12,10 @@ const envSchema = z.object({
   JWT_SECRET: z.string(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
   OSRM_URL: z.string().default('http://localhost:5000/route/v1/driving'),
-  // Path to the baked regional OSRM road-network extract used by the
-  // in-process engine (@osrm/osrm). Baked into the image at build time via
+  // URL of the local osrm-routed sidecar (runs inside the same container).
+  OSRM_ROUTED_URL: z.string().default('http://127.0.0.1:5000'),
+  // Path to the baked regional OSRM road-network extract loaded by the
+  // in-container osrm-routed sidecar. Baked into the image at build time via
   // scripts/build-osrm.sh (Los Angeles area by default — light & fast).
   OSRM_DATA_PATH: z.string().default('./data/la.osrm'),
   DRIVER_MATCH_RADIUS_KM: z.union([z.string(), z.number()]).transform(Number).default(5),

@@ -49,7 +49,6 @@
     "zod": "^3.22.4"
   },
   "optionalDependencies": {
-    "@osrm/osrm": "^5.27.2"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

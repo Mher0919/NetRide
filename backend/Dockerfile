@@ -1,21 +1,22 @@
 # backend/Dockerfile
 #
 # Builds the Node backend WITH an embedded, in-process OSRM road network
-# (Greater LA) baked into the image. This removes the need for a separate
-# always-on OSRM routing service — the routing engine runs inside the Node
-# process (src/modules/routing/local-osrm.engine.ts via @osrm/osrm), which
-# is faster (no network hop) and free-tier friendly.
+# (Greater LA) served by the official `osrm-routed` binary running as a
+# sidecar INSIDE the same container (127.0.0.1:5000). This removes the need
+# for a separate always-on OSRM routing service — the routing engine is in
+# the same container, no network hop to the outside world, sub-50ms
+# responses, and the same contraction-hierarchy geometry OSRM serves in
+# production. Free-tier friendly: one container, one process tree.
 #
-# Result: OSRM_DATA_PATH defaults to ./data/la.osrm. Preferred path: the CH
-# road network (backend/data/la.osrm) is pre-baked ONCE and committed via Git
-# LFS, then copied straight into the image — NO download/extract at build
-# time, so deploys are fast. Fallback: if la.osrm is absent, the build
-# downloads the lightweight LA extract (~203MB BBBike) and runs the CH
-# pipeline (extract + contract) at build time. Either way the engine needs
-# ./data/la.osrm present before npm run build.
+# The CH road network (backend/data/la.osrm + sidecars) is pre-baked ONCE and
+# committed via Git LFS, then copied straight into the image — NO download or
+# osrm-extract at build time, so deploys are fast. Fallback: if la.osrm is
+# absent, the build downloads the lightweight LA extract (~203MB BBBike) and
+# runs the CH pipeline (extract + contract) at build time. Either way the
+# engine needs ./data/la.osrm (+ sidecars) present before launch.
 #
 # To rebuild the network: scripts/rebuild-osrm.sh (needs Docker), then commit
-# data/la.osrm (Git LFS stores the blob).
+# data/la.osrm* (Git LFS stores the blobs).
 
 ARG REGION=la
 
@@ -24,11 +25,11 @@ ARG REGION=la
 FROM ghcr.io/project-osrm/osrm-backend:latest AS osrm-builder
 WORKDIR /osrm
 ARG REGION
-# Bring in the repo so we can check for a pre-baked (Git LFS) la.osrm.
+# Bring in the repo so we can check for a pre-baked (Git LFS) la.osrm family.
 COPY . .
-RUN if [ -s "./data/${REGION}.osrm" ]; then \
-      echo "Using pre-baked ${REGION}.osrm"; \
-      cp "./data/${REGION}.osrm" "/osrm/${REGION}.osrm"; \
+RUN if [ -s "./data/${REGION}.osrm.hsgr" ]; then \
+      echo "Using pre-baked ${REGION}.osrm family"; \
+      for f in data/${REGION}.osrm*; do cp "$f" "/osrm/$(basename "$f")"; done; \
     else \
       echo "Pre-baked ${REGION}.osrm not found — downloading + building at build time"; \
       apt-get update -qq && apt-get install -y -qq wget >/dev/null 2>&1; \
@@ -44,31 +45,21 @@ RUN if [ -s "./data/${REGION}.osrm" ]; then \
       for f in region.osrm*; do mv "$f" "/osrm/${REGION}.osrm${f#region.osrm}"; done; \
     fi
 
-# ---- Stage 1: build the Node backend ---------------------------------------
-FROM node:20-alpine AS builder
+# ---- Stage 1: build the Node backend (glibc/Debian for osrm-routed compat) --
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 ARG REGION
 
-# Native build tooling for prisma + @osrm/osrm (compiles libosmium via
-# cmake/node-gyp). Kept in the build stage so the runtime image stays lean.
-RUN apk add --no-cache \
-    build-base python3 make g++ libc6-compat \
-    cmake boost-dev expat-dev libxml2-dev zlib-dev \
-    && rm -rf /var/cache/apk/*
+RUN apt-get update -qq && apt-get install -y -qq \
+    build-essential python3 make cmake libboost-dev libexpat-dev libxml2-dev zlib1g-dev \
+    && rm -rf /var/cache/apt/*
 
 COPY package*.json ./
-# Install app deps, then force-build the native @osrm/osrm addon from source
-# (its prebuilds don't cover Node 20, so we compile libosmium in-tree).
-# We verify the addon actually loads; if it doesn't, fail the build loudly
-# instead of silently shipping a broken router.
+# Install deps (no reliance on the unmaintained native @osrm/osrm addon).
 RUN npm install
-RUN npm install @osrm/osrm@^5.27.2 --build-from-source \
- && node -e "require('@osrm/osrm'); console.log('@osrm/osrm OK')" \
- || { echo "ERROR: @osrm/osrm native build/load failed"; exit 1; }
 
 COPY . .
 # The road network from the osrm-builder stage (pre-baked or freshly built).
-# Copy the full family: base .osrm plus all sidecar files (la.osrm.hsgr, ...).
 COPY --from=osrm-builder /osrm/${REGION}.osrm ./data/${REGION}.osrm
 COPY --from=osrm-builder /osrm/${REGION}.osrm.hsgr ./data/${REGION}.osrm.hsgr
 COPY --from=osrm-builder /osrm/${REGION}.osrm.ebg ./data/${REGION}.osrm.ebg
@@ -96,24 +87,44 @@ COPY --from=osrm-builder /osrm/${REGION}.osrm.turn_duration_penalties ./data/${R
 
 RUN npx prisma generate && npm run build
 
-# ---- Stage 2: lean runtime ------------------------------------------------
-FROM node:20-alpine AS runtime
+# ---- Stage 2: runtime (Debian/glibc — ships osrm-routed + all libs) -------
+# Based on the OSRM image so osrm-routed + its native libs are present; we
+# inject the Node runtime (glibc-compatible, built on bookworm above) by
+# copying the node binary + global modules from the builder stage.
+FROM ghcr.io/project-osrm/osrm-backend:latest AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV OSRM_DATA_PATH=./data/la.osrm
+ENV OSRM_ROUTED_URL=http://127.0.0.1:5000
 
-RUN apk add --no-cache libc6-compat zlib expat libxml2 boost \
-    && rm -rf /var/cache/apk/*
+# Node runtime from the bookworm builder (same glibc family as Debian).
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm 2>/dev/null || true
 
+# The built Node app (glibc-compatible, built on bookworm above).
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/data ./data
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 
+# Entrypoint: start osrm-routed sidecar (loads the baked CH graph) in the
+# background, wait for it to answer, then launch the Node server.
+RUN printf '#!/usr/bin/env bash\nset -e\n' > /entrypoint.sh && \
+    printf 'REGION="${REGION:-la}"\n' >> /entrypoint.sh && \
+    printf 'echo "[entrypoint] starting osrm-routed on 127.0.0.1:5000"\n' >> /entrypoint.sh && \
+    printf 'osrm-routed --algorithm CH "./data/${REGION}.osrm" --ip 127.0.0.1 --port 5000 > /var/log/osrm-routed.log 2>&1 &\n' >> /entrypoint.sh && \
+    printf 'for i in $(seq 1 90); do\n' >> /entrypoint.sh && \
+    printf '  if node -e "require('"'"'http'"'"').get('"'"'http://127.0.0.1:5000/'"'"',r=>process.exit(r.statusCode===200?0:1)).on('"'"'error'"'"',()=>process.exit(1))" >/dev/null 2>&1; then echo "[entrypoint] osrm-routed is ready"; break; fi\n' >> /entrypoint.sh && \
+    printf '  sleep 1\n' >> /entrypoint.sh && \
+    printf 'done\n' >> /entrypoint.sh && \
+    printf 'echo "[entrypoint] launching node server"\n' >> /entrypoint.sh && \
+    printf 'exec node dist/app.js\n' >> /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
 RUN mkdir -p /app/uploads
 
 EXPOSE 3000
 
-# Prefer the embedded OSRM; fall back to remote OSRM_URL only if set.
-CMD ["node", "dist/app.js"]
+ENTRYPOINT ["/entrypoint.sh"]

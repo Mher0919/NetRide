@@ -8,23 +8,24 @@
 //   to keep alive, and on a free-tier host (Render free) a second always-on
 //   service is both expensive and flaky (cold starts, sleep).
 //
-//   @osrm/osrm runs the *actual* OSRM routing core inside the Node process.
-//   No network hop, no second service, sub-50ms responses, and the geometry
-//   is the same contraction-hierarchy road network OSRM serves over HTTP.
-//   We bake a regional extract (Greater LA / SoCal) into the image at build
-//   time, so the working set is a single ~40–80MB .osrm file — trivial for
-//   the free tier and effectively zero marginal cost per request.
+//   We bake a regional extract (Greater LA) into the image at build time and
+//   run the OFFICIAL `osrm-routed` binary as a local sidecar INSIDE the same
+//   container (started by the container entrypoint on 127.0.0.1:5000). This
+//   process serves the *actual* OSRM road network over HTTP with zero network
+//   hop to the outside world, sub-50ms responses, and the same
+//   contraction-hierarchy geometry OSRM serves in production. No native Node
+//   addon (which is unmaintained/Node-version-fragile) and no second Render
+//   service — just one container, one process tree.
 //
 //   This is the PRIMARY engine. The remote OSRM_URL (if configured) and a
 //   road-shaped synthetic fallback are secondary/tertiary only.
 //
-// Native-build safety:
-//   @osrm/osrm ships a native addon. We NEVER import it statically — it is
-//   required lazily inside an async method, wrapped in try/catch, so that a
-//   missing/!buildable native module can never break `npm install`, `tsc`,
-//   tests, or the server boot on platforms where it isn't available. On the
-//   production Linux image (where the .osrm is baked) it loads normally.
+// Robustness:
+//   The engine queries a localhost HTTP endpoint. If osrm-routed isn't up
+//   yet (cold start) or the query fails, route() returns null WITHOUT
+//   throwing, so callers transparently fall through to the next engine.
 
+import http from 'http';
 import { env } from '../../config/env';
 import { MLEtaService } from '../../services/ml-eta.service';
 import { enrichSteps } from '../../utils/road-classifier';
@@ -38,118 +39,11 @@ export interface LocalOsrmResult {
   speedLimitsByRoad: Record<string, number>;
 }
 
-// Singleton handle to the loaded OSRM instance (null until first success).
-let osrmInstance: any = null;
-let osrmLoadAttempted = false;
+// Local osrm-routed sidecar endpoint (set via OSRM_ROUTED_URL or default).
+const OSRM_ROUTED_URL = env.OSRM_ROUTED_URL || 'http://127.0.0.1:5000';
+
 let osrmAvailable = false;
-
-/** Absolute/relative path to the baked regional .osrm extract. */
-const OSRM_DATA_PATH = env.OSRM_DATA_PATH || './data/la.osrm';
-
-/**
- * Lazily load (once) the in-process OSRM engine for the SoCal road network.
- * Returns the engine instance or null if it can't be loaded. Never throws.
- */
-async function loadOsrm(): Promise<any | null> {
-  if (osrmLoadAttempted) return osrmAvailable ? osrmInstance : null;
-  osrmLoadAttempted = true;
-
-  try {
-    // Dynamic import keeps the native addon out of the static dependency
-    // graph so the build/tests never require it to be compiled.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = await import('@osrm/osrm');
-    const Osrm = (mod as any).default ?? mod;
-    osrmInstance = new Osrm({
-      path: OSRM_DATA_PATH,
-      algorithm: 'CH',
-    });
-    // Warm the file handle — the constructor is sync but the mmap can surface
-    // errors on first use, so we probe with a tiny query.
-    await new Promise<void>((resolve, reject) => {
-      osrmInstance.route(
-        {
-          coordinates: [
-            [-118.2437, 34.0522], // Los Angeles
-            [-118.25, 34.06],
-          ],
-          overview: 'full',
-          geometry: 'geojson',
-          steps: true,
-          annotations: true,
-        },
-        (err: any) => (err ? reject(err) : resolve()),
-      );
-    });
-    osrmAvailable = true;
-    logger.info({ path: OSRM_DATA_PATH }, 'routing_osrm_embedded_ready');
-    return osrmInstance;
-  } catch (err: any) {
-    osrmAvailable = false;
-    logger.warn(
-      { err: err?.message, path: OSRM_DATA_PATH },
-      'routing_osrm_embedded_unavailable',
-    );
-    return null;
-  }
-}
-
-export const LocalOsrmEngine = {
-  /** True once the embedded engine has loaded successfully. */
-  get available(): boolean {
-    return osrmAvailable;
-  },
-
-  /**
-   * Compute a driving route entirely in-process. Returns null (without
-   * throwing) if the engine is unavailable or the query fails, so callers
-   * can transparently fall through to the next engine.
-   */
-  async route(
-    origin: [number, number],
-    destination: [number, number],
-  ): Promise<LocalOsrmResult | null> {
-    const osrm = await loadOsrm();
-    if (!osrm) return null;
-
-    // OSRM expects [lng, lat].
-    const coordinates: [number, number][] = [
-      [origin[1], origin[0]],
-      [destination[1], destination[0]],
-    ];
-
-    const result = await new Promise<any>((resolve, reject) => {
-      osrm.route(
-        {
-          coordinates,
-          overview: 'full',
-          geometry: 'geojson',
-          steps: true,
-          annotations: true,
-        },
-        (err: any, res: any) => (err ? reject(err) : resolve(res)),
-      );
-    }).catch(() => null);
-
-    if (!result || !result.routes || !result.routes.length) return null;
-
-    const route = result.routes[0];
-    const distanceMeters = route.distance;
-    const osrmDuration = route.duration;
-    const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], distanceMeters);
-    const rawSteps = route.legs?.[0]?.steps ?? [];
-    const steps = enrichSteps(rawSteps);
-    const speedLimitsByRoad = buildSpeedMap(steps);
-
-    return {
-      distanceMeters,
-      durationSeconds: osrmDuration,
-      geometry: route.geometry,
-      steps,
-      speedLimitsByRoad,
-    };
-  },
-};
+let healthChecked = false;
 
 function buildSpeedMap(steps: any[]): Record<string, number> {
   const map: Record<string, number> = {};
@@ -163,3 +57,86 @@ function buildSpeedMap(steps: any[]): Record<string, number> {
   }
   return map;
 }
+
+async function getJson(url: string): Promise<any | null> {
+  return new Promise((resolve) => {
+    const req = http.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return resolve(null);
+      }
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (body += c));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(8000, () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+/**
+ * Probe the local sidecar once. Returns true if it answered a health ping.
+ * osrm-routed answers GET / with {"status":"Ok"}.
+ */
+async function probe(): Promise<boolean> {
+  if (healthChecked) return osrmAvailable;
+  healthChecked = true;
+  const data = await getJson(`${OSRM_ROUTED_URL}/`);
+  osrmAvailable = !!data && (data.status === 'Ok' || data.status === 'ok');
+  if (osrmAvailable) {
+    logger.info({ url: OSRM_ROUTED_URL }, 'routing_osrm_embedded_ready');
+  } else {
+    logger.warn({ url: OSRM_ROUTED_URL }, 'routing_osrm_embedded_unavailable');
+  }
+  return osrmAvailable;
+}
+
+export const LocalOsrmEngine = {
+  /** True once the embedded engine has answered a health probe. */
+  get available(): boolean {
+    return osrmAvailable;
+  },
+
+  /**
+   * Compute a driving route via the local osrm-routed sidecar. Returns null
+   * (without throwing) if the sidecar is unavailable or the query fails, so
+   * callers can transparently fall through to the next engine.
+   */
+  async route(
+    origin: [number, number],
+    destination: [number, number],
+  ): Promise<LocalOsrmResult | null> {
+    if (!(await probe())) return null;
+
+    // OSRM expects lng,lat.
+    const coord = `${origin[1]},${origin[0]};${destination[1]},${destination[0]}`;
+    const url =
+      `${OSRM_ROUTED_URL}/route/v1/driving/${coord}` +
+      `?overview=full&geometries=geojson&steps=true&annotations=true`;
+
+    const data = await getJson(url);
+    if (!data || !data.routes || !data.routes.length) return null;
+
+    const route = data.routes[0];
+    const rawSteps = route.legs?.[0]?.steps ?? [];
+    const steps = enrichSteps(rawSteps);
+
+    return {
+      distanceMeters: route.distance,
+      durationSeconds: route.duration,
+      geometry: route.geometry,
+      steps,
+      speedLimitsByRoad: buildSpeedMap(steps),
+    };
+  },
+};
