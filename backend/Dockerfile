@@ -31,7 +31,7 @@ RUN if [ -s "./data/${REGION}.osrm" ]; then \
       cp "./data/${REGION}.osrm" "/osrm/${REGION}.osrm"; \
     else \
       echo "Pre-baked ${REGION}.osrm not found — downloading + building at build time"; \
-      wget -q --tries=5 --timeout=300 -O region.osm.pbf \
+      curl -fSL --retry 5 --max-time 300 -o region.osm.pbf \
         "https://download.bbbike.org/osm/bbbike/LosAngeles/LosAngeles.osm.pbf" && \
       if [ ! -s region.osm.pbf ] || [ "$(stat -c%s region.osm.pbf)" -lt 10000000 ]; then \
         echo "ERROR: downloaded PBF missing or too small"; exit 1; \
