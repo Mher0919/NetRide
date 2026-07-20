@@ -1,7 +1,9 @@
-# Build inputs/outputs for the embedded OSRM engine are generated during the
-# Docker build (download + extract). Never commit these large binaries.
+# Build inputs for the embedded OSRM engine (downloaded/extracted locally or
+# at build time). Never commit these large binaries.
 *.pbf
-*.osrm
+
+# la.osrm is the pre-baked CH road network, tracked via Git LFS
+# (.gitattributes) so it IS committed — do not ignore it.
 *.osrm.names
 *.osrm.properties
 *.osrm.timestamp
