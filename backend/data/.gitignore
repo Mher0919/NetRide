@@ -1,0 +1,7 @@
+# Build inputs/outputs for the embedded OSRM engine are generated during the
+# Docker build (download + extract). Never commit these large binaries.
+*.pbf
+*.osrm
+*.osrm.names
+*.osrm.properties
+*.osrm.timestamp

@@ -7,45 +7,37 @@
 # which is faster (no network hop) and free-tier friendly.
 #
 # Result: OSRM_DATA_PATH defaults to ./data/la.osrm and is produced below.
+# The build downloads a lightweight LA-area OSM extract (~203MB, BBBike) and
+# extracts the road network in-process — no separate routing service needed.
+
+ARG REGION=la
 
 # ---- Stage 1: fetch the OSM extract (Node/alpine has wget) -----------------
-# Default: Los Angeles County only (~60MB) — covers the core operating area
-# with identical road quality but a ~10x lighter/faster build than SoCal.
-# Override OSM_PBF / REGION to target a larger area when needed.
-# NOTE: we deliberately do NOT cache the PBF — a partial/corrupt download
-# would poison the build. The expensive osrm-extract output IS cached
-# separately below, so code-only redeploys stay fast.
+# Lightweight Los Angeles-area extract (~203MB, BBBike) — covers the core
+# operating area with full road detail but builds comfortably on free-tier
+# RAM, unlike the 666MB SoCal region. Override OSM_PBF to target another.
+# We deliberately do NOT cache the PBF (a partial download would poison the
+# build); the expensive osrm-extract is run fresh here at build time.
 FROM node:20-alpine AS pbf-fetcher
 WORKDIR /osrm
-ARG REGION=la
-ARG OSM_PBF=https://download.geofabrik.de/north-america/us/california/los-angeles-latest.osm.pbf
-# --tries/--timeout + timestamping-free; verify the file is non-trivial.
-RUN wget -q --tries=3 --timeout=60 -O region.osm.pbf "${OSM_PBF}" && \
-    if [ ! -s region.osm.pbf ] || [ "$(stat -c%s region.osm.pbf)" -lt 1000000 ]; then \
-      echo "ERROR: downloaded PBF is missing or too small"; exit 1; \
+ARG OSM_PBF=https://download.bbbike.org/osm/bbbike/LosAngeles/LosAngeles.osm.pbf
+# Download with retries; fail fast if the result is missing or an error page.
+RUN wget -q --tries=5 --timeout=180 -O region.osm.pbf "${OSM_PBF}" && \
+    if [ ! -s region.osm.pbf ] || [ "$(stat -c%s region.osm.pbf)" -lt 10000000 ]; then \
+      echo "ERROR: downloaded PBF is missing or too small (got $(stat -c%s region.osm.pbf 2>/dev/null) bytes)"; exit 1; \
     fi
 
 # ---- Stage 2: build the OSRM road-network extract --------------------------
 FROM ghcr.io/project-osrm/osrm-backend:latest AS osrm-builder
 WORKDIR /osrm
-ARG REGION=la
-# The osrm-backend image has neither curl nor wget, so we download the PBF
-# in the pbf-fetcher stage (alpine) and copy it in here.
+ARG REGION
 COPY --from=pbf-fetcher /osrm/region.osm.pbf /osrm/region.osm.pbf
-# Cache the extract output so a code-only redeploy reuses the built network
-# instead of re-running osrm-extract/partition/customize (the slow part).
-RUN --mount=type=cache,target=/osrm/cache2 \
-    if [ -f /osrm/cache2/${REGION}.osrm ] && [ "$(stat -c%s /osrm/cache2/${REGION}.osrm 2>/dev/null || echo 0)" -gt 1000000 ]; then \
-      cp /osrm/cache2/${REGION}.osrm /osrm/${REGION}.osrm; \
-    else \
-      osrm-extract -p /opt/car.lua region.osm.pbf && \
-      osrm-partition region.osrm && \
-      osrm-customize region.osrm && \
-      mv region.osrm /osrm/${REGION}.osrm && \
-      cp /osrm/${REGION}.osrm /osrm/cache2/${REGION}.osrm; \
-    fi
+RUN osrm-extract -p /opt/car.lua region.osm.pbf && \
+    osrm-partition region.osrm && \
+    osrm-customize region.osrm && \
+    mv region.osrm /osrm/${REGION}.osrm
 
-# ---- Stage 2: build the Node backend ---------------------------------------
+# ---- Stage 3: build the Node backend ---------------------------------------
 FROM node:20-alpine AS builder
 WORKDIR /app
 
@@ -63,10 +55,10 @@ RUN npm install || npm install --no-optional
 COPY . .
 
 # Bake the road network from the osrm-builder stage.
-COPY --from=osrm-builder /osrm/*.osrm ./data/
+COPY --from=osrm-builder /osrm/${REGION}.osrm ./data/${REGION}.osrm
 RUN npx prisma generate && npm run build
 
-# ---- Stage 3: lean runtime ------------------------------------------------
+# ---- Stage 4: lean runtime ------------------------------------------------
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
