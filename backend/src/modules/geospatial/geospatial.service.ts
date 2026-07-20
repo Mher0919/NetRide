@@ -330,9 +330,24 @@ export class GeospatialService {
     const q = (query || '').trim();
     if (!q) return [];
 
+    // Check Redis cache first
+    const cacheKey = `search:${q.toLowerCase()}:${userLat?.toFixed(2) ?? '0'}:${userLon?.toFixed(2) ?? '0'}`;
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // cache miss or redis down — proceed
+    }
+
+    let results: any[] = [];
+
     if (!env.GEOAPIFY_API_KEY) {
       logger.warn('geospatial_no_geoapify_key');
-      return this.autocompleteSearch(q);
+      results = await this.autocompleteSearch(q, userLat, userLon);
+      this.cacheSearchResults(cacheKey, results);
+      return results;
     }
 
     const apiKey = env.GEOAPIFY_API_KEY;
@@ -365,7 +380,7 @@ export class GeospatialService {
           const features: any[] = resp.data?.features ?? [];
           if (features.length === 0) continue;
 
-          return features.map((f: any) => {
+          results = features.map((f: any) => {
             const props = f.properties || {};
             const coords = f.geometry?.coordinates || [0, 0];
             const distMiles = this.haversineMiles(
@@ -388,35 +403,61 @@ export class GeospatialService {
               },
             };
           }).slice(0, this.MAX_PLACES);
+
+          this.cacheSearchResults(cacheKey, results);
+          return results;
         } catch {
           // Try next radius
         }
       }
 
-      return this.autocompleteSearch(q);
+      results = await this.autocompleteSearch(q, userLat, userLon);
+      this.cacheSearchResults(cacheKey, results);
+      return results;
     }
 
-    return this.autocompleteSearch(q);
+    results = await this.autocompleteSearch(q, userLat, userLon);
+    this.cacheSearchResults(cacheKey, results);
+    return results;
+  }
+
+  private static async cacheSearchResults(cacheKey: string, results: any[]): Promise<void> {
+    if (results.length === 0) return;
+    try {
+      await redis.set(cacheKey, JSON.stringify(results), 'EX', 300).catch(() => {});
+    } catch {
+      // cache write failure is non-critical
+    }
   }
 
   /**
    * Autocomplete using Geoapify Geocoding Autocomplete API.
+   * Uses location bias when user lat/lon is provided.
    * Falls back to static suggestions if Geoapify is unavailable.
    */
-  static async autocompleteSearch(query: string): Promise<any[]> {
+  static async autocompleteSearch(query: string, userLat?: number, userLon?: number): Promise<any[]> {
     const q = (query || '').trim();
     if (q.length < 2) return [];
 
     if (env.GEOAPIFY_API_KEY) {
       try {
+        const params: Record<string, any> = {
+          text: q,
+          apiKey: env.GEOAPIFY_API_KEY,
+          limit: 8,
+          lang: 'en',
+          type: 'amenity',
+        };
+
+        if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+          params.bias = `proximity:${userLon},${userLat}`;
+          params.filter = `countrycode:us`;
+        } else {
+          params.filter = `countrycode:us`;
+        }
+
         const resp = await axios.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, {
-          params: {
-            text: q,
-            apiKey: env.GEOAPIFY_API_KEY,
-            limit: 6,
-            lang: 'en',
-            type: 'amenity',
-          },
+          params,
           timeout: 5000,
         });
 
@@ -425,13 +466,20 @@ export class GeospatialService {
           return features.map((f: any) => {
             const props = f.properties || {};
             const coords = f.geometry?.coordinates || [0, 0];
+            const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon)
+              ? this.haversineMiles(
+                  { lat: userLat as number, lon: userLon as number },
+                  { lat: coords[1], lon: coords[0] },
+                )
+              : undefined;
+
             return {
               display_name: props.formatted || props.name || props.address_line1 || q,
               lat: coords[1],
               lon: coords[0],
               type: props.result_type || 'suggestion',
               state: props.state || '',
-              distance_miles: undefined,
+              distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
               is_suggestion: true,
               place_id: props.place_id,
             };
@@ -442,8 +490,8 @@ export class GeospatialService {
       }
     }
 
-    // Static suggestion fallback
-    return STATIC_SUGGESTIONS
+    // Static suggestion fallback with location-aware results
+    const suggestions = STATIC_SUGGESTIONS
       .filter((s) => s.prefixes.some((p) => q.toLowerCase().startsWith(p)))
       .slice(0, 6)
       .map((s) => ({
@@ -454,6 +502,8 @@ export class GeospatialService {
         distance_miles: undefined,
         is_suggestion: true,
       }));
+
+    return suggestions;
   }
 
   private static formatGeoapifyName(props: any): string {

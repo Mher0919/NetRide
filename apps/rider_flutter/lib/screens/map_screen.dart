@@ -1,5 +1,5 @@
-import 'package:dio/dio.dart';
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,6 +12,7 @@ import '../services/routing_service.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../models/search_result.dart';
 import 'address_search_delegate.dart';
 import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
@@ -32,7 +33,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   models.Location? _pickup;
   models.Location? _destination;
   List<LatLng> _routePoints = [];
-  Timer? _debounceTimer;
   Timer? _geohashTimer;
   ViewState _state = ViewState.loading;
   String? _errorMessage;
@@ -149,7 +149,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   void dispose() {
     _positionSubscription?.cancel();
     _geohashTimer?.cancel();
-    _debounceTimer?.cancel();
     super.dispose();
   }
 
@@ -240,7 +239,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _openSearch(bool isPickup) async {
-    final result = await showSearch<AddressSearchResult?>(
+    final result = await showSearch<SearchResult?>(
       context: context,
       delegate: AddressSearchDelegate(
         userLat: _userPosition?.latitude,
