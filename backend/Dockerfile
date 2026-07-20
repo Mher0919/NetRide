@@ -57,8 +57,12 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 COPY package*.json ./
-# Install optional @osrm/osrm too (skip if it can't build on this platform).
-RUN npm install || npm install --no-optional
+# Install app deps, then force-build the native @osrm/osrm addon. We do NOT
+# fall back to --no-optional here: if the native module fails to compile we
+# want the build to fail loudly (the embedded router is required in prod),
+# not silently drop it and ship a broken router.
+RUN npm install
+RUN npm install @osrm/osrm@^5.27.2 || { echo "ERROR: @osrm/osrm native build failed"; exit 1; }
 
 COPY . .
 # The road network from the osrm-builder stage (pre-baked or freshly built).
@@ -96,7 +100,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV OSRM_DATA_PATH=./data/la.osrm
 
-RUN apk add --no-cache libc6-compat zlib expat libxml2 boost-python3 \
+RUN apk add --no-cache libc6-compat zlib expat libxml2 boost \
     && rm -rf /var/cache/apk/*
 
 COPY --from=builder /app/node_modules ./node_modules
