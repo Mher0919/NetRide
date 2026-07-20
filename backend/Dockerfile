@@ -8,14 +8,20 @@
 #
 # Result: OSRM_DATA_PATH defaults to ./data/socal.osrm and is produced below.
 
-# ---- Stage 1: build the OSRM road-network extract --------------------------
-FROM ghcr.io/project-osrm/osrm-backend:latest AS osrm-builder
+# ---- Stage 1: fetch the OSM extract (Node/alpine has wget) -----------------
+FROM node:20-alpine AS pbf-fetcher
 WORKDIR /osrm
-# Default: SoCal extract. Override REGION / OSM_PBF to target elsewhere.
 ARG REGION=socal
 ARG OSM_PBF=https://download.geofabrik.de/north-america/us/california/socal-latest.osm.pbf
-# The osrm-backend image is Debian-based and ships wget, not curl.
 RUN wget -q -O region.osm.pbf "${OSM_PBF}"
+
+# ---- Stage 2: build the OSRM road-network extract --------------------------
+FROM ghcr.io/project-osrm/osrm-backend:latest AS osrm-builder
+WORKDIR /osrm
+ARG REGION=socal
+# The osrm-backend image has neither curl nor wget, so we download the PBF
+# in the pbf-fetcher stage (alpine) and copy it in here.
+COPY --from=pbf-fetcher /osrm/region.osm.pbf /osrm/region.osm.pbf
 RUN osrm-extract -p /opt/car.lua region.osm.pbf && \
     osrm-partition region.osrm && \
     osrm-customize region.osrm
