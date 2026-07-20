@@ -57,12 +57,14 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 COPY package*.json ./
-# Install app deps, then force-build the native @osrm/osrm addon. We do NOT
-# fall back to --no-optional here: if the native module fails to compile we
-# want the build to fail loudly (the embedded router is required in prod),
-# not silently drop it and ship a broken router.
+# Install app deps, then force-build the native @osrm/osrm addon from source
+# (its prebuilds don't cover Node 20, so we compile libosmium in-tree).
+# We verify the addon actually loads; if it doesn't, fail the build loudly
+# instead of silently shipping a broken router.
 RUN npm install
-RUN npm install @osrm/osrm@^5.27.2 || { echo "ERROR: @osrm/osrm native build failed"; exit 1; }
+RUN npm install @osrm/osrm@^5.27.2 --build-from-source \
+ && node -e "require('@osrm/osrm'); console.log('@osrm/osrm OK')" \
+ || { echo "ERROR: @osrm/osrm native build/load failed"; exit 1; }
 
 COPY . .
 # The road network from the osrm-builder stage (pre-baked or freshly built).
