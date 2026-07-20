@@ -54,9 +54,13 @@ class AuthService {
     }
   }
 
-  static Future<void> requestPhoneOTP(String phoneNumber) async {
+  static Future<Map<String, dynamic>?> requestPhoneOTP(String phoneNumber) async {
     try {
-      await ApiService.dio.post('auth/request-phone-otp', data: {'phone_number': phoneNumber});
+      final response = await ApiService.dio.post('auth/request-phone-otp', data: {'phone_number': phoneNumber});
+      if (response.statusCode == 200 && response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
     } catch (e) {
       rethrow;
     }

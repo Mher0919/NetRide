@@ -337,16 +337,6 @@ async function runMigrations() {
       console.log('✅ Database security (016) applied successfully');
     }
 
-    // Face verification schema (018)
-    const hasFaceEnrollment = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'face_enrollment_url'");
-    if (hasFaceEnrollment.rowCount === 0) {
-      console.log('⚡ Patching face verification schema (018)...');
-      const schemaPath = path.join(__dirname, '../migrations/018_add_face_verification.sql');
-      const schema = fs.readFileSync(schemaPath, 'utf8');
-      await pool.query(schema);
-      console.log('✅ Face verification schema (018) applied successfully');
-    }
-
     // Navigation + safety schema (019): route_metadata on rides and
     // the speeding_violations ledger for the dangerous-driver flag.
     const hasRouteMetadata = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'rides' AND column_name = 'route_metadata'");
@@ -464,40 +454,18 @@ async function runMigrations() {
       console.log('✅ Storage files schema (028) applied');
     }
 
-    // Make audit_logs.admin_id nullable (029). System-generated events such
-    // as automated face checks have no acting admin, so the column must
-    // allow NULL. Guards on the column's nullability.
+    // Make audit_logs.admin_id nullable (029). System-generated events
+    // (no acting admin) can be recorded, so the column must allow NULL.
+    // Guards on the column's current nullability.
     const adminIdNullable = await pool.query(
       "SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_logs' AND column_name = 'admin_id' AND is_nullable = 'YES'"
     );
     if (adminIdNullable.rowCount === 0) {
       console.log('⚡ Relaxing audit_logs.admin_id nullability (029)...');
-      const schemaPath = path.join(__dirname, '../migrations/20260718_face_audit_admin_nullable.sql');
+      const schemaPath = path.join(__dirname, '../migrations/029_audit_logs_admin_nullable.sql');
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ audit_logs.admin_id made nullable');
-    }
-
-    // Face enrollment descriptor column (face-api.js 128-d vector).
-    const hasDescriptor = await pool.query(
-      "SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'face_enrollment_descriptor'"
-    );
-    if (hasDescriptor.rowCount === 0) {
-      console.log('⚡ Adding face_enrollment_descriptor column...');
-      const schemaPath = path.join(__dirname, '../migrations/20260718_face_descriptor.sql');
-      const schema = fs.readFileSync(schemaPath, 'utf8');
-      await pool.query(schema);
-      console.log('✅ face_enrollment_descriptor column added');
-    }
-
-    // Face check event reason
-    const hasEventReason = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'face_check_events' AND column_name = 'reason'");
-    if (hasEventReason.rowCount === 0) {
-      console.log('⚡ Patching face_check_events (reason)...');
-      const schemaPath = path.join(__dirname, '../migrations/20260719_face_event_reason.sql');
-      const schema = fs.readFileSync(schemaPath, 'utf8');
-      await pool.query(schema);
-      console.log('✅ face_check_events.reason column added');
     }
 
     // User block + rating flag (030)

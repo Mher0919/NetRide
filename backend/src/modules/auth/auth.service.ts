@@ -33,6 +33,14 @@ export class AuthService {
       `SELECT phone_number, phone_verified FROM drivers WHERE user_id = $1`, [userId]
     );
     if (driverRes.rows[0]?.phone_number === phoneNumber && driverRes.rows[0]?.phone_verified) {
+      // Same user, phone verified on the DRIVER profile. Mirror it onto the
+      // RIDER profile (users row) so the rider onboarding is also satisfied
+      // and the app routes straight into the main screen instead of looping
+      // on a phone-verify step that the backend keeps auto-confirming.
+      await pool.query(
+        `UPDATE users SET phone_number = $1, is_verified = true, phone_verified = true WHERE id = $2`,
+        [phoneNumber, userId]
+      );
       return { auto_verified: true, message: 'Phone already verified on your account.' };
     }
 
@@ -41,14 +49,14 @@ export class AuthService {
       'SELECT id FROM users WHERE phone_number = $1 AND id != $2', [phoneNumber, userId]
     );
     if (otherUser.rows.length > 0) {
-      throw new Error('This phone number is already associated with another account');
+      throw new Error('This number is already registered to another account');
     }
 
     const otherDriver = await pool.query(
       'SELECT user_id FROM drivers WHERE phone_number = $1 AND user_id != $2', [phoneNumber, userId]
     );
     if (otherDriver.rows.length > 0) {
-      throw new Error('This phone number is already associated with another account');
+      throw new Error('This number is already registered to another account');
     }
 
     // 3. Normal Twilio flow

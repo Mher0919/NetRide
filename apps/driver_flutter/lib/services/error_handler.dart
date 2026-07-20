@@ -133,7 +133,7 @@ class ErrorHandler {
     final mapped = _mapKnownMessage(message);
     if (mapped != null) return mapped;
     if (code == '23505') {
-      return 'This phone number is already associated with an existing account.';
+      return 'This number is already registered.';
     }
     return 'Something went wrong while saving your information. Please try again.';
   }
@@ -163,7 +163,7 @@ class ErrorHandler {
 
     // Phone / OTP
     if (m.contains('already registered') || m.contains('already exists') || m.contains('already in use')) {
-      return 'This phone number is already associated with an existing account.';
+      return 'This number is already registered.';
     }
     if (m.contains('not found') || m.contains('no account') || m.contains('unknown user')) {
       return 'We couldn\'t find an account with that phone number.';
@@ -203,7 +203,7 @@ class ErrorHandler {
       return 'Something went wrong on our side. Please try again in a few moments.';
     }
     if (m.contains('duplicate') || m.contains('unique constraint') || m.contains('23505')) {
-      return 'This phone number is already associated with an existing account.';
+      return 'This number is already registered.';
     }
     if (m.contains('weak password') || m.contains('password')) {
       return 'That password doesn\'t meet our requirements. Please choose a stronger one.';
@@ -216,7 +216,7 @@ class ErrorHandler {
   // Phone / OTP specific friendly helpers (Requirement 6)
   // ───────────────────────────────────────────────────────────────────
   static String phoneAlreadyRegistered() =>
-      'This phone number is already associated with an existing account.';
+      'This number is already registered.';
   static String phoneNotFound() =>
       'We couldn\'t find an account with that phone number.';
   static String invalidPhone() =>

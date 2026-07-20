@@ -67,7 +67,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await AuthService.requestPhoneOTP(normalized);
+      final result = await AuthService.requestPhoneOTP(normalized);
+
+      // Backend short-circuits when the number is already verified on this
+      // account (e.g. re-onboarding, or verified via another app profile).
+      // In that case no SMS is sent — complete onboarding directly instead
+      // of stranding the user on a code-entry screen with no code.
+      if (result != null && result['auto_verified'] == true) {
+        await _clearProgress();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Phone already verified.')),
+          );
+          Navigator.pushReplacementNamed(context, '/');
+        }
+        return;
+      }
+
       await _persistCodeSent();
       setState(() => _codeSent = true);
       if (mounted) {
