@@ -3,3 +3,6 @@
 backend/.env
 **/.env
 osrm-data/
+
+uploads/
+backend/uploads/
