@@ -43,7 +43,6 @@ export interface LocalOsrmResult {
 const OSRM_ROUTED_URL = env.OSRM_ROUTED_URL || 'http://127.0.0.1:5000';
 
 let osrmAvailable = false;
-let healthChecked = false;
 
 function buildSpeedMap(steps: any[]): Record<string, number> {
   const map: Record<string, number> = {};
@@ -85,18 +84,17 @@ async function getJson(url: string): Promise<any | null> {
 }
 
 /**
- * Probe the local sidecar once. Returns true if it answered a health ping.
- * osrm-routed answers GET / with {"status":"Ok"}.
+ * Probe the local sidecar. Returns true once it answers a health ping
+ * (osrm-routed answers GET / with {"status":"Ok"}). We do NOT permanently
+ * cache a failed probe — the sidecar may still be loading its graph on the
+ * first call — so we keep retrying until it answers, then latch "available".
  */
 async function probe(): Promise<boolean> {
-  if (healthChecked) return osrmAvailable;
-  healthChecked = true;
+  if (osrmAvailable) return true;
   const data = await getJson(`${OSRM_ROUTED_URL}/`);
   osrmAvailable = !!data && (data.status === 'Ok' || data.status === 'ok');
   if (osrmAvailable) {
     logger.info({ url: OSRM_ROUTED_URL }, 'routing_osrm_embedded_ready');
-  } else {
-    logger.warn({ url: OSRM_ROUTED_URL }, 'routing_osrm_embedded_unavailable');
   }
   return osrmAvailable;
 }

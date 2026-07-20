@@ -115,10 +115,11 @@ RUN printf '#!/usr/bin/env bash\nset -e\n' > /entrypoint.sh && \
     printf 'REGION="${REGION:-la}"\n' >> /entrypoint.sh && \
     printf 'echo "[entrypoint] starting osrm-routed on 127.0.0.1:5000"\n' >> /entrypoint.sh && \
     printf 'osrm-routed --algorithm CH "./data/${REGION}.osrm" --ip 127.0.0.1 --port 5000 > /var/log/osrm-routed.log 2>&1 &\n' >> /entrypoint.sh && \
-    printf 'for i in $(seq 1 90); do\n' >> /entrypoint.sh && \
+    printf 'for i in $(seq 1 180); do\n' >> /entrypoint.sh && \
     printf '  if node -e "require('"'"'http'"'"').get('"'"'http://127.0.0.1:5000/'"'"',r=>process.exit(r.statusCode===200?0:1)).on('"'"'error'"'"',()=>process.exit(1))" >/dev/null 2>&1; then echo "[entrypoint] osrm-routed is ready"; break; fi\n' >> /entrypoint.sh && \
     printf '  sleep 1\n' >> /entrypoint.sh && \
     printf 'done\n' >> /entrypoint.sh && \
+    printf 'if ! node -e "require('"'"'http'"'"').get('"'"'http://127.0.0.1:5000/'"'"',r=>process.exit(r.statusCode===200?0:1)).on('"'"'error'"'"',()=>process.exit(1))" >/dev/null 2>&1; then echo "[entrypoint] ERROR: osrm-routed did not start. Log:"; cat /var/log/osrm-routed.log; fi\n' >> /entrypoint.sh && \
     printf 'echo "[entrypoint] launching node server"\n' >> /entrypoint.sh && \
     printf 'exec node dist/app.js\n' >> /entrypoint.sh && \
     chmod +x /entrypoint.sh
