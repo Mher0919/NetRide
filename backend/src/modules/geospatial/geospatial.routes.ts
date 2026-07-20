@@ -38,7 +38,7 @@ router.get('/autocomplete', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Query (q) must be at least 2 characters' });
     }
 
-    const suggestions = GeospatialService.autocompleteSearch(q);
+    const suggestions = await GeospatialService.autocompleteSearch(q);
     res.json({ suggestions });
   } catch (err: any) {
     console.error('[GEOSPATIAL] Autocomplete Error:', err.message);

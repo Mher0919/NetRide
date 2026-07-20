@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { redis } from '../../config/redis';
+import { env } from '../../config/env';
 import { RoutingService, RoutingResult } from '../routing/routing.service';
 import { logger } from '../../observability/logger';
 
@@ -262,217 +263,207 @@ export class GeospatialService {
     return results.slice(0, 15);
   }
 
+  // ---- Places search & autocomplete (Geoapify API) -----------------------
+  //
+  // Geoapify provides a free tier (3,000 req/day) with both a Places API for
+  // nearby POI search and a Geocoding Autocomplete API for search suggestions.
+  // This replaces the earlier Overpass solution which was unreliable due to
+  // rate limits and timeouts on the community-run free tier.
+
+  private static readonly GEOAPIFY_BASE = 'https://api.geoapify.com';
+  private static readonly SEARCH_RADII_MILES = [1, 3, 5, 10, 25, 50];
+  private static readonly MAX_PLACES = 10;
+
+  /** Map common free-text queries to Geoapify category filters. */
+  private static geoapifyCategory(query: string): string[] {
+    const ql = query.toLowerCase();
+    const has = (...terms: string[]) => terms.some((t) => ql.includes(t));
+    if (has('coffee', 'cafe', 'espresso', 'starbucks', 'peet', 'starb'))
+      return ['catering.cafe', 'catering.coffee_shop'];
+    if (has('restaurant', 'dining', 'dinner', 'lunch', 'breakfast', 'brunch'))
+      return ['catering.restaurant'];
+    if (has('fast', 'mcdonald', 'burger', 'kfc', 'wendy', 'taco', 'chipotle', 'subway', 'pizza', 'food'))
+      return ['catering.fast_food'];
+    if (has('bar', 'pub', 'nightclub', 'cocktail', 'beer', 'lounge'))
+      return ['catering.bar', 'catering.pub'];
+    if (has('gas', 'fuel', 'shell', 'chevron', 'arco', 'exxon', 'charging'))
+      return ['service.vehicle.fuel'];
+    if (has('hotel', 'motel', 'inn', 'lodging', 'airbnb', 'hostel'))
+      return ['accommodation.hotel'];
+    if (has('grocery', 'market', 'supermarket', 'whole foods', 'trader', 'costco'))
+      return ['commercial.supermarket'];
+    if (has('target', 'walmart', 'store', 'shop', 'mall'))
+      return ['commercial'];
+    if (has('park', 'playground', 'garden', 'zoo'))
+      return ['leisure.park'];
+    if (has('hospital', 'clinic', 'urgent', 'medical', 'doctor'))
+      return ['healthcare'];
+    if (has('pharmacy', 'drug', 'cvs', 'walgreen', 'rite aid'))
+      return ['healthcare.pharmacy'];
+    if (has('school', 'university', 'college', 'campus'))
+      return ['education'];
+    if (has('bank', 'atm', 'chase', 'wells', 'bofa', 'citi'))
+      return ['service.financial'];
+    if (has('airport', 'lax', 'burbank', 'sfo', 'oakland'))
+      return ['transport.airport'];
+    if (has('disney', 'disn', 'theme park', 'amusement'))
+      return ['leisure.theme_park'];
+    if (has('gym', 'fitness', 'workout', 'la fitness', 'planet fitness', 'equinox'))
+      return ['sport.fitness_centre'];
+    if (has('stadium', 'arena', 'concert', 'venue', 'sofi', 'dodger'))
+      return ['leisure.stadium', 'leisure.sports_hall'];
+    if (has('movie', 'cinema', 'theater', 'amc', 'regal'))
+      return ['entertainment.cinema'];
+    if (has('post', 'mail', 'fedex', 'ups'))
+      return ['service.post_office'];
+    return [];
+  }
+
   /**
-   * Search for points of interest near the rider.
+   * Search for places near the user or get autocomplete suggestions.
    *
-   * Architecture (the 50–100mi bug fix):
-   *   The previous implementation used Nominatim *text search* over the whole
-   *   state of California. Nominatim is a geocoder, not a nearby-POI finder;
-   *   without a tight proximity bias it returns the most "notable" matches
-   *   statewide, so "coffee" / "Starbucks" / "McDonald's" came back 50–100mi
-   *   away. We now query the **Overpass API** with an `around:<radius>` filter
-   *   centered on the rider — a real spatial POI search that returns the
-   *   literally-nearest coffee shops / restaurants / brands first. Overpass is
-   *   free and OSM-backed (Google-level POI coverage).
-   *
-   *   Nominatim is kept ONLY as a graceful fallback for address-like queries
-   *   (street addresses, intersections) where a geocoder is the right tool
-   *   and no rider location is available.
+   * With lat/lon: uses Geoapify Places API (progressive radius 1–50mi).
+   * Without lat/lon: uses Geoapify Autocomplete API.
+   * Falls back to static suggestions if Geoapify is unreachable.
    */
   static async searchPlaces(query: string, userLat?: number, userLon?: number): Promise<any[]> {
     const q = (query || '').trim();
     if (!q) return [];
 
-    // When we have the rider's location, do a true nearby POI search.
+    if (!env.GEOAPIFY_API_KEY) {
+      logger.warn('geospatial_no_geoapify_key');
+      return this.autocompleteSearch(q);
+    }
+
+    const apiKey = env.GEOAPIFY_API_KEY;
+
     if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
-      const results = await this.searchPlacesNearby(q, userLat as number, userLon as number);
-      if (results.length > 0) return results;
-      // No Overpass results within 50mi — show autocomplete suggestions so
-      // the rider can pick a known destination instead of remote results.
-      const suggestions = this.autocompleteSearch(q);
-      if (suggestions.length > 0) {
-        return suggestions.map((s, i) => ({
-          display_name: s,
-          lat: 0, lon: 0,
-          type: 'suggestion',
-          state: '',
-          distance_miles: undefined,
-          is_suggestion: true,
-        }));
+      const lat = userLat as number;
+      const lon = userLon as number;
+      const categories = this.geoapifyCategory(q);
+
+      for (const radiusMi of this.SEARCH_RADII_MILES) {
+        const radiusM = Math.round(radiusMi * 1609.34);
+        try {
+          const params: Record<string, string> = {
+            apiKey,
+            filter: `circle:${lon},${lat},${radiusM}`,
+            limit: String(this.MAX_PLACES),
+            lang: 'en',
+          };
+          if (categories.length > 0) {
+            params.categories = categories.join(',');
+          } else {
+            params.text = q;
+          }
+
+          const resp = await axios.get(`${this.GEOAPIFY_BASE}/v2/places`, {
+            params,
+            timeout: 8000,
+          });
+
+          const features: any[] = resp.data?.features ?? [];
+          if (features.length === 0) continue;
+
+          return features.map((f: any) => {
+            const props = f.properties || {};
+            const coords = f.geometry?.coordinates || [0, 0];
+            const distMiles = this.haversineMiles(
+              { lat, lon },
+              { lat: coords[1], lon: coords[0] },
+            );
+
+            return {
+              display_name: this.formatGeoapifyName(props),
+              lat: coords[1],
+              lon: coords[0],
+              type: props.categories?.[0] || props.result_type || 'poi',
+              state: props.state || 'CA',
+              distance_miles: Math.round(distMiles * 10) / 10,
+              address: {
+                road: props.street || '',
+                city: props.city || '',
+                state: props.state || 'CA',
+                postcode: props.postcode || '',
+              },
+            };
+          }).slice(0, this.MAX_PLACES);
+        } catch {
+          // Try next radius
+        }
       }
+
+      return this.autocompleteSearch(q);
     }
 
-    // No location or no Overpass results — return autocomplete suggestions
-    // instead of a nationwide text search that brings back 100mi+ results.
-    return this.nominatimFallback(q, userLat, userLon);
-  }
-
-  /// Map a free-text query to OSM amenity/shop tags for the Overpass search.
-  private static poiTagFilters(query: string): string[] {
-    const ql = query.toLowerCase();
-    const has = (...terms: string[]) => terms.some((t) => ql.includes(t));
-
-    // Brand / chain name matches still resolve to an amenity via `name~`.
-    if (has('coffee', 'cafe', 'espresso', 'starbucks', 'peet', 'blue bottle')) {
-      return ['node["amenity"="cafe"]', 'way["amenity"="cafe"]', 'node["amenity"="coffee_shop"]', 'way["amenity"="coffee_shop"]'];
-    }
-    if (has('restaurant', 'dining', 'dinner', 'lunch', 'breakfast', 'brunch')) {
-      return ['node["amenity"="restaurant"]', 'way["amenity"="restaurant"]'];
-    }
-    if (has('fast', 'mcdonald', 'burger', 'kfc', 'wendy', 'taco', 'chipotle', 'subway', 'pizza', 'food', 'drive')) {
-      return ['node["amenity"="fast_food"]', 'way["amenity"="fast_food"]'];
-    }
-    if (has('bar', 'pub', 'nightclub', 'cocktail', 'beer', 'lounge')) {
-      return ['node["amenity"="bar"]', 'way["amenity"="bar"]', 'node["amenity"="pub"]', 'way["amenity"="pub"]'];
-    }
-    if (has('gas', 'fuel', 'shell', 'chevron', 'arco', '76', 'exxon', 'charging')) {
-      return ['node["amenity"="fuel"]', 'way["amenity"="fuel"]'];
-    }
-    if (has('hotel', 'motel', 'inn', 'lodging', 'airbnb', 'hostel')) {
-      return ['node["tourism"="hotel"]', 'way["tourism"="hotel"]', 'node["tourism"="motel"]', 'way["tourism"="motel"]'];
-    }
-    if (has('grocery', 'market', 'supermarket', 'whole foods', 'trader', 'target', 'walmart', 'store', 'shop', 'costco')) {
-      return ['node["shop"="supermarket"]', 'way["shop"="supermarket"]', 'node["shop"="convenience"]', 'way["shop"="convenience"]'];
-    }
-    if (has('park', 'playground', 'garden', 'zoo')) {
-      return ['node["leisure"="park"]', 'way["leisure"="park"]'];
-    }
-    if (has('hospital', 'clinic', 'urgent', 'medical', 'doctor', 'pharmacy', 'cvs', 'walgreens', 'dentist')) {
-      return ['node["amenity"="hospital"]', 'way["amenity"="hospital"]', 'node["amenity"="pharmacy"]', 'way["amenity"="pharmacy"]', 'node["amenity"="clinic"]', 'way["amenity"="clinic"]'];
-    }
-    if (has('school', 'university', 'college', 'campus', 'high')) {
-      return ['node["amenity"="school"]', 'way["amenity"="school"]', 'node["amenity"="university"]', 'way["amenity"="university"]'];
-    }
-    if (has('bank', 'atm', 'chase', 'wells', 'bofa', 'citi', 'credit')) {
-      return ['node["amenity"="bank"]', 'way["amenity"="bank"]', 'node["amenity"="atm"]', 'way["amenity"="atm"]'];
-    }
-    if (has('airport', 'lax', 'burbank', 'john wayne', 'ontario', 'sfo', 'oakland', 'san diego')) {
-      return ['node["aeroway"="aerodrome"]', 'way["aeroway"="aerodrome"]', 'node["aeroway"="terminal"]', 'way["aeroway"="terminal"]'];
-    }
-    if (has('disney', 'disn', 'magic', 'theme park', 'amusement')) {
-      return ['node["tourism"="theme_park"]', 'way["tourism"="theme_park"]', 'node["leisure"="amusement_arcade"]', 'way["leisure"="amusement_arcade"]'];
-    }
-    if (has('six flags', 'hurricane', 'water park')) {
-      return ['node["tourism"="theme_park"]', 'way["tourism"="theme_park"]'];
-    }
-    if (has('gym', 'fitness', 'workout', '24 hour', 'la fitness', 'planet fitness', 'equinox')) {
-      return ['node["leisure"="fitness_centre"]', 'way["leisure"="fitness_centre"]', 'node["amenity"="gym"]', 'way["amenity"="gym"]'];
-    }
-    if (has('mall', 'shopping', 'plaza')) {
-      return ['node["shop"="mall"]', 'way["shop"="mall"]'];
-    }
-    if (has('stadium', 'arena', 'concert', 'venue', 'staples', 'crypto', 'sofi', 'dodger')) {
-      return ['node["leisure"="stadium"]', 'way["leisure"="stadium"]', 'node["building"="stadium"]', 'way["building"="stadium"]', 'node["amenity"="theatre"]', 'way["amenity"="theatre"]'];
-    }
-    if (has('movie', 'cinema', 'theater', 'theatre', 'amc', 'regal')) {
-      return ['node["amenity"="cinema"]', 'way["amenity"="cinema"]'];
-    }
-    if (has('pharmacy', 'drug', 'cvs', 'walgreen', 'rite aid')) {
-      return ['node["amenity"="pharmacy"]', 'way["amenity"="pharmacy"]'];
-    }
-    if (has('post', 'mail', 'fedex', 'ups', 'shipping')) {
-      return ['node["amenity"="post_office"]', 'way["amenity"="post_office"]'];
-    }
-    if (has('library')) {
-      return ['node["amenity"="library"]', 'way["amenity"="library"]'];
-    }
-    if (has('parking', 'garage')) {
-      return ['node["amenity"="parking"]', 'way["amenity"="parking"]'];
-    }
-    // Generic: broad net so the search still returns something useful.
-    return [
-      'node["amenility"]', // intentional typo — never matches, forces name-based fallback
-    ];
+    return this.autocompleteSearch(q);
   }
 
   /**
-   * Progressive radius Overpass POI search. Tries increasingly wide radii
-   * until enough results are found, then returns the closest 10 sorted by
-   * distance.
-   *
-   * Strategy:
-   *   - For dense chains (Starbucks, McDonald's, gas stations) the 1mi
-   *     radius usually returns 5+ results immediately.
-   *   - For sparse destinations (theme parks, landmarks, hospitals) radii
-   *     expand up to 50 miles to find at least a few results.
-   *   - Results NEVER come from a statewide text search; they're always
-   *     within a bounded geographic radius centered on the rider.
+   * Autocomplete using Geoapify Geocoding Autocomplete API.
+   * Falls back to static suggestions if Geoapify is unavailable.
    */
-  private static readonly SEARCH_RADII_MILES = [1, 3, 5, 10, 25, 50];
-  private static readonly MAX_RESULTS = 10;
+  static async autocompleteSearch(query: string): Promise<any[]> {
+    const q = (query || '').trim();
+    if (q.length < 2) return [];
 
-  private static async searchPlacesNearby(query: string, lat: number, lon: number): Promise<any[]> {
-    const tagFilters = this.poiTagFilters(query);
-
-    // Build a brand/name regex for chain searches.
-    const brand = query.replace(/[^a-z0-9']/gi, '').toLowerCase();
-    const brandClauses =
-      brand.length >= 3
-        ? tagFilters.map((f) => f.replace(/\]$/, `]["name"~"${brand}",i]`))
-        : [];
-
-    const allSeen = new Set<string>();
-    const results: any[] = [];
-
-    for (const radiusMi of this.SEARCH_RADII_MILES) {
-      if (results.length >= this.MAX_RESULTS) break;
-
-      const radiusM = Math.round(radiusMi * 1609.34);
-      const unionParts = [...tagFilters, ...brandClauses];
-      const overpassQuery = [
-        '[out:json][timeout:20];',
-        '(',
-        ...unionParts.map((f) => `${f}(around:${radiusM},${lat},${lon});`),
-        ');',
-        'out center 30;',
-      ].join('');
-
+    if (env.GEOAPIFY_API_KEY) {
       try {
-        const form = new URLSearchParams();
-        form.append('data', overpassQuery);
-        const resp = await axios.post('https://overpass-api.de/api/interpreter', form, {
-          headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
-          timeout: 15000,
+        const resp = await axios.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, {
+          params: {
+            text: q,
+            apiKey: env.GEOAPIFY_API_KEY,
+            limit: 6,
+            lang: 'en',
+            type: 'amenity',
+          },
+          timeout: 5000,
         });
 
-        const elements: any[] = resp.data?.elements ?? [];
-        for (const el of elements) {
-          const tags = el.tags ?? {};
-          const name = tags.name || tags.brand || tags.operator;
-          if (!name) continue;
-
-          const elLat = el.type === 'node' ? el.lat : el.center?.lat;
-          const elLon = el.type === 'node' ? el.lon : el.center?.lon;
-          if (!Number.isFinite(elLat) || !Number.isFinite(elLon)) continue;
-
-          const key = `${name}|${elLat.toFixed(5)},${elLon.toFixed(5)}`;
-          if (allSeen.has(key)) continue;
-          allSeen.add(key);
-
-          const distMiles = this.haversineMiles({ lat, lon }, { lat: elLat, lon: elLon });
-
-          results.push({
-            display_name: this.formatPoiName(name, tags, elLat, elLon),
-            lat: elLat,
-            lon: elLon,
-            type: tags.amenity || tags.shop || tags.tourism || tags.leisure || tags.aeroway || 'poi',
-            state: 'CA',
-            distance_miles: Math.round(distMiles * 10) / 10,
-            address: {
-              road: tags['addr:street'] ?? '',
-              city: tags['addr:city'] ?? '',
-              state: tags['addr:state'] ?? 'CA',
-              postcode: tags['addr:postcode'] ?? '',
-            },
+        const features: any[] = resp.data?.features ?? [];
+        if (features.length > 0) {
+          return features.map((f: any) => {
+            const props = f.properties || {};
+            const coords = f.geometry?.coordinates || [0, 0];
+            return {
+              display_name: props.formatted || props.name || props.address_line1 || q,
+              lat: coords[1],
+              lon: coords[0],
+              type: props.result_type || 'suggestion',
+              state: props.state || '',
+              distance_miles: undefined,
+              is_suggestion: true,
+              place_id: props.place_id,
+            };
           });
         }
       } catch {
-        // Overpass timeout/error for this radius — try next.
+        // Fall through to static suggestions
       }
     }
 
-    results.sort((a, b) => a.distance_miles - b.distance_miles);
-    return results.slice(0, this.MAX_RESULTS);
+    // Static suggestion fallback
+    return STATIC_SUGGESTIONS
+      .filter((s) => s.prefixes.some((p) => q.toLowerCase().startsWith(p)))
+      .slice(0, 6)
+      .map((s) => ({
+        display_name: s.label,
+        lat: 0, lon: 0,
+        type: 'suggestion',
+        state: '',
+        distance_miles: undefined,
+        is_suggestion: true,
+      }));
+  }
+
+  private static formatGeoapifyName(props: any): string {
+    const name = props.name || props.address_line1 || '';
+    const street = props.street || '';
+    const city = props.city || '';
+    const parts = [name];
+    if (street && !name.includes(street)) parts.push(street);
+    if (city && !name.includes(city)) parts.push(city);
+    return parts.join(', ');
   }
 
   private static haversineMiles(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
@@ -484,104 +475,6 @@ export class GeospatialService {
       Math.sin(dLat / 2) ** 2 +
       Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
     return 2 * R * Math.asin(Math.sqrt(x));
-  }
-
-  /**
-   * Autocomplete: match the query prefix against a curated dictionary of
-   * common destination searches. Returns up to 5 suggestions sorted by
-   * popularity (most-searched first).
-   *
-   * Matches are case-insensitive prefix matches. "star" → "Starbucks",
-   * "mcd" → "McDonald's", "disn" → "Disneyland".
-   */
-  static autocompleteSearch(query: string): string[] {
-    const q = (query || '').trim().toLowerCase();
-    if (q.length < 2) return [];
-
-    const suggestions: Array<{ label: string; score: number }> = [];
-    for (const entry of AUTOCOMPLETE_DICT) {
-      if (entry.prefixes.some((p) => q.startsWith(p))) {
-        suggestions.push({ label: entry.label, score: entry.score });
-      }
-    }
-
-    suggestions.sort((a, b) => b.score - a.score);
-    return suggestions.slice(0, 5).map((s) => s.label);
-  }
-
-  private static formatPoiName(name: string, tags: any, lat: number, lon: number): string {
-    const parts = [name];
-    const road = tags['addr:street'];
-    const city = tags['addr:city'] || tags['addr:suburb'] || tags['addr:town'];
-    if (road) parts.push(road);
-    if (city) parts.push(city);
-    if (parts.length === 1) parts.push(`${lat.toFixed(4)}, ${lon.toFixed(4)}`);
-    return parts.join(', ');
-  }
-
-  /// Fallback geocoder (Nominatim) for address-like queries that Overpass
-  /// can't handle. Bounded to California so results stay in-region.
-  private static async nominatimFallback(query: string, userLat?: number, userLon?: number): Promise<any[]> {
-    try {
-      const CA_VIEWBOX = '-124.5,42.0,-114.0,32.5';
-      const CA_SOUTH = 32.5, CA_NORTH = 42.0, CA_WEST = -124.5, CA_EAST = -114.0;
-
-      const response = await axios.get('https://nominatim.openstreetmap.org/search', {
-        params: {
-          q: query,
-          format: 'json',
-          addressdetails: 1,
-          limit: 20,
-          viewbox: CA_VIEWBOX,
-          bounded: 1,
-          countrycodes: 'us',
-        },
-        headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
-      });
-
-      const hits: any[] = Array.isArray(response.data) ? response.data : [];
-      const isCalifornia = (h: any) => {
-        const a = h.address || {};
-        const state = (a.state || '').toString().toLowerCase();
-        const code = (a.state_code || a['ISO3166-2-lvl4'] || '').toString().toLowerCase();
-        if (state === 'california' || code === 'us-ca' || code === 'ca') return true;
-        const lat = parseFloat(h.lat), lon = parseFloat(h.lon);
-        if (Number.isFinite(lat) && Number.isFinite(lon)) {
-          return lat >= CA_SOUTH && lat <= CA_NORTH && lon >= CA_WEST && lon <= CA_EAST;
-        }
-        return false;
-      };
-
-      const haversineMiles = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
-        const R = 3958.8;
-        const toRad = (d: number) => (d * Math.PI) / 180;
-        const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lon - a.lon);
-        const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
-        return 2 * R * Math.asin(Math.sqrt(x));
-      };
-
-      const results = hits.filter(isCalifornia).map((h: any) => {
-        const lat = parseFloat(h.lat), lon = parseFloat(h.lon);
-        return {
-          display_name: h.display_name,
-          lat: h.lat,
-          lon: h.lon,
-          type: h.type,
-          state: 'CA',
-          distance_miles:
-            Number.isFinite(userLat) && Number.isFinite(userLon)
-              ? Math.round(haversineMiles({ lat, lon }, { lat: userLat as number, lon: userLon as number }) * 10) / 10
-              : undefined,
-          address: h.address,
-        };
-      });
-
-      results.sort((a: any, b: any) => (a.distance_miles ?? 0) - (b.distance_miles ?? 0));
-      return results.slice(0, 10);
-    } catch (err: any) {
-      console.error(`[GEOSPATIAL] ❌ Nominatim fallback failed: ${err.message}`);
-      return [];
-    }
   }
 
   static async preCacheHotZones(zones: [number, number][]) {
@@ -608,7 +501,7 @@ export class GeospatialService {
  *   prefixes — one or more prefix strings that trigger this suggestion
  *   score    — popularity ranking (higher = more common search)
  */
-const AUTOCOMPLETE_DICT: Array<{ label: string; prefixes: string[]; score: number }> = [
+const STATIC_SUGGESTIONS: Array<{ label: string; prefixes: string[]; score: number }> = [
   { label: 'Starbucks', prefixes: ['star', 'starb'], score: 100 },
   { label: 'McDonald\'s', prefixes: ['mcd', 'mcdo', 'mcdon'], score: 99 },
   { label: 'Walmart', prefixes: ['wal', 'walm', 'walt'], score: 90 },
