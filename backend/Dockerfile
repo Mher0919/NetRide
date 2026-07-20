@@ -39,8 +39,8 @@ RUN if [ -s "./data/${REGION}.osrm" ]; then \
       fi && \
       osrm-extract -p /opt/car.lua region.osm.pbf && \
       osrm-contract region.osrm; \
-      if [ ! -f region.osrm ]; then echo "ERROR: region.osrm not produced"; ls -la /osrm; exit 1; fi && \
-      mv region.osrm "/osrm/${REGION}.osrm"; \
+      if [ ! -s "region.osrm.hsgr" ]; then echo "ERROR: contracted graph (region.osrm.hsgr) not produced"; ls -la /osrm; exit 1; fi && \
+      for f in region.osrm*; do mv "$f" "/osrm/${REGION}.osrm${f#region.osrm}"; done; \
     fi
 
 # ---- Stage 1: build the Node backend ---------------------------------------
