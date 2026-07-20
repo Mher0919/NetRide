@@ -36,6 +36,20 @@ services:
     depends_on:
       - postgres
 
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    command: >
+      osrm-routed --algorithm mld --port 5000 --max-triangle 1 /data/LosAngeles.osrm
+    ports:
+      - '5000:5000'
+    volumes:
+      - ./backend/data:/data:ro
+    healthcheck:
+      test: curl -sf http://localhost:5000/route/v1/driving/-118.4455,34.0639;-118.4400,34.0700?overview=simplified || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build: ./backend
     command: npm run dev
@@ -47,11 +61,8 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: your-32-char-secret-replace-in-prod
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
-      ORS_API_KEY: ${ORS_API_KEY}
-      ORS_URL: https://api.openrouteservice.org/v2/directions
-      ORS_PROFILE: driving-car
-      ORS_TIMEOUT_MS: 2000
-      ORS_MAX_RETRIES: 2
+      OSRM_BASE_URL: http://osrm:5000
+      MAPBOX_ACCESS_TOKEN: ${MAPBOX_ACCESS_TOKEN}
       DRIVER_MATCH_RADIUS_KM: 5
       DRIVER_ACCEPT_TIMEOUT_MS: 15000
       FACE_SERVICE_URL: http://face-service:8000
@@ -65,6 +76,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - osrm
       - face-service
     volumes:
       - ./backend:/app
@@ -79,11 +91,8 @@ services:
       DATABASE_URL: postgresql://ridehail:secret@postgres:5432/ridehail
       REDIS_URL: redis://redis:6379
       JWT_SECRET: your-32-char-secret-replace-in-prod
-      ORS_API_KEY: ${ORS_API_KEY}
-      ORS_URL: https://api.openrouteservice.org/v2/directions
-      ORS_PROFILE: driving-car
-      ORS_TIMEOUT_MS: 2000
-      ORS_MAX_RETRIES: 2
+      OSRM_BASE_URL: http://osrm:5000
+      MAPBOX_ACCESS_TOKEN: ${MAPBOX_ACCESS_TOKEN}
       DRIVER_MATCH_RADIUS_KM: 5
       DRIVER_ACCEPT_TIMEOUT_MS: 15000
       MATCH_WORKER_CONCURRENCY: 4
@@ -91,6 +100,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - osrm
     profiles:
       - scaled
     volumes:
@@ -105,15 +115,13 @@ services:
       DATABASE_URL: postgresql://ridehail:secret@postgres:5432/ridehail
       REDIS_URL: redis://redis:6379
       JWT_SECRET: your-32-char-secret-replace-in-prod
-      ORS_API_KEY: ${ORS_API_KEY}
-      ORS_URL: https://api.openrouteservice.org/v2/directions
-      ORS_PROFILE: driving-car
-      ORS_TIMEOUT_MS: 2000
-      ORS_MAX_RETRIES: 2
+      OSRM_BASE_URL: http://osrm:5000
+      MAPBOX_ACCESS_TOKEN: ${MAPBOX_ACCESS_TOKEN}
       DRIVER_SCORE_CACHE_TTL_S: 300
     depends_on:
       - postgres
       - redis
+      - osrm
     profiles:
       - scaled
     volumes:

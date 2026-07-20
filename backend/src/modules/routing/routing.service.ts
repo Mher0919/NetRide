@@ -6,24 +6,24 @@
 // dispatch, matching) MUST go through this service for trip planning so the
 // routing pipeline stays consistent, observable, and cacheable.
 //
-// Architecture (per the routing-redesign brief):
+// Architecture:
 //
 //   Flutter App → Backend API → Ride/Dispatch/Nav → RoutingService →
-//     → ORSEngine → OpenRouteService API
+//     → RegionAwareEngine (OSRM for LA, Mapbox fallback)
 //
-// No business logic calls ORS directly. The active engine is a single
-// binding (ORSEngine) behind the RouteEngine interface, so swapping
-// providers (GraphHopper, Valhalla, Google, Mapbox, a future OSRM) is a
-// one-file change with zero impact on callers.
+// No business logic calls any routing provider directly. The active engine
+// is selected at runtime based on the geographic region (LA region uses
+// the local OSRM sidecar process; outside LA uses Mapbox Directions API).
+// Both implement the RouteEngine interface, so providers are swappable.
 //
 // Design goals:
-//   - Fast:        cache-first, ORS in <250ms, fare in microseconds.
-//   - Road geometry: ORS returns true road-following geometry (polyline).
+//   - Fast:        cache-first, local OSRM <100ms, fare in microseconds.
+//   - Road geometry: OSRM returns true road-following geometry (GeoJSON).
 //   - Lightweight:  no per-request DB hits in the hot path.
 //   - Resilient:    never crash; degrade to a road-shaped synthetic route.
 //   - Observable:   every stage is instrumented via prom-client + structured logs.
 //   - Scalable:     stateless + Redis cache + request dedup map + concurrent-safe.
-//   - Extensible:   provider swap = implement RouteEngine + change one binding.
+//   - Extensible:   provider swap = implement RouteEngine + change engine map.
 
 import ngeohash from 'ngeohash';
 import { redis } from '../../config/redis';
@@ -31,8 +31,11 @@ import { MLEtaService } from '../../services/ml-eta.service';
 import { fareService, FareBreakdown } from '../../services/fare.service';
 import { RoadSnapperService } from '../../services/road-snapper.service';
 import { VehicleClass } from '../../types';
-import { ORSEngine, RouteEngine } from './ors.engine';
+import { RouteEngine } from './route-engine';
+import { OSRMEngine } from './osrm.engine';
+import { MapboxEngine } from './mapbox.engine';
 import { RoutingError } from './routing.errors';
+import { bothInLARegion } from '../../services/la-region';
 import {
   routingRequestsTotal,
   routingDurationSeconds,
@@ -59,7 +62,7 @@ export interface RoutingResult {
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
-  engine: 'ORS' | 'Synthetic';
+  engine: 'OSRM' | 'Mapbox' | 'Synthetic';
   cacheHit: boolean;
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
@@ -133,8 +136,26 @@ export function parseCoordinates(raw: unknown, label: string): LatLng {
 }
 
 export class RoutingService {
-  // The active routing engine. Swap this single binding to change providers.
-  private static readonly engine: RouteEngine = ORSEngine;
+  // ---- Provider map --------------------------------------------------------
+  // The LA region is served by the local OSRM sidecar process for low latency.
+  // Coordinates outside the LA bounding box fall back to Mapbox Directions API.
+  private static readonly providers: Array<{
+    match: (origin: [number, number], destination: [number, number]) => boolean;
+    engine: RouteEngine;
+  }> = [
+    { match: bothInLARegion, engine: OSRMEngine },
+    { match: () => true,        engine: MapboxEngine },
+  ];
+
+  private static selectEngine(
+    origin: [number, number],
+    destination: [number, number],
+  ): RouteEngine {
+    for (const p of this.providers) {
+      if (p.match(origin, destination)) return p.engine;
+    }
+    return MapboxEngine;
+  }
 
   // ---- Request deduplication (collision-free in-flight map) ---------------
   // Two identical OD requests in flight share one engine call + one cache
@@ -220,7 +241,7 @@ export class RoutingService {
     return this.routeCached(origin, destination);
   }
 
-  /** Road distance only (ORS-calculated; never straight-line). */
+  /** Road distance only (engine-calculated; never straight-line). */
   static async calculateDistance(
     origin: LatLng,
     destination: LatLng,
@@ -253,9 +274,8 @@ export class RoutingService {
     return { route, fare };
   }
 
-  /** Decode an ORS `polyline` / `polyline6` string to [lng,lat] coordinates. */
+  /** Decode a polyline6-encoded string to [lng,lat] coordinates. */
   static decodePolyline(encoded: string): Array<[number, number]> {
-    // Lazy import keeps the hot path free of this unless explicitly used.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const polyline = require('@mapbox/polyline');
     return polyline.decode(encoded).map(([lat, lng]: [number, number]) => [lng, lat]);
@@ -361,7 +381,9 @@ export class RoutingService {
     const engineStart = process.hrtime.bigint();
     let result: RoutingResult | null = null;
 
-    // Validate coordinates before contacting ORS.
+    const activeEngine = this.selectEngine(origin, destination);
+
+    // Validate coordinates before contacting the routing engine.
     try {
       parseCoordinates([origin[0], origin[1]], 'origin');
       parseCoordinates([destination[0], destination[1]], 'destination');
@@ -391,16 +413,17 @@ export class RoutingService {
       : destination;
 
     try {
-      const res = await this.engine.route(routeOrigin, routeDest);
+      const res = await activeEngine.route(routeOrigin, routeDest);
       if (res) {
         const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
+        const engineName = activeEngine.name as 'OSRM' | 'Mapbox';
         result = {
           distanceMeters: res.distanceMeters,
           durationSeconds: res.durationSeconds,
           etaSeconds: Math.round(res.durationSeconds * multiplier),
           geometry: res.geometry,
           confidence: 0.99,
-          engine: 'ORS',
+          engine: engineName,
           cacheHit: false,
           steps: res.steps,
           speedLimitsByRoad: res.speedLimitsByRoad,
@@ -479,8 +502,8 @@ export class RoutingService {
 
   // -------------------------------------------------------------------------
   // Synthetic fallback — ALWAYS road-shaped (grid/grid-ish), never a straight
-  // 2-point "line". Used only when ORS is unreachable, so the app still
-  // paints a believable city-grid route and a non-zero fare.
+  // 2-point "line". Used only when all routing engines are unreachable, so
+  // the app still paints a believable city-grid route and a non-zero fare.
   // -------------------------------------------------------------------------
 
   private static syntheticRoute(origin: LatLng, destination: LatLng): RoutingResult {

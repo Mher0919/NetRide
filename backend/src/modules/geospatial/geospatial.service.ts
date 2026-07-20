@@ -30,11 +30,10 @@ export interface RouteResponse {
 
 export class GeospatialService {
   /**
-   * All routing now flows through the single RoutingService (which owns the
-   * ORS engine, cache, dedup, retries, and fallback). GeospatialService is a
-   * thin adapter that maps the routing result into the legacy `RouteResponse`
-   * shape the dispatch / navigation / controller layers expect. This removes
-   * the second, duplicated OSRM client that previously lived here.
+   * All routing flows through the single RoutingService (which owns the
+   * provider selection, cache, dedup, retries, and fallback). GeospatialService
+   * is a thin adapter that maps the routing result into the legacy `RouteResponse`
+   * shape the dispatch / navigation / controller layers expect.
    */
   static async getRoute(start: [number, number], end: [number, number], isPreCache = false): Promise<RouteResponse> {
     const requestStartTime = Date.now();

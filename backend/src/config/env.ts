@@ -11,18 +11,22 @@ const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   JWT_SECRET: z.string(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
-  // ---- Routing engine (OpenRouteService) ---------------------------------
-  // The backend is the ONLY system that talks to ORS. The API key is never
-  // shipped to the Flutter app. All routing flows through RoutingService,
-  // which calls this single ORS endpoint.
-  ORS_URL: z.string().default('https://api.openrouteservice.org/v2/directions'),
-  ORS_API_KEY: z.string().optional(),
-  // Driving profile used for all ride requests.
-  ORS_PROFILE: z.string().default('driving-car'),
-  // Per-request timeout to ORS (ms). Kept tight so the hot path never stalls.
-  ORS_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
-  // Max retries with exponential backoff (timeouts / 5xx / network only).
-  ORS_MAX_RETRIES: z.union([z.string(), z.number()]).transform(Number).default(2),
+  // ---- Routing engine: Local OSRM (Los Angeles) ---------------------------
+  // Base URL of the local OSRM osrm-routed server. Defaults to localhost:5000
+  // for the sidecar process (started by the Docker entrypoint or manually).
+  OSRM_BASE_URL: z.string().default('http://localhost:5000'),
+  // Per-request timeout to the local OSRM engine (ms).
+  OSRM_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(5000),
+  // Path on disk to the pre-processed OSRM road network (.osrm family).
+  // Used by the startup script (start.sh / entrypoint) to find and launch
+  // osrm-routed. Not read directly by backend code.
+  OSRM_DATA_PATH: z.string().default('./data/LosAngeles.osrm'),
+  // ---- Fallback routing engine (Mapbox Directions API) --------------------
+  // Used when coordinates fall outside the LA region served by local OSRM.
+  // The access token is never shipped to the Flutter app.
+  MAPBOX_ACCESS_TOKEN: z.string().optional(),
+  MAPBOX_PROFILE: z.string().default('driving'),
+  MAPBOX_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
   DRIVER_MATCH_RADIUS_KM: z.union([z.string(), z.number()]).transform(Number).default(5),
   DRIVER_ACCEPT_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(15000),
   DRIVER_PICKUP_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(15),
@@ -71,9 +75,6 @@ const envSchema = z.object({
   // ---- Observability & scaling -------------------------------------------
   PINO_LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   SENTRY_DSN: z.string().optional(),
-  // Comma-separated list of ORS base URLs for internal failover / load
-  // balancing. Falls back to a single ORS_URL when unset.
-  ORS_URLS: z.string().optional(),
   MATCH_WORKER_CONCURRENCY: z.union([z.string(), z.number()]).transform(Number).default(4),
   DISPATCH_FANOUT_SIZE: z.union([z.string(), z.number()]).transform(Number).default(5),
   DRIVER_SCORE_CACHE_TTL_S: z.union([z.string(), z.number()]).transform(Number).default(300),

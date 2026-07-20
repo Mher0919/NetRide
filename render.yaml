@@ -17,7 +17,7 @@ services:
     dockerfilePath: ./backend/Dockerfile
     rootDir: backend
     plan: standard # TF.js + face-api.js need real CPU/RAM; free tier will OOM
-    healthCheckPath: /health
+    healthCheckPath: /health/live
     envVars:
       - key: NODE_ENV
         value: production
@@ -36,8 +36,12 @@ services:
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
-      - key: ORS_API_KEY
+      - key: MAPBOX_ACCESS_TOKEN
         sync: false
+      # OSRM_BASE_URL is localhost in the single-container Docker setup.
+      # If OSRM runs in a separate Render service, set this to its internal URL.
+      # - key: OSRM_BASE_URL
+      #   sync: false
       # ---- Face verification tunables (defaults from .env.example) ----
       - key: FACE_MATCH_THRESHOLD
         value: "0.45"

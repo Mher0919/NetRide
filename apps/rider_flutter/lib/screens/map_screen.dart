@@ -305,64 +305,81 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     await _fetchAllEstimates();
   }
 
-  /// Local fare estimate mirroring the backend formula, used as a safety net
-  /// so a class never displays $0 if the backend fare is missing.
-  static double _localFare(double distanceMeters, double durationSeconds) {
-    const base = 3.50, perKm = 1.50, perMin = 0.35, booking = 1.50;
+  /// Backend-matching fare formula with class multiplier.
+  static double _computeClassFare({
+    required double distanceMeters,
+    required double durationSeconds,
+    required models.VehicleClass vehicleClass,
+  }) {
+    const base = 3.50, perKm = 1.50, perMin = 0.35, booking = 1.50, minFare = 7.00;
+    const serviceRate = 0.10, taxRate = 0.0875;
+    final multiplier = _classMultiplier(vehicleClass);
     final distanceKm = distanceMeters / 1000.0;
     final minutes = durationSeconds / 60.0;
-    final subtotal = base + distanceKm * perKm + minutes * perMin + booking;
-    final service = subtotal * 0.10;
-    final taxes = (subtotal + service) * 0.0875;
-    return (subtotal + service + taxes);
+    final subtotal = (base + distanceKm * perKm + minutes * perMin) * multiplier + booking;
+    final service = subtotal * serviceRate;
+    final taxable = subtotal + service;
+    final taxes = taxable * taxRate;
+    final raw = taxable + taxes;
+    return ((raw * 100).roundToDouble() / 100).clamp(minFare * multiplier, double.infinity);
   }
 
-  /// Pull a full ride-option set (route geometry + fare per class) using the
-  /// new combined /routing/plan endpoint. Three parallel class requests,
-  /// each a single round trip — no sequential /ride/estimate DB lookups.
+  static double _classMultiplier(models.VehicleClass c) {
+    switch (c) {
+      case models.VehicleClass.ELITE: return 1.6;
+      case models.VehicleClass.PRESTIGE: return 2.4;
+      default: return 1.0;
+    }
+  }
+
+  /// Pull a full ride-option set (route geometry + fare per class).
+  /// Makes ONE backend call for route data; computes per-class fares locally.
   Future<void> _fetchAllEstimates() async {
     if (_pickup == null || _destination == null) return;
     setState(() => _loadingEstimates = true);
     const classes = models.VehicleClass.values;
-
     final results = <models.VehicleClass, Map<String, dynamic>>{};
-    List<LatLng>? latestPoints;
-    await Future.wait(classes.map((c) async {
-      try {
-        final plan = await _routingService.plan(
-          origin: LatLng(_pickup!.lat, _pickup!.lng),
-          destination: LatLng(_destination!.lat, _destination!.lng),
-          vehicleClass: c.toString().split('.').last,
-        );
-        if (c == _selectedClass) {
-          latestPoints = plan.points;
-        }
+
+    try {
+      final plan = await _routingService.plan(
+        origin: LatLng(_pickup!.lat, _pickup!.lng),
+        destination: LatLng(_destination!.lat, _destination!.lng),
+        vehicleClass: 'CORE',
+      );
+
+      for (final c in classes) {
         results[c] = {
-          'maxFare': (plan.fare['totalFare'] as num?)?.toDouble() ??
-              _localFare(plan.distanceMeters, plan.durationSeconds),
+          'maxFare': _computeClassFare(
+            distanceMeters: plan.distanceMeters,
+            durationSeconds: plan.durationSeconds,
+            vehicleClass: c,
+          ),
           'savingLikelihood': 0,
           'distanceKm': plan.distanceMeters / 1000.0,
           'engine': plan.engine,
           'etaSeconds': plan.etaSeconds,
         };
-      } catch (e) {
-        if (e is DioException && e.type == DioExceptionType.cancel) {
-          // Silently ignore cancellation from destination changes.
-          return;
-        }
-        debugPrint('Estimate error for $c: $e');
       }
-    }));
 
-    for (final c in classes) {
-      results.putIfAbsent(c, () => {'maxFare': 0.0, 'savingLikelihood': 0, 'distanceKm': 0.0});
-    }
-    if (mounted) {
-      setState(() {
-        _estimates = results;
-        _loadingEstimates = false;
-        if (latestPoints != null) _routePoints = latestPoints!;
-      });
+      if (mounted) {
+        setState(() {
+          _routePoints = plan.points;
+          _estimates = results;
+          _loadingEstimates = false;
+        });
+      }
+    } catch (e) {
+      if (e is DioException && e.type == DioExceptionType.cancel) return;
+      debugPrint('Estimate error: $e');
+      for (final c in classes) {
+        results[c] = {'maxFare': 0.0, 'savingLikelihood': 0, 'distanceKm': 0.0};
+      }
+      if (mounted) {
+        setState(() {
+          _estimates = results;
+          _loadingEstimates = false;
+        });
+      }
     }
   }
 

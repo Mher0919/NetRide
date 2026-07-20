@@ -120,7 +120,7 @@ export const socketEventsTotal = new client.Counter({
 export const routingRequestsTotal = new client.Counter({
   name: 'netride_routing_requests_total',
   help: 'Routing plan requests, labeled by cache hit and engine.',
-  labelNames: ['cache', 'engine'] as const, // cache: hit|miss ; engine: ors|synthetic|nearby
+  labelNames: ['cache', 'engine'] as const, // cache: hit|miss ; engine: osrm|mapbox|synthetic
   registers: [register],
 });
 

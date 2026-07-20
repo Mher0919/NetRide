@@ -76,16 +76,18 @@ test('computeFare runs in microseconds (no I/O)', () => {
 // ---- Synthetic fallback is road-shaped (never a straight 2-point line) --
 
 test('synthetic fallback returns a multi-point road-shaped geometry', async () => {
-  // Force the synthetic path by making the engine + cache no-ops so the
-  // test runs in milliseconds with no network/Redis dependency.
+  // Force the synthetic path by stubbing selectEngine to return a failing
+  // engine and disabling cache so the test runs with no network/Redis.
   const svc = RoutingService as any;
-  const origEngine = svc.engine;
+  const origSelect = svc.selectEngine;
   const origWrite = svc.withRedisTimeout;
   const origLookup = svc.lookupCache;
-  // Make the engine throw to force the road-shaped synthetic fallback.
-  svc.engine = { name: 'TestFail', route: async () => { throw new Error('offline'); } };
+  svc.selectEngine = () => ({
+    name: 'TestFail',
+    route: async () => { throw new Error('offline'); },
+  });
   svc.withRedisTimeout = async () => null;
-  svc.lookupCache = async () => null; // skip Redis entirely
+  svc.lookupCache = async () => null;
   try {
     const plan = await RoutingService.plan({
       origin: [34.05, -118.25],
@@ -97,7 +99,7 @@ test('synthetic fallback returns a multi-point road-shaped geometry', async () =
     assert.equal(plan.confidence, 0.4);
     assert.ok(plan.fare.totalFare > 0);
   } finally {
-    svc.engine = origEngine;
+    svc.selectEngine = origSelect;
     svc.withRedisTimeout = origWrite;
     svc.lookupCache = origLookup;
   }

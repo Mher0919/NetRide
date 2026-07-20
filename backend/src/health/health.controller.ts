@@ -7,7 +7,7 @@
 //                        "should I kill this instance?" decisions.
 //
 //   GET /health/ready  — process is ready to serve traffic. Pings every
-//                        critical dependency (Redis, Postgres, ORS routing).
+//                        critical dependency (Redis, Postgres, OSRM, Mapbox).
 //                        Returns 503 with a JSON body listing what's
 //                        down. Use this for "should I send this instance
 //                        traffic?" decisions.
@@ -64,29 +64,33 @@ async function probePostgres(): Promise<DependencyStatus> {
   }
 }
 
-async function probeRouter(): Promise<DependencyStatus> {
+async function probeOSRM(): Promise<DependencyStatus> {
   const start = Date.now();
   try {
-    const body = {
-      coordinates: [[-118.4455, 34.0639], [-118.4400, 34.0700]],
-      profile: 'driving-car',
-      format: 'json',
-      geometry_format: 'polyline',
-      instructions: false,
-      elevation: false,
-    };
-    await axios.post(env.ORS_URL, body, {
-      headers: {
-        Authorization: env.ORS_API_KEY ?? '',
-        'Content-Type': 'application/json',
-      },
-      timeout: 2000,
-    });
+    const url = `${env.OSRM_BASE_URL}/route/v1/driving/-118.4455,34.0639;-118.4400,34.0700?overview=simplified&steps=false`;
+    await axios.get(url, { timeout: 5000 });
     dependencyUp.set({ dependency: 'routing-engine' }, 1);
     return { name: 'routing-engine', up: true, latencyMs: Date.now() - start };
   } catch (err: any) {
     dependencyUp.set({ dependency: 'routing-engine' }, 0);
     return { name: 'routing-engine', up: false, error: err.message };
+  }
+}
+
+async function probeMapbox(): Promise<DependencyStatus> {
+  if (!env.MAPBOX_ACCESS_TOKEN) {
+    return { name: 'routing-fallback', up: true };
+  }
+  const start = Date.now();
+  try {
+    const url = `https://api.mapbox.com/directions/v5/mapbox/${env.MAPBOX_PROFILE}/-118.4455,34.0639;-118.4400,34.0700`;
+    await axios.get(url, {
+      params: { access_token: env.MAPBOX_ACCESS_TOKEN, overview: 'simplified', steps: false },
+      timeout: 5000,
+    });
+    return { name: 'routing-fallback', up: true, latencyMs: Date.now() - start };
+  } catch (err: any) {
+    return { name: 'routing-fallback', up: false, error: err.message };
   }
 }
 
@@ -127,7 +131,8 @@ router.get('/health/ready', async (_req: Request, res: Response) => {
     probeRedisPubSub(),
     probePostgres(),
     probePostgresReplica(),
-    probeRouter(),
+    probeOSRM(),
+    probeMapbox(),
     probeQueue('match:ride', matchQueue),
     probeQueue('match:dispatch', dispatchQueue),
     probeQueue('score:driver:refresh', scoreQueue),
