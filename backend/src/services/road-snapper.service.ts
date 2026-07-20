@@ -44,10 +44,15 @@ export class RoadSnapperService {
           }
         }
       } catch (err: any) {
-        logger.warn(
-          { err: err.message, lat, lng, base: candidates.indexOf(base) === 0 ? 'local' : 'public' },
-          'snap_failed',
-        );
+        const isLocal = candidates.indexOf(base) === 0;
+        if (isLocal && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET')) {
+          logger.debug({ err: err.code, lat, lng }, 'snap_local_unavailable');
+        } else {
+          logger.warn(
+            { err: err.message, lat, lng, base: isLocal ? 'local' : 'public' },
+            'snap_failed',
+          );
+        }
       }
     }
 

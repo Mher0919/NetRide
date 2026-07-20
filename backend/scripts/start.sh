@@ -29,7 +29,6 @@ echo "==> Starting osrm-routed (${OSRM_ALGORITHM}) with ${OSRM_DATA_PATH} on por
 osrm-routed \
   --algorithm "${OSRM_ALGORITHM}" \
   --port "${OSRM_PORT}" \
-  --max-triangle 1 \
   "${OSRM_DATA_PATH}" &
 OSRM_PID=$!
 
