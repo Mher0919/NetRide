@@ -38,8 +38,9 @@ RUN if [ -s "./data/${REGION}.osrm" ]; then \
         echo "ERROR: downloaded PBF missing or too small"; exit 1; \
       fi && \
       osrm-extract -p /opt/car.lua region.osm.pbf && \
-      osrm-contract region.osrm; \
-      if [ ! -f region.osrm ]; then echo "ERROR: region.osrm not produced"; exit 1; fi && \
+      osrm-contract region.osrm 2>&1 | tee /osrm/contract.log; \
+      echo "contract exit: ${PIPESTATUS[0]}"; \
+      if [ ! -f region.osrm ]; then echo "ERROR: region.osrm not produced"; ls -la /osrm; echo '--- contract.log tail ---'; tail -n 30 /osrm/contract.log; exit 1; fi && \
       mv region.osrm "/osrm/${REGION}.osrm"; \
     fi
 
