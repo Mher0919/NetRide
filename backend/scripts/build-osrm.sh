@@ -7,26 +7,27 @@
 # src/modules/routing/local-osrm.engine.ts via @osrm/osrm — no separate
 # routing service required.
 #
-# Region: Greater Los Angeles / Southern California (default).
-#   To target a different area, override OSM_PBF (a .osm.pbf URL) and the
-#   output filename. e.g.  OSM_PBF=https://.../california-latest.osm.pbf \
-#                          OUTPUT=./data/california.osrm ./scripts/build-osrm.sh
+# Region: Los Angeles County (default) — light & fast (~60MB), identical
+# road quality for the core operating area.
+#   To target a larger area, override OSM_PBF (a .osm.pbf URL) and the
+#   output filename. e.g.  OSM_PBF=https://.../socal-latest.osm.pbf \
+#                          OUTPUT=./data/socal.osrm ./scripts/build-osrm.sh
 #
 # Requirements (only needed at BUILD time, not at runtime):
 #   - osrm-backend (the `osrm-extract`, `osrm-partition`, `osrm-customize`
 #     CLI tools) on PATH, OR the Docker image `ghcr.io/project-osrm/osrm-backend`.
 #   - curl, and ~2GB free disk for the working set.
 #
-# The produced .osrm is ~40–80MB for SoCal and is baked into the Docker
+# The produced .osrm is ~10–20MB for LA County and is baked into the Docker
 # image (see Dockerfile) so the running container needs no network access
 # to route — sub-50ms, Google-level geometry, free tier friendly.
 
 set -euo pipefail
 
 # ---- Configuration ---------------------------------------------------------
-REGION="${REGION:-socal}"
-# Geofabrik SoCal extract (LA + Orange + San Diego + Inland Empire + Ventura).
-OSM_PBF="${OSM_PBF:-https://download.geofabrik.de/north-america/us/california/socal-latest.osm.pbf}"
+REGION="${REGION:-la}"
+# Geofabrik Los Angeles County extract (small, fast, full road detail).
+OSM_PBF="${OSM_PBF:-https://download.geofabrik.de/north-america/us/california/los-angeles-latest.osm.pbf}"
 OUT_DIR="${OUT_DIR:-./data}"
 OUTPUT="${OUTPUT:-${OUT_DIR}/${REGION}.osrm}"
 PROFILE="${PROFILE:-./scripts/car.lua}"

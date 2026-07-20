@@ -6,26 +6,41 @@
 # the Node process (src/modules/routing/local-osrm.engine.ts via @osrm/osrm),
 # which is faster (no network hop) and free-tier friendly.
 #
-# Result: OSRM_DATA_PATH defaults to ./data/socal.osrm and is produced below.
+# Result: OSRM_DATA_PATH defaults to ./data/la.osrm and is produced below.
 
 # ---- Stage 1: fetch the OSM extract (Node/alpine has wget) -----------------
+# Default: Los Angeles County only (~60MB) — covers the core operating area
+# with identical road quality but a ~10x lighter/faster build than SoCal.
+# Override OSM_PBF / REGION to target a larger area when needed.
+# The downloaded PBF is cached across builds (BuildKit cache mount) so a
+# code-only redeploy never re-downloads it.
 FROM node:20-alpine AS pbf-fetcher
 WORKDIR /osrm
-ARG REGION=socal
-ARG OSM_PBF=https://download.geofabrik.de/north-america/us/california/socal-latest.osm.pbf
-RUN wget -q -O region.osm.pbf "${OSM_PBF}"
+ARG REGION=la
+ARG OSM_PBF=https://download.geofabrik.de/north-america/us/california/los-angeles-latest.osm.pbf
+RUN --mount=type=cache,target=/osrm/cache \
+    wget -q -O /osrm/cache/region.osm.pbf "${OSM_PBF}" && \
+    cp /osrm/cache/region.osm.pbf /osrm/region.osm.pbf
 
 # ---- Stage 2: build the OSRM road-network extract --------------------------
 FROM ghcr.io/project-osrm/osrm-backend:latest AS osrm-builder
 WORKDIR /osrm
-ARG REGION=socal
+ARG REGION=la
 # The osrm-backend image has neither curl nor wget, so we download the PBF
 # in the pbf-fetcher stage (alpine) and copy it in here.
 COPY --from=pbf-fetcher /osrm/region.osm.pbf /osrm/region.osm.pbf
-RUN osrm-extract -p /opt/car.lua region.osm.pbf && \
-    osrm-partition region.osrm && \
-    osrm-customize region.osrm
-RUN mv region.osrm /osrm/${REGION}.osrm
+# Cache the extract output so a code-only redeploy reuses the built network
+# instead of re-running osrm-extract/partition/customize (the slow part).
+RUN --mount=type=cache,target=/osrm/cache \
+    if [ -f /osrm/cache/${REGION}.osrm ]; then \
+      cp /osrm/cache/${REGION}.osrm /osrm/${REGION}.osrm; \
+    else \
+      osrm-extract -p /opt/car.lua region.osm.pbf && \
+      osrm-partition region.osrm && \
+      osrm-customize region.osrm && \
+      mv region.osrm /osrm/${REGION}.osrm && \
+      cp /osrm/${REGION}.osrm /osrm/cache/${REGION}.osrm; \
+    fi
 
 # ---- Stage 2: build the Node backend ---------------------------------------
 FROM node:20-alpine AS builder
@@ -52,7 +67,7 @@ RUN npx prisma generate && npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-ENV OSRM_DATA_PATH=./data/socal.osrm
+ENV OSRM_DATA_PATH=./data/la.osrm
 
 RUN apk add --no-cache libc6-compat zlib expat libxml2 boost-python3 \
     && rm -rf /var/cache/apk/*

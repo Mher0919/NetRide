@@ -44,7 +44,7 @@ let osrmLoadAttempted = false;
 let osrmAvailable = false;
 
 /** Absolute/relative path to the baked regional .osrm extract. */
-const OSRM_DATA_PATH = env.OSRM_DATA_PATH || './data/socal.osrm';
+const OSRM_DATA_PATH = env.OSRM_DATA_PATH || './data/la.osrm';
 
 /**
  * Lazily load (once) the in-process OSRM engine for the SoCal road network.

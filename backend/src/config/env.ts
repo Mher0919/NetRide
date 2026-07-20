@@ -14,8 +14,8 @@ const envSchema = z.object({
   OSRM_URL: z.string().default('http://localhost:5000/route/v1/driving'),
   // Path to the baked regional OSRM road-network extract used by the
   // in-process engine (@osrm/osrm). Baked into the image at build time via
-  // scripts/build-osrm.sh (Greater LA / SoCal by default).
-  OSRM_DATA_PATH: z.string().default('./data/socal.osrm'),
+  // scripts/build-osrm.sh (Los Angeles County by default — light & fast).
+  OSRM_DATA_PATH: z.string().default('./data/la.osrm'),
   DRIVER_MATCH_RADIUS_KM: z.union([z.string(), z.number()]).transform(Number).default(5),
   DRIVER_ACCEPT_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(15000),
   DRIVER_PICKUP_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(15),
