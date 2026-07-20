@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-OSRM_DATA_PATH="${OSRM_DATA_PATH:-./data/LosAngeles.osrm}"
+OSRM_DATA_PATH="${OSRM_DATA_PATH:-./data/la.osrm}"
 OSRM_ALGORITHM="${OSRM_ALGORITHM:-mld}"
 OSRM_PORT="${OSRM_PORT:-5000}"
 NODE_PORT="${NODE_PORT:-3000}"

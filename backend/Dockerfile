@@ -1,15 +1,12 @@
 # backend/Dockerfile
 #
 # Multi-stage build.
-#   1. Build the Node backend (Node 20 slim)
-#   2. Runtime: OSRM image + Node.js 20
+#   1. Build the Node backend
+#   2. Build the LA OSRM road network (extract → partition → customize)
+#   3. Runtime: OSRM image + Node.js + fresh LA data
 #
-# Using the OSRM image as the base ensures all osrm-routed shared libraries
-# are available without fighting package compatibility. Node.js is installed
-# from NodeSource on top of the OSRM image.
-#
-# At startup, start.sh launches osrm-routed with the LA road network, waits
-# for it to be ready, then starts the Node backend.
+# The OSRM data is rebuilt during Docker build using the same osrm-backend
+# version that runs at runtime, guaranteeing compatibility.
 
 # ---- Stage 1: Node build ----------------------------------------------------
 FROM node:20-bookworm-slim AS builder
@@ -21,7 +18,30 @@ RUN npm ci
 COPY . .
 RUN npx prisma generate && npm run build
 
-# ---- Stage 2: Runtime (OSRM base + Node) ------------------------------------
+# ---- Stage 2: Build LA OSRM road network ------------------------------------
+FROM ghcr.io/project-osrm/osrm-backend:v5.27.1 AS osrm-data
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /data
+
+# Download Los Angeles OSM extract (~200MB compressed).
+# BBBike LA extract covers Los Angeles, Orange, Ventura, San Bernardino,
+# and Riverside counties — the entire greater LA ride-hailing area.
+RUN curl -L -o la.osm.pbf \
+    https://download.bbbike.org/osm/bbbike/LosAngeles/LosAngeles.osm.pbf
+
+# Pre-process the OSM data into the OSRM routing graph.
+RUN osrm-extract -p /opt/car.lua la.osm.pbf
+RUN osrm-partition la.osrm
+RUN osrm-customize la.osrm
+
+# Clean up the source PBF to save space.
+RUN rm la.osm.pbf
+
+# ---- Stage 3: Runtime (OSRM base + Node + fresh data) -----------------------
 FROM ghcr.io/project-osrm/osrm-backend:v5.27.1 AS runtime
 
 # Install Node.js 20 from NodeSource.
@@ -41,8 +61,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
-# Copy OSRM road-network data (pre-processed LA extract).
-COPY data/ ./data/
+# Copy freshly built OSRM road network.
+COPY --from=osrm-data /data/ ./data/
 
 # Startup script runs osrm-routed then Node.
 COPY scripts/start.sh /start.sh

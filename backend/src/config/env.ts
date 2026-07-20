@@ -20,7 +20,7 @@ const envSchema = z.object({
   // Path on disk to the pre-processed OSRM road network (.osrm family).
   // Used by the startup script (start.sh / entrypoint) to find and launch
   // osrm-routed. Not read directly by backend code.
-  OSRM_DATA_PATH: z.string().default('./data/LosAngeles.osrm'),
+  OSRM_DATA_PATH: z.string().default('./data/la.osrm'),
   // ---- Fallback routing engine (Mapbox Directions API) --------------------
   // Used when coordinates fall outside the LA region served by local OSRM.
   // The access token is never shipped to the Flutter app.
