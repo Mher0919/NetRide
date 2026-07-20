@@ -43,7 +43,7 @@ class _RideRequestScreenState extends State<RideRequestScreen> {
       _loadingEstimate = true;
     });
     try {
-      final response = await ApiService.dio.post('/routing/plan', data: {
+      final response = await ApiService.dio.post('routing/plan', data: {
         'origin': [pickup.lat, pickup.lng],
         'destination': [destination.lat, destination.lng],
         'vehicleClass': _selectedClass.toString().split('.').last,
