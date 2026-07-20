@@ -22,7 +22,7 @@ async function runBenchmark() {
   for (const testCase of TEST_CASES) {
     console.log(`\nTesting: ${testCase.name}`);
     
-    // 1. Cold Call (OSRM + ML ETA)
+    // 1. Cold Call (routing engine + ML ETA)
     console.log('Requesting Route...');
     const start1 = Date.now();
     try {

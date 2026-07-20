@@ -1,11 +1,7 @@
-import axios, { AxiosInstance } from 'axios';
-import http from 'http';
-import pThrottle from 'p-throttle';
-import { env } from '../../config/env';
+import axios from 'axios';
 import { redis } from '../../config/redis';
-import { MLEtaService } from '../../services/ml-eta.service';
-import { enrichSteps } from '../../utils/road-classifier';
-import { LocalOsrmEngine } from '../routing/local-osrm.engine';
+import { RoutingService, RoutingResult } from '../routing/routing.service';
+import { logger } from '../../observability/logger';
 
 interface InspectionStation {
   display_name: string;
@@ -32,49 +28,44 @@ export interface RouteResponse {
 }
 
 export class GeospatialService {
-  private static inFlightRequests = new Map<string, Promise<RouteResponse>>();
-  private static isOsrmOnline = false; // Readiness Guard
-  
-  private static throttler = pThrottle({ limit: 50, interval: 1000 });
-
-  private static axiosClient: AxiosInstance = axios.create({
-    httpAgent: new http.Agent({ keepAlive: true, maxSockets: 100 }),
-    timeout: 2000,
-  });
-
-  private static throttledGet = GeospatialService.throttler(async (url: string) => {
-    return GeospatialService.axiosClient.get(url);
-  });
-
+  /**
+   * All routing now flows through the single RoutingService (which owns the
+   * ORS engine, cache, dedup, retries, and fallback). GeospatialService is a
+   * thin adapter that maps the routing result into the legacy `RouteResponse`
+   * shape the dispatch / navigation / controller layers expect. This removes
+   * the second, duplicated OSRM client that previously lived here.
+   */
   static async getRoute(start: [number, number], end: [number, number], isPreCache = false): Promise<RouteResponse> {
-    const cacheKey = this.generateCacheKey(start, end);
-
-    // 1. L1 - CACHE LAYER
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      const result = JSON.parse(cached);
-      result.cache_hit = true;
-      return result;
-    }
-
-    if (this.inFlightRequests.has(cacheKey)) {
-      return this.inFlightRequests.get(cacheKey)!;
-    }
-
     const requestStartTime = Date.now();
-    const requestPromise = this.fetchAndProcessRoute(start, end, cacheKey, isPreCache ? 5 : 0);
-    this.inFlightRequests.set(cacheKey, requestPromise);
+    const route: RoutingResult = await RoutingService.calculateRoute(
+      [start[0], start[1]],
+      [end[0], end[1]],
+    );
 
-    try {
-      const result = await requestPromise;
+    const multiplier =
+      route.durationSeconds > 0
+        ? route.etaSeconds / route.durationSeconds
+        : 1.2;
+
+    if (!isPreCache) {
       const totalLatency = Date.now() - requestStartTime;
-      if (!isPreCache && this.isOsrmOnline) {
-        console.log(`[GEOSPATIAL] ⚡ Request resolved in ${totalLatency}ms (Engine: ${result.engine}, Cache: ${result.cache_hit})`);
-      }
-      return result;
-    } finally {
-      this.inFlightRequests.delete(cacheKey);
+      logger.info(
+        { latencyMs: totalLatency, engine: route.engine, cacheHit: route.cacheHit },
+        'geospatial_route',
+      );
     }
+
+    return {
+      distance: route.distanceMeters,
+      osrm_duration: route.durationSeconds,
+      eta: route.etaSeconds,
+      geometry: route.geometry,
+      steps: route.steps,
+      speedLimitsByRoad: route.speedLimitsByRoad,
+      cache_hit: route.cacheHit,
+      model_multiplier: Math.round(multiplier * 100) / 100,
+      engine: route.engine,
+    };
   }
 
   // ---- Inspection-location helpers (driver app) --------------------------
@@ -450,7 +441,7 @@ export class GeospatialService {
       const CA_VIEWBOX = '-124.5,42.0,-114.0,32.5';
       const CA_SOUTH = 32.5, CA_NORTH = 42.0, CA_WEST = -124.5, CA_EAST = -114.0;
 
-      const response = await this.axiosClient.get('https://nominatim.openstreetmap.org/search', {
+      const response = await axios.get('https://nominatim.openstreetmap.org/search', {
         params: {
           q: query,
           format: 'json',
@@ -508,173 +499,15 @@ export class GeospatialService {
     }
   }
 
-  private static async fetchAndProcessRoute(start: [number, number], end: [number, number], cacheKey: string, retries = 0): Promise<RouteResponse> {
-    // Try the embedded in-process OSRM first (primary, Google-level, free).
-    try {
-      const res = await LocalOsrmEngine.route(start, end);
-      if (res) {
-        this.isOsrmOnline = true;
-        const multiplier = MLEtaService.predictMultiplier(start[0], start[1], res.distanceMeters);
-        const result: RouteResponse = {
-          distance: res.distanceMeters,
-          osrm_duration: res.durationSeconds,
-          eta: Math.round(res.durationSeconds * multiplier),
-          geometry: res.geometry,
-          steps: res.steps,
-          speedLimitsByRoad: res.speedLimitsByRoad,
-          cache_hit: false,
-          model_multiplier: multiplier,
-          engine: 'OSRM',
-        };
-        await redis.set(cacheKey, JSON.stringify(result), 'EX', 600).catch(() => {});
-        return result;
-      }
-    } catch (err: any) {
-      console.error(`[GEOSPATIAL] ❌ Embedded OSRM failed: ${err.message}`);
-    }
-
-    // Secondary: remote OSRM_URL if configured.
-    if (env.OSRM_URL) {
-      try {
-        const result = await this.fetchOsrmRoute(start, end, cacheKey);
-        if (result) return result;
-      } catch (err: any) {
-        if (this.isOsrmOnline) {
-          console.error(`[GEOSPATIAL] ❌ Router connection lost: ${err.message}`);
-          this.isOsrmOnline = false;
-        }
-      }
-    }
-
-    return this.calculateSyntheticRoute(start, end);
-  }
-
-  private static async fetchOsrmRoute(start: [number, number], end: [number, number], cacheKey: string): Promise<RouteResponse | null> {
-    const url = `${env.OSRM_URL}/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true&annotations=true`;
-    const response = await this.throttledGet(url);
-
-    if (response.status !== 200 || !response.data.routes?.length) return null;
-
-    this.isOsrmOnline = true;
-    const route = response.data.routes[0];
-    const multiplier = MLEtaService.predictMultiplier(start[0], start[1], route.distance);
-    const rawSteps = route.legs?.[0]?.steps ?? [];
-    const enrichedSteps = enrichSteps(rawSteps);
-    const speedLimitsByRoad = this.buildSpeedMap(enrichedSteps);
-
-    const result: RouteResponse = {
-      distance: route.distance,
-      osrm_duration: route.duration,
-      eta: Math.round(route.duration * multiplier),
-      geometry: route.geometry,
-      steps: enrichedSteps,
-      speedLimitsByRoad,
-      cache_hit: false,
-      model_multiplier: multiplier,
-      engine: 'OSRM-ML'
-    };
-
-    await redis.set(cacheKey, JSON.stringify(result), 'EX', 600);
-    return result;
-  }
-
-  private static buildSpeedMap(steps: any[]): Record<string, number> {
-    const map: Record<string, number> = {};
-    for (const step of steps) {
-      const limit = step.speedLimitMph;
-      if (!limit) continue;
-      const keys = [step.name, step.ref].filter(k => typeof k === 'string' && k.length > 0);
-      for (const k of keys) map[k] = limit;
-    }
-    return map;
-  }
-
-  private static generateCacheKey(start: [number, number], end: [number, number]): string {
-    const p = 4;
-    return `route:${start[0].toFixed(p)}:${start[1].toFixed(p)}:${end[0].toFixed(p)}:${end[1].toFixed(p)}:driving`;
-  }
-
-  private static calculateSyntheticRoute(start: [number, number], end: [number, number]): RouteResponse {
-    const speed = 6.1;
-    const detour = 1.35;
-    const lat1 = start[0], lon1 = start[1];
-    const lat2 = end[0], lon2 = end[1];
-    const R = 6371e3;
-    const φ1 = lat1 * Math.PI/180;
-    const φ2 = lat2 * Math.PI/180;
-    const Δφ = (lat2-lat1) * Math.PI/180;
-    const Δλ = (lon2-lon1) * Math.PI/180;
-    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const distance = R * c * detour;
-    const duration = distance / speed;
-
-    // Road-shaped (Manhattan/grid) polyline — never a single straight line.
-    const midLat = (lat1 + lat2) / 2;
-    const midLng = (lon1 + lon2) / 2;
-    const qLat = lat1 + (lat2 - lat1) * 0.25;
-    const qLng = lon1 + (lon2 - lon1) * 0.25;
-    const tLat = lat1 + (lat2 - lat1) * 0.75;
-    const tLng = lon1 + (lon2 - lon1) * 0.75;
-    const coordinates: Array<[number, number]> = [
-      [lon1, lat1],
-      [qLng, lat1],
-      [qLng, midLat],
-      [midLng, midLat],
-      [midLng, tLat],
-      [tLng, tLat],
-      [tLng, lat2],
-      [lon2, lat2],
-    ];
-
-    return {
-      distance,
-      osrm_duration: duration,
-      eta: Math.round(duration * 1.2),
-      geometry: { type: 'LineString', coordinates },
-      steps: [],
-      speedLimitsByRoad: {},
-      cache_hit: false,
-      model_multiplier: 1.2,
-      engine: 'Synthetic-Fallback'
-    };
-  }
-
   static async preCacheHotZones(zones: [number, number][]) {
-    console.log('[GEOSPATIAL] Router health check started in background...');
-    
-    let checks = 0;
-    const maxChecks = 12;
-    
-    const checkInterval = setInterval(async () => {
-      checks++;
-      try {
-        if (env.GEOAPIFY_API_KEY) {
-          await this.axiosClient.get(
-            `https://api.geoapify.com/v1/routing?waypoints=${zones[0][0]},${zones[0][1]}|${zones[0][0] + 0.01},${zones[0][1] + 0.01}&mode=drive&apiKey=${env.GEOAPIFY_API_KEY}`,
-            { timeout: 2000 }
-          );
-        } else {
-          const url = `${env.OSRM_URL.replace('/route/v1/driving', '/nearest/v1/driving')}/${zones[0][1]},${zones[0][0]}?number=1`;
-          await this.axiosClient.get(url);
-        }
-        
-        console.log('[GEOSPATIAL] 🟢 Router is ready. Triggering LA pre-cache...');
-        this.isOsrmOnline = true;
-        clearInterval(checkInterval);
-
-        for (const start of zones) {
-          for (const end of zones) {
-            if (start === end) continue;
-            this.getRoute(start, end, true).catch(() => {});
-          }
-        }
-      } catch (e) {
-        if (checks >= maxChecks) {
-          console.log('[GEOSPATIAL] ℹ️ Router still offline. Continuing with synthetic fallback. Pre-caching disabled.');
-          clearInterval(checkInterval);
-        }
+    logger.info({ zoneCount: zones.length }, 'geospatial_precache_start');
+    // Pre-warm the cache by asking for routes between every pair of hot zones.
+    // The RoutingService handles caching internally, so we just fire requests.
+    for (const start of zones) {
+      for (const end of zones) {
+        if (start === end) continue;
+        this.getRoute(start, end, true).catch(() => {});
       }
-    }, 5000);
+    }
   }
 }

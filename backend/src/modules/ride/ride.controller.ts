@@ -77,7 +77,7 @@ export class RideController {
     try {
       const validatedData = EstimateRideSchema.parse(req.body);
 
-      // Calculate distance using OSRM routing, but never block the request on
+      // Calculate distance using the routing service, but never block the request on
       // a slow/unreachable router — fall back to a synthetic distance fast.
       const route = await Promise.race<unknown>([
         GeospatialService.getRoute(

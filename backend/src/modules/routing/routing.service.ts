@@ -1,30 +1,37 @@
 // backend/src/modules/routing/routing.service.ts
 //
-// Isolated Routing Service — the single owner of the rider routing + fare
+// Isolated Routing Service — the SINGLE owner of the rider routing + fare
 // pipeline. It owns NO business logic beyond: validate → cache → engine →
-// decode → fare. Every other module (ride, navigation, geospatial search)
-// must go through this service for trip planning so the routing pipeline
-// stays consistent, observable, and cacheable.
+// decode → fare. Every other module (ride, navigation, geospatial search,
+// dispatch, matching) MUST go through this service for trip planning so the
+// routing pipeline stays consistent, observable, and cacheable.
 //
-// Design goals (per the routing-redesign brief):
-//   - Fast:        cache-first, OSRM in <250ms, fare in microseconds.
-//   - Road geometry: OSRM/Geoapify return true road-following geometry.
+// Architecture (per the routing-redesign brief):
+//
+//   Flutter App → Backend API → Ride/Dispatch/Nav → RoutingService →
+//     → ORSEngine → OpenRouteService API
+//
+// No business logic calls ORS directly. The active engine is a single
+// binding (ORSEngine) behind the RouteEngine interface, so swapping
+// providers (GraphHopper, Valhalla, Google, Mapbox, a future OSRM) is a
+// one-file change with zero impact on callers.
+//
+// Design goals:
+//   - Fast:        cache-first, ORS in <250ms, fare in microseconds.
+//   - Road geometry: ORS returns true road-following geometry (polyline).
 //   - Lightweight:  no per-request DB hits in the hot path.
 //   - Resilient:    never crash; degrade to a road-shaped synthetic route.
-//   - Observable:   every stage is instrumented via prom-client.
-//   - Scalable:     stateless + Redis cache + request dedup map.
+//   - Observable:   every stage is instrumented via prom-client + structured logs.
+//   - Scalable:     stateless + Redis cache + request dedup map + concurrent-safe.
+//   - Extensible:   provider swap = implement RouteEngine + change one binding.
 
-import axios, { AxiosInstance } from 'axios';
-import http from 'http';
-import pThrottle from 'p-throttle';
 import ngeohash from 'ngeohash';
-import { env } from '../../config/env';
 import { redis } from '../../config/redis';
 import { MLEtaService } from '../../services/ml-eta.service';
-import { enrichSteps } from '../../utils/road-classifier';
 import { fareService, FareBreakdown } from '../../services/fare.service';
 import { VehicleClass } from '../../types';
-import { LocalOsrmEngine } from './local-osrm.engine';
+import { ORSEngine, RouteEngine } from './ors.engine';
+import { RoutingError } from './routing.errors';
 import {
   routingRequestsTotal,
   routingDurationSeconds,
@@ -32,6 +39,8 @@ import {
   routingEngineSeconds,
   routingFareSeconds,
   routingFallbackTotal,
+  routingEngineRequestsTotal,
+  routingEngineDurationSeconds,
 } from '../../observability/metrics';
 import { logger } from '../../observability/logger';
 
@@ -49,7 +58,7 @@ export interface RoutingResult {
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
-  engine: 'OSRM' | 'OSRM-Remote' | 'Synthetic';
+  engine: 'ORS' | 'Synthetic';
   cacheHit: boolean;
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
@@ -107,10 +116,7 @@ function validateCoordinate(value: unknown, label: string): number {
   return value;
 }
 
-export function parseCoordinates(
-  raw: unknown,
-  label: string,
-): LatLng {
+export function parseCoordinates(raw: unknown, label: string): LatLng {
   if (!Array.isArray(raw) || raw.length !== 2) {
     throw new InvalidCoordinatesError(`${label} must be a [lat, lng] tuple`);
   }
@@ -126,30 +132,13 @@ export function parseCoordinates(
 }
 
 export class RoutingService {
+  // The active routing engine. Swap this single binding to change providers.
+  private static readonly engine: RouteEngine = ORSEngine;
+
   // ---- Request deduplication (collision-free in-flight map) ---------------
   // Two identical OD requests in flight share one engine call + one cache
   // write. Keyed by the snapped cache key so "nearby" repeats also dedupe.
   private static readonly inFlight = new Map<string, Promise<RoutingResult>>();
-
-  // ---- Engine readiness guard ---------------------------------------------
-  private static osrmOnline = false;
-
-  // ---- Engine throttle (protect the shared OSRM cluster) -----------------
-  private static readonly throttler = pThrottle({ limit: 80, interval: 1000 });
-
-  private static readonly httpAgent = new http.Agent({
-    keepAlive: true,
-    maxSockets: 100,
-  });
-
-  private static readonly axiosClient: AxiosInstance = axios.create({
-    httpAgent: RoutingService.httpAgent,
-    timeout: 2000,
-  });
-
-  private static readonly throttledGet = RoutingService.throttler(
-    (url: string) => RoutingService.axiosClient.get(url),
-  );
 
   // ---- Cache tuning -------------------------------------------------------
   /** Exact-match TTL — identical OD pairs. */
@@ -165,6 +154,7 @@ export class RoutingService {
    */
   static async plan(request: PlanRequest): Promise<PlanResponse> {
     const end = routingDurationSeconds.startTimer();
+    const start = Date.now();
     try {
       const route = await this.routeCached(request.origin, request.destination);
 
@@ -176,7 +166,23 @@ export class RoutingService {
       });
       routingFareSeconds.observe(Number(process.hrtime.bigint() - fareStart) / 1e9);
 
-      routingRequestsTotal.inc({ cache: route.cacheHit ? 'hit' : 'miss', engine: route.engine.toLowerCase() });
+      routingRequestsTotal.inc({
+        cache: route.cacheHit ? 'hit' : 'miss',
+        engine: route.engine.toLowerCase(),
+      });
+
+      logger.info(
+        {
+          origin: request.origin,
+          destination: request.destination,
+          engine: route.engine,
+          cacheHit: route.cacheHit,
+          distanceMeters: route.distanceMeters,
+          durationSeconds: route.durationSeconds,
+          latencyMs: Date.now() - start,
+        },
+        'routing_plan',
+      );
 
       return {
         origin: request.origin,
@@ -199,6 +205,59 @@ export class RoutingService {
     } finally {
       end();
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Clean public API (per the routing-redesign brief)
+  // -------------------------------------------------------------------------
+
+  /** Full route: distance + duration + ETA + geometry + steps. */
+  static async calculateRoute(
+    origin: LatLng,
+    destination: LatLng,
+  ): Promise<RoutingResult> {
+    return this.routeCached(origin, destination);
+  }
+
+  /** Road distance only (ORS-calculated; never straight-line). */
+  static async calculateDistance(
+    origin: LatLng,
+    destination: LatLng,
+  ): Promise<number> {
+    const r = await this.routeCached(origin, destination);
+    return r.distanceMeters;
+  }
+
+  /** Road ETA only (OSM base duration × ML multiplier). */
+  static async calculateETA(
+    origin: LatLng,
+    destination: LatLng,
+  ): Promise<number> {
+    const r = await this.routeCached(origin, destination);
+    return r.etaSeconds;
+  }
+
+  /** Route + fare breakdown together. */
+  static async calculateFareRoute(
+    origin: LatLng,
+    destination: LatLng,
+    vehicleClass: VehicleClass,
+  ): Promise<{ route: RoutingResult; fare: FareBreakdown }> {
+    const route = await this.routeCached(origin, destination);
+    const fare = fareService.computeFare({
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      vehicleClass,
+    });
+    return { route, fare };
+  }
+
+  /** Decode an ORS `polyline` / `polyline6` string to [lng,lat] coordinates. */
+  static decodePolyline(encoded: string): Array<[number, number]> {
+    // Lazy import keeps the hot path free of this unless explicitly used.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const polyline = require('@mapbox/polyline');
+    return polyline.decode(encoded).map(([lat, lng]: [number, number]) => [lng, lat]);
   }
 
   // -------------------------------------------------------------------------
@@ -301,28 +360,50 @@ export class RoutingService {
     const engineStart = process.hrtime.bigint();
     let result: RoutingResult | null = null;
 
-    // Engine preference order (per the routing-redesign brief):
-    //   1. OSRM (embedded, in-process) — the PRIMARY engine. Sub-50ms,
-    //      Google-level road geometry, no network hop, no second service.
-    //   2. OSRM (remote) — only if OSRM_URL is configured AND the embedded
-    //      engine is unavailable (e.g. the .osrm wasn't baked yet).
-    //   3. Synthetic — a road-shaped fallback used only if both OSRM paths
-    //      are unreachable, so the app NEVER shows a straight line or $0.
-    // Geoapify has been removed entirely from the routing hot path.
+    // Validate coordinates before contacting ORS. Cheap, local, avoids
+    // wasting a paid API call on bad input.
     try {
-      result = await this.fetchOsrmEmbedded(origin, destination);
-    } catch (osrmErr: any) {
-      logger.warn({ err: osrmErr.message }, 'routing_osrm_embedded_error');
+      parseCoordinates([origin[0], origin[1]], 'origin');
+      parseCoordinates([destination[0], destination[1]], 'destination');
+    } catch (coordErr) {
+      // Invalid coordinates → don't touch ORS; synthesize a safe fallback.
+      logger.warn({ err: (coordErr as Error).message }, 'routing_invalid_coords');
+      result = this.syntheticRoute(origin, destination);
+      routingFallbackTotal.inc();
+      routingEngineSeconds.observe(this.elapsed(engineStart));
+      await this.writeCache(exactKey, origin, destination, result);
+      return result;
     }
 
-    if (!result && env.OSRM_URL) {
-      try {
-        result = await this.fetchOsrmRemote(origin, destination);
-      } catch (osrmErr: any) {
-        if (this.osrmOnline) {
-          logger.error({ err: osrmErr.message }, 'routing_osrm_remote_error');
-          this.osrmOnline = false;
-        }
+    try {
+      const res = await this.engine.route(origin, destination);
+      if (res) {
+        const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
+        result = {
+          distanceMeters: res.distanceMeters,
+          durationSeconds: res.durationSeconds,
+          etaSeconds: Math.round(res.durationSeconds * multiplier),
+          geometry: res.geometry,
+          confidence: 0.99,
+          engine: 'ORS',
+          cacheHit: false,
+          steps: res.steps,
+          speedLimitsByRoad: res.speedLimitsByRoad,
+        };
+        routingEngineRequestsTotal.inc({ status: 'ok' });
+      } else {
+        routingEngineRequestsTotal.inc({ status: 'empty' });
+      }
+    } catch (engineErr: any) {
+      if (engineErr instanceof RoutingError) {
+        // Permanent bad-input error — do not silently fall back to a wrong
+        // synthetic route; still return a road-shaped fallback so the app
+        // keeps working, but mark it as low confidence.
+        logger.warn({ err: engineErr.message }, 'routing_engine_bad_input');
+        routingEngineRequestsTotal.inc({ status: 'bad_input' });
+      } else {
+        logger.error({ err: engineErr.message }, 'routing_engine_error');
+        routingEngineRequestsTotal.inc({ status: 'error' });
       }
     }
 
@@ -333,7 +414,18 @@ export class RoutingService {
     }
 
     routingEngineSeconds.observe(this.elapsed(engineStart));
+    routingEngineDurationSeconds.observe(this.elapsed(engineStart));
 
+    await this.writeCache(exactKey, origin, destination, result);
+    return result;
+  }
+
+  private static async writeCache(
+    exactKey: string,
+    origin: LatLng,
+    destination: LatLng,
+    result: RoutingResult,
+  ): Promise<void> {
     const payload = JSON.stringify(result);
     // Exact key + nearby keys so "close enough" future requests reuse it.
     const nearbyKeys = this.nearbyKeys(origin, destination);
@@ -345,8 +437,6 @@ export class RoutingService {
     } catch (err: any) {
       logger.warn({ err: err.message }, 'routing_cache_write_failed');
     }
-
-    return result;
   }
 
   /**
@@ -372,59 +462,10 @@ export class RoutingService {
     }
   }
 
-  /** PRIMARY: in-process OSRM over the baked SoCal road network. */
-  private static async fetchOsrmEmbedded(origin: LatLng, destination: LatLng): Promise<RoutingResult | null> {
-    const res = await LocalOsrmEngine.route(origin, destination);
-    if (!res) return null;
-
-    const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
-    return {
-      distanceMeters: res.distanceMeters,
-      durationSeconds: res.durationSeconds,
-      etaSeconds: Math.round(res.durationSeconds * multiplier),
-      geometry: res.geometry,
-      confidence: 0.99,
-      engine: 'OSRM',
-      cacheHit: false,
-      steps: res.steps,
-      speedLimitsByRoad: res.speedLimitsByRoad,
-    };
-  }
-
-  /** SECONDARY: remote OSRM instance (OSRM_URL) when embedded is unavailable. */
-  private static async fetchOsrmRemote(origin: LatLng, destination: LatLng): Promise<RoutingResult | null> {
-    const url =
-      `${env.OSRM_URL}/${origin[1]},${origin[0]};${destination[1]},${destination[0]}` +
-      `?overview=full&geometries=geojson&steps=true&annotations=true`;
-    const response = await this.throttledGet(url);
-    if (response.status !== 200 || !response.data?.routes?.length) return null;
-
-    this.osrmOnline = true;
-    const route = response.data.routes[0];
-    const distanceMeters = route.distance;
-    const osrmDuration = route.duration;
-    const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], distanceMeters);
-    const rawSteps = route.legs?.[0]?.steps ?? [];
-    const steps = enrichSteps(rawSteps);
-    const speedLimitsByRoad = this.buildSpeedMap(steps);
-
-    return {
-      distanceMeters,
-      durationSeconds: osrmDuration,
-      etaSeconds: Math.round(osrmDuration * multiplier),
-      geometry: route.geometry,
-      confidence: 0.99,
-      engine: 'OSRM-Remote',
-      cacheHit: false,
-      steps,
-      speedLimitsByRoad,
-    };
-  }
-
   // -------------------------------------------------------------------------
   // Synthetic fallback — ALWAYS road-shaped (grid/grid-ish), never a straight
-  // 2-point "line". Used only when BOTH OSRM engines are unreachable, so the
-  // app still paints a believable city-grid route and a non-zero fare.
+  // 2-point "line". Used only when ORS is unreachable, so the app still
+  // paints a believable city-grid route and a non-zero fare.
   // -------------------------------------------------------------------------
 
   private static syntheticRoute(origin: LatLng, destination: LatLng): RoutingResult {

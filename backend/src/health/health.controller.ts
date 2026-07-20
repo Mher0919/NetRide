@@ -7,13 +7,15 @@
 //                        "should I kill this instance?" decisions.
 //
 //   GET /health/ready  — process is ready to serve traffic. Pings every
-//                        critical dependency (Redis, Postgres, OSRM).
+//                        critical dependency (Redis, Postgres, ORS routing).
 //                        Returns 503 with a JSON body listing what's
 //                        down. Use this for "should I send this instance
 //                        traffic?" decisions.
 
 import { Request, Response, Router } from 'express';
 import axios from 'axios';
+import http from 'http';
+import https from 'https';
 import { redis } from '../config/redis';
 import { pool } from '../config/database';
 import { env } from '../config/env';
@@ -65,20 +67,26 @@ async function probePostgres(): Promise<DependencyStatus> {
 async function probeRouter(): Promise<DependencyStatus> {
   const start = Date.now();
   try {
-    if (env.GEOAPIFY_API_KEY) {
-      await axios.get(
-        `https://api.geoapify.com/v1/routing?waypoints=34.0639,-118.4455|34.0700,-118.4400&mode=drive&apiKey=${env.GEOAPIFY_API_KEY}`,
-        { timeout: 2000 }
-      );
-    } else {
-      const base = env.OSRM_URL.replace('/route/v1/driving', '/nearest/v1/driving');
-      await axios.get(`${base}/-118.4455,34.0639?number=1`, { timeout: 2000 });
-    }
-    dependencyUp.set({ dependency: 'osrm' }, 1);
-    return { name: 'osrm', up: true, latencyMs: Date.now() - start };
+    const body = {
+      coordinates: [[-118.4455, 34.0639], [-118.4400, 34.0700]],
+      profile: 'driving-car',
+      format: 'json',
+      geometry_format: 'polyline',
+      instructions: false,
+      elevation: false,
+    };
+    await axios.post(env.ORS_URL, body, {
+      headers: {
+        Authorization: env.ORS_API_KEY ?? '',
+        'Content-Type': 'application/json',
+      },
+      timeout: 2000,
+    });
+    dependencyUp.set({ dependency: 'routing-engine' }, 1);
+    return { name: 'routing-engine', up: true, latencyMs: Date.now() - start };
   } catch (err: any) {
-    dependencyUp.set({ dependency: 'osrm' }, 0);
-    return { name: 'osrm', up: false, error: err.message };
+    dependencyUp.set({ dependency: 'routing-engine' }, 0);
+    return { name: 'routing-engine', up: false, error: err.message };
   }
 }
 

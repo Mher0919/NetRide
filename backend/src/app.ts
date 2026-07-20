@@ -512,9 +512,9 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
 
   logger.info({ set: !!env.JWT_SECRET, length: env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
 
-  // Pre-cache OSRM routes for the launch market (Hollywood / UCLA /
-  // Beverly Hills / Westwood). The coords are landmarks, not
-  // pre-cached OD pairs — preCacheHotZones computes the full grid.
+  // Pre-cache routes for the launch market (Hollywood / UCLA / Beverly Hills
+  // / Westwood). preCacheHotZones computes the full grid — the routing
+  // service caches the results so future identical requests are instant.
   GeospatialService.preCacheHotZones([
     [34.0928, -118.3287], // Hollywood
     [34.0639, -118.4455], // Westwood / UCLA

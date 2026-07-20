@@ -76,16 +76,14 @@ test('computeFare runs in microseconds (no I/O)', () => {
 // ---- Synthetic fallback is road-shaped (never a straight 2-point line) --
 
 test('synthetic fallback returns a multi-point road-shaped geometry', async () => {
-  // Force the synthetic path by making both OSRM engines + cache no-ops so
-  // the test runs in milliseconds with no network/Redis dependency.
+  // Force the synthetic path by making the engine + cache no-ops so the
+  // test runs in milliseconds with no network/Redis dependency.
   const svc = RoutingService as any;
-  const origEmbedded = svc.fetchOsrmEmbedded;
-  const origRemote = svc.fetchOsrmRemote;
+  const origEngine = svc.engine;
   const origWrite = svc.withRedisTimeout;
   const origLookup = svc.lookupCache;
-  // Make both OSRM paths throw to force the road-shaped synthetic fallback.
-  svc.fetchOsrmEmbedded = async () => { throw new Error('offline'); };
-  svc.fetchOsrmRemote = async () => { throw new Error('offline'); };
+  // Make the engine throw to force the road-shaped synthetic fallback.
+  svc.engine = { name: 'TestFail', route: async () => { throw new Error('offline'); } };
   svc.withRedisTimeout = async () => null;
   svc.lookupCache = async () => null; // skip Redis entirely
   try {
@@ -99,8 +97,7 @@ test('synthetic fallback returns a multi-point road-shaped geometry', async () =
     assert.equal(plan.confidence, 0.4);
     assert.ok(plan.fare.totalFare > 0);
   } finally {
-    svc.fetchOsrmEmbedded = origEmbedded;
-    svc.fetchOsrmRemote = origRemote;
+    svc.engine = origEngine;
     svc.withRedisTimeout = origWrite;
     svc.lookupCache = origLookup;
   }
@@ -123,8 +120,6 @@ test('identical concurrent plans share one computation', async () => {
   svc.lookupCache = async () => null;
   const origWrite = svc.withRedisTimeout;
   svc.withRedisTimeout = async () => null;
-  const origGeo = svc.fetchGeoapify;
-  svc.fetchGeoapify = async () => { throw new Error('offline'); };
   try {
     const [a, b] = await Promise.all([
       RoutingService.plan({ origin: [34.0, -118.2], destination: [34.1, -118.3], vehicleClass: VehicleClass.CORE }),
@@ -136,6 +131,5 @@ test('identical concurrent plans share one computation', async () => {
     svc.computeRoute = origCompute;
     svc.lookupCache = origLookup;
     svc.withRedisTimeout = origWrite;
-    svc.fetchGeoapify = origGeo;
   }
 });

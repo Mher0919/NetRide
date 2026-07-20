@@ -9,7 +9,7 @@
     "build": "tsc",
     "test": "node run-tests.cjs",
     "bench:routing": "ts-node src/modules/routing/__tests__/benchmark.routing.ts",
-    "build:osrm": "bash scripts/build-osrm.sh",
+    "build:osrm": "echo 'DEPRECATED: Routing now uses OpenRouteService (ORS). No local OSRM build needed.'",
     "match-worker": "ts-node src/queue/matchWorker.ts",
     "cron-worker": "ts-node src/queue/cronWorker.ts"
   },

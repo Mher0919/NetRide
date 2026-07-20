@@ -59,7 +59,7 @@ export const matchingService = {
     const trip = await RideRepository.findById(tripId);
     if (!trip) return;
 
-    // 1. Fetch driver location & OSRM routes
+    // 1. Fetch driver location & routes (via RoutingService / ORS)
     let driverLoc = null;
     let driverToPickupRoute = null;
     try {

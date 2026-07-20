@@ -1,9 +1,11 @@
 // backend/src/utils/road-classifier.ts
 //
 // Centralized helpers for inferring road class + speed limit from raw
-// OSRM step metadata. OSRM populates `ref` (e.g. "I-405", "US-101"),
-// `name`, and `mode`. Speed limits are inconsistently populated upstream,
-// so we layer three sources in priority order:
+// routing step metadata (provider-agnostic — works with ORS, OSRM,
+// GraphHopper, etc. after step normalization). Routes populate `ref`
+// (e.g. "I-405", "US-101"), `name`, and `mode`. Speed limits are
+// inconsistently populated upstream, so we layer three sources in
+// priority order:
 //   1. step.speed_limit (when present, kph)
 //   2. road-class default (freeway / arterial / local / residential)
 //   3. conservative fallback (30 mph local)
@@ -28,8 +30,8 @@ const FREEWAY_PATTERNS: RegExp[] = [
 ];
 
 /**
- * Classify a road from its OSRM step. Returns the class key used to
- * pick a speed-limit default when OSRM doesn't provide one.
+ * Classify a road from a routing step. Returns the class key used to
+ * pick a speed-limit default when the provider doesn't provide one.
  */
 export function classifyRoad(step: { ref?: string | null; name?: string | null; mode?: string | null }): {
   isFreeway: boolean;
@@ -68,9 +70,10 @@ const MPH_DEFAULTS: Record<string, number> = {
 };
 
 /**
- * Resolve a speed limit in mph. Prefers OSRM-provided `speed_limit`
- * (which is in kph on some OSRM builds); falls back to the road-class
- * default; ultimately to a 30 mph conservative local limit.
+ * Resolve a speed limit in mph. Prefers provider-provided `speed_limit`
+ * (which may be in m/s, kph, or mph depending on the provider); falls
+ * back to the road-class default; ultimately to a 30 mph conservative
+ * local limit.
  */
 export function resolveSpeedLimitMph(step: {
   ref?: string | null;
@@ -81,7 +84,7 @@ export function resolveSpeedLimitMph(step: {
   if (raw !== undefined && raw !== null && raw !== '') {
     const num = typeof raw === 'string' ? parseFloat(raw) : Number(raw);
     if (Number.isFinite(num) && num > 0) {
-      // OSRM speed_limit is in m/s on some builds, kph on others.
+      // speed_limit may be in m/s on some providers, kph on others.
       // >30 m/s is implausible; >200 kph is plausible for a German
       // autobahn but impossible in California. We treat anything in
       // [10, 35] as m/s and convert, and anything >35 as kph.
@@ -96,7 +99,7 @@ export function resolveSpeedLimitMph(step: {
 }
 
 /**
- * Flatten OSRM steps into a per-step record the client and the
+ * Flatten provider steps into a per-step record the client and the
  * speeding detector both consume. Keeps backwards compat: `name`,
  * `distance`, `maneuver` are unchanged. Adds:
  *   - ref, mode
@@ -122,8 +125,8 @@ export function enrichSteps(steps: any[]): any[] {
 }
 
 /**
- * Pull lane guidance out of the first intersection that has lanes. The
- * OSRM step shape: `step.intersections[0].lanes[].{valid, indications}`.
+ * Pull lane guidance out of the first intersection that has lanes. Shape:
+ * `step.intersections[0].lanes[].{valid, indications}`.
  *
  * Returns `[{ indication: 'left'|'right'|'straight'|..., valid: bool }]`
  * so the driver app's LaneGuidance widget can render icons.

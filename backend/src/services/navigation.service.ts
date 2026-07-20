@@ -2,8 +2,8 @@
 //
 // Owns the per-trip, per-leg route cache and the navigation lifecycle
 // socket events. Built so the driver app can hold a local cached route
-// (one OSRM call per leg) and re-fetch only when an explicit reroute
-// signal arrives — never poll Google / OSRM.
+// (one routing call per leg) and re-fetch only when an explicit reroute
+// signal arrives — never poll the routing API unnecessarily.
 //
 // Cache shape:
 //   key:    trip_route:{tripId}:{leg}     leg in {'pickup','destination'}
@@ -48,7 +48,7 @@ export class NavigationService {
   /**
    * Read a previously cached leg. Returns null if missing or expired.
    * The driver app's local navigator calls this on mount to rehydrate
-   * its in-memory NavigationRoute without hitting OSRM again.
+   * its in-memory NavigationRoute without hitting the routing API again.
    */
   static async getCachedRouteLeg(tripId: string, leg: NavigationLeg): Promise<CachedRoutePayload | null> {
     try {

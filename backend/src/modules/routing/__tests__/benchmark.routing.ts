@@ -8,7 +8,7 @@
 //   total plan     < 400ms (absolute max 700ms)
 //
 // Run with:  npx ts-node src/modules/routing/__tests__/benchmark.routing.ts
-// (or: npm run bench:routing). Works with or without a live OSRM/Redis.
+// (or: npm run bench:routing). Works with or without a live ORS/Redis.
 
 import { RoutingService } from '../routing.service';
 import { fareService } from '../../../services/fare.service';

@@ -2,7 +2,7 @@
 //
 // Prometheus metrics for the NetRide backend. Every counter / histogram
 // here MUST be cheap to record — these are called from the hot path
-// (request log, match log, OSRM call). The registry is the default
+// (request log, match log, routing call). The registry is the default
 // global one so prom-client picks it up via `register.metrics()`.
 //
 // Naming follows Prometheus conventions: `<unit>_total` for counters,
@@ -64,18 +64,36 @@ export const dispatchAcceptOutcomeTotal = new client.Counter({
   registers: [register],
 });
 
-// --- OSRM ------------------------------------------------------------------
+// --- Routing engine (provider-agnostic: ORS today, swappable tomorrow) -----
 
-export const osrmRequestsTotal = new client.Counter({
-  name: 'netride_osrm_requests_total',
-  help: 'OSRM HTTP calls, labeled by cache hit and engine.',
-  labelNames: ['cache', 'engine'] as const, // cache: hit|miss ; engine: osrm|synthetic
+/** Total calls to the active routing engine, labeled by outcome. */
+export const routingEngineRequestsTotal = new client.Counter({
+  name: 'netride_routing_engine_requests_total',
+  help: 'Routing engine calls (ORS/GraphHopper/...), labeled by outcome.',
+  labelNames: ['status'] as const, // ok | empty | error | bad_input
   registers: [register],
 });
 
+/** Routing engine call latency in seconds (excludes cache hits). */
+export const routingEngineDurationSeconds = new client.Histogram({
+  name: 'netride_routing_engine_duration_seconds',
+  help: 'Routing engine call latency in seconds.',
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+  registers: [register],
+});
+
+/** @deprecated retained for dashboards that still reference OSRM metrics. */
+export const osrmRequestsTotal = new client.Counter({
+  name: 'netride_osrm_requests_total',
+  help: 'Deprecated: use netride_routing_engine_requests_total.',
+  labelNames: ['cache', 'engine'] as const,
+  registers: [register],
+});
+
+/** @deprecated retained for dashboards that still reference OSRM metrics. */
 export const osrmRequestDurationSeconds = new client.Histogram({
   name: 'netride_osrm_request_duration_seconds',
-  help: 'OSRM call latency in seconds (excludes cache hits).',
+  help: 'Deprecated: use netride_routing_engine_duration_seconds.',
   buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
   registers: [register],
 });
@@ -102,7 +120,7 @@ export const socketEventsTotal = new client.Counter({
 export const routingRequestsTotal = new client.Counter({
   name: 'netride_routing_requests_total',
   help: 'Routing plan requests, labeled by cache hit and engine.',
-  labelNames: ['cache', 'engine'] as const, // cache: hit|miss ; engine: osrm|geoapify|synthetic|nearby
+  labelNames: ['cache', 'engine'] as const, // cache: hit|miss ; engine: ors|synthetic|nearby
   registers: [register],
 });
 
@@ -122,7 +140,7 @@ export const routingCacheLookupSeconds = new client.Histogram({
   registers: [register],
 });
 
-/** Routing engine (OSRM/Geoapify) call latency, excludes cache hits. */
+/** Routing engine (ORS/GraphHopper/...) call latency, excludes cache hits. */
 export const routingEngineSeconds = new client.Histogram({
   name: 'netride_routing_engine_seconds',
   help: 'Routing engine call latency in seconds.',
@@ -150,7 +168,7 @@ export const routingFallbackTotal = new client.Counter({
 export const dependencyUp = new client.Gauge({
   name: 'netride_dependency_up',
   help: '1 if the last health probe to this dependency succeeded, 0 otherwise.',
-  labelNames: ['dependency'] as const, // redis | postgres | osrm
+  labelNames: ['dependency'] as const, // redis | postgres | routing-engine
   registers: [register],
 });
 

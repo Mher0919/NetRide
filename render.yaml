@@ -36,7 +36,7 @@ services:
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
-      - key: OSRM_URL
+      - key: ORS_API_KEY
         sync: false
       # ---- Face verification tunables (defaults from .env.example) ----
       - key: FACE_MATCH_THRESHOLD

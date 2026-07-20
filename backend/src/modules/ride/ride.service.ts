@@ -296,7 +296,7 @@ export class RideService {
     (updatedTrip as any).driver_location = driverLoc;
 
     // Navigation cache + route_metadata for the pickup leg. We resolve
-    // the route OSRM-side, cache it for the speeding detector + driver
+    // the route via the routing service, cache it for the speeding detector + driver
     // app, persist a snapshot on the ride, and emit the start event.
     if (driverLoc) {
       try {

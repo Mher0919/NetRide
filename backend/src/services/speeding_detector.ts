@@ -286,7 +286,7 @@ export class SpeedingDetector {
    * currently on. We probe both the pickup and destination cached legs
    * (whichever is active) and pick the first match by road name / ref.
    *
-   * Cheap: one or two Redis reads, never a per-point OSRM call.
+   * Cheap: one or two Redis reads, never a per-point routing API call.
    */
   private static async resolveRouteForPoint(
     driverId: string,

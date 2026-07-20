@@ -11,7 +11,7 @@ export class MLEtaService {
     const day = now.getDay();
     const isWeekend = (day === 0 || day === 6);
 
-    let multiplier = 0.90; // Base: OSRM is conservative, our drivers are faster.
+    let multiplier = 0.90; // Base: routing engine is conservative, our drivers are faster.
 
     // 1. Granular Congestion Model
     if (!isWeekend) {
