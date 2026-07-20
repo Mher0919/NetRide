@@ -6,6 +6,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../services/auth_service.dart';
 import '../components/state_container.dart';
 import '../utils/file_url.dart';
+import '../utils/phone_utils.dart';
+import '../services/error_handler.dart';
+import '../widgets/phone_input_field.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -42,6 +45,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _isPhoneVerified = false;
   bool _isSendingCode = false;
   bool _codeSent = false;
+  bool _phoneValid = false;
   final _otpController = TextEditingController();
 
   // Step 3: Documents
@@ -521,21 +525,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 32),
           if (!_isPhoneVerified) ...[
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: TextField(
+                  child: PhoneInputField(
                     controller: _phoneController,
-                    enabled: !_codeSent,
-                    decoration: _inputDecoration('Phone Number').copyWith(
-                      hintText: '+1 (555) 123-4567',
-                    ),
-                    keyboardType: TextInputType.phone,
+                    onValidityChanged: (valid) {
+                      if (valid != _phoneValid) {
+                        setState(() => _phoneValid = valid);
+                      }
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
                 if (!_codeSent)
                   ElevatedButton(
-                    onPressed: _isSendingCode ? null : _sendPhoneCode,
+                    onPressed: (!_phoneValid || _isSendingCode) ? null : _sendPhoneCode,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.black,
                       foregroundColor: Colors.white,
@@ -648,19 +653,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  String _normalizePhone(String raw) {
-    final digits = raw.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('1')) return '+$digits';
-    return '+1$digits';
-  }
-
   Future<void> _sendPhoneCode() async {
-    final raw = _phoneController.text.trim();
-    if (raw.isEmpty) {
-      _showError('Please enter your phone number.');
+    final normalized = PhoneUtils.normalize(
+      input: _phoneController.text,
+      country: CountryDialCode.unitedStates,
+    );
+    if (normalized == null) {
+      _showError('Please enter a valid 10-digit US phone number.');
       return;
     }
-    final normalized = _normalizePhone(raw);
     _phoneController.text = normalized;
     setState(() => _isSendingCode = true);
     try {
@@ -680,12 +681,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }
     } catch (e) {
       setState(() => _isSendingCode = false);
-      final msg = e.toString();
-      if (msg.contains('already') || msg.contains('associated')) {
-        _showError('This phone number already exists.');
-      } else {
-        _showError('Failed to send code.');
-      }
+      _showError(ErrorHandler.friendly(e));
     }
   }
 
@@ -697,7 +693,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _isSendingCode = true);
     try {
       await AuthService.verifyPhoneOTP(
-        phoneNumber: _phoneController.text.trim(),
+        phoneNumber: PhoneUtils.normalize(
+              input: _phoneController.text,
+              country: CountryDialCode.unitedStates,
+            ) ??
+            _phoneController.text.trim(),
         code: _otpController.text.trim(),
       );
       setState(() {
@@ -707,7 +707,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _showSuccess('Phone number verified successfully!');
     } catch (e) {
       setState(() => _isSendingCode = false);
-      _showError('Invalid code. Please try again.');
+      _showError(ErrorHandler.friendly(e));
     }
   }
 

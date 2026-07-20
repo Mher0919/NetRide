@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -43,24 +44,26 @@ class _MainWrapperState extends State<MainWrapper> {
     }
 
     try {
-      // Use cache-first fetch via provider
-      Map<String, dynamic> profile;
-      try {
-        final provider = Provider.of<DriverProvider>(context, listen: false);
-        profile = await provider.fetchProfile();
-      } catch (_) {
-        profile = await UserService.getProfile();
-      }
-
-      final onboardingStep = profile['onboarding_step'] ?? 0;
-      final isSubmitted = onboardingStep >= 5;
-      if (profile['user_id'] == null || !isSubmitted) {
+      // The backend is the single source of truth for onboarding completion.
+      // Even if this screen is reached via a deep link, back-stack, or a stale
+      // local cache, an un-onboarded driver must be sent back to onboarding.
+      final complete = await AuthService.isDriverOnboardingComplete();
+      if (!complete) {
         if (mounted) {
           Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
         }
         return;
       }
-      
+
+      // Warm the cache for downstream screens, but do NOT use it for the
+      // onboarding decision above.
+      try {
+        final provider = Provider.of<DriverProvider>(context, listen: false);
+        unawaited(provider.fetchProfile());
+      } catch (_) {
+        // Non-fatal; the guard decision is already made from the backend.
+      }
+
       if (mounted) {
         setState(() => _isChecking = false);
       }

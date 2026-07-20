@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/error_handler.dart';
 import '../services/sound_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -69,7 +70,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   }
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(ErrorHandler.friendly(e))),
+                  );
                 }
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),

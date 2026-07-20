@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/error_handler.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   final String? token;
@@ -85,7 +86,15 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (mounted) {
+        final message = ErrorHandler.friendly(
+          e,
+          fallback: 'We couldn\'t reset your password. Please try again.',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

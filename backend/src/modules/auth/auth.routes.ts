@@ -13,6 +13,13 @@ router.post('/verify-otp', AuthController.verifyOTP);
 router.post('/request-phone-otp', authMiddleware, AuthController.requestPhoneOTP);
 router.post('/verify-phone-otp', authMiddleware, AuthController.verifyPhoneOTP);
 
+// Authoritative onboarding/role resolution used by clients at startup to
+// decide whether to route into onboarding or the main application.
+router.get('/onboarding-status', authMiddleware, AuthController.getOnboardingStatus);
+
+// Public app identity used by clients to assert correct OAuth branding.
+router.get('/config', AuthController.getPublicConfig);
+
 // Password Routes
 router.post('/signup-password', AuthController.signupPassword);
 router.post('/login-password', AuthController.loginPassword);

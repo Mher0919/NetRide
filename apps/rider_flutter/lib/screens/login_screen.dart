@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import '../providers/ride_provider.dart';
 import '../services/auth_service.dart';
+import '../services/error_handler.dart';
 import 'signup_screen.dart';
 import 'verification_screen.dart';
 
@@ -45,26 +46,34 @@ class _LoginScreenState extends State<LoginScreen> {
             );
             
             final userData = res['user'];
-            final hasPhone = userData != null && 
-                            userData['phone_number'] != null && 
-                            userData['phone_number'].toString().isNotEmpty;
-            
+            final onboarding = res['onboarding'] as Map<String, dynamic>?;
+            final riderComplete = onboarding?['rider'] is Map &&
+                onboarding!['rider']['onboarding_complete'] == true;
+
             if (mounted) {
               debugPrint('[LOGIN] ✅ Backend sync successful. User ID: ${userData['id']}');
               AuthService.isAuthenticatedNotifier.value = true;
               Provider.of<RideProvider>(context, listen: false).initSocket(res['token']);
 
+              // Route by authoritative backend onboarding state, not local
+              // guesses. A shared Google account that already completed Rider
+              // onboarding enters the app; otherwise it resumes onboarding.
+              final target = riderComplete ? '/' : '/onboarding';
               Navigator.pushReplacementNamed(
-                context, 
-                '/splash', 
-                arguments: {'targetRoute': hasPhone ? '/' : '/onboarding'}
+                context,
+                '/splash',
+                arguments: {'targetRoute': target}
               );
             }
           } catch (e) {
             debugPrint('[LOGIN] ❌ Backend OAuth sync failed: $e');
             if (mounted) {
+              final message = ErrorHandler.friendly(
+                e,
+                fallback: 'We couldn\'t sign you in. Please try again.',
+              );
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Failed to sync with backend: $e')),
+                SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
               );
             }
           } finally {
@@ -73,10 +82,19 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       });
 
-      // 2. Trigger the OAuth flow
+      // 2. Trigger the OAuth flow.
+      // The consent-screen label ("Logging in for NetRide") is configured in
+      // Supabase Auth → Providers → Google and the Google Cloud OAuth consent
+      // screen. We assert the canonical app name locally and use the in-app
+      // browser view so the experience stays consistent and on-brand.
+      await AuthService.getAppName();
       await supabase.auth.signInWithOAuth(
         provider == 'google' ? OAuthProvider.google : OAuthProvider.apple,
         redirectTo: 'io.supabase.netride://login-callback/',
+        authScreenLaunchMode: LaunchMode.inAppBrowserView,
+        queryParams: {
+          'access_type': 'offline',
+        },
       );
 
       // Clean up subscription after a timeout if no session is received
@@ -84,8 +102,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
     } catch (e) {
       if (mounted) {
+        final message = ErrorHandler.friendly(
+          e,
+          fallback: 'We couldn\'t sign you in. Please try again.',
+        );
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: $e')),
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
         );
       }
     } finally {
@@ -112,6 +134,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final res = await AuthService.loginWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
+        appRole: 'RIDER',
       );
       if (mounted) {
         if (res['otp_required'] == true) {
@@ -125,21 +148,25 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else {
-          final hasPhone = res['user']['phone_number'] != null && 
-                          res['user']['phone_number'].toString().isNotEmpty &&
-                          res['phone_number_required'] != true;
-          
+          final onboarding = res['onboarding'] as Map<String, dynamic>?;
+          final riderComplete = onboarding?['rider'] is Map &&
+              onboarding!['rider']['onboarding_complete'] == true;
+
           Navigator.pushReplacementNamed(
-            context, 
-            '/splash', 
-            arguments: {'targetRoute': hasPhone ? '/' : '/onboarding'}
+            context,
+            '/splash',
+            arguments: {'targetRoute': riderComplete ? '/' : '/onboarding'}
           );
         }
       }
     } catch (e) {
       if (mounted) {
+        final message = ErrorHandler.friendly(
+          e,
+          fallback: 'The phone number or password you entered is incorrect.',
+        );
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
         );
       }
     } finally {
@@ -165,8 +192,12 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final message = ErrorHandler.friendly(
+          e,
+          fallback: 'We couldn\'t send the reset link. Please try again.',
+        );
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
         );
       }
     } finally {

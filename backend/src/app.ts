@@ -109,17 +109,40 @@ app.get('/api/ping', (req, res) => {
 });
 
 // Middleware for Socket.io auth
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth.token || socket.handshake.headers.authorization;
 
   if (!token) {
     return next(new Error('Authentication error: No token provided'));
   }
-  
+
   try {
     const pureToken = token.toString().replace('Bearer ', '');
     const decoded = AuthService.verifyToken(pureToken);
-    (socket as any).user = decoded;
+
+    // Resolve the ACTIVE session role from the application context supplied
+    // by the connecting client (e.g. the Driver App sends `role: 'driver'`,
+    // the Rider App sends `role: 'rider'`). This is the single source of
+    // truth for which "hat" the user is wearing during this connection and
+    // MUST NOT be inferred from the frozen `users.role` column alone. A
+    // dual-role user (same email owning both profiles) is identified by the
+    // app they launched, never by account-existence order.
+    const appRoleHint = socket.handshake.auth.role;
+    const active = await AuthService.resolveActiveRole(decoded.id, appRoleHint);
+
+    (socket as any).user = {
+      id: decoded.id,
+      // Active application/session role — used for all downstream branching,
+      // logging, presence, and ride-matching.
+      role: active.role,
+      // The role carried in the JWT claim (legacy/frozen `users.role`). Kept
+      // for reference only; `role` above is authoritative for this session.
+      jwtRole: decoded.role,
+      driverId: active.driverId,
+      riderId: active.riderId,
+      // Stable per-connection session id for tracing/logging.
+      sessionId: socket.id,
+    };
     next();
   } catch (err: any) {
     console.error(`[AUTH] ❌ Socket JWT verification failed:`, err.message);

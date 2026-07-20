@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
+import 'user_service.dart';
 
 class AuthService {
   static final ValueNotifier<bool> isAuthenticatedNotifier = ValueNotifier<bool>(false);
@@ -143,11 +144,13 @@ class AuthService {
   static Future<Map<String, dynamic>> loginWithPassword({
     required String email,
     required String password,
+    String? appRole,
   }) async {
     try {
       final response = await ApiService.dio.post('auth/login-password', data: {
         'email': email,
         'password': password,
+        if (appRole != null) 'app_role': appRole,
       });
 
       if (response.statusCode == 200) {
@@ -339,5 +342,41 @@ class AuthService {
     final token = prefs.getString('jwt_token');
     if (token == null) return false;
     return !isJwtExpired(token);
+  }
+
+  /// Authoritative onboarding/role resolution from the backend. This is the
+  /// single source of truth for whether the user may enter the app. The
+  /// frontend must never decide onboarding completion from local state alone.
+  static Future<Map<String, dynamic>> getOnboardingStatus() async {
+    final response = await ApiService.dio.get('auth/onboarding-status');
+    return response.data as Map<String, dynamic>;
+  }
+
+  /// Returns true only when the backend reports the Rider onboarding
+  /// (including mandatory Twilio phone verification) is complete.
+  static Future<bool> isRiderOnboardingComplete() async {
+    try {
+      final status = await getOnboardingStatus();
+      final rider = status['rider'];
+      if (rider is Map && rider['onboarding_complete'] == true) return true;
+      // Fallback: read profile directly if the compact endpoint is unavailable.
+      final profile = await UserService.getProfile();
+      return profile['phone_verified'] == true;
+    } catch (_) {
+      // If we cannot reach the backend, DO NOT bypass onboarding.
+      return false;
+    }
+  }
+
+  /// Canonical application identity, used to assert correct OAuth branding.
+  static Future<String> getAppName() async {
+    try {
+      final response = await ApiService.dio.get('auth/config');
+      final name = response.data['app_name'];
+      if (name is String && name.isNotEmpty) return name;
+    } catch (_) {
+      // Ignore — fallback handled by caller.
+    }
+    return 'NetRide';
   }
 }

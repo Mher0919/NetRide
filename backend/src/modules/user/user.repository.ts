@@ -13,7 +13,10 @@ export class UserRepository {
 
   static async findById(id: string): Promise<User | null> {
     const res = await pool.query(
-      'SELECT id, email, phone_number, full_name, role, is_verified, profile_image_url, date_of_birth, created_at FROM users WHERE id = $1',
+      `SELECT id, email, phone_number, full_name, role, is_verified, profile_image_url,
+              date_of_birth, created_at, verification_status, onboarding_step,
+              phone_verified, headshot_uploaded
+       FROM users WHERE id = $1`,
       [id]
     );
     return res.rows[0] || null;
@@ -73,7 +76,7 @@ export class UserRepository {
 
     values.push(id);
     const res = await pool.query(
-      `UPDATE users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING id, email, phone_number, full_name, role, is_verified, profile_image_url, id_photo_front_url, id_photo_back_url, date_of_birth, created_at`,
+      `UPDATE users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING id, email, phone_number, full_name, role, is_verified, profile_image_url, id_photo_front_url, id_photo_back_url, date_of_birth, created_at, verification_status, onboarding_step, phone_verified, headshot_uploaded`,
       values
     );
     return res.rows[0] || null;

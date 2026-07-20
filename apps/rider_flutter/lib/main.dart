@@ -29,6 +29,11 @@ import 'package:app_links/app_links.dart';
 bool kInitialIsBlocked = false;
 String? kInitialBlockedReason;
 
+/// Resolved at startup from the backend. The backend is the single source of
+/// truth for whether onboarding (including mandatory phone verification) is
+/// complete. Until it confirms completion, the app must stay in onboarding.
+String kInitialTargetRoute = '/login';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
@@ -72,18 +77,27 @@ void main() async {
 
   AuthService.isAuthenticatedNotifier.value = token != null;
 
-  // If an authenticated rider's account has been blocked by an admin,
-  // route them straight to the standalone blocked-account screen.
   if (token != null) {
+    // Determine the correct startup destination from authoritative backend
+    // state. Never assume onboarding is complete based on local token alone.
     try {
       final profile = await UserService.getProfile();
       if (profile['verification_status'] == 'BLOCKED') {
         kInitialBlockedReason = profile['blocked_reason'] as String?;
         kInitialIsBlocked = true;
+        kInitialTargetRoute = '/blocked';
+      } else if (await AuthService.isRiderOnboardingComplete()) {
+        kInitialTargetRoute = '/';
+      } else {
+        kInitialTargetRoute = '/onboarding';
       }
     } catch (_) {
-      // If the profile can't be fetched, fall through to normal auth flow.
+      // If the backend cannot be reached, DO NOT bypass onboarding. Keep the
+      // user in the onboarding flow (or login if no token context).
+      kInitialTargetRoute = '/onboarding';
     }
+  } else {
+    kInitialTargetRoute = '/login';
   }
 
   runApp(
@@ -156,7 +170,7 @@ class _NetRideRiderState extends State<NetRideRider> {
                 final args = settings.arguments as Map<String, dynamic>?;
                 final targetRoute = kInitialIsBlocked
                     ? '/blocked'
-                    : (args?['targetRoute'] ?? (isAuthenticated ? '/' : '/login'));
+                    : (args?['targetRoute'] ?? kInitialTargetRoute);
                 page = SplashScreen(
                   targetRoute: targetRoute,
                   arguments: args?['arguments'],

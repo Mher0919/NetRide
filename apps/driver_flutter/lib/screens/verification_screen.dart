@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/error_handler.dart';
 
 class VerificationScreen extends StatefulWidget {
   final String email;
@@ -37,24 +38,25 @@ class _VerificationScreenState extends State<VerificationScreen> {
       );
       
       if (mounted) {
-        final user = res['user'];
-        // For drivers, onboarding is more complex (license, etc), but we can check if it's completed
-        // For now, check if user has license_number which is set during onboarding
-        final bool needsOnboarding = user['role'] == 'DRIVER' 
-            ? (user['onboarding_step'] == null || (user['onboarding_step'] as int?)! < 5)
-            : (user['phone_number'] == null || user['phone_number'].toString().isEmpty);
+        final onboarding = res['onboarding'] as Map<String, dynamic>?;
+        final driverComplete = onboarding?['driver'] is Map &&
+            onboarding!['driver']['onboarding_complete'] == true;
 
         Navigator.pushNamedAndRemoveUntil(
-          context, 
-          '/splash', 
+          context,
+          '/splash',
           (route) => false,
-          arguments: {'targetRoute': needsOnboarding ? '/onboarding' : '/'},
+          arguments: {'targetRoute': driverComplete ? '/' : '/onboarding'},
         );
       }
     } catch (e) {
       if (mounted) {
+        final message = ErrorHandler.friendly(
+          e,
+          fallback: ErrorHandler.incorrectCode(),
+        );
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Verification failed: $e')),
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
         );
       }
     } finally {

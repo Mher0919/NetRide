@@ -11,6 +11,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../services/error_handler.dart';
+import '../utils/phone_utils.dart';
+import '../widgets/phone_input_field.dart';
 import '../components/state_container.dart';
 import '../cache/cache_service.dart';
 import '../utils/file_url.dart';
@@ -494,6 +497,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final newPhoneController = TextEditingController();
     _phoneOtpController.clear();
     _phoneCodeSent = false;
+    bool phoneValid = false;
 
     await showDialog(
       context: context,
@@ -509,16 +513,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Text('Enter your new phone number and verify it via SMS.',
                     style: GoogleFonts.poppins(fontSize: 14)),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: newPhoneController,
-                  keyboardType: TextInputType.phone,
-                  enabled: !_phoneCodeSent,
-                  decoration: const InputDecoration(
-                    labelText: 'New Phone Number',
-                    border: OutlineInputBorder(),
-                    hintText: '+1 (555) 123-4567',
+                if (!_phoneCodeSent)
+                  PhoneInputField(
+                    controller: newPhoneController,
+                    onValidityChanged: (valid) {
+                      if (phoneValid != valid) setDialogState(() => phoneValid = valid);
+                    },
                   ),
-                ),
                 if (_phoneCodeSent) ...[
                   const SizedBox(height: 16),
                   TextField(
@@ -536,26 +537,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const CircularProgressIndicator(strokeWidth: 2)
                 else if (!_phoneCodeSent)
                   ElevatedButton(
-                    onPressed: () async {
-                      final phone = newPhoneController.text.trim();
-                      if (phone.isEmpty) return;
-                      setDialogState(() => _isSendingPhoneCode = true);
-                      try {
-                        await AuthService.requestPhoneOTP(phone);
-                        _pendingPhoneNumber = phone;
-                        setDialogState(() {
-                          _phoneCodeSent = true;
-                          _isSendingPhoneCode = false;
-                        });
-                      } catch (e) {
-                        setDialogState(() => _isSendingPhoneCode = false);
-                        if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Failed to send code: $e')),
-                          );
-                        }
-                      }
-                    },
+                    onPressed: phoneValid
+                        ? () async {
+                            final normalized = PhoneUtils.normalize(input: newPhoneController.text);
+                            if (normalized == null) {
+                              if (ctx.mounted) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(content: Text(ErrorHandler.invalidPhone())),
+                                );
+                              }
+                              return;
+                            }
+                            setDialogState(() => _isSendingPhoneCode = true);
+                            try {
+                              await AuthService.requestPhoneOTP(normalized);
+                              _pendingPhoneNumber = normalized;
+                              setDialogState(() {
+                                _phoneCodeSent = true;
+                                _isSendingPhoneCode = false;
+                              });
+                            } catch (e) {
+                              setDialogState(() => _isSendingPhoneCode = false);
+                              if (ctx.mounted) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(
+                                    content: Text(ErrorHandler.friendly(e, fallback: ErrorHandler.unableToSendCode())),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                              }
+                            }
+                          }
+                        : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.black,
                       foregroundColor: Colors.white,
@@ -588,7 +601,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         setDialogState(() => _isSendingPhoneCode = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Verification failed: $e')),
+                            SnackBar(
+                              content: Text(ErrorHandler.friendly(e, fallback: ErrorHandler.incorrectCode())),
+                              backgroundColor: Colors.redAccent,
+                            ),
                           );
                         }
                       }
@@ -654,7 +670,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Verification link sent to your new email')));
                       }
                     } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(ErrorHandler.friendly(e))),
+                      );
                     } finally {
                       if (mounted) setState(() => _isSendingEmailLink = false);
                     }

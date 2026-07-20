@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
+import '../services/error_handler.dart';
+import '../utils/phone_utils.dart';
+import '../widgets/phone_input_field.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -13,23 +17,58 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _phoneController = TextEditingController();
   final List<TextEditingController> _codeControllers = List.generate(6, (_) => TextEditingController());
   final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
-  
+
   bool _isLoading = false;
   bool _codeSent = false;
+  bool _phoneValid = false;
+
+  // Transient UI-progress flag so a restart/resume returns the user to the
+  // correct onboarding sub-step. NOTE: this is NOT the completion signal —
+  // completion is always derived from the backend (phone_verified).
+  static const String _kPhoneStep = 'onboarding_phone_step';
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreProgress();
+  }
+
+  Future<void> _restoreProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    final step = prefs.getString(_kPhoneStep);
+    if (step == 'code_sent' && mounted) {
+      setState(() => _codeSent = true);
+    }
+  }
+
+  Future<void> _persistCodeSent() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kPhoneStep, 'code_sent');
+  }
+
+  Future<void> _clearProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kPhoneStep);
+  }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.redAccent),
+    );
   }
 
   Future<void> _requestOTP() async {
-    if (_phoneController.text.isEmpty) {
-      _showError('Please enter your phone number');
+    // Frontend gate: only enabled when valid, but double-check anyway.
+    final normalized = PhoneUtils.normalize(input: _phoneController.text);
+    if (normalized == null) {
+      _showError(ErrorHandler.invalidPhone());
       return;
     }
 
     setState(() => _isLoading = true);
     try {
-      await AuthService.requestPhoneOTP(_phoneController.text.trim());
+      await AuthService.requestPhoneOTP(normalized);
+      await _persistCodeSent();
       setState(() => _codeSent = true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -37,7 +76,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         );
       }
     } catch (e) {
-      _showError('Failed to send code: $e');
+      // Backend validation still exists; translate any failure safely.
+      _showError(ErrorHandler.friendly(e, fallback: ErrorHandler.unableToSendCode()));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -45,27 +85,42 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _verifyAndSubmit() async {
     String code = _codeControllers.map((c) => c.text).join();
-    if (code.length < 4) {
-      _showError('Please enter the full code');
+    if (code.length < 6) {
+      _showError('Please enter the full 6-digit code');
+      return;
+    }
+
+    final normalized = PhoneUtils.normalize(input: _phoneController.text);
+    if (normalized == null) {
+      _showError(ErrorHandler.invalidPhone());
       return;
     }
 
     setState(() => _isLoading = true);
     try {
-      final phoneNumber = _phoneController.text.trim();
       await AuthService.verifyPhoneOTP(
-        phoneNumber: phoneNumber,
+        phoneNumber: normalized,
         code: code,
       );
-      
+
+      await _clearProgress();
+
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/');
       }
     } catch (e) {
-      _showError('Verification failed: $e');
+      _showError(ErrorHandler.friendly(e, fallback: ErrorHandler.incorrectCode()));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    for (final c in _codeControllers) c.dispose();
+    for (final f in _focusNodes) f.dispose();
+    super.dispose();
   }
 
   @override
@@ -85,25 +140,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                _codeSent 
-                  ? 'Enter the code sent to your phone.'
-                  : 'Verify your phone number to start riding.',
+                _codeSent
+                    ? 'Enter the 6-digit code sent to your phone.'
+                    : 'Verify your phone number to start riding.',
                 style: GoogleFonts.poppins(fontSize: 16, color: Colors.grey[600]),
               ),
               const SizedBox(height: 48),
               if (!_codeSent) ...[
-                TextField(
+                PhoneInputField(
                   controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(
-                    labelText: 'Phone Number',
-                    hintText: '+15550000000',
-                    helperText: 'Include country code (e.g., +1)',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Colors.black, width: 2),
-                    ),
+                  onValidityChanged: (valid) {
+                    if (_phoneValid != valid) setState(() => _phoneValid = valid);
+                  },
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _phoneValid
+                      ? 'Looks good — tap Send Code to continue.'
+                      : 'Enter your 10-digit US phone number.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: _phoneValid ? Colors.green[700] : Colors.grey[600],
                   ),
                 ),
               ] else ...[
@@ -127,9 +184,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: _isLoading 
-                    ? null 
-                    : (_codeSent ? _verifyAndSubmit : _requestOTP),
+                  onPressed: _isLoading || !_phoneValid
+                      ? null
+                      : (_codeSent ? _verifyAndSubmit : _requestOTP),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.black,
                     foregroundColor: Colors.white,
@@ -138,7 +195,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   child: _isLoading
                       ? const CircularProgressIndicator(color: Colors.white)
                       : Text(
-                          _codeSent ? 'Verify & Finish' : 'Send Code', 
+                          _codeSent ? 'Verify & Finish' : 'Send Code',
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
                         ),
                 ),

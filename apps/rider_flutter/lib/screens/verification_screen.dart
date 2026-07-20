@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/error_handler.dart';
 
 class VerificationScreen extends StatefulWidget {
   final String email;
@@ -37,20 +38,25 @@ class _VerificationScreenState extends State<VerificationScreen> {
       );
       
       if (mounted) {
-        final user = res['user'];
-        final bool isNewUser = user['phone_number'] == null || user['phone_number'].toString().isEmpty;
-        
+        final onboarding = res['onboarding'] as Map<String, dynamic>?;
+        final riderComplete = onboarding?['rider'] is Map &&
+            onboarding!['rider']['onboarding_complete'] == true;
+
         Navigator.pushNamedAndRemoveUntil(
-          context, 
-          '/splash', 
+          context,
+          '/splash',
           (route) => false,
-          arguments: {'targetRoute': isNewUser ? '/onboarding' : '/'},
+          arguments: {'targetRoute': riderComplete ? '/' : '/onboarding'},
         );
       }
     } catch (e) {
       if (mounted) {
+        final message = ErrorHandler.friendly(
+          e,
+          fallback: ErrorHandler.incorrectCode(),
+        );
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Verification failed: $e')),
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
         );
       }
     } finally {

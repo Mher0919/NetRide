@@ -48,7 +48,7 @@ class RideProvider with ChangeNotifier {
       .enableReconnection()
       .setAuth({
         'token': token,
-        'role': 'rider'
+        'role': 'RIDER'
       })
       .build());
 

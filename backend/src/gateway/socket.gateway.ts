@@ -162,10 +162,23 @@ function haversineMeters(a: Location, b: { lat: number; lng: number }): number {
 
 export function setupSocketGateway(io: Server) {
   io.on('connection', (socket: Socket) => {
-    // Authentication context from middleware
-    const { id, role } = (socket as any).user || {};
-    
-    console.log(`[SOCKET] ✅ Connected: ${id} as ${role} (SocketID: ${socket.id})`);
+    // Authentication context from middleware. `role` is the ACTIVE session
+    // role resolved from the connecting application's context (Driver App ->
+    // DRIVER, Rider App -> RIDER), never inferred from account order.
+    const user = (socket as any).user || {};
+    const id = user.id;
+    const role = user.role;
+    const driverId = user.driverId;
+    const riderId = user.riderId;
+    const sessionId = user.sessionId || socket.id;
+
+    // Requirement 4: structured, debuggable connection log.
+    console.log(
+      `[SOCKET] ✅ ${role === UserRole.DRIVER ? 'Driver' : role === UserRole.ADMIN ? 'Admin' : 'Rider'} Connected | ` +
+      `userId=${id} | activeRole=${role} | driverProfileId=${driverId ?? 'n/a'} | ` +
+      `riderProfileId=${riderId ?? 'n/a'} | sessionId=${sessionId} | ` +
+      `at=${new Date().toISOString()}`
+    );
 
     (socket as any).isOnline = false;
     (socket as any).currentGeohash = null;

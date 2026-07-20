@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
+import '../services/error_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../utils/file_url.dart';
 import '../services/api_service.dart';
@@ -320,7 +321,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Verification link sent to your new email')));
                 }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(ErrorHandler.friendly(e, fallback: 'We couldn\'t update your email. Please try again.')),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
@@ -363,7 +369,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() => _isSaving = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update profile: $e')),
+          SnackBar(
+            content: Text(ErrorHandler.friendly(e, fallback: 'We couldn\'t update your profile. Please try again.')),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     }

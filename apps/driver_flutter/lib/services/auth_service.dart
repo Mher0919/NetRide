@@ -175,11 +175,13 @@ class AuthService {
   static Future<Map<String, dynamic>> loginWithPassword({
     required String email,
     required String password,
+    String? appRole,
   }) async {
     try {
-      final response = await ApiService.dio.post('/auth/login-password', data: {
+      final response = await ApiService.dio.post('auth/login-password', data: {
         'email': email,
         'password': password,
+        if (appRole != null) 'app_role': appRole,
       });
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -472,5 +474,38 @@ class AuthService {
     final token = prefs.getString('jwt_token');
     if (token == null) return false;
     return !isJwtExpired(token);
+  }
+
+  /// Authoritative onboarding/role resolution from the backend. The frontend
+  /// must never decide onboarding completion from local/cache state alone.
+  static Future<Map<String, dynamic>> getOnboardingStatus() async {
+    final response = await ApiService.dio.get('auth/onboarding-status');
+    return response.data as Map<String, dynamic>;
+  }
+
+  /// True only when the backend reports Driver onboarding (phone verified +
+  /// all steps complete, step >= 5) is finished.
+  static Future<bool> isDriverOnboardingComplete() async {
+    try {
+      final status = await getOnboardingStatus();
+      final driver = status['driver'];
+      if (driver is Map && driver['onboarding_complete'] == true) return true;
+      return false;
+    } catch (_) {
+      // If the backend can't be reached, DO NOT bypass onboarding.
+      return false;
+    }
+  }
+
+  /// Canonical application identity, used to assert correct OAuth branding.
+  static Future<String> getAppName() async {
+    try {
+      final response = await ApiService.dio.get('auth/config');
+      final name = response.data['app_name'];
+      if (name is String && name.isNotEmpty) return name;
+    } catch (_) {
+      // Ignore — fallback handled by caller.
+    }
+    return 'NetRide';
   }
 }

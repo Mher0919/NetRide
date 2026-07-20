@@ -24,6 +24,7 @@ const LoginPasswordSchema = z.object({
   email: z.string().email(),
   password: z.string(),
   trusted_device_token: z.string().nullable().optional(),
+  app_role: z.string().optional(),
 });
 
 const ChangePasswordSchema = z.object({
@@ -64,8 +65,8 @@ export class AuthController {
 
   static async loginPassword(req: Request, res: Response) {
     try {
-      const { email, password, trusted_device_token } = LoginPasswordSchema.parse(req.body);
-      const result = await AuthService.loginWithPassword({ email, password, trusted_device_token });
+      const { email, password, trusted_device_token, app_role } = LoginPasswordSchema.parse(req.body);
+      const result = await AuthService.loginWithPassword({ email, password, trusted_device_token, app_role });
       res.json(result);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -336,5 +337,29 @@ export class AuthController {
       console.error(`[AUTH] ❌ Admin 2FA verification error: ${error.message}`);
       res.status(401).json({ error: 'Invalid administrative security code.' });
     }
+  }
+
+  static async getOnboardingStatus(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const status = await AuthService.getOnboardingStatus(userId);
+      res.json(status);
+    } catch (error: any) {
+      console.error(`[AUTH] ❌ Onboarding status error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to determine onboarding status.' });
+    }
+  }
+
+  static async getPublicConfig(req: Request, res: Response) {
+    // Exposes the canonical application identity so clients can assert the
+    // correct OAuth branding ("Logging in for NetRide"). The actual consent
+    // screen name is configured in Supabase Auth → Providers → Google and the
+    // Google Cloud OAuth consent screen, but this guarantees clients render
+    // the right product name everywhere.
+    res.json({
+      app_name: 'NetRide',
+      auth_brand: 'NetRide',
+    });
   }
 }

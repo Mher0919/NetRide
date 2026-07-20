@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/error_handler.dart';
 import 'verification_screen.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -97,13 +98,13 @@ class _SignupScreenState extends State<SignupScreen> {
       }
     } catch (e) {
       if (mounted) {
-        String errorMsg = e.toString();
-        if (errorMsg.contains('User already exists')) {
-          errorMsg = 'User already exists';
-        }
+        final message = ErrorHandler.friendly(
+          e,
+          fallback: 'We couldn\'t create your account. Please try again.',
+        );
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(errorMsg),
+            content: Text(message),
             backgroundColor: Colors.redAccent,
           ),
         );

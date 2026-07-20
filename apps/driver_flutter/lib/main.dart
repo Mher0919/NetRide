@@ -31,6 +31,11 @@ import 'package:app_links/app_links.dart';
 
 import 'services/navigation_service.dart';
 
+/// Resolved at startup from the backend. The backend is the single source of
+/// truth for whether Driver onboarding (including mandatory phone verification)
+/// is complete. Until it confirms completion, the app must stay in onboarding.
+String kInitialTargetRoute = '/login';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
@@ -75,6 +80,23 @@ void main() async {
     if (success) {
       token = prefs.getString('jwt_token');
     }
+  }
+
+  if (token != null) {
+    // Determine the correct startup destination from authoritative backend
+    // state. Never assume onboarding is complete based on a local token alone.
+    try {
+      if (await AuthService.isDriverOnboardingComplete()) {
+        kInitialTargetRoute = '/';
+      } else {
+        kInitialTargetRoute = '/onboarding';
+      }
+    } catch (_) {
+      // If the backend cannot be reached, DO NOT bypass onboarding.
+      kInitialTargetRoute = '/onboarding';
+    }
+  } else {
+    kInitialTargetRoute = '/login';
   }
 
   runApp(
@@ -164,7 +186,7 @@ class _NetRideDriverState extends State<NetRideDriver> with WidgetsBindingObserv
           case '/splash':
             final args = settings.arguments as Map<String, dynamic>?;
             page = SplashScreen(
-              targetRoute: args?['targetRoute'] ?? (widget.isAuthenticated ? '/' : '/login'),
+              targetRoute: args?['targetRoute'] ?? kInitialTargetRoute,
               arguments: args?['arguments'],
             );
             break;

@@ -40,6 +40,10 @@ export interface User {
   role: UserRole;
   is_verified: boolean;
   is_active: boolean;
+  verification_status?: string;
+  onboarding_step?: number | null;
+  phone_verified?: boolean;
+  headshot_uploaded?: boolean;
   created_at: Date;
 }
 

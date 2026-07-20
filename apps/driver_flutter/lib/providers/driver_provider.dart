@@ -643,7 +643,7 @@ class DriverProvider with ChangeNotifier {
       .enableReconnection()
       .setAuth({
         'token': token,
-        'role': 'driver'
+        'role': 'DRIVER'
       })
       .build());
 
