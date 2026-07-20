@@ -32,9 +32,13 @@ FROM ghcr.io/project-osrm/osrm-backend:latest AS osrm-builder
 WORKDIR /osrm
 ARG REGION
 COPY --from=pbf-fetcher /osrm/region.osm.pbf /osrm/region.osm.pbf
+# osrm-customize (MLD) can exit non-zero on benign "unreachable boundary
+# node" warnings, so we don't gate the rename on its exit code — the output
+# file is still written. Verify it exists before renaming.
 RUN osrm-extract -p /opt/car.lua region.osm.pbf && \
     osrm-partition region.osrm && \
-    osrm-customize region.osrm && \
+    osrm-customize region.osrm; \
+    if [ ! -f region.osrm ]; then echo "ERROR: region.osrm not produced"; exit 1; fi && \
     mv region.osrm /osrm/${REGION}.osrm
 
 # ---- Stage 3: build the Node backend ---------------------------------------
