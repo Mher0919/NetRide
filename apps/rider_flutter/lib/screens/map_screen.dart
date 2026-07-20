@@ -326,6 +326,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     const classes = models.VehicleClass.values;
 
     final results = <models.VehicleClass, Map<String, dynamic>>{};
+    List<LatLng>? latestPoints;
     await Future.wait(classes.map((c) async {
       try {
         final plan = await _routingService.plan(
@@ -333,10 +334,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           destination: LatLng(_destination!.lat, _destination!.lng),
           vehicleClass: c.toString().split('.').last,
         );
-        // Dedupe the geometry from the most recent plan so the map stays
-        // in sync with the selected class without a second route call.
-        if (mounted && c == _selectedClass) {
-          setState(() => _routePoints = plan.points);
+        if (c == _selectedClass) {
+          latestPoints = plan.points;
         }
         results[c] = {
           'maxFare': (plan.fare['totalFare'] as num?)?.toDouble() ??
@@ -347,6 +346,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           'etaSeconds': plan.etaSeconds,
         };
       } catch (e) {
+        if (e is DioException && e.type == DioExceptionType.cancel) {
+          // Silently ignore cancellation from destination changes.
+          return;
+        }
         debugPrint('Estimate error for $c: $e');
       }
     }));
@@ -358,6 +361,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       setState(() {
         _estimates = results;
         _loadingEstimates = false;
+        if (latestPoints != null) _routePoints = latestPoints!;
       });
     }
   }

@@ -29,6 +29,7 @@ import ngeohash from 'ngeohash';
 import { redis } from '../../config/redis';
 import { MLEtaService } from '../../services/ml-eta.service';
 import { fareService, FareBreakdown } from '../../services/fare.service';
+import { RoadSnapperService } from '../../services/road-snapper.service';
 import { VehicleClass } from '../../types';
 import { ORSEngine, RouteEngine } from './ors.engine';
 import { RoutingError } from './routing.errors';
@@ -360,13 +361,11 @@ export class RoutingService {
     const engineStart = process.hrtime.bigint();
     let result: RoutingResult | null = null;
 
-    // Validate coordinates before contacting ORS. Cheap, local, avoids
-    // wasting a paid API call on bad input.
+    // Validate coordinates before contacting ORS.
     try {
       parseCoordinates([origin[0], origin[1]], 'origin');
       parseCoordinates([destination[0], destination[1]], 'destination');
     } catch (coordErr) {
-      // Invalid coordinates → don't touch ORS; synthesize a safe fallback.
       logger.warn({ err: (coordErr as Error).message }, 'routing_invalid_coords');
       result = this.syntheticRoute(origin, destination);
       routingFallbackTotal.inc();
@@ -375,8 +374,24 @@ export class RoutingService {
       return result;
     }
 
+    // Snap endpoints to drivable roads before routing. This prevents
+    // routes from starting/ending inside buildings, parks, or otherwise
+    // inaccessible locations. Snapping is best-effort; if it fails we
+    // proceed with the original coordinates.
+    const [snappedOrigin, snappedDestination] = await Promise.all([
+      RoadSnapperService.snapIfNeeded(origin[0], origin[1]),
+      RoadSnapperService.snapIfNeeded(destination[0], destination[1]),
+    ]);
+
+    const routeOrigin: LatLng = snappedOrigin.snapped
+      ? [snappedOrigin.lat, snappedOrigin.lng]
+      : origin;
+    const routeDest: LatLng = snappedDestination.snapped
+      ? [snappedDestination.lat, snappedDestination.lng]
+      : destination;
+
     try {
-      const res = await this.engine.route(origin, destination);
+      const res = await this.engine.route(routeOrigin, routeDest);
       if (res) {
         const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
         result = {

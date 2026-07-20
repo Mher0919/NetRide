@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
@@ -31,8 +30,6 @@ class TripPlan {
 class RoutingService {
   final Dio _dio = Dio();
 
-  /// Test seam: lets widget/unit tests inject a fake POST implementation
-  /// without touching the network. Production code never sets this.
   void setTestPost(Future<Response> Function(
     String path, {
     required Object? data,
@@ -47,14 +44,10 @@ class RoutingService {
     Options? options,
   })? _testPost;
 
-  // API Gateway URL.
   final String _baseUrl = 'https://netride.onrender.com';
 
-  /// In-flight request token per (origin+destination+class) so we can cancel
-  /// stale calls when the rider changes the destination mid-typing.
+  /// Key excludes vehicleClass so all 3 class estimates share one request.
   final Map<String, CancelToken> _inflight = {};
-
-  /// Dedupe identical in-flight plans so a rapid re-tap doesn't double-call.
   final Map<String, Future<TripPlan>> _dedupe = {};
 
   Future<TripPlan> plan({
@@ -63,10 +56,10 @@ class RoutingService {
     String vehicleClass = 'CORE',
   }) async {
     final key =
-        '${origin.latitude},${origin.longitude}|${destination.latitude},${destination.longitude}|$vehicleClass';
+        '${origin.latitude},${origin.longitude}|${destination.latitude},${destination.longitude}';
 
-    // Cancel any previous in-flight request for a *different* destination so
-    // we never render a stale route or race old responses over new ones.
+    if (_dedupe.containsKey(key)) return _dedupe[key]!;
+
     for (final entry in _inflight.entries.toList()) {
       if (entry.key != key) {
         entry.value.cancel();
@@ -74,8 +67,6 @@ class RoutingService {
         _dedupe.remove(entry.key);
       }
     }
-
-    if (_dedupe.containsKey(key)) return _dedupe[key]!;
 
     final token = CancelToken();
     _inflight[key] = token;

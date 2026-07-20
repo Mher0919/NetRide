@@ -20,7 +20,7 @@ const envSchema = z.object({
   // Driving profile used for all ride requests.
   ORS_PROFILE: z.string().default('driving-car'),
   // Per-request timeout to ORS (ms). Kept tight so the hot path never stalls.
-  ORS_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(2000),
+  ORS_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
   // Max retries with exponential backoff (timeouts / 5xx / network only).
   ORS_MAX_RETRIES: z.union([z.string(), z.number()]).transform(Number).default(2),
   DRIVER_MATCH_RADIUS_KM: z.union([z.string(), z.number()]).transform(Number).default(5),
