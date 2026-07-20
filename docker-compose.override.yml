@@ -1,0 +1,8 @@
+# Local dev override: point the backend at Supabase (the same DB the app's
+# Supabase OAuth uses), because the local postgres container has a stale,
+# incompatible schema. Render uses its own DATABASE_URL and ignores this file.
+services:
+  backend:
+    environment:
+      DATABASE_URL: "postgresql://postgres.lpcnkfqagpouwzikedzl:MMkrtumy_0919@aws-1-us-east-2.pooler.supabase.com:5432/postgres"
+      DATABASE_REPLICA_URL: "postgresql://postgres.lpcnkfqagpouwzikedzl:MMkrtumy_0919@aws-1-us-east-2.pooler.supabase.com:5432/postgres"

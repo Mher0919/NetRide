@@ -1,1 +1,5 @@
 .aider*
+.env
+backend/.env
+**/.env
+osrm-data/

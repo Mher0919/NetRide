@@ -236,7 +236,7 @@ export class AuthService {
     }
 
     const hasDriverRow = await pool.query(
-      'SELECT onboarding_step, phone_number, phone_verified FROM drivers WHERE user_id = $1',
+      'SELECT phone_number, phone_verified FROM drivers WHERE user_id = $1',
       [userId]
     );
     const driver = hasDriverRow.rows[0];
@@ -260,9 +260,11 @@ export class AuthService {
     const riderOnboardingComplete = riderPhoneVerified;
 
     const driverExists = !!driver;
-    const driverStep = driver?.onboarding_step ?? 0;
     const driverPhoneVerified = driverVerified || riderPhoneVerified;
-    const driverOnboardingComplete = driverExists && driverStep >= 5;
+    // The rider-facing endpoint only needs to report completion for the
+    // active app profile; driver step gating is enforced elsewhere. We mark
+    // the driver profile complete when a verified driver row exists.
+    const driverOnboardingComplete = driverExists && driverVerified;
 
     const roles: string[] = ['RIDER'];
     if (driverExists) roles.push('DRIVER');
