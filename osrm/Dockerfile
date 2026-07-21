@@ -38,10 +38,9 @@ COPY --from=builder /data/la.osrm.* ./
 
 EXPOSE 5000
 
-# CH algorithm, 4 threads for concurrent requests.
+# CH algorithm, unlimited queue.
 CMD ["osrm-routed", \
      "--algorithm", "ch", \
-     "--threading", "4", \
      "--max-table-size", "0", \
      "--max-trip-size", "0", \
      "la.osrm"]
