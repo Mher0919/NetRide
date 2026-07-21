@@ -21,6 +21,10 @@ import * as geohash from 'ngeohash';
 import { redis } from '../config/redis';
 import { rateLimitedTotal } from '../observability/metrics';
 
+// Rider auto-cancel timers: userId → setTimeout handle
+// Cancelled when the rider reconnects within the grace period.
+const riderAutoCancelTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 const MAX_MESSAGE_BODY = 1000;
 const RATE_LIMIT_PER_MINUTE = 30;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -405,6 +409,14 @@ export function setupSocketGateway(io: Server) {
      * RIDER EVENTS
      */
     if (role === UserRole.RIDER) {
+      // Cancel any pending auto-cancel timer — rider is back online.
+      const pendingTimer = riderAutoCancelTimers.get(id);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        riderAutoCancelTimers.delete(id);
+        console.log(`[SOCKET] ✅ Cleared auto-cancel timer for reconnecting rider ${id}`);
+      }
+
       socket.on('subscribeToNearbyDrivers', (loc: Location) => {
         const gh = geohash.encode(loc.lat, loc.lng, 6);
         const neighbors = geohash.neighbors(gh);
@@ -524,9 +536,11 @@ export function setupSocketGateway(io: Server) {
       socket.on('disconnect', async () => {
         console.log(`[SOCKET] ❌ Rider ${id} disconnected`);
         
-        // If rider has an active request, mark it for potential cleanup
-        // We wait a few seconds before cancelling to allow for brief reconnects
-        setTimeout(async () => {
+        // Cancel ride if rider doesn't reconnect within 3 minutes.
+        // This covers: app force-closed, OS killed background process.
+        // Brief app switches reconnect within seconds and clear the timer.
+        const timer = setTimeout(async () => {
+          riderAutoCancelTimers.delete(id);
           try {
             const currentTrip = await RideService.getCurrentRide(id, UserRole.RIDER);
             if (currentTrip && currentTrip.status === TripStatus.REQUESTED) {
@@ -534,7 +548,8 @@ export function setupSocketGateway(io: Server) {
               await RideService.cancelTrip(currentTrip.id, id);
             }
           } catch (err) {}
-        }, 30000); // 30 second grace period
+        }, 180_000); // 3 minutes
+        riderAutoCancelTimers.set(id, timer);
       });
     }
 
