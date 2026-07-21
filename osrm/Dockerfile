@@ -38,9 +38,4 @@ COPY --from=builder /data/la.osrm.* ./
 
 EXPOSE 5000
 
-# CH algorithm, unlimited queue.
-CMD ["osrm-routed", \
-     "--algorithm", "ch", \
-     "--max-table-size", "0", \
-     "--max-trip-size", "0", \
-     "la.osrm"]
+CMD ["osrm-routed", "--algorithm", "ch", "la.osrm"]

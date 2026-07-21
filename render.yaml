@@ -22,7 +22,7 @@ services:
     dockerfilePath: ./osrm/Dockerfile
     rootDir: osrm
     plan: starter # 512 MB RAM — CH algorithm fits easily
-    healthCheckPath: /health
+    healthCheckPath: /
     autoDeploy: true
     envVars:
       - key: PORT
