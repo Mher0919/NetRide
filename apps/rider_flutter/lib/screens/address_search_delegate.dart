@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/search_result.dart';
 import '../services/search/search_controller.dart' as sc;
+import '../services/search_history_service.dart';
 import '../theme/app_theme.dart';
 
 class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
@@ -8,8 +9,18 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
   final double? userLat;
   final double? userLon;
 
+  List<SearchResult> _recentSearches = [];
+  bool _loadedHistory = false;
+
   AddressSearchDelegate({this.userLat, this.userLon}) {
     _controller.updateLocation(userLat, userLon);
+  }
+
+  /// Loads recent searches from the server (once per delegate lifetime).
+  Future<void> _loadHistory() async {
+    if (_loadedHistory) return;
+    _loadedHistory = true;
+    _recentSearches = await SearchHistoryService.instance.fetch();
   }
 
   @override
@@ -48,7 +59,7 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
 
   Widget _buildBody() {
     if (query.length < 2) {
-      return _buildEmptyHint();
+      return _buildRecentSearches();
     }
 
     return ListenableBuilder(
@@ -56,7 +67,7 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
       builder: (context, _) {
         switch (_controller.state) {
           case sc.SearchState.idle:
-            return _buildEmptyHint();
+            return _buildRecentSearches();
           case sc.SearchState.loading:
             return const Center(
               child: SizedBox(
@@ -74,6 +85,92 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
         }
       },
     );
+  }
+
+  Widget _buildRecentSearches() {
+    return FutureBuilder<List<SearchResult>>(
+      future: _loadHistory().then((_) => Future.value(_recentSearches)),
+      builder: (context, snapshot) {
+        final searches = snapshot.data ?? _recentSearches;
+
+        if (searches.isEmpty) {
+          return _buildEmptyHint();
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                'Recent',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.secondaryDarkText.withOpacity(0.5),
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView.separated(
+                itemCount: searches.length,
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                separatorBuilder: (_, __) => Divider(
+                  height: 1,
+                  color: AppTheme.softBorderColor.withOpacity(0.6),
+                ),
+                itemBuilder: (context, index) {
+                  final result = searches[index];
+                  return ListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    leading: const Icon(Icons.history_rounded,
+                        color: AppTheme.secondaryDarkText, size: 22),
+                    title: Text(
+                      result.displayName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.secondaryDarkText,
+                      ),
+                    ),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          _CaBadge(),
+                          if (result.distanceMiles != null) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '${result.distanceMiles!.toStringAsFixed(1)} mi',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.secondaryDarkText.withOpacity(0.7),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    onTap: () => _selectResult(context, result),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Selects a result, saves it to history, and closes the delegate.
+  void _selectResult(BuildContext context, SearchResult result) {
+    SearchHistoryService.instance.save(result);
+    close(context, result);
   }
 
   Widget _buildEmptyHint() {
@@ -155,7 +252,7 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
               ],
             ),
           ),
-          onTap: () => close(context, result),
+          onTap: () => _selectResult(context, result),
         );
       },
     );

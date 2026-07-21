@@ -4,11 +4,15 @@ import { UserController, updateProfileSchema, verifyIdentitySchema } from './use
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { validate } from '../../middleware/validate.middleware';
 import favoriteRoutes from './favorite.routes';
+import searchHistoryRoutes from './search-history.routes';
 
 const router = Router();
 
 // Mount Favorite Routes
 router.use('/', favoriteRoutes);
+
+// Mount Search History Routes
+router.use('/', searchHistoryRoutes);
 
 router.get('/profile', authMiddleware, UserController.getProfile);
 router.patch('/profile', authMiddleware, validate(updateProfileSchema), UserController.updateProfile);

@@ -1,5 +1,7 @@
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { pubClient, subClient } from '../config/redisPubSub';
 import { createScoreWorker, createCleanupWorker, scheduleRepeatableJobs } from './queue';
 import { handleScoreRefresh } from './jobs/scoreRefresh';
 import { handleCleanupStaleRides } from './jobs/cleanupStaleRides';
@@ -9,6 +11,15 @@ async function main() {
 
   const httpServer = createServer();
   const io = new Server(httpServer);
+
+  try {
+    await pubClient.connect();
+    await subClient.connect();
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log('[CRON] Socket.IO Redis adapter connected');
+  } catch (err: any) {
+    console.error(`[CRON] ⚠️ Redis adapter failed (non-fatal): ${err.message}`);
+  }
 
   const scoreWorker = await createScoreWorker(await handleScoreRefresh());
   const cleanupWorker = await createCleanupWorker(await handleCleanupStaleRides(io));

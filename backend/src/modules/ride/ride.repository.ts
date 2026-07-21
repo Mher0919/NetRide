@@ -141,7 +141,7 @@ export class RideRepository {
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
-      WHERE r.driver_id = $1 
+      WHERE r.driver_id = $1 AND r.status IN ('COMPLETED', 'ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
       ORDER BY r.created_at DESC
     `, [driverId]);
     return res.rows.map(row => this.mapToTrip(row));

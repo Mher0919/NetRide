@@ -126,8 +126,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Widget _buildEarningsSummary() {
+    final completed = _history.where((r) => r['status'] == 'COMPLETED').toList();
     double total = 0;
-    for (var ride in _history) {
+    for (var ride in completed) {
       total += double.tryParse((ride['fare_amount'] ?? ride['estimated_fare'] ?? '0').toString()) ?? 0;
     }
 
@@ -146,7 +147,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
           const SizedBox(height: 8),
           Text('\$${total.toStringAsFixed(2)}', style: GoogleFonts.poppins(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          Text('${_history.length} completed trips', style: GoogleFonts.poppins(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('${completed.length} completed trips', style: GoogleFonts.poppins(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -172,8 +173,23 @@ class _ActivityScreenState extends State<ActivityScreen> {
     final dateStr = ride['requested_at'] ?? ride['created_at'];
     final date = dateStr != null ? DateTime.parse(dateStr.toString()) : DateTime.now();
     final formattedDate = DateFormat('MMM d, h:mm a').format(date);
-    final fare = ride['fare_amount'] ?? ride['estimated_fare'] ?? '0.00';
     final rating = ride['rating'];
+    final status = ride['status'] ?? 'UNKNOWN';
+
+    dynamic fare = ride['fare_amount'] ?? ride['estimated_fare'] ?? '0.00';
+    Color fareColor;
+    String farePrefix;
+    if (status == 'COMPLETED') {
+      fareColor = Colors.green[700]!;
+      farePrefix = '+\$';
+    } else if (status == 'CANCELLED') {
+      fareColor = Colors.red[400]!;
+      farePrefix = '';
+      fare = '0.00';
+    } else {
+      fareColor = Colors.grey[600]!;
+      farePrefix = '\$';
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -192,7 +208,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
               Text(formattedDate, style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 14)),
               Row(
                 children: [
-                  Text('+\$$fare', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.green[700])),
+                  Text('$farePrefix$fare', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: fareColor)),
                   const SizedBox(width: 8),
                   IconButton(
                     visualDensity: VisualDensity.compact,
