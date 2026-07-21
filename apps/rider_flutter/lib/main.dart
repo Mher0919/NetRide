@@ -162,15 +162,31 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
 
   void _initDeepLinks() {
     _appLinks = AppLinks();
-    _appLinks.uriLinkStream.listen((uri) {
-      debugPrint('🔗 Received Deep Link: $uri');
-      if (uri.host == 'password-reset' || uri.path.contains('password-reset')) {
-        final token = uri.queryParameters['token'];
-        if (token != null) {
-          ApiService.navigatorKey.currentState?.pushNamed('/reset-password', arguments: {'token': token});
-        }
+    
+    // Handle initial link (when app is launched via URI scheme)
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) {
+        debugPrint('🔗 Initial Deep Link: $uri');
+        _handleDeepLink(uri);
       }
     });
+
+    // Handle subsequent links
+    _appLinks.uriLinkStream.listen((uri) {
+      debugPrint('🔗 Received Deep Link: $uri');
+      _handleDeepLink(uri);
+    });
+  }
+
+  void _handleDeepLink(Uri uri) {
+    if (uri.host == 'password-reset' || uri.path.contains('password-reset')) {
+      final token = uri.queryParameters['token'];
+      if (token != null) {
+        ApiService.navigatorKey.currentState?.pushNamed('/reset-password', arguments: {'token': token});
+      }
+    }
+    // Note: OAuth callback (login-callback) is handled automatically by Supabase
+    // via the auth state change listener in the login screen.
   }
 
   @override

@@ -6,6 +6,8 @@
 #include <windows.h>
 
 #include <iostream>
+#include <string>
+#include <vector>
 
 void CreateAndAttachConsole() {
   if (::AllocConsole()) {
@@ -62,4 +64,36 @@ std::string Utf8FromUtf16(const wchar_t* utf16_string) {
     return std::string();
   }
   return utf8_string;
+}
+
+void RegisterUriScheme() {
+  // Register the URI scheme for deep linking (OAuth callback)
+  // This allows the app to handle io.supabase.netride://login-callback/
+  HKEY hKey;
+  std::wstring scheme = L"io.supabase.netride";
+  std::wstring appPath = L"\"";
+  wchar_t exePath[MAX_PATH];
+  GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+  appPath += exePath;
+  appPath += L"\" \"%1\"";
+
+  // Create the scheme key
+  LONG result = RegCreateKeyExW(HKEY_CURRENT_USER,
+                                (L"Software\\Classes\\" + scheme).c_str(),
+                                0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr);
+  if (result == ERROR_SUCCESS) {
+    RegSetKeyValueW(hKey, nullptr, nullptr, REG_SZ, L"URL:NetRide Auth Callback", 
+                    (DWORD)(wcslen(L"URL:NetRide Auth Callback") + 1) * sizeof(wchar_t));
+    RegSetKeyValueW(hKey, nullptr, L"URL Protocol", REG_SZ, L"", 1);
+    RegCloseKey(hKey);
+  }
+
+  // Create the shell\open\command key
+  std::wstring commandPath = L"Software\\Classes\\" + scheme + L"\\shell\\open\\command";
+  result = RegCreateKeyExW(HKEY_CURRENT_USER, commandPath.c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr);
+  if (result == ERROR_SUCCESS) {
+    RegSetKeyValueW(hKey, nullptr, nullptr, REG_SZ, appPath.c_str(),
+                    (DWORD)(appPath.length() + 1) * sizeof(wchar_t));
+    RegCloseKey(hKey);
+  }
 }

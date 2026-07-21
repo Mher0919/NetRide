@@ -6,6 +6,8 @@
 #include <windows.h>
 
 #include <iostream>
+#include <string>
+#include <vector>
 
 void CreateAndAttachConsole() {
   if (::AllocConsole()) {
@@ -62,4 +64,55 @@ std::string Utf8FromUtf16(const wchar_t* utf16_string) {
     return std::string();
   }
   return utf8_string;
+}
+
+void RegisterUriScheme() {
+  const wchar_t* scheme = L"io.supabase.netride";
+  const wchar_t* appPath = nullptr;
+  wchar_t exePath[MAX_PATH];
+  if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) > 0) {
+    appPath = exePath;
+  }
+
+  HKEY hKey;
+  // Create the scheme key
+  std::wstring schemeKey = L"SOFTWARE\\Classes\\" + std::wstring(scheme);
+  LONG result = RegCreateKeyExW(HKEY_CURRENT_USER, schemeKey.c_str(), 0,
+                                nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE,
+                                nullptr, &hKey, nullptr);
+  if (result == ERROR_SUCCESS) {
+    // Set the URL Protocol
+    const wchar_t* urlProtocol = L"URL Protocol";
+    RegSetValueExW(hKey, urlProtocol, 0, REG_SZ, (const BYTE*)L"", 2);
+
+    // Set the default icon
+    std::wstring defaultIconKey = schemeKey + L"\\DefaultIcon";
+    HKEY hIconKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, defaultIconKey.c_str(), 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hIconKey,
+                        nullptr) == ERROR_SUCCESS) {
+      if (appPath) {
+        std::wstring iconValue = std::wstring(appPath) + L",1";
+        RegSetValueExW(hIconKey, nullptr, 0, REG_SZ,
+                       (const BYTE*)iconValue.c_str(),
+                       (DWORD)((iconValue.size() + 1) * sizeof(wchar_t)));
+      }
+      RegCloseKey(hIconKey);
+    }
+
+    // Set the shell open command
+    std::wstring commandKey = schemeKey + L"\\shell\\open\\command";
+    HKEY hCommandKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, commandKey.c_str(), 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hCommandKey,
+                        nullptr) == ERROR_SUCCESS) {
+      if (appPath) {
+        std::wstring commandValue = L"\"" + std::wstring(appPath) + L"\" \"%1\"";
+        RegSetValueExW(hCommandKey, nullptr, 0, REG_SZ,
+                       (const BYTE*)commandValue.c_str(),
+                       (DWORD)((commandValue.size() + 1) * sizeof(wchar_t)));
+      }
+      RegCloseKey(hCommandKey);
+    }
+  }
 }

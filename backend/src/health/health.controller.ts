@@ -7,7 +7,7 @@
 //                        "should I kill this instance?" decisions.
 //
 //   GET /health/ready  — process is ready to serve traffic. Pings every
-//                        critical dependency (Redis, Postgres, OSRM, Mapbox).
+//                        critical dependency (Redis, Postgres, ORS, Mapbox).
 //                        Returns 503 with a JSON body listing what's
 //                        down. Use this for "should I send this instance
 //                        traffic?" decisions.
@@ -64,11 +64,19 @@ async function probePostgres(): Promise<DependencyStatus> {
   }
 }
 
-async function probeOSRM(): Promise<DependencyStatus> {
+async function probeORS(): Promise<DependencyStatus> {
   const start = Date.now();
   try {
-    const url = `${env.OSRM_BASE_URL}/route/v1/driving/-118.4455,34.0639;-118.4400,34.0700?overview=simplified&steps=false`;
-    await axios.get(url, { timeout: 5000 });
+    const url = `https://api.openrouteservice.org/v2/directions/driving-car/geojson`;
+    await axios.post(url, {
+      coordinates: [[-118.4455, 34.0639], [-118.4400, 34.0700]],
+      instructions: false,
+      geometry: true,
+    }, {
+      params: { api_key: env.ORS_API_KEY },
+      timeout: 5000,
+      headers: { 'Content-Type': 'application/json' },
+    });
     dependencyUp.set({ dependency: 'routing-engine' }, 1);
     return { name: 'routing-engine', up: true, latencyMs: Date.now() - start };
   } catch (err: any) {
@@ -131,7 +139,7 @@ router.get('/health/ready', async (_req: Request, res: Response) => {
     probeRedisPubSub(),
     probePostgres(),
     probePostgresReplica(),
-    probeOSRM(),
+    probeORS(),
     probeMapbox(),
     probeQueue('match:ride', matchQueue),
     probeQueue('match:dispatch', dispatchQueue),

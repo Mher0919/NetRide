@@ -9,16 +9,16 @@
 // Architecture:
 //
 //   Flutter App → Backend API → Ride/Dispatch/Nav → RoutingService →
-//     → RegionAwareEngine (OSRM for LA, Mapbox fallback)
+//     → ORSEngine (primary) / MapboxEngine (fallback)
 //
 // No business logic calls any routing provider directly. The active engine
-// is selected at runtime based on the geographic region (LA region uses
-// the local OSRM sidecar process; outside LA uses Mapbox Directions API).
-// Both implement the RouteEngine interface, so providers are swappable.
+// is selected at runtime. ORS is the primary provider globally; Mapbox
+// serves as fallback. Both implement the RouteEngine interface, so providers
+// are swappable.
 //
 // Design goals:
-//   - Fast:        cache-first, local OSRM <100ms, fare in microseconds.
-//   - Road geometry: OSRM returns true road-following geometry (GeoJSON).
+//   - Fast:        cache-first, ORS <500ms, fare in microseconds.
+//   - Road geometry: ORS returns true road-following geometry (GeoJSON).
 //   - Lightweight:  no per-request DB hits in the hot path.
 //   - Resilient:    never crash; degrade to a road-shaped synthetic route.
 //   - Observable:   every stage is instrumented via prom-client + structured logs.
@@ -32,10 +32,9 @@ import { fareService, FareBreakdown } from '../../services/fare.service';
 import { RoadSnapperService } from '../../services/road-snapper.service';
 import { VehicleClass } from '../../types';
 import { RouteEngine } from './route-engine';
-import { OSRMEngine } from './osrm.engine';
+import { ORSEngine } from './ors.engine';
 import { MapboxEngine } from './mapbox.engine';
 import { RoutingError } from './routing.errors';
-import { bothInLARegion } from '../../services/la-region';
 import {
   routingRequestsTotal,
   routingDurationSeconds,
@@ -62,7 +61,7 @@ export interface RoutingResult {
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
-  engine: 'OSRM' | 'Mapbox' | 'Synthetic';
+  engine: 'ORS' | 'Mapbox' | 'Synthetic';
   cacheHit: boolean;
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
@@ -137,13 +136,13 @@ export function parseCoordinates(raw: unknown, label: string): LatLng {
 
 export class RoutingService {
   // ---- Provider map --------------------------------------------------------
-  // The LA region is served by the local OSRM sidecar process for low latency.
-  // Coordinates outside the LA bounding box fall back to Mapbox Directions API.
+  // ORS (OpenRouteService) is the primary routing engine for all regions.
+  // Mapbox Directions API serves as the fallback if ORS is unavailable.
   private static readonly providers: Array<{
     match: (origin: [number, number], destination: [number, number]) => boolean;
     engine: RouteEngine;
   }> = [
-    { match: bothInLARegion, engine: OSRMEngine },
+    { match: () => true,        engine: ORSEngine },
     { match: () => true,        engine: MapboxEngine },
   ];
 
@@ -437,7 +436,7 @@ export class RoutingService {
       const res = await activeEngine.route(routeOrigin, routeDest);
       if (res) {
         const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
-        const engineName = activeEngine.name as 'OSRM' | 'Mapbox';
+        const engineName = activeEngine.name as 'ORS' | 'Mapbox';
         result = {
           distanceMeters: res.distanceMeters,
           durationSeconds: res.durationSeconds,

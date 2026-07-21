@@ -11,18 +11,24 @@ const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   JWT_SECRET: z.string(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
-  // ---- Routing engine: Local OSRM (Los Angeles) ---------------------------
-  // Base URL of the local OSRM osrm-routed server. Defaults to localhost:5000
-  // for the sidecar process (started by the Docker entrypoint or manually).
-  OSRM_BASE_URL: z.string().default('http://localhost:5000'),
+  // ---- Routing engine: OpenRouteService (ORS) -------------------------------
+  // Used for all routing (replaces self-hosted OSRM).
+  // Get API key from https://openrouteservice.org/
+  ORS_API_KEY: z.string().optional(),
+  ORS_PROFILE: z.string().default('driving-car'),
+  ORS_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
+  // ---- Local OSRM (legacy, for road-snapper nearest-node) -----------------
+  // Base URL of the local OSRM osrm-routed server. Used by road-snapper for
+  // nearest-node snapping. Optional — if not set, falls back to public OSRM.
+  OSRM_BASE_URL: z.string().optional(),
   // Per-request timeout to the local OSRM engine (ms).
-  OSRM_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(5000),
+  OSRM_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).optional(),
   // Path on disk to the pre-processed OSRM road network (.osrm family).
   // Used by the startup script (start.sh / entrypoint) to find and launch
   // osrm-routed. Not read directly by backend code.
   OSRM_DATA_PATH: z.string().default('./data/la.osrm'),
   // ---- Fallback routing engine (Mapbox Directions API) --------------------
-  // Used when coordinates fall outside the LA region served by local OSRM.
+  // Used as fallback when ORS is unavailable.
   // The access token is never shipped to the Flutter app.
   MAPBOX_ACCESS_TOKEN: z.string().optional(),
   MAPBOX_PROFILE: z.string().default('driving'),
