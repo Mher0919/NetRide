@@ -21,12 +21,16 @@ export async function handleMatchRide(io: Server) {
     const data: MatchRideJobData = job.data;
 
     try {
+      console.log(`[MATCH] 🔍 Processing match job ${job.id} for trip ${data.tripId} at (${data.pickupLat}, ${data.pickupLng})`);
+
       const drivers = await DispatchService.getWeightedDrivers(
         { lat: data.pickupLat, lng: data.pickupLng },
         data.requestedClass,
         env.DRIVER_MATCH_RADIUS_KM || 10,
         data.riderId
       );
+
+      console.log(`[MATCH] Found ${drivers.length} driver(s) for trip ${data.tripId} in ${Date.now() - startTime}ms`);
 
       if (drivers.length === 0) {
         const trip = await RideRepository.findById(data.tripId);

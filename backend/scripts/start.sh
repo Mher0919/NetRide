@@ -2,11 +2,8 @@
 # scripts/start.sh
 #
 # Entrypoint for the production Docker container.
-# OSRM now runs as a separate Render service (netride-osrm).
-# This script only starts the Node backend.
-#
-# Environment variables (with defaults):
-#   NODE_PORT  — port the Node backend listens on (default: 3000)
+# OSRM runs as a separate Render service (netride-osrm).
+# This script starts the Node backend + match/cron workers.
 
 set -euo pipefail
 
@@ -18,21 +15,39 @@ NODE_PORT="${NODE_PORT:-3000}"
 echo "==> Starting Node backend on port ${NODE_PORT}..."
 NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1024 --expose-gc}"
 NODE_PORT="${NODE_PORT}" node ${NODE_OPTIONS} dist/app.js &
-NODE_PID=$!
+BACKEND_PID=$!
+
+# ---------------------------------------------------------------------------
+# Start match worker (processes ride matching + dispatch queue jobs)
+# ---------------------------------------------------------------------------
+echo "==> Starting match worker..."
+node ${NODE_OPTIONS} dist/queue/matchWorker.js &
+MATCH_PID=$!
+
+# ---------------------------------------------------------------------------
+# Start cron worker (stale ride cleanup + driver score refresh)
+# ---------------------------------------------------------------------------
+echo "==> Starting cron worker..."
+node ${NODE_OPTIONS} dist/queue/cronWorker.js &
+CRON_PID=$!
 
 # ---------------------------------------------------------------------------
 # Forward signals for graceful shutdown
 # ---------------------------------------------------------------------------
 shutdown() {
   echo "==> Shutting down..."
-  kill "${NODE_PID}" 2>/dev/null || true
-  wait "${NODE_PID}" 2>/dev/null || true
+  kill "${BACKEND_PID}" 2>/dev/null || true
+  kill "${MATCH_PID}" 2>/dev/null || true
+  kill "${CRON_PID}" 2>/dev/null || true
+  wait 2>/dev/null || true
   echo "==> Shutdown complete"
   exit 0
 }
 trap shutdown SIGTERM SIGINT
 
 # ---------------------------------------------------------------------------
-# Wait for the process to exit
+# Wait for any process to exit
 # ---------------------------------------------------------------------------
-wait
+wait -n ${BACKEND_PID} ${MATCH_PID} ${CRON_PID}
+echo "==> One process exited, shutting down all..."
+shutdown

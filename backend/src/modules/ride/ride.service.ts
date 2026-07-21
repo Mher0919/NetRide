@@ -124,22 +124,27 @@ export class RideService {
     const riderRes = await pool.query('SELECT rating FROM users WHERE id = $1', [riderId]);
     const snapshotRating = riderRes.rows[0]?.rating || 5.0;
 
-    // Get Route
+    // Get Route — use cached result from the Flutter app's /api/routing/plan
+    // call (same coordinates, same cache key). Fall back to direct call.
+    const routeStart = Date.now();
     const route = await GeospatialService.getRoute(
       [pickup.lat, pickup.lng],
       [destination.lat, destination.lng]
     ).catch(() => null);
+    console.log(`[RIDE] Route fetched in ${Date.now() - routeStart}ms (cached=${route != null})`);
 
     const distanceKm = route ? (route.distance / 1000) : 10.0;
     const etaSeconds = route ? route.eta : 600;
 
     // Calculate maximum fare and saving likelihood
+    const fareStart = Date.now();
     const estimate = await fareService.calculateRiderPriceEstimate(
       pickup.lat,
       pickup.lng,
       requestedClass,
       distanceKm
     );
+    console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms`);
 
     // Use a transactional insert for safety
     const res = await pool.query(

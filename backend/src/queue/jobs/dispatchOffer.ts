@@ -21,8 +21,13 @@ export async function handleDispatchOffer(io: Server) {
     const data: DispatchOfferJobData = job.data;
     const { tripId, drivers } = data;
 
+    console.log(`[DISPATCH] 📤 Processing dispatch job ${job.id} for trip ${tripId} → ${drivers.length} driver(s)`);
+
     const trip = await RideRepository.findById(tripId);
-    if (!trip || trip.status !== 'REQUESTED') return;
+    if (!trip || trip.status !== 'REQUESTED') {
+      console.log(`[DISPATCH] ⏭️ Skipping trip ${tripId} — status=${trip?.status}`);
+      return;
+    }
 
     const offeredDrivers: string[] = [];
 
@@ -76,6 +81,7 @@ export async function handleDispatchOffer(io: Server) {
         driver_price_per_mile: driverPricePerMile,
       });
 
+      console.log(`[DISPATCH] ✅ Sent newTripRequest to driver:${driverId} for trip ${tripId} (price=$${calculatedPrice})`);
       offeredDrivers.push(driverId);
     }
 
