@@ -46,7 +46,7 @@ export async function uploadToSupabase(
         'Content-Type': mimetype,
         'x-upsert': 'true',
       },
-      body: new Blob([new Uint8Array(buffer)], { type: mimetype }),
+      body: new Uint8Array(buffer),
     });
 
     if (!res.ok) {

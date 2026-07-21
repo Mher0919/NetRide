@@ -50,8 +50,8 @@ done
 # ---------------------------------------------------------------------------
 echo "==> Starting Node backend on port ${NODE_PORT}..."
 # Cap V8 heap at 768 MB to prevent OOM (standard Render plan = 2 GB RAM,
-# leaving headroom for OSRM + OS + TensorFlow native bindings).
-NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=768}"
+# leaving headroom for OSRM sidecar + OS).
+NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=768 --expose-gc}"
 NODE_PORT="${NODE_PORT}" node ${NODE_OPTIONS} dist/app.js &
 NODE_PID=$!
 
