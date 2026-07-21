@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -36,14 +35,19 @@ class RideProvider with ChangeNotifier {
   }
 
   void initSocket(String token) {
-    final url = 'https://netride.onrender.com';
-    print('--- SOCKET INIT ---');
-    print('URL: $url');
-    print('Token: $token');
-    print('-------------------');
+    // Socket base URL is derived once in ApiService so HTTP and WebSocket
+    // gateways can never drift. Tokens are intentionally NOT logged (OWASP:
+    // a JWT prefix leaks the signing algorithm header).
+    final socketUrl = ApiService.socketBaseUrl;
+    debugPrint('--- SOCKET INIT --- URL=$socketUrl token=<redacted>');
 
-    _socket = IO.io(url, <String, dynamic>{
-      'transports': ['websocket'], // Force websocket
+    _socket = IO.io(socketUrl, <String, dynamic>{
+      // Negotiation order: WebSocket first (low-latency), then polling as
+      // fallback (works through HTTP proxies that block ws upgrades). This
+      // mirrors socket.io-client defaults and avoids the Android-emulator
+      // "Failed host lookup" that the previous forced-websocket transport
+      // masked.
+      'transports': ['websocket', 'polling'],
       'forceNew': true, // Ensure fresh connection
       'reconnection': true,
       'reconnectionAttempts': double.infinity,
@@ -54,24 +58,23 @@ class RideProvider with ChangeNotifier {
     });
 
     _socket!.onConnect((_) {
-      print('Rider connected to socket');
+      debugPrint('[SOCKET] Rider connected URL=$socketUrl transport=${_socket?.io.engine?.transport?.name ?? '?'}');
       _isConnected = true;
       notifyListeners();
     });
 
-    _socket!.onDisconnect((_) {
-      print('Rider disconnected from socket');
+    _socket!.onDisconnect((reason) {
+      debugPrint('[SOCKET] Rider disconnected URL=$socketUrl reason=$reason');
       _isConnected = false;
       notifyListeners();
     });
 
     _socket!.onConnectError((err) {
-      final errStr = err.toString();
-      if (errStr.contains('Failed host lookup') || errStr.contains('No address associated')) {
-        print('Rider Connect Error — DNS resolution failed for netride.onrender.com. Retrying...');
-      } else {
-        print('Rider Connect Error: $err');
-      }
+      // Log the actual URL and the raw error — the previous version hardcoded
+      // a misleading "DNS resolution failed for netride.onrender.com" message
+      // regardless of the real cause, which made it impossible to tell a DNS
+      // failure from a blocked WebSocket upgrade or a wrong path.
+      debugPrint('[SOCKET] Rider connect error URL=$socketUrl raw=$err');
       _isConnected = false;
       notifyListeners();
     });

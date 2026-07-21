@@ -64,8 +64,8 @@ app.use(cors());
 // instead of the proxy IP. This fixes rate-limit key collisions
 // where all users share one rate-limit bucket behind Render.
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Request-id + child logger context. Mount BEFORE rate-limit so even
 // 429s get a log line and a metric.
 app.use(requestContext);

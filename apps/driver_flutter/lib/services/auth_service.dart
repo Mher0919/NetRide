@@ -367,7 +367,10 @@ class AuthService {
 
   static Future<List<String>> getVehicleMakes(int year) async {
     try {
-      final response = await ApiService.dio.get('/driver/vehicle-models/makes');
+      final response = await ApiService.dio.get(
+        'driver/vehicle-models/makes',
+        queryParameters: {'year': year},
+      );
       return List<String>.from(response.data);
     } catch (e) {
       rethrow;
@@ -376,9 +379,10 @@ class AuthService {
 
   static Future<List<String>> getVehicleModels(String make, int year) async {
     try {
-      final response = await ApiService.dio.get('/driver/vehicle-models/models', queryParameters: {
-        'make': make,
-      });
+      final response = await ApiService.dio.get(
+        'driver/vehicle-models/models',
+        queryParameters: {'make': make, 'year': year},
+      );
       return List<String>.from(response.data);
     } catch (e) {
       rethrow;

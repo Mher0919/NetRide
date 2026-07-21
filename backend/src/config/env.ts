@@ -49,6 +49,7 @@ const envSchema = z.object({
   ADMIN_URL: z.string().default('http://localhost:5173'),
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_VERIFY_SERVICE_SID: z.string().optional(),

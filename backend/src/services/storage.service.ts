@@ -4,6 +4,8 @@ import { uploadToSupabase } from '../config/supabase';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import { pipeline } from 'stream/promises';
+import { Readable } from 'stream';
 
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
@@ -57,7 +59,11 @@ export class StorageService {
 
     const localPath = path.join(uploadDir, `${uuidv4()}.${ext}`);
     const relativePath = `local/${options.userId}/${options.fileType}/${path.basename(localPath)}`;
-    fs.writeFileSync(localPath, buffer);
+
+    // Stream write instead of blocking sync write
+    const readStream = Readable.from(buffer);
+    const writeStream = fs.createWriteStream(localPath);
+    await pipeline(readStream, writeStream);
 
     const result = await pool.query(
       `INSERT INTO storage_files (user_id, bucket, path, original_name, mimetype, size_bytes)
@@ -118,7 +124,7 @@ export class StorageService {
     if (bucket === 'local') {
       const localPath = path.join(UPLOADS_DIR, filePath.replace('local/', ''));
       try {
-        if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+        if (fs.existsSync(localPath)) await fs.promises.unlink(localPath);
       } catch { /* ignore */ }
     }
 

@@ -646,11 +646,18 @@ class DriverProvider with ChangeNotifier {
       _socket!.dispose();
       _socket = null;
     }
-    final url = 'https://netride.onrender.com';
-    print('--- DRIVER SOCKET INIT ---');
+    // Socket base URL is derived once in ApiService so HTTP and WebSocket
+    // gateways can never drift. Fall back to the production URL on missing
+    // env (mirrors ApiService.baseUrl behavior).
+    final url = ApiService.socketBaseUrl;
+    debugPrint('--- DRIVER SOCKET INIT --- URL=$url');
 
     _socket = IO.io(url, <String, dynamic>{
-      'transports': ['websocket'],
+      // Negotiate WebSocket first, then fall back to polling. This mirrors
+      // socket.io-client defaults and gives HTTP-only paths a chance when a
+      // reverse proxy blocks ws upgrades (which is the most common cause of
+      // the previously-seen "Failed host lookup" symptom on Android emulators).
+      'transports': ['websocket', 'polling'],
       'forceNew': true,
       'reconnection': true,
       'reconnectionAttempts': double.infinity,
@@ -661,26 +668,25 @@ class DriverProvider with ChangeNotifier {
     });
 
     _socket!.onConnect((_) {
-      print('Driver connected to socket');
+      debugPrint('[SOCKET] Driver connected URL=' + url + ' transport=' + (_socket?.io.engine?.transport?.name ?? '?'));
       _isConnected = true;
       // Extract driver ID from token and hydrate cache
       _tryHydrateFromToken(token);
       notifyListeners();
     });
 
-    _socket!.onDisconnect((_) {
-      print('Driver disconnected from socket');
+    _socket!.onDisconnect((reason) {
+      debugPrint('[SOCKET] Driver disconnected URL=' + url + ' reason=' + reason.toString());
       _isConnected = false;
       notifyListeners();
     });
 
     _socket!.onConnectError((err) {
-      final errStr = err.toString();
-      if (errStr.contains('Failed host lookup') || errStr.contains('No address associated')) {
-        print('Driver Connect Error — DNS resolution failed for netride.onrender.com. Retrying...');
-      } else {
-        print('Driver Connect Error: $err');
-      }
+      // Log the actual URL and the raw error to surface the real reason
+      // (DNS, ws upgrade blocked by proxy, wrong path, ...) instead of the
+      // misleading hardcoded "DNS resolution failed for netride.onrender.com"
+      // message it replaced.
+      debugPrint('[SOCKET] Driver connect error URL=$url raw=$err');
       _isConnected = false;
       notifyListeners();
     });

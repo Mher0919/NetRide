@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/ride_provider.dart';
 import '../services/auth_service.dart';
 import 'map_screen.dart';
 import 'activity_screen.dart';
@@ -78,9 +80,23 @@ class _MainWrapperState extends State<MainWrapper> {
     }
 
     return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _screens,
+      // The connection banner lives above the IndexedStack so the bottom nav
+      // and the active screen are unchanged. Using Consumer<RideProvider>
+      // (not context.watch) keeps rebuilds local to this widget.
+      body: Consumer<RideProvider>(
+        builder: (context, ride, _) {
+          return Column(
+            children: [
+              _ConnectionBanner(connected: ride.isConnected),
+              Expanded(
+                child: IndexedStack(
+                  index: _selectedIndex,
+                  children: _screens,
+                ),
+              ),
+            ],
+          );
+        },
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -133,6 +149,45 @@ class _MainWrapperState extends State<MainWrapper> {
                 letterSpacing: 0.2,
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Slim status pill that surfaces socket-connection state. Hidden when
+/// connected (positive state), shown otherwise so the rider knows their app
+/// is offline before they request a ride that will silently fail.
+class _ConnectionBanner extends StatelessWidget {
+  const _ConnectionBanner({required this.connected});
+
+  final bool connected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (connected) return const SizedBox.shrink();
+    return Container(
+      color: const Color(0xFFB5524A),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: const [
+              Icon(Icons.cloud_off_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Reconnecting to ride service… ride requests may not send.',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

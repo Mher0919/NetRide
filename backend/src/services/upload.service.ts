@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { StorageService } from './storage.service';
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+
 export class UploadService {
   static async upload(req: Request, res: Response) {
     try {
@@ -12,7 +14,10 @@ export class UploadService {
 
       const buffer = Buffer.from(image, 'base64');
 
-      // Infer user ID from request auth (optional, for path organisation)
+      if (buffer.length > MAX_UPLOAD_BYTES) {
+        return res.status(413).json({ error: `File too large. Max ${MAX_UPLOAD_BYTES / 1024 / 1024}MB.` });
+      }
+
       const userId = (req as any).user?.id || 'anonymous';
 
       const result = await StorageService.upload(buffer, {
@@ -22,9 +27,6 @@ export class UploadService {
         mimetype,
       });
 
-      // Return the relative /api/files/{id} path.
-      // The Flutter app resolves it to a full URL via resolveFileUrl(),
-      // which works on any platform (emulator, device, web).
       console.log(`📸 [UPLOAD] Uploaded via StorageService: ${result.id} (${buffer.length} bytes) -> ${result.url}`);
       res.json({ url: result.url });
     } catch (error: any) {

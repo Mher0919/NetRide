@@ -54,9 +54,12 @@ class AuthService {
     }
   }
 
-  static Future<Map<String, dynamic>?> requestPhoneOTP(String phoneNumber) async {
+  static Future<Map<String, dynamic>?> requestPhoneOTP(String phoneNumber, {String role = 'RIDER'}) async {
     try {
-      final response = await ApiService.dio.post('auth/request-phone-otp', data: {'phone_number': phoneNumber});
+      final response = await ApiService.dio.post('auth/request-phone-otp', data: {
+        'phone_number': phoneNumber,
+        'role': role,
+      });
       if (response.statusCode == 200 && response.data is Map<String, dynamic>) {
         return response.data as Map<String, dynamic>;
       }
@@ -69,11 +72,13 @@ class AuthService {
   static Future<Map<String, dynamic>> verifyPhoneOTP({
     required String phoneNumber,
     required String code,
+    String role = 'RIDER',
   }) async {
     try {
       final response = await ApiService.dio.post('auth/verify-phone-otp', data: {
         'phone_number': phoneNumber,
         'code': code,
+        'role': role,
       });
 
       if (response.statusCode == 200) {
@@ -95,8 +100,8 @@ class AuthService {
       final response = await ApiService.dio.post('auth/verify-otp', data: {
         'email': email,
         'code': code,
-        'full_name': ?fullName,
-        'role': ?role,
+        if (fullName != null) 'full_name': fullName,
+        if (role != null) 'role': role,
       });
 
       if (response.statusCode == 200) {
@@ -178,7 +183,7 @@ class AuthService {
   static Future<void> changePassword({String? currentPassword, required String newPassword}) async {
     try {
       await ApiService.dio.post('auth/change-password', data: {
-        'currentPassword': ?currentPassword,
+        if (currentPassword != null) 'currentPassword': currentPassword,
         'newPassword': newPassword,
       });
     } catch (e) {

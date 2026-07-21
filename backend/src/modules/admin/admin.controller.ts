@@ -2032,6 +2032,9 @@ export class AdminController {
 
     try {
       const buffer = Buffer.from(image, 'base64');
+      if (buffer.length > 10 * 1024 * 1024) {
+        return res.status(413).json({ error: 'File too large. Max 10MB.' });
+      }
       const fileType = field.replace(/_url$/, '');
       const adminId = req.user?.id || id;
 

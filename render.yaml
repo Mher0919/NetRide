@@ -36,6 +36,8 @@ services:
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: MAPBOX_ACCESS_TOKEN
         sync: false
       # OSRM_BASE_URL is localhost in the single-container Docker setup.
