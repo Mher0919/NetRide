@@ -20,8 +20,10 @@ export class RoadSnapperService {
       return { lat, lng, distanceMeters: 0, snapped: false };
     }
 
-    const localBase = `${env.OSRM_BASE_URL}/nearest/v1/driving`;
-    const candidates = [localBase, PUBLIC_OSRM_NEAREST];
+    const localBase = env.OSRM_BASE_URL
+      ? `${env.OSRM_BASE_URL}/nearest/v1/driving`
+      : null;
+    const candidates = [localBase, PUBLIC_OSRM_NEAREST].filter(Boolean) as string[];
 
     for (const base of candidates) {
       try {

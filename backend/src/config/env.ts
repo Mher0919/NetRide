@@ -17,9 +17,10 @@ const envSchema = z.object({
   ORS_API_KEY: z.string().optional(),
   ORS_PROFILE: z.string().default('driving-car'),
   ORS_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
-  // ---- Local OSRM (legacy, for road-snapper nearest-node) -----------------
-  // Base URL of the local OSRM osrm-routed server. Used by road-snapper for
-  // nearest-node snapping. Optional — if not set, falls back to public OSRM.
+  // ---- Local OSRM (self-hosted, separate Render service) -------------------
+  // Base URL of the self-hosted OSRM service (e.g. http://netride-osrm.internal:5000).
+  // Used as the PRIMARY routing engine and by road-snapper for nearest-node snapping.
+  // Falls back to public OSRM if not set.
   OSRM_BASE_URL: z.string().optional(),
   // Per-request timeout to the local OSRM engine (ms).
   OSRM_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).optional(),

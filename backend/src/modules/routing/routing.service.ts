@@ -9,7 +9,7 @@
 // Architecture:
 //
 //   Flutter App → Backend API → Ride/Dispatch/Nav → RoutingService →
-//     → ORSEngine (primary) / MapboxEngine (fallback)
+//     → OSRM (self-hosted, primary) → ORS (fallback) → Mapbox (last resort)
 //
 // No business logic calls any routing provider directly. The active engine
 // is selected at runtime. ORS is the primary provider globally; Mapbox
@@ -32,6 +32,7 @@ import { fareService, FareBreakdown } from '../../services/fare.service';
 import { RoadSnapperService } from '../../services/road-snapper.service';
 import { VehicleClass } from '../../types';
 import { RouteEngine } from './route-engine';
+import { OSEngine } from './osrm.engine';
 import { ORSEngine } from './ors.engine';
 import { MapboxEngine } from './mapbox.engine';
 import { RoutingError } from './routing.errors';
@@ -61,7 +62,7 @@ export interface RoutingResult {
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
-  engine: 'ORS' | 'Mapbox' | 'Synthetic';
+  engine: 'OSRM' | 'ORS' | 'Mapbox' | 'Synthetic';
   cacheHit: boolean;
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
@@ -136,12 +137,14 @@ export function parseCoordinates(raw: unknown, label: string): LatLng {
 
 export class RoutingService {
   // ---- Provider map --------------------------------------------------------
-  // ORS (OpenRouteService) is the primary routing engine for all regions.
-  // Mapbox Directions API serves as the fallback if ORS is unavailable.
+  // Self-hosted OSRM (LA only) is the primary routing engine — fast, free,
+  // and runs on a separate Render service. ORS is the fallback for routes
+  // outside LA or if OSRM is down. Mapbox is the last resort.
   private static readonly providers: Array<{
     match: (origin: [number, number], destination: [number, number]) => boolean;
     engine: RouteEngine;
   }> = [
+    { match: () => true,        engine: OSEngine },
     { match: () => true,        engine: ORSEngine },
     { match: () => true,        engine: MapboxEngine },
   ];
@@ -436,7 +439,7 @@ export class RoutingService {
       const res = await activeEngine.route(routeOrigin, routeDest);
       if (res) {
         const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
-        const engineName = activeEngine.name as 'ORS' | 'Mapbox';
+        const engineName = activeEngine.name as 'OSRM' | 'ORS' | 'Mapbox';
         result = {
           distanceMeters: res.distanceMeters,
           durationSeconds: res.durationSeconds,

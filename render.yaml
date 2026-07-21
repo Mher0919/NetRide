@@ -1,28 +1,55 @@
 # NetRide Render Blueprint
 #
-# Deploys the backend (Node/TypeScript) with in-process face verification
-# (face-api.js / TensorFlow.js). No separate Python service is required.
+# Two services:
+#   1. netride-osrm   — self-hosted OSRM routing for LA (CH algorithm, 512 MB)
+#   2. netride-backend — Node/TypeScript API (standard plan, 2 GB)
+#
+# OSRM runs as a separate service so its ~300 MB footprint doesn't compete
+# with the Node.js heap. The backend talks to OSRM over Render's internal DNS.
 #
 # Usage:
 #   1. Render dashboard -> New -> Blueprint -> connect this repo.
-#   2. Render reads this file and creates the service.
+#   2. Render reads this file and creates both services.
 #   3. Fill in the secret env vars marked sync:false in the Environment tab.
-#   4. On first face check the model weights are downloaded automatically
-#      into the service (or pre-bake them — see README).
 
 services:
+  # --------------------------------------------------------------------------
+  # OSRM Routing Service (LA only)
+  # --------------------------------------------------------------------------
+  - type: web
+    name: netride-osrm
+    runtime: docker
+    dockerfilePath: ./osrm/Dockerfile
+    rootDir: osrm
+    plan: starter # 512 MB RAM — CH algorithm fits easily
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "5000"
+
+  # --------------------------------------------------------------------------
+  # Backend API
+  # --------------------------------------------------------------------------
   - type: web
     name: netride-backend
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     rootDir: backend
-    plan: standard # TF.js + face-api.js need real CPU/RAM; free tier will OOM
+    plan: standard
     healthCheckPath: /health/live
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: "3000"
+      # ---- OSRM routing (self-hosted, separate service) ----
+      # Render internal DNS: http://<service-name>.internal:<port>
+      - key: OSRM_BASE_URL
+        value: "http://netride-osrm.internal:5000"
+      - key: OSRM_TIMEOUT_MS
+        value: "5000"
       # ---- Secrets you MUST set in the dashboard (sync: false) ----
       - key: DATABASE_URL
         sync: false
@@ -38,12 +65,10 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: ORS_API_KEY
+        sync: false
       - key: MAPBOX_ACCESS_TOKEN
         sync: false
-      # OSRM_BASE_URL is localhost in the single-container Docker setup.
-      # If OSRM runs in a separate Render service, set this to its internal URL.
-      # - key: OSRM_BASE_URL
-      #   sync: false
       # ---- Face verification tunables (defaults from .env.example) ----
       - key: FACE_MATCH_THRESHOLD
         value: "0.45"
