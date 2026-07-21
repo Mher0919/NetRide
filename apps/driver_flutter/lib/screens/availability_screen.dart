@@ -1073,9 +1073,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     final current = _tempPrice ?? driverProvider.pricePerMile;
     final rec = driverProvider.recommendedPrice;
 
-    debugPrint('[PRICING] slider init current=\$' +
-        '$current (temp=$_tempPrice, provider=\$${driverProvider.pricePerMile}) range=\$$min..\$$max locked=${driverProvider.isPriceLocked}');
-
     final double recFraction = (max - min) > 0 ? (rec - min) / (max - min) : 0.5;
 
     // Authoritative cooldown derived from the backend-persisted
