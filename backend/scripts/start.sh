@@ -57,7 +57,7 @@ trap shutdown SIGTERM SIGINT
 echo "==> Starting backend self-keep-alive (every 2 min)..."
 while true; do
   sleep 120
-  curl -sf "http://localhost:${NODE_PORT}/health" > /dev/null 2>&1 || \
+  curl -sf "http://localhost:${NODE_PORT}/health/live" > /dev/null 2>&1 || \
     echo "[KEEPALIVE] Self-ping failed"
   if [ -n "${OSRM_BASE_URL:-}" ]; then
     curl -sf "${OSRM_BASE_URL}/health" > /dev/null 2>&1 || \
