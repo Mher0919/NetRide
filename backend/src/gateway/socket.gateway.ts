@@ -216,9 +216,10 @@ export function setupSocketGateway(io: Server) {
     /**
      * DRIVER INITIAL CLEANUP
      */
-    if (role === UserRole.DRIVER) {
-      LocationsService.removeDriverLocation(id).catch(() => {});
-    }
+    // NOTE: Do NOT remove driver location on connect — the driver may be
+    // reconnecting after a brief network blip. Removing their location
+    // makes them invisible to the match worker's GEORADIUS query.
+    // Location is only removed on explicit goOffline or disconnect.
 
     /**
      * DRIVER EVENTS
