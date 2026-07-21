@@ -404,8 +404,6 @@ export class RoutingService {
     const engineStart = process.hrtime.bigint();
     let result: RoutingResult | null = null;
 
-    const activeEngine = this.selectEngine(origin, destination);
-
     // Validate coordinates before contacting the routing engine.
     try {
       parseCoordinates([origin[0], origin[1]], 'origin');
@@ -436,36 +434,46 @@ export class RoutingService {
       : destination;
 
     try {
-      const res = await activeEngine.route(routeOrigin, routeDest);
-      if (res) {
-        const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
-        const engineName = activeEngine.name as 'OSRM' | 'ORS' | 'Mapbox';
-        result = {
-          distanceMeters: res.distanceMeters,
-          durationSeconds: res.durationSeconds,
-          etaSeconds: Math.round(res.durationSeconds * multiplier),
-          geometry: res.geometry,
-          confidence: 0.99,
-          engine: engineName,
-          cacheHit: false,
-          steps: res.steps,
-          speedLimitsByRoad: res.speedLimitsByRoad,
-        };
-        routingEngineRequestsTotal.inc({ status: 'ok' });
-      } else {
-        routingEngineRequestsTotal.inc({ status: 'empty' });
+      // Try engines in order: OSRM → ORS → Mapbox → Synthetic fallback
+      const engines = [OSEngine, ORSEngine, MapboxEngine];
+      for (const engine of engines) {
+        try {
+          const res = await engine.route(routeOrigin, routeDest);
+          if (res) {
+            const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
+            const engineName = engine.name as 'OSRM' | 'ORS' | 'Mapbox';
+            result = {
+              distanceMeters: res.distanceMeters,
+              durationSeconds: res.durationSeconds,
+              etaSeconds: Math.round(res.durationSeconds * multiplier),
+              geometry: res.geometry,
+              confidence: 0.99,
+              engine: engineName,
+              cacheHit: false,
+              steps: res.steps,
+              speedLimitsByRoad: res.speedLimitsByRoad,
+            };
+            routingEngineRequestsTotal.inc({ status: 'ok' });
+            break;
+          } else {
+            logger.warn({ engine: engine.name }, 'routing_engine_returned_null');
+            routingEngineRequestsTotal.inc({ status: 'empty' });
+          }
+        } catch (engineErr: any) {
+          if (engineErr instanceof RoutingError) {
+            logger.warn({ engine: engine.name, err: engineErr.message }, 'routing_engine_bad_input');
+            routingEngineRequestsTotal.inc({ status: 'bad_input' });
+            break;
+          } else {
+            logger.error({ engine: engine.name, err: engineErr.message }, 'routing_engine_error');
+            routingEngineRequestsTotal.inc({ status: 'error' });
+          }
+        }
       }
-    } catch (engineErr: any) {
-      if (engineErr instanceof RoutingError) {
-        // Permanent bad-input error — do not silently fall back to a wrong
-        // synthetic route; still return a road-shaped fallback so the app
-        // keeps working, but mark it as low confidence.
-        logger.warn({ err: engineErr.message }, 'routing_engine_bad_input');
-        routingEngineRequestsTotal.inc({ status: 'bad_input' });
-      } else {
-        logger.error({ err: engineErr.message }, 'routing_engine_error');
-        routingEngineRequestsTotal.inc({ status: 'error' });
-      }
+
+    } catch (err: any) {
+      logger.error({ err: err.message }, 'routing_compute_route_error');
+      routingEngineRequestsTotal.inc({ status: 'error' });
     }
 
     if (!result) {

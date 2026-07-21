@@ -512,6 +512,12 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
 
   logger.info({ set: !!env.JWT_SECRET, length: env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
 
+  logger.info({
+    osrm: env.OSRM_BASE_URL || '(not set)',
+    ors: env.ORS_API_KEY ? '(configured)' : '(not set)',
+    mapbox: env.MAPBOX_ACCESS_TOKEN ? '(configured)' : '(not set)',
+  }, 'routing_engines');
+
   // Pre-cache routes for the launch market (Hollywood / UCLA / Beverly Hills
   // / Westwood). preCacheHotZones computes the full grid — the routing
   // service caches the results so future identical requests are instant.
