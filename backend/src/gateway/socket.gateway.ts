@@ -399,10 +399,11 @@ export function setupSocketGateway(io: Server) {
       });
 
       socket.on('disconnect', async () => {
-        console.log(`[SOCKET] ❌ Driver ${id} disconnected`);
-        try {
-          await LocationsService.removeDriverLocation(id);
-        } catch (err) {}
+        console.log(`[SOCKET] ❌ Driver ${id} disconnected (location kept — will expire via heartbeat)`);
+        // Do NOT remove driver location here. On free-tier Render the
+        // service spins down and ALL sockets disconnect — wiping every
+        // driver's location makes them invisible when the service wakes.
+        // Location is only removed on explicit goOffline or heartbeat expiry.
       });
     }
 

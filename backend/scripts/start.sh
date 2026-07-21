@@ -39,11 +39,32 @@ shutdown() {
   kill "${BACKEND_PID}" 2>/dev/null || true
   kill "${MATCH_PID}" 2>/dev/null || true
   kill "${CRON_PID}" 2>/dev/null || true
+  kill "${KEEPALIVE_PID:-}" 2>/dev/null || true
   wait 2>/dev/null || true
   echo "==> Shutdown complete"
   exit 0
 }
 trap shutdown SIGTERM SIGINT
+
+# ---------------------------------------------------------------------------
+# Wait for any process to exit
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Keep-alive: ping self + OSRM every 2 minutes to prevent Render free-tier
+# spin-down. Without this the service goes to sleep after ~60 s idle,
+# killing all active socket connections.
+# ---------------------------------------------------------------------------
+echo "==> Starting backend self-keep-alive (every 2 min)..."
+while true; do
+  sleep 120
+  curl -sf "http://localhost:${NODE_PORT}/health" > /dev/null 2>&1 || \
+    echo "[KEEPALIVE] Self-ping failed"
+  if [ -n "${OSRM_BASE_URL:-}" ]; then
+    curl -sf "${OSRM_BASE_URL}/health" > /dev/null 2>&1 || \
+      echo "[KEEPALIVE] OSRM ping failed (may be spinning up)"
+  fi
+done &
+KEEPALIVE_PID=$!
 
 # ---------------------------------------------------------------------------
 # Wait for any process to exit

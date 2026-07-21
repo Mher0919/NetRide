@@ -181,6 +181,12 @@ class RideProvider with ChangeNotifier {
     DateTime? scheduledAt,
     bool favoritePriority = false
   }) {
+    debugPrint('[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}');
+    if (_socket == null) {
+      debugPrint('[RIDE] ❌ Socket is NULL — request will be silently dropped!');
+    } else if (!_socket!.connected) {
+      debugPrint('[RIDE] ⚠️ Socket exists but NOT connected — attempting emit anyway');
+    }
     _socket?.emit('requestRide', {
       'pickup': pickup.toJson(),
       'destination': destination.toJson(),

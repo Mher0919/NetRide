@@ -59,18 +59,29 @@ void main() async {
   final supabase = Supabase.instance.client;
   if (token != null && AuthService.isJwtExpired(token)) {
     debugPrint('[MAIN] ⚠️ Stored backend JWT token has expired.');
-    if (supabase.auth.currentSession != null) {
-      debugPrint('[MAIN] 🔄 Active Supabase session found. Attempting backend sync...');
-      final success = await AuthService.syncWithBackend();
-      if (success) {
-        token = prefs.getString('jwt_token');
+    // On hot restart, Supabase in-memory session state may have been wiped
+    // but the persisted refresh token survives. Try refreshSession() which
+    // reads from local persistence and refreshes the tokens.
+    debugPrint('[MAIN] 🔄 Attempting Supabase session refresh from disk...');
+    try {
+      final refreshRes = await supabase.auth.refreshSession();
+      if (refreshRes.session != null) {
+        debugPrint('[MAIN] ✅ Session refreshed. Syncing with backend...');
+        final success = await AuthService.syncWithBackend();
+        if (success) {
+          token = prefs.getString('jwt_token');
+        } else {
+          debugPrint('[MAIN] ❌ Sync failed after refresh. Clearing...');
+          await AuthService.logout();
+          token = null;
+        }
       } else {
-        debugPrint('[MAIN] ❌ Sync failed. Clearing expired session...');
+        debugPrint('[MAIN] ❌ No refreshable session. Clearing expired token...');
         await AuthService.logout();
         token = null;
       }
-    } else {
-      debugPrint('[MAIN] ❌ No active session. Clearing expired token...');
+    } catch (e) {
+      debugPrint('[MAIN] ❌ Session refresh failed: $e. Clearing...');
       await AuthService.logout();
       token = null;
     }
@@ -92,8 +103,10 @@ void main() async {
         kInitialTargetRoute = '/onboarding';
       }
     } catch (_) {
-      // If the backend cannot be reached, DO NOT bypass onboarding.
-      kInitialTargetRoute = '/onboarding';
+      // Backend unreachable — but we have a valid JWT. The user already
+      // completed onboarding previously; don't force them through it again.
+      debugPrint('[MAIN] ⚠️ Backend unreachable. Trusting existing session.');
+      kInitialTargetRoute = '/';
     }
   } else {
     kInitialTargetRoute = '/login';

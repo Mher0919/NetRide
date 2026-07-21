@@ -51,8 +51,10 @@ export class LocationsService {
     // 1. Update Geospatial position
     pipeline.geoadd(DRIVER_LOCATIONS_KEY, loc.lng, loc.lat, driverId);
     
-    // 2. Set heartbeat with TTL (15 seconds) - if this expires, driver is "ghost"
-    pipeline.set(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`, '1', 'EX', 15);
+    // 2. Set heartbeat with TTL (90 seconds). This is long enough to
+    // survive brief socket disconnects (free-tier spin-down, network
+    // blip) without making truly offline drivers invisible to matching.
+    pipeline.set(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`, '1', 'EX', 90);
     
     await pipeline.exec();
 
@@ -158,10 +160,9 @@ export class LocationsService {
       });
 
       if (staleIds.length > 0) {
-        await redis.pipeline()
-          .zrem(DRIVER_LOCATIONS_KEY, ...staleIds)
-          .del(...staleIds.map((id: string) => `${DRIVER_HEARTBEAT_PREFIX}${id}`))
-          .exec();
+        console.log(`[GEO] Skipping ${staleIds.length} stale driver(s) (heartbeat expired): ${staleIds.join(', ')}`);
+        // Don't remove from Redis here — the driver may reconnect soon.
+        // Stale locations will be cleaned up by the cron worker instead.
       }
 
       return nearbyDrivers;
