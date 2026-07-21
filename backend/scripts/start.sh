@@ -54,9 +54,9 @@ trap shutdown SIGTERM SIGINT
 # spin-down. Without this the service goes to sleep after ~60 s idle,
 # killing all active socket connections.
 # ---------------------------------------------------------------------------
-echo "==> Starting backend self-keep-alive (every 2 min)..."
+echo "==> Starting backend self-keep-alive (every 60s)..."
 while true; do
-  sleep 120
+  sleep 60
   curl -sf "http://localhost:${NODE_PORT}/health/live" > /dev/null 2>&1 || \
     echo "[KEEPALIVE] Self-ping failed"
   if [ -n "${OSRM_BASE_URL:-}" ]; then
