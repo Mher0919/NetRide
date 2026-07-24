@@ -1,0 +1,145 @@
+workflows:
+  flutter-apps:
+    name: Build Flutter Apps
+    max_build_duration: 60
+    environment:
+      flutter-version: "3.11.5"
+      xcode: "15.0"
+      node-version: "20"
+      cocoapods: "1.15.2"
+    environment_vars:
+      - name: MATCH_PASSWORD
+        value: ""
+        type: SECURE
+      - name: CODE_SIGNING_identity
+        value: ""
+    triggering:
+      branch_patterns:
+        - pattern: main
+          include: true
+        - pattern: develop
+          include: true
+      cancel_delayed_workflow_on_push: true
+    scripts:
+      - name: Set up code signing
+        script: |
+          keychain initialize
+      - name: Build rider app
+        script: |
+          cd apps/rider_flutter
+          flutter pub get
+          if [ "$PLATFORM" = "ios" ]; then
+            flutter build ios --release --no-codesign
+          else
+            flutter build apk --release
+          fi
+        test: false
+      - name: Build driver app
+        script: |
+          cd apps/driver_flutter
+          flutter pub get
+          if [ "$PLATFORM" = "ios" ]; then
+            flutter build ios --release --no-codesign
+          else
+            flutter build apk --release
+          fi
+        test: false
+    artifacts:
+      - apps/rider_flutter/build/**/outputs/**/*.apk
+      - apps/driver_flutter/build/**/outputs/**/*.apk
+      - apps/rider_flutter/build/ios/iphonesimulator/Runner.app
+      - apps/driver_flutter/build/ios/iphonesimulator/Runner.app
+      - apps/rider_flutter/build/ios/iphoneos/Runner.ipa
+      - apps/driver_flutter/build/ios/iphoneos/Runner.ipa
+
+  build-ios-rider:
+    name: Build iOS Rider
+    max_build_duration: 60
+    environment:
+      flutter-version: "3.11.5"
+      xcode: "15.0"
+      node-version: "20"
+      cocoapods: "1.15.2"
+    triggering:
+      branch_patterns:
+        - pattern: main
+          include: true
+        - pattern: develop
+          include: true
+    scripts:
+      - name: Set up code signing
+        script: keychain initialize
+      - name: Build rider iOS
+        script: |
+          cd apps/rider_flutter
+          flutter pub get
+          flutter build ios --release --no-codesign
+    artifacts:
+      - apps/rider_flutter/build/ios/**/*.app
+      - apps/rider_flutter/build/ios/**/*.ipa
+
+  build-ios-driver:
+    name: Build iOS Driver
+    max_build_duration: 60
+    environment:
+      flutter-version: "3.11.5"
+      xcode: "15.0"
+      node-version: "20"
+      cocoapods: "1.15.2"
+    triggering:
+      branch_patterns:
+        - pattern: main
+          include: true
+        - pattern: develop
+          include: true
+    scripts:
+      - name: Set up code signing
+        script: keychain initialize
+      - name: Build driver iOS
+        script: |
+          cd apps/driver_flutter
+          flutter pub get
+          flutter build ios --release --no-codesign
+    artifacts:
+      - apps/driver_flutter/build/ios/**/*.app
+      - apps/driver_flutter/build/ios/**/*.ipa
+
+  build-android-rider:
+    name: Build Android Rider
+    max_build_duration: 60
+    environment:
+      flutter-version: "3.11.5"
+    triggering:
+      branch_patterns:
+        - pattern: main
+          include: true
+        - pattern: develop
+          include: true
+    scripts:
+      - name: Build rider Android
+        script: |
+          cd apps/rider_flutter
+          flutter pub get
+          flutter build apk --release
+    artifacts:
+      - apps/rider_flutter/build/app/outputs/flutter-apk/*.apk
+
+  build-android-driver:
+    name: Build Android Driver
+    max_build_duration: 60
+    environment:
+      flutter-version: "3.11.5"
+    triggering:
+      branch_patterns:
+        - pattern: main
+          include: true
+        - pattern: develop
+          include: true
+    scripts:
+      - name: Build driver Android
+        script: |
+          cd apps/driver_flutter
+          flutter pub get
+          flutter build apk --release
+    artifacts:
+      - apps/driver_flutter/build/app/outputs/flutter-apk/*.apk
