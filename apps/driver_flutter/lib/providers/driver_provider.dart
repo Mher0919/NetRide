@@ -945,7 +945,19 @@ class DriverProvider with ChangeNotifier {
   }
 
   void acceptTrip(String tripId) {
+    // Optimistically set _currentTrip from the incoming request so the
+    // trip screen doesn't race with the async tripUpdate socket event.
+    if (_incomingRequest != null && _incomingRequest!.id == tripId) {
+      _currentTrip = _incomingRequest;
+      _incomingRequest = null;
+      _status = models.DriverStatus.onTrip;
+      notifyListeners();
+    }
     _socket?.emit('acceptTrip', tripId);
+  }
+
+  void cancelTrip(String tripId) {
+    _socket?.emit('cancelTrip', tripId);
   }
 
   void declineTrip(String tripId) {

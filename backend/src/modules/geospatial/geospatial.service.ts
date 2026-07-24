@@ -3,6 +3,11 @@ import { redis } from '../../config/redis';
 import { env } from '../../config/env';
 import { RoutingService, RoutingResult } from '../routing/routing.service';
 import { logger } from '../../observability/logger';
+import {
+  geoapifyBreaker,
+  nominatimBreaker,
+  overpassBreaker,
+} from '../../utils/circuit-breaker';
 
 interface InspectionStation {
   display_name: string;
@@ -102,16 +107,18 @@ export class GeospatialService {
     }
 
     try {
-      const resp = await axios.get('https://nominatim.openstreetmap.org/search', {
-        params: {
-          q: zip,
-          format: 'json',
-          countrycodes: 'us',
-          limit: 1,
-        },
-        headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
-        timeout: 5000,
-      });
+      const resp = await nominatimBreaker.execute(() =>
+        axios.get('https://nominatim.openstreetmap.org/search', {
+          params: {
+            q: zip,
+            format: 'json',
+            countrycodes: 'us',
+            limit: 1,
+          },
+          headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
+          timeout: 5000,
+        })
+      );
 
       const data = resp.data;
       if (!Array.isArray(data) || data.length === 0) return null;
@@ -185,25 +192,29 @@ export class GeospatialService {
         try {
           const formParams = new URLSearchParams();
           formParams.append('data', overpassQuery);
-          const resp = await axios.post(
-            'https://overpass-api.de/api/interpreter',
-            formParams,
-            {
-              headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
-              timeout: 25000,
-            },
+          const resp = await overpassBreaker.execute(() =>
+            axios.post(
+              'https://overpass-api.de/api/interpreter',
+              formParams,
+              {
+                headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
+                timeout: 25000,
+              },
+            )
           );
           return resp.data?.elements ?? [];
         } catch (postErr: any) {
           console.warn(`[GEOSPATIAL] Overpass POST failed (${postErr.message}), trying GET...`);
           // Fallback to GET
-          const resp = await axios.get(
-            'https://overpass-api.de/api/interpreter',
-            {
-              params: { data: overpassQuery },
-              headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
-              timeout: 25000,
-            },
+          const resp = await overpassBreaker.execute(() =>
+            axios.get(
+              'https://overpass-api.de/api/interpreter',
+              {
+                params: { data: overpassQuery },
+                headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
+                timeout: 25000,
+              },
+            )
           );
           return resp.data?.elements ?? [];
         }
@@ -371,10 +382,12 @@ export class GeospatialService {
             params.text = q;
           }
 
-          const resp = await axios.get(`${this.GEOAPIFY_BASE}/v2/places`, {
-            params,
-            timeout: 8000,
-          });
+          const resp = await geoapifyBreaker.execute(() =>
+            axios.get(`${this.GEOAPIFY_BASE}/v2/places`, {
+              params,
+              timeout: 8000,
+            })
+          );
 
           const features: any[] = resp.data?.features ?? [];
           if (features.length === 0) continue;
@@ -455,10 +468,12 @@ export class GeospatialService {
           params.filter = `countrycode:us`;
         }
 
-        const resp = await axios.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, {
-          params,
-          timeout: 5000,
-        });
+        const resp = await geoapifyBreaker.execute(() =>
+            axios.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, {
+              params,
+              timeout: 5000,
+            })
+          );
 
         const features: any[] = resp.data?.features ?? [];
         if (features.length > 0) {

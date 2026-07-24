@@ -33,6 +33,8 @@ import geospatialRoutes from './modules/geospatial/geospatial.routes';
 import navigationRoutes from './modules/navigation/navigation.routes';
 import routingRoutes from './modules/routing/routing.routes';
 import adminRoutes from './modules/admin/admin.routes';
+import routingApi from './routing/api/routing-api';
+import pushRoutes from './modules/push/push.routes';
 import { GeospatialService } from './modules/geospatial/geospatial.service';
 import { UploadService } from './services/upload.service';
 import { SpeedingDetector } from './services/speeding_detector';
@@ -162,8 +164,10 @@ app.use('/api/ride', rideRoutes);
 app.use('/api/geospatial', geospatialRoutes);
 app.use('/api/navigation', navigationRoutes);
 app.use('/api/routing', routingRoutes);
+app.use('/api/routing', routingApi);
 app.use('/api/admin', adminRoutes);
 app.use('/api/files', fileRoutes);
+app.use('/api/push', pushRoutes);
 app.post('/api/upload', UploadService.upload);
 
 // Global Error Handler
@@ -512,11 +516,52 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
 
   logger.info({ set: !!env.JWT_SECRET, length: env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
 
+  // Initialize A* routing engine (self-hosted, in-memory).
+  // Loads preprocessed graph from disk if ROUTING_GRAPH_PATH is set.
+  try {
+    const { astarEngine } = await import('./routing/engine/astar-engine');
+    if (env.ROUTING_GRAPH_PATH) {
+      await astarEngine.loadGraph(env.ROUTING_GRAPH_PATH);
+      logger.info({ path: env.ROUTING_GRAPH_PATH }, 'astar_engine_initialized');
+    } else {
+      logger.warn('routing_graph_path_not_set_engine_not_loaded');
+    }
+  } catch (astarErr: any) {
+    logger.warn({ err: astarErr.message }, 'astar_engine_init_failed_falling_back');
+  }
+
   logger.info({
-    osrm: env.OSRM_BASE_URL || '(not set)',
-    ors: env.ORS_API_KEY ? '(configured)' : '(not set)',
-    mapbox: env.MAPBOX_ACCESS_TOKEN ? '(configured)' : '(not set)',
+    astar: 'PRIMARY',
+    osrm: env.OSRM_BASE_URL ? '(fallback)' : '(not set)',
+    ors: env.ORS_API_KEY ? '(last resort)' : '(not set)',
   }, 'routing_engines');
+
+  // -----------------------------------------------------------------
+  // Self-keep-alive: ping our own /health/live every 60s so Render
+  // free-tier doesn't spin the service down. Uses Node's http module
+  // because curl isn't available in the Docker image.
+  // -----------------------------------------------------------------
+  const keepAliveUrl = `http://127.0.0.1:${PORT}/health/live`;
+  setInterval(() => {
+    const http = require('http');
+    http.get(keepAliveUrl, (res: any) => {
+      // consume data to free memory
+      res.resume();
+    }).on('error', () => {
+      // silent — the endpoint may not be ready yet during cold start
+    });
+  }, 60_000);
+
+  // Ping OSRM every 60s to prevent its free-tier service from spinning down.
+  if (env.OSRM_BASE_URL) {
+    const osrmUrl = `${env.OSRM_BASE_URL}/health`;
+    setInterval(() => {
+      const client = osrmUrl.startsWith('https') ? require('https') : require('http');
+      client.get(osrmUrl, (res: any) => {
+        res.resume();
+      }).on('error', () => {});
+    }, 60_000);
+  }
 
   // Pre-cache routes for the launch market (Hollywood / UCLA / Beverly Hills
   // / Westwood). preCacheHotZones computes the full grid — the routing

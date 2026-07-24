@@ -5,6 +5,7 @@ import { env } from '../../config/env';
 import { logger } from '../../observability/logger';
 import { RouteEngine, LocalRoute } from './route-engine';
 import { RoutingError, RoutingErrors } from './routing.errors';
+import { orsBreaker } from '../../utils/circuit-breaker';
 
 const ORS_BASE = 'https://api.openrouteservice.org/v2/directions';
 
@@ -102,20 +103,22 @@ export const ORSEngine: RouteEngine = {
     const url = `${ORS_BASE}/driving-car/geojson`;
 
     try {
-      const response = await axiosClient.post(url, {
-        coordinates,
-        instructions: true,
-        geometry: true,
-        geometry_simplify: false,
-        elevation: false,
-        extra_info: ['speedlimit'],
-      }, {
-        headers: {
-          Authorization: env.ORS_API_KEY,
-          'Content-Type': 'application/json',
-          Accept: 'application/json, application/geo+json',
-        },
-      });
+      const response = await orsBreaker.execute(() =>
+        axiosClient.post(url, {
+          coordinates,
+          instructions: true,
+          geometry: true,
+          geometry_simplify: false,
+          elevation: false,
+          extra_info: ['speedlimit'],
+        }, {
+          headers: {
+            Authorization: env.ORS_API_KEY,
+            'Content-Type': 'application/json',
+            Accept: 'application/json, application/geo+json',
+          },
+        })
+      );
 
       if (response.status !== 200 || !response.data?.features?.length) {
         logger.warn({ status: response.status }, 'routing_ors_empty');

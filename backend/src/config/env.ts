@@ -11,33 +11,31 @@ const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   JWT_SECRET: z.string(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
-  // ---- Routing engine: OpenRouteService (ORS) -------------------------------
-  // Used for all routing (replaces self-hosted OSRM).
-  // Get API key from https://openrouteservice.org/
-  ORS_API_KEY: z.string().optional(),
-  ORS_PROFILE: z.string().default('driving-car'),
-  ORS_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
-  // ---- Local OSRM (self-hosted, separate Render service) -------------------
+  // ---- Routing engine: A* (PRIMARY) ----------------------------------------
+  // Self-hosted A* routing engine. Loads preprocessed graph from disk.
+  // Fast, free, and runs entirely in-memory. No external API calls.
+  ROUTING_GRAPH_PATH: z.string().optional(),
+  // ---- Fallback routing engine: OSRM (self-hosted) -------------------------
   // Base URL of the self-hosted OSRM service (e.g. http://netride-osrm.internal:5000).
-  // Used as the PRIMARY routing engine and by road-snapper for nearest-node snapping.
-  // Falls back to public OSRM if not set.
+  // Used as fallback when A* engine is unavailable or graph not loaded.
   OSRM_BASE_URL: z.string().optional(),
   // Per-request timeout to the local OSRM engine (ms).
   OSRM_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).optional(),
   // Path on disk to the pre-processed OSRM road network (.osrm family).
-  // Used by the startup script (start.sh / entrypoint) to find and launch
-  // osrm-routed. Not read directly by backend code.
   OSRM_DATA_PATH: z.string().default('./data/la.osrm'),
-  // ---- Fallback routing engine (Mapbox Directions API) --------------------
-  // Used as fallback when ORS is unavailable.
-  // The access token is never shipped to the Flutter app.
-  MAPBOX_ACCESS_TOKEN: z.string().optional(),
-  MAPBOX_PROFILE: z.string().default('driving'),
-  MAPBOX_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
+  // ---- Fallback routing engine: OpenRouteService (ORS) --------------------
+  // Get API key from https://openrouteservice.org/
+  ORS_API_KEY: z.string().optional(),
+  ORS_PROFILE: z.string().default('driving-car'),
+  ORS_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
   DRIVER_MATCH_RADIUS_KM: z.union([z.string(), z.number()]).transform(Number).default(5),
   DRIVER_ACCEPT_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(15000),
   DRIVER_PICKUP_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(15),
   DRIVER_DESTINATION_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(30),
+  // Grace period: after this many seconds at pickup/dropoff, allow completion even if slightly outside strict proximity
+  DRIVER_PROXIMITY_GRACE_S: z.union([z.string(), z.number()]).transform(Number).default(30),
+  // Wait timer: max seconds to wait for rider at pickup before driver can force-start
+  DRIVER_WAIT_TIMER_S: z.union([z.string(), z.number()]).transform(Number).default(120),
 
   // ---- Face verification --------------------------------------------------
   GMAIL_CLIENT_ID: z.string().optional(),
@@ -97,6 +95,13 @@ const envSchema = z.object({
   DIRECT_DATABASE_URL: z.string().optional(),
   GEOAPIFY_API_KEY: z.string().optional(),
   DATABASE_REPLICA_URL: z.string().optional(),
+
+  // ---- Push notifications (FCM) -------------------------------------------
+  // Path to Firebase service account JSON. If not set, push notifications
+  // are logged but not actually sent (useful for development/testing).
+  FCM_SERVICE_ACCOUNT_PATH: z.string().optional(),
+  // Alternatively, paste the JSON directly (base64-encoded for safety).
+  FCM_SERVICE_ACCOUNT_B64: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

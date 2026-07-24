@@ -2,18 +2,15 @@ import 'dart:async';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:latlong2/latlong.dart';
+import 'api_service.dart';
 
 class RoutingService {
-  final Dio _dio = Dio();
-
-  // API Gateway URL
-  final String _baseUrl = 'https://netride.onrender.com';
+  final Dio _dio = ApiService.dio;
 
   Future<Map<String, dynamic>> getRoute(LatLng start, LatLng end) async {
     try {
-      // Call Backend API Gateway (which handles Cache, OSRM, and ML ETA)
       final response = await _dio.post(
-        '$_baseUrl/api/geospatial/route',
+        '/geospatial/route',
         data: {
           'start': [start.latitude, start.longitude],
           'end': [end.latitude, end.longitude],
@@ -63,7 +60,7 @@ class RoutingService {
   }) async {
     try {
       final response = await _dio.post(
-        '$_baseUrl/api/navigation/reroute',
+        '/navigation/reroute',
         data: {
           'tripId': tripId,
           'leg': leg,
@@ -97,7 +94,7 @@ class RoutingService {
   }) async {
     try {
       final response = await _dio.get(
-        '$_baseUrl/api/navigation/cached',
+        '/navigation/cached',
         queryParameters: {'tripId': tripId, 'leg': leg},
         options: Options(
           sendTimeout: const Duration(seconds: 5),

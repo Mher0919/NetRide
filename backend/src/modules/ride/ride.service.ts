@@ -16,6 +16,7 @@ import { DriverService } from '../driver/driver.service';
 import { areBothTestUsers } from '../../utils/testUser';
 import { matchQueue } from '../../queue/queue';
 import { matchJobsTotal, dispatchAcceptOutcomeTotal } from '../../observability/metrics';
+import { traceAsync, getCurrentTraceId } from '../../utils/tracing';
 
 export class RideService {
   static async rateRide(data: {
@@ -111,105 +112,124 @@ export class RideService {
   }
 
   static async requestRide(
-    riderId: string, 
-    pickup: Location & { address: string }, 
+    riderId: string,
+    pickup: Location & { address: string },
     destination: Location & { address: string },
     requestedClass: VehicleClass = VehicleClass.CORE,
     scheduledAt?: Date,
-    isScheduled: boolean = false
+    isScheduled: boolean = false,
+    idempotencyKey?: string
   ): Promise<Trip> {
-    console.log(`[RIDE] New request from rider ${riderId} for class ${requestedClass}${isScheduled ? ' [SCHEDULED]' : ''}. Pickup: ${pickup.lat}, ${pickup.lng}`);
-    
-    // Snapshot rider rating
-    const riderRes = await pool.query('SELECT rating FROM users WHERE id = $1', [riderId]);
-    const snapshotRating = riderRes.rows[0]?.rating || 5.0;
+    return traceAsync('RideService.requestRide', async () => {
+      const traceId = getCurrentTraceId();
+      console.log(`[RIDE] New request from rider ${riderId} for class ${requestedClass}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
 
-    // Get Route — use cached result from the Flutter app's /api/routing/plan
-    // call (same coordinates, same cache key). Fall back to direct call.
-    const routeStart = Date.now();
-    const route = await GeospatialService.getRoute(
-      [pickup.lat, pickup.lng],
-      [destination.lat, destination.lng]
-    ).catch(() => null);
-    console.log(`[RIDE] Route fetched in ${Date.now() - routeStart}ms (cached=${route != null})`);
+      // Idempotency: if key provided, check for existing ride
+      if (idempotencyKey) {
+        const existing = await pool.query(
+          `SELECT * FROM rides WHERE idempotency_key = $1 AND rider_id = $2`,
+          [idempotencyKey, riderId]
+        );
+        if (existing.rows.length > 0) {
+          console.log(`[RIDE] ♻️ Idempotent request - returning existing trip ${existing.rows[0].id}`);
+          const existingTrip = await RideRepository.findById(existing.rows[0].id);
+          if (!existingTrip) throw new Error('Idempotent ride not found');
+          return existingTrip;
+        }
+      }
 
-    const distanceKm = route ? (route.distance / 1000) : 10.0;
-    const etaSeconds = route ? route.eta : 600;
+      // Snapshot rider rating
+      const riderRes = await pool.query('SELECT rating FROM users WHERE id = $1', [riderId]);
+      const snapshotRating = riderRes.rows[0]?.rating || 5.0;
 
-    // Calculate maximum fare and saving likelihood
-    const fareStart = Date.now();
-    const estimate = await fareService.calculateRiderPriceEstimate(
-      pickup.lat,
-      pickup.lng,
-      requestedClass,
-      distanceKm
-    );
-    console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms`);
+      // Get Route
+      const routeStart = Date.now();
+      const route = await GeospatialService.getRoute(
+        [pickup.lat, pickup.lng],
+        [destination.lat, destination.lng]
+      ).catch(() => null);
+      console.log(`[RIDE] Route fetched in ${Date.now() - routeStart}ms (cached=${route != null})`);
 
-    // Use a transactional insert for safety
-    const res = await pool.query(
-      `INSERT INTO rides (
-        rider_id, status, pickup_lat, pickup_lng, pickup_address,
-        destination_lat, destination_lng, destination_address,
-        requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
-        distance_meters, duration_seconds, initial_max_fare, saving_likelihood
-      )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-       RETURNING *`,
-      [
-        riderId,
-        TripStatus.REQUESTED,
+      const distanceKm = route ? (route.distance / 1000) : 10.0;
+      const etaSeconds = route ? route.eta : 600;
+
+      // Calculate maximum fare and saving likelihood
+      const fareStart = Date.now();
+      const estimate = await fareService.calculateRiderPriceEstimate(
         pickup.lat,
         pickup.lng,
-        pickup.address,
-        destination.lat,
-        destination.lng,
-        destination.address,
-        requestedClass || 'CORE',
-        snapshotRating,
-        scheduledAt || null,
-        isScheduled,
-        route ? Math.round(route.distance) : null,
-        etaSeconds,
-        estimate.maxFare,
-        estimate.savingLikelihood
-      ]
-    );
+        requestedClass,
+        distanceKm
+      );
+      console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms`);
 
-    const trip = await RideRepository.findById(res.rows[0].id);
-    if (!trip) throw new Error('Failed to create trip record');
-
-    if (route) {
-      (trip as any).route_geometry = route.geometry;
-    }
-
-    // Trigger Matching ONLY if it's NOT a future scheduled ride 
-    // or if scheduledAt is within the next 15 minutes.
-    const isNow = !isScheduled || (scheduledAt && (scheduledAt.getTime() - Date.now() < 15 * 60 * 1000));
-
-    if (isNow) {
-      if (env.LEGACY_SYNC_MATCHING) {
-        import('../../services/matching.service').then(({ matchingService }) => {
-          matchingService.findAndDispatch(io, trip.id, pickup.lat, pickup.lng, requestedClass, riderId);
-        });
-      } else {
-        matchQueue.add('matchRide', {
-          tripId: trip.id,
-          pickupLat: pickup.lat,
-          pickupLng: pickup.lng,
-          requestedClass,
+      // Use a transactional insert for safety
+      const res = await pool.query(
+        `INSERT INTO rides (
+          rider_id, status, pickup_lat, pickup_lng, pickup_address,
+          destination_lat, destination_lng, destination_address,
+          requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
+          distance_meters, duration_seconds, initial_max_fare, saving_likelihood,
+          idempotency_key
+        )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         RETURNING *`,
+        [
           riderId,
-        }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
-        matchJobsTotal.inc({ outcome: 'enqueued' });
+          TripStatus.REQUESTED,
+          pickup.lat,
+          pickup.lng,
+          pickup.address,
+          destination.lat,
+          destination.lng,
+          destination.address,
+          requestedClass || 'CORE',
+          snapshotRating,
+          scheduledAt || null,
+          isScheduled,
+          route ? Math.round(route.distance) : null,
+          etaSeconds,
+          estimate.maxFare,
+          estimate.savingLikelihood,
+          idempotencyKey || null
+        ]
+      );
+
+      const trip = await RideRepository.findById(res.rows[0].id);
+      if (!trip) throw new Error('Failed to create trip record');
+
+      if (route) {
+        (trip as any).route_geometry = route.geometry;
       }
-    }
 
-    // Update Redis Demand
-    redis.incr(`demand:count:${requestedClass}`).then(() => {
-      redis.expire(`demand:count:${requestedClass}`, 600);
+      // Trigger Matching ONLY if it's NOT a future scheduled ride
+      // or if scheduledAt is within the next 15 minutes.
+      const isNow = !isScheduled || (scheduledAt && (scheduledAt.getTime() - Date.now() < 15 * 60 * 1000));
+
+      if (isNow) {
+        if (env.LEGACY_SYNC_MATCHING) {
+          import('../../services/matching.service').then(({ matchingService }) => {
+            matchingService.findAndDispatch(io, trip.id, pickup.lat, pickup.lng, requestedClass, riderId);
+          });
+        } else {
+          matchQueue.add('matchRide', {
+            tripId: trip.id,
+            pickupLat: pickup.lat,
+            pickupLng: pickup.lng,
+            requestedClass,
+            riderId,
+          }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
+          matchJobsTotal.inc({ outcome: 'enqueued' });
+        }
+      }
+
+      // Update Redis Demand
+      redis.incr(`demand:count:${requestedClass}`).then(() => {
+        redis.expire(`demand:count:${requestedClass}`, 600);
+      });
+
+      return trip;
     });
-
-    return trip;
   }
 
   static async acceptTrip(tripId: string, driverId: string): Promise<Trip> {
@@ -296,6 +316,7 @@ export class RideService {
       await redis.del(`match:queue:dispatched:${tripId}`);
     }
     await redis.del(`dispatch:lock:${tripId}`);
+    await redis.del(`dispatch:${tripId}`);
 
     const driverLoc = await LocationsService.getDriverLocation(driverId);
     (updatedTrip as any).driver_location = driverLoc;
@@ -463,6 +484,11 @@ export class RideService {
     // Security: Only the rider or the assigned driver can cancel
     if (trip.rider_id !== userId && trip.driver_id !== userId) {
       throw new Error('Unauthorized to cancel this trip');
+    }
+
+    // Only allow cancellation before pickup (REQUESTED or ACCEPTED)
+    if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
+      throw new Error('Cannot cancel a ride that is already in progress or completed');
     }
 
     const extra: any = { cancelled_at: new Date() };

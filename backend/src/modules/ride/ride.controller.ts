@@ -9,6 +9,7 @@ import { fareService } from '../../services/fare.service';
 import { GeospatialService } from '../geospatial/geospatial.service';
 import { RideMessagesRepository } from './ride_messages.repository';
 import { TwilioService } from '../../services/twilio.service';
+import { pushIncomingCall } from '../../services/push-notification.service';
 import { pool } from '../../config/database';
 
 const RequestRideSchema = z.object({
@@ -288,6 +289,19 @@ export class RideController {
         ...callToken,
         tripId,
       });
+
+      // Notify the other party via push (non-blocking)
+      const counterpartId = party.trip.rider_id === userId
+        ? party.trip.driver_id
+        : party.trip.rider_id;
+      const counterpartRole = party.trip.rider_id === userId ? 'driver' : 'rider';
+      try {
+        const senderRes = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+        const senderName = senderRes.rows[0]?.full_name || 'Someone';
+        await pushIncomingCall(counterpartId, counterpartRole as 'rider' | 'driver', senderName, tripId);
+      } catch (pushErr: any) {
+        console.error(`[RIDE] ⚠️ Incoming call push failed (non-fatal): ${pushErr.message}`);
+      }
     } catch (error: any) {
       console.error(`[RIDE] ❌ Mint call token error: ${error.message}`);
       res.status(500).json({ error: 'Unable to start a call right now.' });

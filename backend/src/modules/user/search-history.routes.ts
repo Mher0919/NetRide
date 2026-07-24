@@ -10,6 +10,8 @@ const HISTORY_TTL = 60 * 60 * 24 * 90; // 90 days
 
 interface SearchHistoryEntry {
   displayName: string;
+  address?: string;
+  distance?: string;
   lat: number;
   lon: number;
   state: string;
@@ -48,7 +50,7 @@ router.get('/search-history', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/user/search-history
- * Body: { displayName, lat, lon, state, type }
+ * Body: { displayName, lat, lon, state, type, address?, distance? }
  * Saves a search to the user's history (max 5, deduped by coordinates).
  */
 router.post('/search-history', authMiddleware, async (req, res) => {
@@ -58,13 +60,15 @@ router.post('/search-history', authMiddleware, async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { displayName, lat, lon, state, type } = req.body;
+    const { displayName, lat, lon, state, type, address, distance } = req.body;
     if (!displayName || lat == null || lon == null) {
       return res.status(400).json({ error: 'displayName, lat, lon are required' });
     }
 
     const entry: SearchHistoryEntry = {
       displayName: String(displayName).slice(0, 200),
+      address: address ? String(address).slice(0, 300) : undefined,
+      distance: distance ? String(distance).slice(0, 50) : undefined,
       lat: Number(lat),
       lon: Number(lon),
       state: String(state || 'CA'),

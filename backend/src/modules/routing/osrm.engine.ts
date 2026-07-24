@@ -6,6 +6,7 @@ import { env } from '../../config/env';
 import { logger } from '../../observability/logger';
 import { RouteEngine, LocalRoute } from './route-engine';
 import { RoutingError, RoutingErrors } from './routing.errors';
+import { osrmBreaker } from '../../utils/circuit-breaker';
 
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
@@ -63,14 +64,16 @@ export const OSEngine: RouteEngine = {
     });
 
     try {
-      const response = await client.get(url, {
-        params: {
-          overview: 'full',
-          geometries: 'polyline6',
-          steps: 'true',
-          annotations: 'true',
-        },
-      });
+      const response = await osrmBreaker.execute(() =>
+        client.get(url, {
+          params: {
+            overview: 'full',
+            geometries: 'polyline6',
+            steps: 'true',
+            annotations: 'true',
+          },
+        })
+      );
 
       if (response.status !== 200 || !response.data?.routes?.length) {
         logger.warn({ status: response.status }, 'osrm_engine_empty');

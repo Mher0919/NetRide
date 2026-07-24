@@ -37,6 +37,7 @@ interface DependencyStatus {
   up: boolean;
   latencyMs?: number;
   error?: string;
+  detail?: string;
 }
 
 async function probeRedis(): Promise<DependencyStatus> {
@@ -85,20 +86,22 @@ async function probeORS(): Promise<DependencyStatus> {
   }
 }
 
-async function probeMapbox(): Promise<DependencyStatus> {
-  if (!env.MAPBOX_ACCESS_TOKEN) {
-    return { name: 'routing-fallback', up: true };
-  }
+async function probeAStarEngine(): Promise<DependencyStatus> {
   const start = Date.now();
   try {
-    const url = `https://api.mapbox.com/directions/v5/mapbox/${env.MAPBOX_PROFILE}/-118.4455,34.0639;-118.4400,34.0700`;
-    await axios.get(url, {
-      params: { access_token: env.MAPBOX_ACCESS_TOKEN, overview: 'simplified', steps: false },
-      timeout: 5000,
-    });
-    return { name: 'routing-fallback', up: true, latencyMs: Date.now() - start };
+    const { astarEngine } = await import('../routing/engine/astar-engine');
+    if (!astarEngine.isReady()) {
+      return { name: 'astar-engine', up: true, latencyMs: Date.now() - start, detail: 'not-loaded' };
+    }
+    const stats = astarEngine.stats();
+    return {
+      name: 'astar-engine',
+      up: true,
+      latencyMs: Date.now() - start,
+      detail: `${stats.nodes} nodes, ${stats.edges} edges`,
+    };
   } catch (err: any) {
-    return { name: 'routing-fallback', up: false, error: err.message };
+    return { name: 'astar-engine', up: false, error: err.message };
   }
 }
 
@@ -140,7 +143,7 @@ router.get('/health/ready', async (_req: Request, res: Response) => {
     probePostgres(),
     probePostgresReplica(),
     probeORS(),
-    probeMapbox(),
+    probeAStarEngine(),
     probeQueue('match:ride', matchQueue),
     probeQueue('match:dispatch', dispatchQueue),
     probeQueue('score:driver:refresh', scoreQueue),

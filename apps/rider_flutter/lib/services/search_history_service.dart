@@ -25,11 +25,12 @@ class SearchHistoryService {
   Future<void> save(SearchResult result) async {
     try {
       await ApiService.dio.post('user/search-history', data: {
-        'displayName': result.displayName,
+        'display_name': result.displayName,
         'lat': result.lat,
         'lon': result.lon,
         'state': result.state,
         'type': result.type,
+        if (result.distanceMiles != null) 'distance_miles': result.distanceMiles,
       });
     } catch (_) {
       // Best-effort — never block the UI.

@@ -129,6 +129,12 @@ export const matchingService = {
         const parsed = JSON.parse(pending);
         if (parsed.index === index) {
             await redis.del(`dispatch:${tripId}`);
+            // Guard: only proceed if the trip is still REQUESTED (not already accepted)
+            const currentTrip = await RideRepository.findById(tripId);
+            if (!currentTrip || currentTrip.status !== TripStatus.REQUESTED) {
+              console.log(`[DISPATCH] Driver ${driverId} timed out for trip ${tripId}, but ride is already ${currentTrip?.status}. Skipping.`);
+              return;
+            }
             console.log(`[DISPATCH] Driver ${driverId} timed out for trip ${tripId}. Moving to next.`);
             await this.dispatchToNextDriver(io, tripId, drivers, index + 1);
         }

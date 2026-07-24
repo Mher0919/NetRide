@@ -546,7 +546,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       }
       
       if (_shouldFollowUser && _isMapReady) {
-        _mapController.move(LatLng(position.latitude, position.longitude), 15.0);
+        try {
+          _mapController.move(LatLng(position.latitude, position.longitude), 15.0);
+        } catch (_) {
+          // flutter_map internal state not ready yet — safe to ignore
+        }
       }
     });
 
@@ -615,8 +619,10 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                 padding: const EdgeInsets.only(top: 80, bottom: 380, left: 50, right: 50),
               ),
             );
-          } catch (e) {
-            _mapController.move(routePoints.first, 13.0);
+          } catch (_) {
+            try {
+              _mapController.move(routePoints.first, 13.0);
+            } catch (_) {}
           }
         }
       });
@@ -641,7 +647,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
     LatLng initialCenter = _lastPosition != null 
         ? LatLng(_lastPosition!.latitude, _lastPosition!.longitude)
-        : const LatLng(0, 0); 
+        : const LatLng(34.0522, -118.2437);
 
     final bool isOnline = driverProvider.status != models.DriverStatus.offline;
 
@@ -657,6 +663,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
               options: MapOptions(
                 initialCenter: initialCenter,
                 initialZoom: 15.0,
+                minZoom: 12,
+                maxZoom: 18,
                 onMapReady: () => setState(() => _isMapReady = true),
                 onPositionChanged: (pos, hasGesture) {
                   if (hasGesture) setState(() => _shouldFollowUser = false);
@@ -861,7 +869,9 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                   onPressed: () {
                     setState(() => _shouldFollowUser = true);
                     if (_lastPosition != null) {
-                      _mapController.move(LatLng(_lastPosition!.latitude, _lastPosition!.longitude), 15.0);
+                      try {
+                        _mapController.move(LatLng(_lastPosition!.latitude, _lastPosition!.longitude), 15.0);
+                      } catch (_) {}
                     }
                   },
                   child: const Icon(Icons.my_location),

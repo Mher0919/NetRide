@@ -175,6 +175,46 @@ class _TripScreenState extends State<TripScreen> {
           onCall: () => _startCall(context, trip),
         ),
         const DriverCallOverlayHost(),
+        // Cancel button — only visible before pickup (ACCEPTED status)
+        if (trip.status == models.TripStatus.ACCEPTED)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            right: 16,
+            child: SafeArea(
+              child: GestureDetector(
+                onTap: () => _showCancelDialog(context, driverProvider, trip),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFC65A5A),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.close, color: Colors.white, size: 16),
+                      SizedBox(width: 6),
+                      Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         if (!_isActionInRange(trip, driverProvider,
             isPickup: trip.status == models.TripStatus.ACCEPTED))
           Positioned(
@@ -202,6 +242,31 @@ class _TripScreenState extends State<TripScreen> {
             ),
           ),
       ],
+    );
+  }
+
+  void _showCancelDialog(BuildContext context, DriverProvider driverProvider, models.Trip trip) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Cancel Ride?', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: const Text('Are you sure you want to cancel? This may affect your rating.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('No, Keep'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              driverProvider.cancelTrip(trip.id);
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
+          ),
+        ],
+      ),
     );
   }
 

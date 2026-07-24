@@ -151,7 +151,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
                 target: gps != null
                     ? gmaps.LatLng(
                         gps.position.latitude, gps.position.longitude)
-                    : const gmaps.LatLng(34.0407, -118.2468),
+                    : const gmaps.LatLng(34.0522, -118.2437),
                 zoom: 17,
                 tilt: 60,
               ),
@@ -163,6 +163,13 @@ class _NavigationScreenState extends State<NavigationScreen> {
               markers: markers,
               onMapCreated: (c) {
                 _mapController = c;
+                // Animate to current GPS position once the map is ready.
+                if (gps != null) {
+                  c.animateCamera(gmaps.CameraUpdate.newLatLngZoom(
+                    gmaps.LatLng(gps.position.latitude, gps.position.longitude),
+                    17,
+                  ));
+                }
               },
             ),
           ),

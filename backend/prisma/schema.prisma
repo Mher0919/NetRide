@@ -96,6 +96,7 @@ model User {
   onboarding_step     Int?
   phone_verified      Boolean? @default(false)
   headshot_uploaded   Boolean? @default(false)
+  fcm_token           String?
 
   created_at DateTime? @default(now()) @db.Timestamptz(6)
   updated_at DateTime? @default(now()) @db.Timestamptz(6)
@@ -145,6 +146,7 @@ model Driver {
   price_last_changed DateTime? @db.Timestamptz(6)
   is_dangerous       Boolean?  @default(false)
   is_flagged         Boolean?  @default(false)
+  fcm_token          String?
 
   user         User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
   vehicles     DriverVehicle[]
@@ -255,6 +257,7 @@ model Ride {
   requested_class       VehicleClass? @default(CORE)
   snapshot_rider_rating Decimal?      @db.Decimal(3, 2)
   compliance_snapshot   Json?         @default("{}")
+  idempotency_key       String?       @unique
 
   pickup_lat          Float?
   pickup_lng          Float?

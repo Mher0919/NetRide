@@ -8,6 +8,7 @@ import { env } from '../../config/env';
 import { dispatchAcceptOutcomeTotal } from '../../observability/metrics';
 import { ScoredDriver } from '../../services/dispatch.service';
 import { TripStatus } from '../../types';
+import { matchQueue } from '../queue';
 
 interface DispatchOfferJobData {
   tripId: string;
@@ -98,20 +99,35 @@ export async function handleDispatchOffer(io: Server) {
           await redis.del(`dispatch:lock:${tripId}`);
           const t = await RideRepository.findById(tripId);
           if (t && t.status === 'REQUESTED') {
-            await RideRepository.updateStatus(tripId, TripStatus.CANCELLED);
-            io.to(`rider:${t.rider_id}`).emit('tripUpdate', {
-              ...t,
-              status: TripStatus.CANCELLED,
-              cancelReason: 'No driver accepted in time',
-            });
+            // Instead of cancelling immediately, re-enqueue a fresh match cycle
+            // so the system keeps searching for a driver. The match job has its
+            // own retry limit (MAX_MATCH_RETRIES) that will eventually cancel.
+            // Preserve retry count by reading from match queue metadata.
+            let nextRetryCount = 0;
+            try {
+              const matchMeta = await redis.get(`match:queue:dispatched:${tripId}`);
+              if (matchMeta) {
+                const parsed = JSON.parse(matchMeta);
+                nextRetryCount = (parsed as any).retryCount ?? 0;
+              }
+            } catch { /* ignore */ }
+            console.log(`[DISPATCH] ⏳ No driver accepted for trip ${tripId}, re-enqueueing match cycle (retry ${nextRetryCount + 1})`);
             offeredDrivers.forEach(did => {
               io.to(`driver:${did}`).emit('tripUpdate', {
                 ...t,
                 status: TripStatus.CANCELLED,
-                cancelReason: 'Another driver accepted',
+                cancelReason: 'Offer expired',
               });
             });
-            dispatchAcceptOutcomeTotal.inc({ outcome: 'timeout' });
+            await matchQueue.add('matchRide', {
+              tripId,
+              pickupLat: (t as any).pickup?.lat ?? 0,
+              pickupLng: (t as any).pickup?.lng ?? 0,
+              requestedClass: (t as any).requested_class ?? 'CORE',
+              riderId: t.rider_id,
+              retryCount: nextRetryCount + 1,
+            });
+            dispatchAcceptOutcomeTotal.inc({ outcome: 'timeout_retry' });
           }
         }
       }, env.DRIVER_ACCEPT_TIMEOUT_MS);

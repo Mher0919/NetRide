@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -28,22 +29,48 @@ class _TripScreenState extends State<TripScreen> {
   LatLng? _riderLocation;
   List<LatLng> _routePoints = [];
   StreamSubscription<Position>? _positionSubscription;
-  Timer? _refreshTimer;
+  LatLng? _lastDriverLocation;
   bool _isMapReady = false;
+  bool _dialogShown = false;
 
   @override
   void initState() {
     super.initState();
     _initLocationTracking();
     _fetchRoute();
-    _startPeriodicRefresh();
+    _listenToDriverLocation();
   }
 
-  void _startPeriodicRefresh() {
-    _refreshTimer?.cancel();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) _fetchRoute();
-    });
+  void _listenToDriverLocation() {
+    final rideProvider = Provider.of<RideProvider>(context, listen: false);
+    rideProvider.addListener(_onDriverLocationChanged);
+  }
+
+  void _onDriverLocationChanged() {
+    final rideProvider = Provider.of<RideProvider>(context, listen: false);
+    final driver = rideProvider.driver;
+    
+    if (driver == null || driver.location == null) return;
+    
+    final newLoc = LatLng(driver.location!.lat, driver.location!.lng);
+    
+    // Only refresh route if driver moved significantly (>50m)
+    if (_lastDriverLocation == null || 
+        _distance(newLoc, _lastDriverLocation!) > 50) {
+      _lastDriverLocation = newLoc;
+      _fetchRoute();
+    }
+  }
+
+  double _distance(LatLng a, LatLng b) {
+    const R = 6371000.0;
+    final dLat = (b.latitude - a.latitude) * 3.14159 / 180;
+    final dLng = (b.longitude - a.longitude) * 3.14159 / 180;
+    final latA = a.latitude * 3.14159 / 180;
+    final latB = b.latitude * 3.14159 / 180;
+    final x = sin(dLat / 2) * sin(dLat / 2) + 
+      cos(latA) * cos(latB) * sin(dLng / 2) * sin(dLng / 2);
+    return 2 * R * asin(sqrt(x));
   }
 
   Future<void> _initLocationTracking() async {
@@ -93,7 +120,8 @@ class _TripScreenState extends State<TripScreen> {
   @override
   void dispose() {
     _positionSubscription?.cancel();
-    _refreshTimer?.cancel();
+    final rideProvider = Provider.of<RideProvider>(context, listen: false);
+    rideProvider.removeListener(_onDriverLocationChanged);
     super.dispose();
   }
 
@@ -109,13 +137,39 @@ class _TripScreenState extends State<TripScreen> {
     );
   }
 
+  void _showCancelDialog(BuildContext context, RideProvider rideProvider) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Cancel Ride?', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: const Text('Are you sure you want to cancel this ride? Your driver is on the way.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('No, Keep'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              rideProvider.cancelRide();
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final rideProvider = Provider.of<RideProvider>(context);
     final driver = rideProvider.driver;
     final theme = Theme.of(context);
 
-    if (rideProvider.status == models.TripStatus.COMPLETED) {
+    if (rideProvider.status == models.TripStatus.COMPLETED && !_dialogShown) {
+      _dialogShown = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showArrivalDialog();
       });
@@ -160,6 +214,8 @@ class _TripScreenState extends State<TripScreen> {
             options: MapOptions(
               initialCenter: driverLocation,
               initialZoom: 15.0,
+              minZoom: 12,
+              maxZoom: 18,
               onMapReady: () => setState(() => _isMapReady = true),
             ),
             children: [
@@ -313,6 +369,12 @@ class _TripScreenState extends State<TripScreen> {
                         ),
                       ),
                       const SizedBox(width: 16),
+                      if (rideProvider.status == models.TripStatus.ACCEPTED)
+                        TextButton.icon(
+                          onPressed: () => _showCancelDialog(context, rideProvider),
+                          icon: const Icon(Icons.close, color: Color(0xFFC65A5A), size: 18),
+                          label: const Text('Cancel', style: TextStyle(color: Color(0xFFC65A5A), fontWeight: FontWeight.w600)),
+                        ),
                       _ChatCallButtons(tripId: rideProvider.tripId ?? '', peerName: driver.name),
                     ],
                   ),

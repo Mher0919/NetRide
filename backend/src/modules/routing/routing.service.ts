@@ -9,16 +9,15 @@
 // Architecture:
 //
 //   Flutter App → Backend API → Ride/Dispatch/Nav → RoutingService →
-//     → OSRM (self-hosted, primary) → ORS (fallback) → Mapbox (last resort)
+//     → A* Engine (self-hosted, PRIMARY) → OSRM (fallback) → ORS (last resort)
 //
 // No business logic calls any routing provider directly. The active engine
-// is selected at runtime. ORS is the primary provider globally; Mapbox
-// serves as fallback. Both implement the RouteEngine interface, so providers
-// are swappable.
+// is selected at runtime. A* is the primary provider — fast, free,
+// and runs entirely in-memory. OSRM serves as fallback if A* is unavailable.
 //
 // Design goals:
-//   - Fast:        cache-first, ORS <500ms, fare in microseconds.
-//   - Road geometry: ORS returns true road-following geometry (GeoJSON).
+//   - Fast:        cache-first, A* <50ms, fare in microseconds.
+//   - Road geometry: A* returns true road-following geometry (GeoJSON).
 //   - Lightweight:  no per-request DB hits in the hot path.
 //   - Resilient:    never crash; degrade to a road-shaped synthetic route.
 //   - Observable:   every stage is instrumented via prom-client + structured logs.
@@ -32,9 +31,9 @@ import { fareService, FareBreakdown } from '../../services/fare.service';
 import { RoadSnapperService } from '../../services/road-snapper.service';
 import { VehicleClass } from '../../types';
 import { RouteEngine } from './route-engine';
+import { AStarEngineAdapter } from './astar-engine-adapter';
 import { OSEngine } from './osrm.engine';
 import { ORSEngine } from './ors.engine';
-import { MapboxEngine } from './mapbox.engine';
 import { RoutingError } from './routing.errors';
 import {
   routingRequestsTotal,
@@ -62,7 +61,7 @@ export interface RoutingResult {
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
-  engine: 'OSRM' | 'ORS' | 'Mapbox' | 'Synthetic';
+  engine: 'A*' | 'OSRM' | 'ORS' | 'Synthetic';
   cacheHit: boolean;
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
@@ -95,7 +94,7 @@ export interface PlanResponse {
 }
 
 /**
- * Coordinate validation. Rejects anything NaN, non-finite, or outside the
+ * Coordinate validation. Rejecting anything NaN, non-finite, or outside the
  * valid latitude/longitude ranges. Throws a typed error so callers can map
  * it to a 400 response.
  */
@@ -137,16 +136,17 @@ export function parseCoordinates(raw: unknown, label: string): LatLng {
 
 export class RoutingService {
   // ---- Provider map --------------------------------------------------------
-  // Self-hosted OSRM (LA only) is the primary routing engine — fast, free,
-  // and runs on a separate Render service. ORS is the fallback for routes
-  // outside LA or if OSRM is down. Mapbox is the last resort.
+  // A* engine (self-hosted, in-memory) is the PRIMARY routing engine —
+  // fast, free, and runs entirely in the Node.js process.
+  // OSRM is the fallback for when the A* graph is not loaded.
+  // ORS is the last resort.
   private static readonly providers: Array<{
     match: (origin: [number, number], destination: [number, number]) => boolean;
     engine: RouteEngine;
   }> = [
+    { match: () => true,        engine: AStarEngineAdapter },
     { match: () => true,        engine: OSEngine },
     { match: () => true,        engine: ORSEngine },
-    { match: () => true,        engine: MapboxEngine },
   ];
 
   private static selectEngine(
@@ -156,7 +156,7 @@ export class RoutingService {
     for (const p of this.providers) {
       if (p.match(origin, destination)) return p.engine;
     }
-    return MapboxEngine;
+    return ORSEngine;
   }
 
   // ---- Request deduplication (collision-free in-flight map) ---------------
@@ -273,7 +273,7 @@ export class RoutingService {
     return r.distanceMeters;
   }
 
-  /** Road ETA only (OSM base duration × ML multiplier). */
+  /** Road ETA only (A* base duration x ML multiplier). */
   static async calculateETA(
     origin: LatLng,
     destination: LatLng,
@@ -434,20 +434,20 @@ export class RoutingService {
       : destination;
 
     try {
-      // Try engines in order: OSRM → ORS → Mapbox → Synthetic fallback
-      const engines = [OSEngine, ORSEngine, MapboxEngine];
+      // Try engines in order: A* → OSRM → ORS → Synthetic fallback
+      const engines = [AStarEngineAdapter, OSEngine, ORSEngine];
       for (const engine of engines) {
         try {
           const res = await engine.route(routeOrigin, routeDest);
           if (res) {
             const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
-            const engineName = engine.name as 'OSRM' | 'ORS' | 'Mapbox';
+            const engineName = engine.name as 'A*' | 'OSRM' | 'ORS';
             result = {
               distanceMeters: res.distanceMeters,
               durationSeconds: res.durationSeconds,
               etaSeconds: Math.round(res.durationSeconds * multiplier),
               geometry: res.geometry,
-              confidence: 0.99,
+              confidence: engine.name === 'A*' ? 0.99 : 0.95,
               engine: engineName,
               cacheHit: false,
               steps: res.steps,

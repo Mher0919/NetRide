@@ -319,9 +319,10 @@ class NavigationService extends ChangeNotifier {
   int _lastNotifiedStepIndex = -1;
 
   String formatDistance(double meters) {
-    if (meters >= 1000) {
-      return "${(meters / 1000).toStringAsFixed(1)} km";
+    final mi = meters / 1609.34;
+    if (mi >= 0.1) {
+      return "${mi.toStringAsFixed(1)} mi";
     }
-    return "${meters.round()} m";
+    return "${(meters * 3.28084).round()} ft";
   }
 }

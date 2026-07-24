@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
+import 'api_service.dart';
 
 /// Result of a trip-plan call: road-following geometry + ETA + full fare.
 class TripPlan {
@@ -28,7 +29,7 @@ class TripPlan {
 }
 
 class RoutingService {
-  final Dio _dio = Dio();
+  final Dio _dio = ApiService.dio;
 
   void setTestPost(Future<Response> Function(
     String path, {
@@ -90,7 +91,7 @@ class RoutingService {
       final response = await (_testPost ??
           (path, {required data, cancelToken, options}) =>
               _dio.post(path, data: data, cancelToken: cancelToken, options: options))(
-        '$_baseUrl/api/routing/plan',
+        '/routing/plan',
         data: {
           'origin': [origin.latitude, origin.longitude],
           'destination': [destination.latitude, destination.longitude],

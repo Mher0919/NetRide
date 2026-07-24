@@ -433,6 +433,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 options: MapOptions(
                   initialCenter: _smoothedPosition!,
                   initialZoom: 15.0,
+                  minZoom: 12,
+                  maxZoom: 18,
                   onMapReady: () {
                     setState(() => _isMapReady = true);
                   },

@@ -7,19 +7,19 @@ import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } from '../../conf
 export async function handleCleanupStaleRides(io: Server) {
   return async (job: any) => {
     try {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
       const staleRides = await prisma.ride.findMany({
         where: {
           status: 'REQUESTED',
-          created_at: { lt: fiveMinutesAgo },
+          created_at: { lt: tenMinutesAgo },
         },
-        select: { id: true, rider_id: true },
+        select: { id: true, rider_id: true, created_at: true },
       });
 
       for (const ride of staleRides) {
         const updatedTrip = await RideRepository.updateStatus(ride.id, TripStatus.CANCELLED, {
           cancelled_at: new Date(),
-          cancel_reason: 'Request timed out (no driver accepted or rider disconnected)',
+          cancel_reason: 'Request timed out (no driver accepted after extended search)',
         });
         io.to(`rider:${ride.rider_id}`).emit('tripUpdate', updatedTrip);
         io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);

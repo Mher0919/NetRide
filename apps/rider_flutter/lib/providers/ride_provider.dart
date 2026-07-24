@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:uuid/uuid.dart';
 import '../models/trip_models.dart';
 import '../services/api_service.dart';
 import '../services/sound_service.dart';
@@ -179,7 +180,8 @@ class RideProvider with ChangeNotifier {
     VehicleClass requestedClass = VehicleClass.CORE,
     bool isScheduled = false,
     DateTime? scheduledAt,
-    bool favoritePriority = false
+    bool favoritePriority = false,
+    String? idempotencyKey,
   }) {
     debugPrint('[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}');
     if (_socket == null) {
@@ -187,13 +189,18 @@ class RideProvider with ChangeNotifier {
     } else if (!_socket!.connected) {
       debugPrint('[RIDE] ⚠️ Socket exists but NOT connected — attempting emit anyway');
     }
+    
+    // Generate idempotency key if not provided (for retries)
+    final key = idempotencyKey ?? const Uuid().v4();
+    
     _socket?.emit('requestRide', {
       'pickup': pickup.toJson(),
       'destination': destination.toJson(),
       'requestedClass': requestedClass.toString().split('.').last,
       'isScheduled': isScheduled,
       'scheduledAt': scheduledAt?.toIso8601String(),
-      'favoritePriority': favoritePriority
+      'favoritePriority': favoritePriority,
+      'idempotencyKey': key,
     });
     
     if (!isScheduled) {

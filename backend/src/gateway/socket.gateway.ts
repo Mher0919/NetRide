@@ -9,6 +9,24 @@ import { pool } from '../config/database';
 import { UserRole, Location, TripStatus } from '../types';
 import { env } from '../config/env';
 import * as geohash from 'ngeohash';
+import {
+  validate,
+  checkRateLimit,
+  GoOnlineSchema,
+  UpdateLocationSchema,
+  AcceptTripSchema,
+  DeclineTripSchema,
+  CancelTripSchema,
+  PickUpRiderSchema,
+  CompleteTripSchema,
+  SendMessageSchema,
+  RequestRerouteSchema,
+  SubscribeNearbyDriversSchema,
+  RiderUpdateLocationSchema,
+  RequestRideSchema,
+  RiderDestinationChangedSchema,
+} from '../utils/socket-validation';
+import { isOnline, markOnline, markOffline, pushChatMessage, pushIncomingCall } from '../services/push-notification.service';
 
 // ---- Chat hardening ------------------------------------------------------
 //
@@ -24,6 +42,10 @@ import { rateLimitedTotal } from '../observability/metrics';
 // Rider auto-cancel timers: userId → setTimeout handle
 // Cancelled when the rider reconnects within the grace period.
 const riderAutoCancelTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Driver arrival tracking for grace period / wait timer
+// tripId → { pickupArrivedAt: timestamp, destinationArrivedAt: timestamp }
+const driverArrivalTimes = new Map<string, { pickupArrivedAt?: number; destinationArrivedAt?: number }>();
 
 const MAX_MESSAGE_BODY = 1000;
 const RATE_LIMIT_PER_MINUTE = 30;
@@ -144,6 +166,32 @@ async function relayChatMessage(
   };
 
   io.to(`${counterpartRole}:${counterpartId}`).emit('messageReceived', wirePayload);
+
+  // If recipient is offline (not connected to a socket), send a push notification
+  // so they still see the message on their lock screen / notification tray.
+  try {
+    const recipientOnline = await isOnline(counterpartId, counterpartRole);
+    if (!recipientOnline) {
+      // Fetch sender's display name for the notification
+      const senderNameRes = await pool.query(
+        'SELECT full_name FROM users WHERE id = $1',
+        [self.id]
+      );
+      const senderName = senderNameRes.rows[0]?.full_name || 'Unknown';
+      await pushChatMessage(
+        counterpartId,
+        counterpartRole,
+        senderName,
+        body,
+        payload.tripId
+      );
+      console.log(`[SOCKET] 📲 Push notification sent to offline ${counterpartRole} ${counterpartId}`);
+    }
+  } catch (pushErr: any) {
+    // Push failure should never break chat delivery
+    console.error(`[SOCKET] ⚠️ Push notification failed (non-fatal): ${pushErr.message}`);
+  }
+
   // Echo back to the sender so the optimistic UI can reconcile any
   // pending state (e.g. replace a "pending" spinner with the persisted
   // id). Clients also use this to mark delivery.
@@ -196,6 +244,15 @@ export function setupSocketGateway(io: Server) {
     socket.join(`${roomRole}:${id}`);
     console.log(`[SOCKET] 🏠 ${id} joined room: ${roomRole}:${id}`);
 
+    // Track online presence for push notification delivery.
+    // When a user disconnects, their presence key expires (60s TTL)
+    // and the system falls back to FCM push notifications.
+    if (roomRole === 'driver' || roomRole === 'rider') {
+      markOnline(id, roomRole as 'rider' | 'driver', socket.id).catch((err: any) =>
+        console.error(`[SOCKET] ⚠️ Presence tracking failed: ${err.message}`)
+      );
+    }
+
     /**
      * ADMIN MONITORING EVENTS
      */
@@ -226,11 +283,14 @@ export function setupSocketGateway(io: Server) {
      */
     if (role === UserRole.DRIVER) {
       socket.on('goOnline', async (loc?: Location) => {
+        const validated = validate(GoOnlineSchema, loc, socket, 'goOnline');
+        if (!validated.success || !validated.data) return;
+        
         console.log(`[SOCKET] 🟢 Driver ${id} is now ONLINE`);
 
         (socket as any).isOnline = true;
-        if (loc) {
-          const gh = await LocationsService.updateDriverLocation(id, loc);
+        if (validated.data.lat && validated.data.lng) {
+          const gh = await LocationsService.updateDriverLocation(id, { lat: validated.data.lat, lng: validated.data.lng });
           updateDriverGeohashRoom(socket, gh);
         }
       });
@@ -244,15 +304,21 @@ export function setupSocketGateway(io: Server) {
       });
 
       socket.on('updateLocation', async (loc: Location) => {
+        const validated = validate(UpdateLocationSchema, loc, socket, 'updateLocation');
+        if (!validated.success || !validated.data) return;
+        
+        const allowed = await checkRateLimit(socket, 'updateLocation');
+        if (!allowed) return;
+        
         try {
           if ((socket as any).isOnline) {
-            console.log(`[SOCKET] 📍 Location from driver ${id}: lat=${loc.lat}, lng=${loc.lng}`);
-            const gh = await LocationsService.updateDriverLocation(id, loc);
+            console.log(`[SOCKET] 📍 Location from driver ${id}: lat=${validated.data.lat}, lng=${validated.data.lng}`);
+            const gh = await LocationsService.updateDriverLocation(id, validated.data);
             updateDriverGeohashRoom(socket, gh);
 
             const payload = {
               driverId: id,
-              ...loc,
+              ...validated.data,
               timestamp: new Date()
             };
 
@@ -272,15 +338,18 @@ export function setupSocketGateway(io: Server) {
           console.log(`[SOCKET] 📡 Broadcasting driver loc to rider:${currentTrip.rider_id}`);
           io.to(`rider:${currentTrip.rider_id}`).emit('driverLocationUpdate', {
             driverId: id,
-            ...loc
+            ...validated.data
           });
         }
       });
 
       socket.on('acceptTrip', async (tripId: string) => {
-        console.log(`[SOCKET] 🤝 Driver ${id} accepts trip: ${tripId}`);
+        const validated = validate(AcceptTripSchema, tripId, socket, 'acceptTrip');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🤝 Driver ${id} accepts trip: ${validated.data}`);
         try {
-          await RideService.acceptTrip(tripId, id);
+          await RideService.acceptTrip(validated.data, id);
         } catch (err: any) {
           console.error(`[SOCKET] ❌ Accept trip failed: ${err.message}`);
           socket.emit('error', err.message);
@@ -288,22 +357,39 @@ export function setupSocketGateway(io: Server) {
       });
 
       socket.on('declineTrip', async (tripId: string) => {
-        console.log(`[SOCKET] 🙅 Driver ${id} declined trip: ${tripId}`);
+        const validated = validate(DeclineTripSchema, tripId, socket, 'declineTrip');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🙅 Driver ${id} declined trip: ${validated.data}`);
         try {
-          await matchingService.handleDecline(io, tripId, id);
+          await matchingService.handleDecline(io, validated.data, id);
         } catch (err: any) {
           console.error(`[SOCKET] ❌ Decline trip failed: ${err.message}`);
         }
       });
 
-      socket.on('pickUpRider', async (tripId: string) => {
-        console.log(`[SOCKET] 🚕 Driver ${id} picked up rider for trip: ${tripId}`);
+      socket.on('cancelTrip', async (tripId: string) => {
+        const validated = validate(CancelTripSchema, tripId, socket, 'cancelTrip');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🚫 Trip cancellation from driver ${id} for trip: ${validated.data}`);
         try {
-          // Server-side proximity gate: driver must be within
-          // DRIVER_PICKUP_PROXIMITY_M of the pickup point to start the trip.
+          await RideService.cancelTrip(validated.data, id);
+        } catch (err: any) {
+          console.error(`[SOCKET] ❌ Cancel trip failed: ${err.message}`);
+          socket.emit('error', 'Unable to cancel trip. Please try again.');
+        }
+      });
+
+      socket.on('pickUpRider', async (tripId: string) => {
+        const validated = validate(PickUpRiderSchema, tripId, socket, 'pickUpRider');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🚕 Driver ${id} picked up rider for trip: ${validated.data}`);
+        try {
           const trip: any = await RideService.getCurrentRide(id, UserRole.DRIVER);
-          console.log(`[SOCKET] pickUpRider: getCurrentRide returned`, trip?.id, 'match:', trip?.id === tripId);
-          if (!trip || trip.id !== tripId) {
+          console.log(`[SOCKET] pickUpRider: getCurrentRide returned`, trip?.id, 'match:', trip?.id === validated.data);
+          if (!trip || trip.id !== validated.data) {
             socket.emit('error', 'You are not assigned to this trip.');
             return;
           }
@@ -315,14 +401,51 @@ export function setupSocketGateway(io: Server) {
           }
           const dist = haversineMeters(driverLoc, trip.pickup);
           console.log(`[SOCKET] pickUpRider: dist=`, dist, 'limit=', env.DRIVER_PICKUP_PROXIMITY_M);
-          if (dist > env.DRIVER_PICKUP_PROXIMITY_M) {
-            socket.emit('error',
-              `You must be at the pickup to start the trip. You are ${Math.round(dist)}m away.`);
-            return;
+          
+          const arrival = driverArrivalTimes.get(validated.data) || {};
+          const now = Date.now();
+          const strictLimit = env.DRIVER_PICKUP_PROXIMITY_M;
+          const graceLimit = strictLimit * 2; // 2x strict limit during grace
+          
+          if (dist > strictLimit) {
+            // Not at pickup yet - record arrival time if close
+            if (dist <= graceLimit) {
+              if (!arrival.pickupArrivedAt) {
+                arrival.pickupArrivedAt = now;
+                driverArrivalTimes.set(validated.data, arrival);
+              }
+              
+              const waitTimeS = Math.ceil((now - arrival.pickupArrivedAt!) / 1000);
+              const graceS = env.DRIVER_PROXIMITY_GRACE_S;
+              const waitTimerS = env.DRIVER_WAIT_TIMER_S;
+              
+              if (waitTimeS >= waitTimerS) {
+                console.log(`[SOCKET] pickUpRider: wait timer (${waitTimerS}s) exceeded, force-allowing pickup`);
+              } else if (waitTimeS >= graceS) {
+                console.log(`[SOCKET] pickUpRider: grace period (${graceS}s) exceeded, allowing pickup`);
+              } else {
+                socket.emit('error', `You must be at the pickup to start the trip. You are ${Math.round(dist)}m away (${graceS - waitTimeS}s grace remaining).`);
+                return;
+              }
+            } else {
+              // Too far - clear any arrival time
+              if (arrival.pickupArrivedAt) {
+                arrival.pickupArrivedAt = undefined;
+                driverArrivalTimes.set(validated.data, arrival);
+              }
+              socket.emit('error', `You must be at the pickup to start the trip. You are ${Math.round(dist)}m away.`);
+              return;
+            }
           }
+          
           console.log(`[SOCKET] pickUpRider: calling updateTripStatus`);
-          await RideService.updateTripStatus(tripId, TripStatus.IN_PROGRESS, id);
+          await RideService.updateTripStatus(validated.data, TripStatus.IN_PROGRESS, id);
           console.log(`[SOCKET] pickUpRider: updateTripStatus done`);
+          
+          // Clear arrival time on successful pickup
+          if (arrival.pickupArrivedAt) {
+            driverArrivalTimes.delete(validated.data);
+          }
         } catch (err: any) {
           console.error(`[SOCKET] ❌ Pick up rider failed: ${err.message}`);
           socket.emit('error', err.message || 'Unable to start trip. Please ensure you are assigned to this ride.');
@@ -330,10 +453,15 @@ export function setupSocketGateway(io: Server) {
       });
 
       socket.on('completeTrip', async (tripId: string) => {
-        console.log(`[SOCKET] 🏁 Driver ${id} completed trip: ${tripId}`);
+        const validated = validate(CompleteTripSchema, tripId, socket, 'completeTrip');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🏁 Driver ${id} completed trip: ${validated.data}`);
         try {
-          // Server-side proximity gate: driver must be within
-          // DRIVER_DESTINATION_PROXIMITY_M of the destination to finish.
+          // Server-side proximity gate with grace period:
+          // - Must be within DRIVER_DESTINATION_PROXIMITY_M of destination
+          // - Grace period: 60s once within 1.5x proximity
+          // - Wait timer: 30s if within 2x proximity
           const trip: any = await RideService.getCurrentRide(id, UserRole.DRIVER);
           if (!trip || trip.id !== tripId) {
             socket.emit('error', 'You are not assigned to this trip.');
@@ -345,12 +473,61 @@ export function setupSocketGateway(io: Server) {
             return;
           }
           const dist = haversineMeters(driverLoc, trip.destination);
-          if (dist > env.DRIVER_DESTINATION_PROXIMITY_M) {
-            socket.emit('error',
-              `You must reach the destination to finish the trip. You are ${Math.round(dist)}m away.`);
+          const strict = env.DRIVER_DESTINATION_PROXIMITY_M;
+          const graceDist = strict * 1.5;
+          const waitDist = strict * 2;
+          const graceS = 60;
+          const waitTimerS = 30;
+
+          // Track arrival time
+          const arrivalKey = `arrival:${tripId}`;
+          let arrival = driverArrivalTimes.get(arrivalKey) || { destinationArrivedAt: undefined };
+          
+          if (dist <= graceDist) {
+            if (!arrival.destinationArrivedAt) {
+              arrival.destinationArrivedAt = Date.now();
+              driverArrivalTimes.set(arrivalKey, arrival);
+            }
+            const waitTimeS = (Date.now() - arrival.destinationArrivedAt) / 1000;
+            
+            if (waitTimeS >= waitTimerS) {
+              console.log(`[SOCKET] completeTrip: wait timer (${waitTimerS}s) exceeded, force-allowing complete`);
+            } else if (waitTimeS >= graceS) {
+              console.log(`[SOCKET] completeTrip: grace period (${graceS}s) exceeded, allowing complete`);
+            } else {
+              socket.emit('error', `You must reach the destination to finish. You are ${Math.round(dist)}m away (${graceS - waitTimeS}s grace remaining).`);
+              return;
+            }
+          } else if (dist <= waitDist) {
+            // Within wait distance but not grace distance - only allow if wait timer exceeded
+            if (arrival.destinationArrivedAt) {
+              const waitTimeS = (Date.now() - arrival.destinationArrivedAt) / 1000;
+              if (waitTimeS >= waitTimerS) {
+                console.log(`[SOCKET] completeTrip: wait timer (${waitTimerS}s) exceeded at wait distance, allowing complete`);
+              } else {
+                socket.emit('error', `You must reach the destination to finish. You are ${Math.round(dist)}m away (${waitTimerS - waitTimeS}s wait timer remaining).`);
+                return;
+              }
+            } else {
+              socket.emit('error', `You must reach the destination to finish. You are ${Math.round(dist)}m away.`);
+              return;
+            }
+          } else {
+            // Too far - clear any arrival time
+            if (arrival.destinationArrivedAt) {
+              arrival.destinationArrivedAt = undefined;
+              driverArrivalTimes.set(arrivalKey, arrival);
+            }
+            socket.emit('error', `You must reach the destination to finish. You are ${Math.round(dist)}m away.`);
             return;
           }
+          
           await RideService.updateTripStatus(tripId, TripStatus.COMPLETED, id);
+          
+          // Clear arrival time on successful completion
+          if (arrival.destinationArrivedAt) {
+            driverArrivalTimes.delete(arrivalKey);
+          }
         } catch (err: any) {
           console.error(`[SOCKET] ❌ Complete trip failed: ${err.message}`);
           socket.emit('error', err.message || 'Unable to complete trip. Please try again.');
@@ -358,7 +535,10 @@ export function setupSocketGateway(io: Server) {
       });
 
       socket.on('sendMessage', async (data: { tripId: string, message: string }) => {
-        await relayChatMessage(io, socket, 'driver', data, { id, role: 'driver' });
+        const validated = validate(SendMessageSchema, data, socket, 'sendMessage');
+        if (!validated.success || !validated.data) return;
+        
+        await relayChatMessage(io, socket, 'driver', validated.data, { id, role: 'driver' });
       });
 
       /**
@@ -370,13 +550,41 @@ export function setupSocketGateway(io: Server) {
        * `navigationRerouteRequested` toast to the rider.
        */
       socket.on('requestReroute', async (data: { tripId: string; leg: 'pickup' | 'destination'; lat: number; lng: number }) => {
-        console.log(`[SOCKET] 🔁 Driver ${id} requested reroute for trip ${data.tripId} (leg: ${data.leg})`);
+        const validated = validate(RequestRerouteSchema, data, socket, 'requestReroute');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🔁 Driver ${id} requested reroute for trip ${validated.data.tripId} (leg: ${validated.data.leg})`);
         try {
           const trip: any = await RideService.getCurrentRide(id, UserRole.DRIVER);
-          if (!trip || trip.id !== data.tripId) {
+          if (!trip || trip.id !== validated.data.tripId) {
             socket.emit('error', 'You are not assigned to this trip.');
             return;
           }
+
+          // Rate limit reroutes: minimum 30 seconds between reroutes per trip+leg
+          const rerouteKey = `reroute:${data.tripId}:${data.leg}`;
+          const lastReroute = await redis.get(rerouteKey);
+          if (lastReroute) {
+            const lastTime = parseInt(lastReroute, 10);
+            const elapsedS = (Date.now() - lastTime) / 1000;
+            if (elapsedS < 30) {
+              socket.emit('error', `Please wait ${Math.ceil(30 - elapsedS)}s before requesting another reroute.`);
+              return;
+            }
+          }
+
+          // Also check minimum distance from last reroute start point
+          const lastPosKey = `reroute:pos:${data.tripId}:${data.leg}`;
+          const lastPos = await redis.get(lastPosKey);
+          if (lastPos) {
+            const [lastLat, lastLng] = lastPos.split(',').map(Number);
+            const distM = haversineMeters({ lat: data.lat, lng: data.lng }, { lat: lastLat, lng: lastLng });
+            if (distM < 200) {
+              socket.emit('error', `Please drive at least 200m before requesting another reroute.`);
+              return;
+            }
+          }
+
           const end =
             data.leg === 'pickup' ? trip.pickup : trip.destination;
           const route = await NavigationService.cacheRouteLeg(
@@ -389,6 +597,11 @@ export function setupSocketGateway(io: Server) {
             `UPDATE rides SET route_metadata = route_metadata || $1::jsonb WHERE id = $2`,
             [JSON.stringify({ [data.leg]: route }), data.tripId]
           );
+          
+          // Store current position for distance check on next reroute
+          await redis.set(lastPosKey, `${data.lat},${data.lng}`, 'EX', 3600);
+          await redis.set(rerouteKey, Date.now().toString(), 'EX', 3600);
+
           NavigationService.emitRouteUpdated(
             io, data.tripId, id, trip.rider_id, data.leg, route
           );
@@ -404,6 +617,9 @@ export function setupSocketGateway(io: Server) {
         // service spins down and ALL sockets disconnect — wiping every
         // driver's location makes them invisible when the service wakes.
         // Location is only removed on explicit goOffline or heartbeat expiry.
+        markOffline(id, 'driver').catch((err: any) =>
+          console.error(`[SOCKET] ⚠️ Presence tracking failed on disconnect: ${err.message}`)
+        );
       });
     }
 
@@ -420,7 +636,10 @@ export function setupSocketGateway(io: Server) {
       }
 
       socket.on('subscribeToNearbyDrivers', (loc: Location) => {
-        const gh = geohash.encode(loc.lat, loc.lng, 6);
+        const validated = validate(SubscribeNearbyDriversSchema, loc, socket, 'subscribeToNearbyDrivers');
+        if (!validated.success || !validated.data) return;
+        
+        const gh = geohash.encode(validated.data.lat, validated.data.lng, 6);
         const neighbors = geohash.neighbors(gh);
         const rooms = [gh, ...neighbors].map(g => `drivers:near:${g}`);
         
@@ -435,8 +654,11 @@ export function setupSocketGateway(io: Server) {
       });
 
       socket.on('updateLocation', async (loc: Location) => {
+        const validated = validate(RiderUpdateLocationSchema, loc, socket, 'updateLocation');
+        if (!validated.success || !validated.data) return;
+        
         try {
-          console.log(`[SOCKET] 📍 Location from rider ${id}: lat=${loc.lat}, lng=${loc.lng}`);
+          console.log(`[SOCKET] 📍 Location from rider ${id}: lat=${validated.data.lat}, lng=${validated.data.lng}`);
           // Broadcast to specific driver if rider is on a trip
           const currentTrip = await RideService.getCurrentRide(id, UserRole.RIDER);
           if (currentTrip && currentTrip.driver_id && currentTrip.status !== TripStatus.COMPLETED) {
@@ -446,14 +668,20 @@ export function setupSocketGateway(io: Server) {
         } catch (err) {}
       });
 
-      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; requestedClass?: any }) => {
-        console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${data.pickup?.address} to ${data.destination?.address} (Class: ${data.requestedClass})`);
+      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; requestedClass?: any; idempotencyKey?: string }) => {
+        const validated = validate(RequestRideSchema, data, socket, 'requestRide');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address} (Class: ${validated.data.requestedClass})`);
         try {
           const trip = await RideService.requestRide(
             id, 
             data.pickup, 
             data.destination, 
-            data.requestedClass as any
+            data.requestedClass as any,
+            undefined,
+            false,
+            data.idempotencyKey
           );
           socket.emit('tripUpdate', trip);
         } catch (err: any) {
@@ -463,7 +691,10 @@ export function setupSocketGateway(io: Server) {
       });
 
       socket.on('cancelTrip', async (tripId: string) => {
-        console.log(`[SOCKET] 🚫 Trip cancellation from rider ${id} for trip: ${tripId}`);
+        const validated = validate(CancelTripSchema, tripId, socket, 'cancelTrip');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🚫 Trip cancellation from rider ${id} for trip: ${validated.data}`);
         try {
           await RideService.cancelTrip(tripId, id);
         } catch (err: any) {
@@ -473,7 +704,10 @@ export function setupSocketGateway(io: Server) {
       });
 
       socket.on('sendMessage', async (data: { tripId: string, message: string }) => {
-        await relayChatMessage(io, socket, 'driver', data, { id, role: 'rider' });
+        const validated = validate(SendMessageSchema, data, socket, 'sendMessage');
+        if (!validated.success || !validated.data) return;
+        
+        await relayChatMessage(io, socket, 'driver', validated.data, { id, role: 'rider' });
       });
 
       /**
@@ -485,7 +719,10 @@ export function setupSocketGateway(io: Server) {
        * is being told to recalculate".
        */
       socket.on('riderDestinationChanged', async (data: { tripId: string; lat: number; lng: number; address: string }) => {
-        console.log(`[SOCKET] 🎯 Rider ${id} changed destination for trip ${data.tripId} → ${data.address}`);
+        const validated = validate(RiderDestinationChangedSchema, data, socket, 'riderDestinationChanged');
+        if (!validated.success || !validated.data) return;
+        
+        console.log(`[SOCKET] 🎯 Rider ${id} changed destination for trip ${validated.data.tripId} → ${validated.data.address}`);
         try {
           const trip: any = await RideService.getCurrentRide(id, UserRole.RIDER);
           if (!trip || trip.id !== data.tripId || !trip.driver_id) {
@@ -538,6 +775,11 @@ export function setupSocketGateway(io: Server) {
       socket.on('disconnect', async () => {
         console.log(`[SOCKET] ❌ Rider ${id} disconnected`);
         
+        // Mark rider as offline for push notification delivery
+        markOffline(id, 'rider').catch((err: any) =>
+          console.error(`[SOCKET] ⚠️ Presence tracking failed on disconnect: ${err.message}`)
+        );
+
         // Cancel ride if rider doesn't reconnect within 3 minutes.
         // This covers: app force-closed, OS killed background process.
         // Brief app switches reconnect within seconds and clear the timer.

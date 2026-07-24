@@ -6,6 +6,9 @@
 export const RoutingErrors = {
   INVALID_COORDINATES: 'INVALID_COORDINATES',
   ENGINE_UNAVAILABLE: 'ENGINE_UNAVAILABLE',
+  NO_ROUTE_FOUND: 'NO_ROUTE_FOUND',
+  GRAPH_NOT_LOADED: 'GRAPH_NOT_LOADED',
+  SNAP_FAILED: 'SNAP_FAILED',
 } as const;
 
 export type RoutingErrorCode = (typeof RoutingErrors)[keyof typeof RoutingErrors];

@@ -9,6 +9,9 @@
     "build": "tsc",
     "test": "node run-tests.cjs",
     "bench:routing": "ts-node src/modules/routing/__tests__/benchmark.routing.ts",
+    "bench:astar": "ts-node src/routing/__tests__/astar-benchmark.ts",
+    "preprocess": "ts-node src/scripts/preprocess-map.ts",
+    "test:astar": "node --test src/routing/__tests__/astar-routing.test.ts",
     "build:osrm": "bash scripts/build-osrm.sh",
     "match-worker": "ts-node src/queue/matchWorker.ts",
     "cron-worker": "ts-node src/queue/cronWorker.ts"
@@ -22,12 +25,14 @@
     "@sentry/node": "^7.99.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "@supabase/supabase-js": "^2.110.3",
+    "@types/pbf": "^3.0.5",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.7.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "firebase-admin": "^14.2.0",
     "form-data": "^4.0.6",
     "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
@@ -37,6 +42,7 @@
     "ngeohash": "^0.6.3",
     "nodemailer": "^8.0.6",
     "p-throttle": "^4.1.1",
+    "pbf": "^5.1.2",
     "pg": "^8.11.3",
     "pino": "^8.19.0",
     "pino-http": "^9.0.0",
@@ -45,8 +51,6 @@
     "twilio": "^6.0.2",
     "uuid": "^14.0.0",
     "zod": "^3.22.4"
-  },
-  "optionalDependencies": {
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
