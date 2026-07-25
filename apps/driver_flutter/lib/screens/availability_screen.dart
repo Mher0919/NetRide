@@ -1032,11 +1032,12 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                 ? null
                 : () async {
                     setState(() => _isConfirmingPrice = true);
+                    final messenger = ScaffoldMessenger.of(context);
                     Navigator.pop(context);
                     try {
                       await provider.updatePrice(value);
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        messenger.showSnackBar(
                           SnackBar(
                             content: Text('Driving price successfully set to \$${value.toStringAsFixed(2)}/mi.'),
                             backgroundColor: const Color(0xFF5B7760),
@@ -1046,17 +1047,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                       }
                     } catch (e) {
                       if (mounted) {
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Error'),
-                            content: Text(e.toString().replaceAll('Exception: ', '')),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: const Text('OK'),
-                              )
-                            ],
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('Error: ${e.toString().replaceAll('Exception: ', '')}'),
+                            backgroundColor: Colors.red,
+                            behavior: SnackBarBehavior.floating,
                           ),
                         );
                       }
