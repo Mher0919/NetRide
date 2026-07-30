@@ -1,27 +1,25 @@
 // backend/src/modules/routing/routing.service.ts
 //
 // Isolated Routing Service — the SINGLE owner of the rider routing + fare
-// pipeline. It owns NO business logic beyond: validate → cache → engine →
-// decode → fare. Every other module (ride, navigation, geospatial search,
-// dispatch, matching) MUST go through this service for trip planning so the
-// routing pipeline stays consistent, observable, and cacheable.
+// pipeline. It owns NO business logic beyond: validate → engine → decode → fare.
+// Every other module (ride, navigation, geospatial search, dispatch, matching)
+// MUST go through this service for trip planning so the routing pipeline stays
+// consistent, observable, and cacheable.
 //
 // Architecture:
 //
 //   Flutter App → Backend API → Ride/Dispatch/Nav → RoutingService →
-//     → Google Routes API (sole provider, cached with geohash neighbors)
+//     → Google Routes API (sole provider)
 //
 // Design goals:
-//   - Fast:        cache-first with 5x5 geohash neighbor grid, Google Routes <2s.
+//   - Fast:        Google Routes <2s, no Redis cache on hot path.
 //   - Road geometry: Google Routes returns true road-following geometry (GeoJSON).
-//   - Lightweight:  no per-request DB hits in the hot path.
+//   - Lightweight:  no per-request DB/Redis hits in the hot path.
 //   - Resilient:    never crash; degrade to a synthetic city-grid route.
 //   - Observable:   every stage is instrumented via prom-client + structured logs.
-//   - Scalable:     stateless + Redis cache + request dedup map + concurrent-safe.
-//   - Cost-effective: aggressive geohash caching minimizes Google API calls.
+//   - Scalable:     stateless + request dedup map + concurrent-safe.
+//   - Cost-effective: client-side caching minimizes Google API calls.
 
-import ngeohash from 'ngeohash';
-import { redis } from '../../config/redis';
 import { MLEtaService } from '../../services/ml-eta.service';
 import { fareService, FareBreakdown } from '../../services/fare.service';
 import { VehicleClass } from '../../types';
@@ -31,12 +29,11 @@ import { RoutingError } from './routing.errors';
 import {
   routingRequestsTotal,
   routingDurationSeconds,
-  routingCacheLookupSeconds,
-  routingEngineSeconds,
   routingFareSeconds,
   routingFallbackTotal,
   routingEngineRequestsTotal,
   routingEngineDurationSeconds,
+  routingEngineSeconds,
 } from '../../observability/metrics';
 import { logger } from '../../observability/logger';
 
@@ -55,7 +52,7 @@ export interface RoutingResult {
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
   engine: 'GoogleRoutes' | 'Synthetic';
-  cacheHit: boolean;
+  cacheHit: boolean; // always false (no server cache)
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
   speedLimitsByRoad: Record<string, number>;
@@ -81,16 +78,11 @@ export interface PlanResponse {
   fare: FareBreakdown;
   metadata: {
     computedAt: string;
-    geohash: string;
     stepsCount: number;
   };
 }
 
-/**
- * Coordinate validation. Rejecting anything NaN, non-finite, or outside the
- * valid latitude/longitude ranges. Throws a typed error so callers can map
- * it to a 400 response.
- */
+/** Coordinate validation error. */
 export class InvalidCoordinatesError extends Error {
   public readonly detail: string;
   constructor(detail: string) {
@@ -129,8 +121,7 @@ export function parseCoordinates(raw: unknown, label: string): LatLng {
 
 export class RoutingService {
   // ---- Provider map --------------------------------------------------------
-  // Google Routes API is the sole routing engine. Results are cached
-  // aggressively using geohash neighbors so nearby OD pairs reuse cached routes.
+  // Google Routes API is the sole routing engine. No fallbacks, no local engines.
   private static readonly providers: Array<{
     match: (origin: [number, number], destination: [number, number]) => boolean;
     engine: RouteEngine;
@@ -138,38 +129,24 @@ export class RoutingService {
     { match: () => true, engine: GoogleRoutesEngine },
   ];
 
-  private static selectEngine(
-    origin: [number, number],
-    destination: [number, number],
-  ): RouteEngine {
-    for (const p of this.providers) {
-      if (p.match(origin, destination)) return p.engine;
-    }
-    return GoogleRoutesEngine;
-  }
-
-  // ---- Request deduplication (collision-free in-flight map) ---------------
-  // Two identical OD requests in flight share one engine call + one cache
-  // write. Keyed by the snapped cache key so "nearby" repeats also dedupe.
+  // ---- Request deduplication (in-flight only, per-process) ---------------
   private static readonly inFlight = new Map<string, Promise<RoutingResult>>();
 
-  // ---- Cache tuning -------------------------------------------------------
-  /** Exact-match TTL — identical OD pairs. */
-  private static readonly EXACT_TTL_S = 1800; // 30 min
-  /** Nearby-match TTL — reused for OD pairs within the same geohash cell. */
-  private static readonly NEARBY_TTL_S = 900; // 15 min
-  /** Geohash precision (~0.6km × 1.2km cell in LA) — "nearby" bucket size. */
-  private static readonly GEOHASH_PRECISION = 6;
+  // Simple cache key for in-flight deduplication (4dp ≈ 11m)
+  private static exactKey(origin: LatLng, destination: LatLng): string {
+    const p = 4;
+    return `exact:${origin[0].toFixed(p)}:${origin[1].toFixed(p)}:${destination[0].toFixed(p)}:${destination[1].toFixed(p)}`;
+  }
 
   /**
-   * Public entry point. Validates, caches, routes, and prices in one
+   * Public entry point. Validates, routes, and prices in one
    * coherent pipeline. Always returns a road-following plan.
    */
   static async plan(request: PlanRequest): Promise<PlanResponse> {
     const end = routingDurationSeconds.startTimer();
     const start = Date.now();
     try {
-      const route = await this.routeCached(request.origin, request.destination);
+      const route = await this.route(request.origin, request.destination);
 
       const fareStart = process.hrtime.bigint();
 
@@ -232,7 +209,6 @@ export class RoutingService {
         fare,
         metadata: {
           computedAt: new Date().toISOString(),
-          geohash: ngeohash.encode(request.origin[0], request.origin[1], this.GEOHASH_PRECISION),
           stepsCount: route.steps.length,
         },
       };
@@ -242,7 +218,7 @@ export class RoutingService {
   }
 
   // -------------------------------------------------------------------------
-  // Clean public API (per the routing-redesign brief)
+  // Clean public API
   // -------------------------------------------------------------------------
 
   /** Full route: distance + duration + ETA + geometry + steps. */
@@ -250,7 +226,7 @@ export class RoutingService {
     origin: LatLng,
     destination: LatLng,
   ): Promise<RoutingResult> {
-    return this.routeCached(origin, destination);
+    return this.route(origin, destination);
   }
 
   /** Road distance only (engine-calculated; never straight-line). */
@@ -258,16 +234,16 @@ export class RoutingService {
     origin: LatLng,
     destination: LatLng,
   ): Promise<number> {
-    const r = await this.routeCached(origin, destination);
+    const r = await this.route(origin, destination);
     return r.distanceMeters;
   }
 
-  /** Road ETA only (A* base duration x ML multiplier). */
+  /** Road ETA only (Google Routes base duration x ML multiplier). */
   static async calculateETA(
     origin: LatLng,
     destination: LatLng,
   ): Promise<number> {
-    const r = await this.routeCached(origin, destination);
+    const r = await this.route(origin, destination);
     return r.etaSeconds;
   }
 
@@ -277,7 +253,7 @@ export class RoutingService {
     destination: LatLng,
     vehicleClass: VehicleClass,
   ): Promise<{ route: RoutingResult; fare: FareBreakdown }> {
-    const route = await this.routeCached(origin, destination);
+    const route = await this.route(origin, destination);
     const fare = fareService.computeFare({
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
@@ -294,91 +270,26 @@ export class RoutingService {
   }
 
   // -------------------------------------------------------------------------
-  // Cache-first routing
+  // In-flight deduplication only (no Redis cache)
   // -------------------------------------------------------------------------
 
-  private static async routeCached(
+  private static async route(
     origin: LatLng,
     destination: LatLng,
   ): Promise<RoutingResult> {
     const exactKey = this.exactKey(origin, destination);
 
-    // 1. Dedupe in-flight identical requests. The reservation is set
-    //    *synchronously* (before the first await) so that two requests that
-    //    arrive on the same tick share one computation rather than both
-    //    slipping past the check and hitting the engine twice.
+    // 1. Dedupe in-flight identical requests.
     const existing = this.inFlight.get(exactKey);
     if (existing) return existing;
 
     const promise = (async () => {
-      // 2. Try exact cache, then nearby cache (geohash neighbor reuse).
-      const cached = await this.lookupCache(origin, destination, exactKey);
-      if (cached) {
-        cached.cacheHit = true;
-        return cached;
-      }
-      // 3. Compute (single in-flight promise shared by all duplicates).
+      // No server-side cache — call engine directly.
       return this.computeRoute(origin, destination, exactKey);
     })().finally(() => this.inFlight.delete(exactKey));
 
     this.inFlight.set(exactKey, promise);
     return promise;
-  }
-
-  /**
-   * Two-level cache lookup:
-   *   L1 exact:    same snapped OD pair (4 dp ≈ 11m).
-   *   L2 nearby:   another OD pair sharing origin/dest geohash cells,
-   *                reused to avoid a second engine call for "nearby" trips.
-   */
-  private static async lookupCache(
-    origin: LatLng,
-    destination: LatLng,
-    exactKey: string,
-  ): Promise<RoutingResult | null> {
-    const start = process.hrtime.bigint();
-    try {
-      const exact = await this.withRedisTimeout(() => redis.get(exactKey));
-      if (exact) {
-        routingCacheLookupSeconds.observe(this.elapsed(start));
-        return JSON.parse(exact) as RoutingResult;
-      }
-
-      // L2: scan the 9-cell geohash neighborhood around each endpoint.
-      const originNeighbors = this.geohashNeighbors(origin);
-      const destNeighbors = this.geohashNeighbors(destination);
-      const candidateKeys: string[] = [];
-      for (const o of originNeighbors) {
-        for (const d of destNeighbors) {
-          candidateKeys.push(`route:nearby:${o}:${d}`);
-        }
-      }
-
-      const pipeline = redis.multi();
-      for (const k of candidateKeys) pipeline.get(k);
-      const results = (await this.withRedisTimeout(() => pipeline.exec())) as
-        | Array<[Error | null, string | null]>
-        | null;
-      routingCacheLookupSeconds.observe(this.elapsed(start));
-
-      if (results) {
-        for (const [, raw] of results) {
-          if (raw) {
-            const parsed = JSON.parse(raw) as RoutingResult;
-            // Promote the nearby hit into the exact key so the next identical
-            // request is a pure L1 hit.
-            await this.withRedisTimeout(() => redis.set(exactKey, raw, 'EX', this.EXACT_TTL_S)).catch(() => {});
-            return parsed;
-          }
-        }
-      }
-      return null;
-    } catch (err: any) {
-      // Redis down → treat as a miss and compute fresh. Never crash.
-      logger.warn({ err: err.message }, 'routing_cache_lookup_failed');
-      routingCacheLookupSeconds.observe(this.elapsed(start));
-      return null;
-    }
   }
 
   // -------------------------------------------------------------------------
@@ -402,17 +313,15 @@ export class RoutingService {
       result = this.syntheticRoute(origin, destination);
       routingFallbackTotal.inc();
       routingEngineSeconds.observe(this.elapsed(engineStart));
-      await this.writeCache(exactKey, origin, destination, result);
       return result;
     }
 
-    // Use original coordinates directly (no road-snapping — that required OSRM).
-    // Google Routes API handles coordinate snapping internally.
+    // Use original coordinates directly — Google Routes handles snapping internally.
     const routeOrigin: LatLng = origin;
     const routeDest: LatLng = destination;
 
     try {
-      // Use Google Routes API as the sole routing engine.
+      // Google Routes API as the sole routing engine.
       const engine = GoogleRoutesEngine;
       try {
         const res = await engine.route(routeOrigin, routeDest);
@@ -443,14 +352,13 @@ export class RoutingService {
           routingEngineRequestsTotal.inc({ status: 'error' });
         }
       }
-
     } catch (err: any) {
       logger.error({ err: err.message }, 'routing_compute_route_error');
       routingEngineRequestsTotal.inc({ status: 'error' });
     }
 
     if (!result) {
-      // Fell through both engines — synthesize a road-shaped route.
+      // Synthetic fallback — only when Google Routes is unreachable.
       result = this.syntheticRoute(origin, destination);
       routingFallbackTotal.inc();
     }
@@ -458,56 +366,12 @@ export class RoutingService {
     routingEngineSeconds.observe(this.elapsed(engineStart));
     routingEngineDurationSeconds.observe(this.elapsed(engineStart));
 
-    await this.writeCache(exactKey, origin, destination, result);
     return result;
-  }
-
-  private static async writeCache(
-    exactKey: string,
-    origin: LatLng,
-    destination: LatLng,
-    result: RoutingResult,
-  ): Promise<void> {
-    const payload = JSON.stringify(result);
-    // Exact key + nearby keys so "close enough" future requests reuse it.
-    const nearbyKeys = this.nearbyKeys(origin, destination);
-    try {
-      const multi = redis.multi();
-      multi.set(exactKey, payload, 'EX', this.EXACT_TTL_S);
-      for (const k of nearbyKeys) multi.set(k, payload, 'EX', this.NEARBY_TTL_S);
-      await this.withRedisTimeout(() => multi.exec());
-    } catch (err: any) {
-      logger.warn({ err: err.message }, 'routing_cache_write_failed');
-    }
-  }
-
-  /**
-   * Wrap a Redis operation in a short timeout so an unreachable or stalled
-   * Redis can NEVER block the routing hot path. On timeout/error we treat
-   * the value as absent (cache miss) and compute fresh — the service stays
-   * available even if the cache layer is fully down.
-   */
-  private static readonly REDIS_OP_TIMEOUT_MS = 800;
-
-  private static async withRedisTimeout<T>(op: () => Promise<T>): Promise<T | null> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), this.REDIS_OP_TIMEOUT_MS);
-    });
-    const opPromise = op().catch(() => null as T | null);
-    try {
-      return await Promise.race([opPromise, timeout]);
-    } catch {
-      return null;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
   }
 
   // -------------------------------------------------------------------------
   // Synthetic fallback — ALWAYS road-shaped (grid/grid-ish), never a straight
-  // 2-point "line". Used only when all routing engines are unreachable, so
-  // the app still paints a believable city-grid route and a non-zero fare.
+  // 2-point "line". Used only when Google Routes is unreachable.
   // -------------------------------------------------------------------------
 
   private static syntheticRoute(origin: LatLng, destination: LatLng): RoutingResult {
@@ -532,8 +396,7 @@ export class RoutingService {
     const durationSeconds = distanceMeters / SPEED_MPS;
 
     // Build a believable city-grid polyline: multiple Manhattan-style bends
-    // through intermediate intersections so it reads as real streets, never
-    // a single straight segment. Coordinates are [lng, lat] (GeoJSON order).
+    // through intermediate intersections so it reads as real streets.
     const midLat = (lat1 + lat2) / 2;
     const midLng = (lng1 + lng2) / 2;
     const quarterLat = lat1 + (lat2 - lat1) * 0.25;
@@ -566,37 +429,6 @@ export class RoutingService {
   }
 
   // -------------------------------------------------------------------------
-  // Cache key helpers
-  // -------------------------------------------------------------------------
-
-  private static exactKey(origin: LatLng, destination: LatLng): string {
-    const p = 4;
-    return `route:exact:${origin[0].toFixed(p)}:${origin[1].toFixed(p)}:${destination[0].toFixed(p)}:${destination[1].toFixed(p)}`;
-  }
-
-  /** Nearby keys = cartesian product of origin/dest geohash neighborhoods. */
-  private static nearbyKeys(origin: LatLng, destination: LatLng): string[] {
-    const o = this.geohashNeighbors(origin);
-    const d = this.geohashNeighbors(destination);
-    const keys: string[] = [];
-    for (const a of o) for (const b of d) keys.push(`route:nearby:${a}:${b}`);
-    return keys;
-  }
-
-  private static geohashNeighbors(coord: LatLng): string[] {
-    const base = ngeohash.encode(coord[0], coord[1], this.GEOHASH_PRECISION);
-    // 5x5 grid: base + 8 immediate neighbors + 16 second-ring neighbors = 25 cells
-    const firstRing = [base, ...ngeohash.neighbors(base)];
-    const secondRing = new Set<string>();
-    for (const hash of firstRing) {
-      for (const neighbor of ngeohash.neighbors(hash)) {
-        secondRing.add(neighbor);
-      }
-    }
-    return [...firstRing, ...secondRing];
-  }
-
-  // -------------------------------------------------------------------------
   // Small utilities
   // -------------------------------------------------------------------------
 
@@ -604,16 +436,24 @@ export class RoutingService {
     return Number(process.hrtime.bigint() - start) / 1e9;
   }
 
-  private static buildSpeedMap(steps: any[]): Record<string, number> {
-    const map: Record<string, number> = {};
-    for (const step of steps) {
-      const limit = step.speedLimitMph;
-      if (!limit) continue;
-      const keys = [step.name, step.ref].filter(
-        (k) => typeof k === 'string' && k.length > 0,
-      );
-      for (const k of keys) map[k] = limit;
+  // ---- Redis timeout wrapper for pricing:system_conditions (only Redis use) ----
+  private static readonly REDIS_OP_TIMEOUT_MS = 800;
+
+  private static async withRedisTimeout<T>(op: () => Promise<T>): Promise<T | null> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), this.REDIS_OP_TIMEOUT_MS);
+    });
+    const opPromise = op().catch(() => null as T | null);
+    try {
+      return await Promise.race([opPromise, timeout]);
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    return map;
   }
 }
+
+// Need to import redis for pricing cache only
+import { redis } from '../../config/redis';
