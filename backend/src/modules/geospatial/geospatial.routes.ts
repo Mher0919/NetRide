@@ -68,11 +68,13 @@ router.get('/search', authMiddleware, async (req, res) => {
     const userLon = lon ? parseFloat(lon as string) : undefined;
 
     // Primary: local PostGIS places database
-    const localResults = await PlacesService.search(
-      q as string,
-      userLat,
-      userLon,
-    );
+    let localResults: any[] = [];
+    try {
+      localResults = await PlacesService.search(q as string, userLat, userLon);
+    } catch {
+      // Places table may not exist yet (migration deferred or PgBouncer blocked)
+      // Fall through to API providers.
+    }
     if (localResults.length >= 3) {
       return res.json(localResults);
     }

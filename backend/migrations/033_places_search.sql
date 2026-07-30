@@ -2,9 +2,19 @@
 -- Enables PostGIS + pg_trgm, creates the places table with spatial indexes,
 -- and seeds initial California POI data for geospatial search.
 
--- 1. Extensions (idempotent)
-CREATE EXTENSION IF NOT EXISTS "postgis";
-CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+-- 1. Extensions (idempotent, wrapped in DO blocks so PgBouncer
+--    transaction-mode doesn't abort the rest of the migration).
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS "postgis";
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'postgis: % (non-fatal, enable manually if needed)', SQLERRM;
+END $$;
+
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pg_trgm: % (non-fatal, enable manually if needed)', SQLERRM;
+END $$;
 
 -- 2. Places table
 CREATE TABLE IF NOT EXISTS places (
