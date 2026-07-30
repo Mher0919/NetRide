@@ -23,6 +23,29 @@ router.post('/route', auth_middleware_1.authMiddleware, async (req, res) => {
     }
 });
 /**
+ * GET /api/geospatial/autocomplete
+ * Query: q (required, min 2 chars)
+ *
+ * Returns up to 5 destination suggestions based on common search patterns.
+ * Matches are prefix-based: "star" → ["Starbucks"], "mcd" → ["McDonald's"].
+ */
+router.get('/autocomplete', auth_middleware_1.authMiddleware, async (req, res) => {
+    try {
+        const q = (req.query.q || '').trim();
+        if (q.length < geospatial_service_1.GeospatialService.MIN_AUTOCOMPLETE_LEN) {
+            return res.status(400).json({ error: 'Query (q) must be at least 2 characters' });
+        }
+        const lat = req.query.lat ? parseFloat(req.query.lat) : undefined;
+        const lon = req.query.lon ? parseFloat(req.query.lon) : undefined;
+        const suggestions = await geospatial_service_1.GeospatialService.autocompleteSearch(q, lat, lon);
+        res.json({ suggestions });
+    }
+    catch (err) {
+        console.error('[GEOSPATIAL] Autocomplete Error:', err.message);
+        res.status(500).json({ error: 'Failed to get suggestions' });
+    }
+});
+/**
  * GET /api/geospatial/search
  * Query: q, lat, lon
  */

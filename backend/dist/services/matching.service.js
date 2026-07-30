@@ -45,7 +45,7 @@ exports.matchingService = {
         const trip = await ride_repository_1.RideRepository.findById(tripId);
         if (!trip)
             return;
-        // 1. Fetch driver location & OSRM routes
+        // 1. Fetch driver location & routes (via RoutingService / ORS)
         let driverLoc = null;
         let driverToPickupRoute = null;
         try {
@@ -101,6 +101,12 @@ exports.matchingService = {
                 const parsed = JSON.parse(pending);
                 if (parsed.index === index) {
                     await redis_1.redis.del(`dispatch:${tripId}`);
+                    // Guard: only proceed if the trip is still REQUESTED (not already accepted)
+                    const currentTrip = await ride_repository_1.RideRepository.findById(tripId);
+                    if (!currentTrip || currentTrip.status !== types_1.TripStatus.REQUESTED) {
+                        console.log(`[DISPATCH] Driver ${driverId} timed out for trip ${tripId}, but ride is already ${currentTrip?.status}. Skipping.`);
+                        return;
+                    }
                     console.log(`[DISPATCH] Driver ${driverId} timed out for trip ${tripId}. Moving to next.`);
                     await this.dispatchToNextDriver(io, tripId, drivers, index + 1);
                 }

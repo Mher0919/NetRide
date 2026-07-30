@@ -5,6 +5,12 @@ export interface FareInput {
     /** Expected trip duration in seconds (for the time component). */
     durationSeconds: number;
     vehicleClass: VehicleClass;
+    /**
+     * Price per mile from the dynamic pricing engine.
+     * When set, replaces the static PER_KM_RATE for the distance component,
+     * using the highest default latest price in the class range.
+     */
+    pricePerMile?: number;
 }
 export interface FareBreakdown {
     baseFare: number;

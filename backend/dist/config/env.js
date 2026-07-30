@@ -15,15 +15,32 @@ const envSchema = zod_1.z.object({
     REDIS_URL: zod_1.z.string().default('redis://localhost:6379'),
     JWT_SECRET: zod_1.z.string(),
     GOOGLE_MAPS_API_KEY: zod_1.z.string().optional(),
-    OSRM_URL: zod_1.z.string().default('http://localhost:5000/route/v1/driving'),
-    // Path to the baked regional OSRM road-network extract used by the
-    // in-process engine (@osrm/osrm). Baked into the image at build time via
-    // scripts/build-osrm.sh (Los Angeles County by default — light & fast).
+    GOOGLE_ROUTES_API_KEY: zod_1.z.string().optional(),
+    // ---- Routing engine: A* (PRIMARY) ----------------------------------------
+    // Self-hosted A* routing engine. Loads preprocessed graph from disk.
+    // Fast, free, and runs entirely in-memory. No external API calls.
+    ROUTING_GRAPH_PATH: zod_1.z.string().optional(),
+    // ---- Fallback routing engine: OSRM (self-hosted) -------------------------
+    // Base URL of the self-hosted OSRM service (e.g. http://netride-osrm.internal:5000).
+    // Used as fallback when A* engine is unavailable or graph not loaded.
+    OSRM_BASE_URL: zod_1.z.string().optional(),
+    // Per-request timeout to the local OSRM engine (ms).
+    OSRM_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).optional(),
+    // Path on disk to the pre-processed OSRM road network (.osrm family).
     OSRM_DATA_PATH: zod_1.z.string().default('./data/la.osrm'),
+    // ---- Fallback routing engine: OpenRouteService (ORS) --------------------
+    // Get API key from https://openrouteservice.org/
+    ORS_API_KEY: zod_1.z.string().optional(),
+    ORS_PROFILE: zod_1.z.string().default('driving-car'),
+    ORS_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(8000),
     DRIVER_MATCH_RADIUS_KM: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     DRIVER_ACCEPT_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15000),
     DRIVER_PICKUP_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15),
     DRIVER_DESTINATION_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(30),
+    // Grace period: after this many seconds at pickup/dropoff, allow completion even if slightly outside strict proximity
+    DRIVER_PROXIMITY_GRACE_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(30),
+    // Wait timer: max seconds to wait for rider at pickup before driver can force-start
+    DRIVER_WAIT_TIMER_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(120),
     // ---- Face verification --------------------------------------------------
     GMAIL_CLIENT_ID: zod_1.z.string().optional(),
     GMAIL_CLIENT_SECRET: zod_1.z.string().optional(),
@@ -35,6 +52,7 @@ const envSchema = zod_1.z.object({
     ADMIN_URL: zod_1.z.string().default('http://localhost:5173'),
     SUPABASE_URL: zod_1.z.string().optional(),
     SUPABASE_ANON_KEY: zod_1.z.string().optional(),
+    SUPABASE_SERVICE_ROLE_KEY: zod_1.z.string().optional(),
     TWILIO_ACCOUNT_SID: zod_1.z.string().optional(),
     TWILIO_AUTH_TOKEN: zod_1.z.string().optional(),
     TWILIO_VERIFY_SERVICE_SID: zod_1.z.string().optional(),
@@ -65,9 +83,6 @@ const envSchema = zod_1.z.object({
     // ---- Observability & scaling -------------------------------------------
     PINO_LOG_LEVEL: zod_1.z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     SENTRY_DSN: zod_1.z.string().optional(),
-    // Comma-separated OSRM URLs for the internal load balancer. Falls back
-    // to single OSRM_URL when unset so the dev docker-compose keeps working.
-    OSRM_URLS: zod_1.z.string().optional(),
     MATCH_WORKER_CONCURRENCY: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(4),
     DISPATCH_FANOUT_SIZE: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     DRIVER_SCORE_CACHE_TTL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(300),
@@ -81,6 +96,12 @@ const envSchema = zod_1.z.object({
     DIRECT_DATABASE_URL: zod_1.z.string().optional(),
     GEOAPIFY_API_KEY: zod_1.z.string().optional(),
     DATABASE_REPLICA_URL: zod_1.z.string().optional(),
+    // ---- Push notifications (FCM) -------------------------------------------
+    // Path to Firebase service account JSON. If not set, push notifications
+    // are logged but not actually sent (useful for development/testing).
+    FCM_SERVICE_ACCOUNT_PATH: zod_1.z.string().optional(),
+    // Alternatively, paste the JSON directly (base64-encoded for safety).
+    FCM_SERVICE_ACCOUNT_B64: zod_1.z.string().optional(),
 });
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {

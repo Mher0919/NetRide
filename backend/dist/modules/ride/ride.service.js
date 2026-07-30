@@ -52,6 +52,7 @@ const driver_service_1 = require("../driver/driver.service");
 const testUser_1 = require("../../utils/testUser");
 const queue_1 = require("../../queue/queue");
 const metrics_1 = require("../../observability/metrics");
+const tracing_1 = require("../../utils/tracing");
 class RideService {
     static async rateRide(data) {
         const client = await database_1.pool.connect();
@@ -117,74 +118,94 @@ class RideService {
             client.release();
         }
     }
-    static async requestRide(riderId, pickup, destination, requestedClass = types_1.VehicleClass.CORE, scheduledAt, isScheduled = false) {
-        console.log(`[RIDE] New request from rider ${riderId} for class ${requestedClass}${isScheduled ? ' [SCHEDULED]' : ''}. Pickup: ${pickup.lat}, ${pickup.lng}`);
-        // Snapshot rider rating
-        const riderRes = await database_1.pool.query('SELECT rating FROM users WHERE id = $1', [riderId]);
-        const snapshotRating = riderRes.rows[0]?.rating || 5.0;
-        // Get Route
-        const route = await geospatial_service_1.GeospatialService.getRoute([pickup.lat, pickup.lng], [destination.lat, destination.lng]).catch(() => null);
-        const distanceKm = route ? (route.distance / 1000) : 10.0;
-        const etaSeconds = route ? route.eta : 600;
-        // Calculate maximum fare and saving likelihood
-        const estimate = await fare_service_1.fareService.calculateRiderPriceEstimate(pickup.lat, pickup.lng, requestedClass, distanceKm);
-        // Use a transactional insert for safety
-        const res = await database_1.pool.query(`INSERT INTO rides (
-        rider_id, status, pickup_lat, pickup_lng, pickup_address,
-        destination_lat, destination_lng, destination_address,
-        requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
-        distance_meters, duration_seconds, initial_max_fare, saving_likelihood
-      )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-       RETURNING *`, [
-            riderId,
-            types_1.TripStatus.REQUESTED,
-            pickup.lat,
-            pickup.lng,
-            pickup.address,
-            destination.lat,
-            destination.lng,
-            destination.address,
-            requestedClass || 'CORE',
-            snapshotRating,
-            scheduledAt || null,
-            isScheduled,
-            route ? Math.round(route.distance) : null,
-            etaSeconds,
-            estimate.maxFare,
-            estimate.savingLikelihood
-        ]);
-        const trip = await ride_repository_1.RideRepository.findById(res.rows[0].id);
-        if (!trip)
-            throw new Error('Failed to create trip record');
-        if (route) {
-            trip.route_geometry = route.geometry;
-        }
-        // Trigger Matching ONLY if it's NOT a future scheduled ride 
-        // or if scheduledAt is within the next 15 minutes.
-        const isNow = !isScheduled || (scheduledAt && (scheduledAt.getTime() - Date.now() < 15 * 60 * 1000));
-        if (isNow) {
-            if (env_1.env.LEGACY_SYNC_MATCHING) {
-                Promise.resolve().then(() => __importStar(require('../../services/matching.service'))).then(({ matchingService }) => {
-                    matchingService.findAndDispatch(app_1.io, trip.id, pickup.lat, pickup.lng, requestedClass, riderId);
-                });
+    static async requestRide(riderId, pickup, destination, requestedClass = types_1.VehicleClass.CORE, scheduledAt, isScheduled = false, idempotencyKey) {
+        return (0, tracing_1.traceAsync)('RideService.requestRide', async () => {
+            const traceId = (0, tracing_1.getCurrentTraceId)();
+            console.log(`[RIDE] New request from rider ${riderId} for class ${requestedClass}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
+            // Idempotency: if key provided, check for existing ride
+            if (idempotencyKey) {
+                const existing = await database_1.pool.query(`SELECT * FROM rides WHERE idempotency_key = $1 AND rider_id = $2`, [idempotencyKey, riderId]);
+                if (existing.rows.length > 0) {
+                    console.log(`[RIDE] ♻️ Idempotent request - returning existing trip ${existing.rows[0].id}`);
+                    const existingTrip = await ride_repository_1.RideRepository.findById(existing.rows[0].id);
+                    if (!existingTrip)
+                        throw new Error('Idempotent ride not found');
+                    return existingTrip;
+                }
             }
-            else {
-                queue_1.matchQueue.add('matchRide', {
-                    tripId: trip.id,
-                    pickupLat: pickup.lat,
-                    pickupLng: pickup.lng,
-                    requestedClass,
-                    riderId,
-                }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
-                metrics_1.matchJobsTotal.inc({ outcome: 'enqueued' });
+            // Snapshot rider rating
+            const riderRes = await database_1.pool.query('SELECT rating FROM users WHERE id = $1', [riderId]);
+            const snapshotRating = riderRes.rows[0]?.rating || 5.0;
+            // Get Route
+            const routeStart = Date.now();
+            const route = await geospatial_service_1.GeospatialService.getRoute([pickup.lat, pickup.lng], [destination.lat, destination.lng]).catch(() => null);
+            console.log(`[RIDE] Route fetched in ${Date.now() - routeStart}ms (cached=${route != null})`);
+            const distanceKm = route ? (route.distance / 1000) : 10.0;
+            const etaSeconds = route ? route.eta : 600;
+            // Calculate maximum fare and saving likelihood
+            const fareStart = Date.now();
+            const estimate = await fare_service_1.fareService.calculateRiderPriceEstimate(pickup.lat, pickup.lng, requestedClass, distanceKm);
+            console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms`);
+            // Use a transactional insert for safety
+            const res = await database_1.pool.query(`INSERT INTO rides (
+          rider_id, status, pickup_lat, pickup_lng, pickup_address,
+          destination_lat, destination_lng, destination_address,
+          requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
+          distance_meters, duration_seconds, initial_max_fare, saving_likelihood,
+          idempotency_key
+        )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         RETURNING *`, [
+                riderId,
+                types_1.TripStatus.REQUESTED,
+                pickup.lat,
+                pickup.lng,
+                pickup.address,
+                destination.lat,
+                destination.lng,
+                destination.address,
+                requestedClass || 'CORE',
+                snapshotRating,
+                scheduledAt || null,
+                isScheduled,
+                route ? Math.round(route.distance) : null,
+                etaSeconds,
+                estimate.maxFare,
+                estimate.savingLikelihood,
+                idempotencyKey || null
+            ]);
+            const trip = await ride_repository_1.RideRepository.findById(res.rows[0].id);
+            if (!trip)
+                throw new Error('Failed to create trip record');
+            if (route) {
+                trip.route_geometry = route.geometry;
             }
-        }
-        // Update Redis Demand
-        redis_1.redis.incr(`demand:count:${requestedClass}`).then(() => {
-            redis_1.redis.expire(`demand:count:${requestedClass}`, 600);
+            // Trigger Matching ONLY if it's NOT a future scheduled ride
+            // or if scheduledAt is within the next 15 minutes.
+            const isNow = !isScheduled || (scheduledAt && (scheduledAt.getTime() - Date.now() < 15 * 60 * 1000));
+            if (isNow) {
+                if (env_1.env.LEGACY_SYNC_MATCHING) {
+                    Promise.resolve().then(() => __importStar(require('../../services/matching.service'))).then(({ matchingService }) => {
+                        matchingService.findAndDispatch(app_1.io, trip.id, pickup.lat, pickup.lng, requestedClass, riderId);
+                    });
+                }
+                else {
+                    queue_1.matchQueue.add('matchRide', {
+                        tripId: trip.id,
+                        pickupLat: pickup.lat,
+                        pickupLng: pickup.lng,
+                        requestedClass,
+                        riderId,
+                    }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
+                    metrics_1.matchJobsTotal.inc({ outcome: 'enqueued' });
+                }
+            }
+            // Update Redis Demand
+            redis_1.redis.incr(`demand:count:${requestedClass}`).then(() => {
+                redis_1.redis.expire(`demand:count:${requestedClass}`, 600);
+            });
+            return trip;
         });
-        return trip;
     }
     static async acceptTrip(tripId, driverId) {
         const trip = await ride_repository_1.RideRepository.findById(tripId);
@@ -262,10 +283,11 @@ class RideService {
             await redis_1.redis.del(`match:queue:dispatched:${tripId}`);
         }
         await redis_1.redis.del(`dispatch:lock:${tripId}`);
+        await redis_1.redis.del(`dispatch:${tripId}`);
         const driverLoc = await locations_service_1.LocationsService.getDriverLocation(driverId);
         updatedTrip.driver_location = driverLoc;
         // Navigation cache + route_metadata for the pickup leg. We resolve
-        // the route OSRM-side, cache it for the speeding detector + driver
+        // the route via the routing service, cache it for the speeding detector + driver
         // app, persist a snapshot on the ride, and emit the start event.
         if (driverLoc) {
             try {
@@ -373,6 +395,10 @@ class RideService {
         // Security: Only the rider or the assigned driver can cancel
         if (trip.rider_id !== userId && trip.driver_id !== userId) {
             throw new Error('Unauthorized to cancel this trip');
+        }
+        // Only allow cancellation before pickup (REQUESTED or ACCEPTED)
+        if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
+            throw new Error('Cannot cancel a ride that is already in progress or completed');
         }
         const extra = { cancelled_at: new Date() };
         // If driver was assigned, cleanup trajectory

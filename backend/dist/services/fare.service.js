@@ -67,10 +67,13 @@ exports.fareService = {
      */
     computeFare(input) {
         const distanceKm = input.distanceMeters / 1000;
+        const distanceMiles = distanceKm * 0.621371;
         const durationMinutes = input.durationSeconds / 60;
         const classMultiplier = CLASS_DISTANCE_MULTIPLIER[input.vehicleClass] ?? 1.0;
         const baseFare = BASE_FARE * classMultiplier;
-        const distanceFare = distanceKm * PER_KM_RATE * classMultiplier;
+        const distanceFare = input.pricePerMile != null
+            ? distanceMiles * input.pricePerMile * classMultiplier
+            : distanceKm * PER_KM_RATE * classMultiplier;
         const timeFare = durationMinutes * PER_MINUTE_RATE * classMultiplier;
         // Surge is 1.0 on the planning path; recomputed from live market at
         // request time by calculateRiderPriceEstimate when dynamic pricing applies.

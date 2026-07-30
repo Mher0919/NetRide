@@ -9,9 +9,12 @@ const user_controller_1 = require("./user.controller");
 const auth_middleware_1 = require("../../middleware/auth.middleware");
 const validate_middleware_1 = require("../../middleware/validate.middleware");
 const favorite_routes_1 = __importDefault(require("./favorite.routes"));
+const search_history_routes_1 = __importDefault(require("./search-history.routes"));
 const router = (0, express_1.Router)();
 // Mount Favorite Routes
 router.use('/', favorite_routes_1.default);
+// Mount Search History Routes
+router.use('/', search_history_routes_1.default);
 router.get('/profile', auth_middleware_1.authMiddleware, user_controller_1.UserController.getProfile);
 router.patch('/profile', auth_middleware_1.authMiddleware, (0, validate_middleware_1.validate)(user_controller_1.updateProfileSchema), user_controller_1.UserController.updateProfile);
 router.post('/verify-identity', auth_middleware_1.authMiddleware, (0, validate_middleware_1.validate)(user_controller_1.verifyIdentitySchema), user_controller_1.UserController.verifyIdentity);

@@ -207,7 +207,7 @@ class AdminController {
                 return res.status(404).json({ error: 'User record not found.' });
             }
             const row = userRes.rows[0];
-            // Reconstruct user (top-level) fields and nest driver fields.
+            // Reconstruct user (top-level) fields.
             const user = {
                 id: row.id,
                 email: row.email,
@@ -228,6 +228,12 @@ class AdminController {
                 created_at: row.created_at,
                 updated_at: row.updated_at,
             };
+            // Riders have no driver record (d.user_id is NULL)
+            if (row.user_id === null) {
+                user.driver_profile = null;
+                res.json(user);
+                return;
+            }
             // Build driver_profile
             const driverProfile = {
                 user_id: row.user_id,
@@ -1721,6 +1727,9 @@ class AdminController {
         }
         try {
             const buffer = Buffer.from(image, 'base64');
+            if (buffer.length > 5 * 1024 * 1024) {
+                return res.status(413).json({ error: 'File too large. Max 5MB.' });
+            }
             const fileType = field.replace(/_url$/, '');
             const adminId = req.user?.id || id;
             const { id: fileId, url } = await storage_service_1.StorageService.upload(buffer, {

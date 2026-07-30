@@ -9,6 +9,7 @@ const fare_service_1 = require("../../services/fare.service");
 const geospatial_service_1 = require("../geospatial/geospatial.service");
 const ride_messages_repository_1 = require("./ride_messages.repository");
 const twilio_service_1 = require("../../services/twilio.service");
+const push_notification_service_1 = require("../../services/push-notification.service");
 const database_1 = require("../../config/database");
 const RequestRideSchema = zod_1.z.object({
     pickup: zod_1.z.object({
@@ -63,7 +64,7 @@ class RideController {
     static async estimateRide(req, res) {
         try {
             const validatedData = EstimateRideSchema.parse(req.body);
-            // Calculate distance using OSRM routing, but never block the request on
+            // Calculate distance using the routing service, but never block the request on
             // a slow/unreachable router — fall back to a synthetic distance fast.
             const route = await Promise.race([
                 geospatial_service_1.GeospatialService.getRoute([validatedData.pickup.lat, validatedData.pickup.lng], [validatedData.destination.lat, validatedData.destination.lng]).catch(() => null),
@@ -253,6 +254,19 @@ class RideController {
                 ...callToken,
                 tripId,
             });
+            // Notify the other party via push (non-blocking)
+            const counterpartId = party.trip.rider_id === userId
+                ? party.trip.driver_id
+                : party.trip.rider_id;
+            const counterpartRole = party.trip.rider_id === userId ? 'driver' : 'rider';
+            try {
+                const senderRes = await database_1.pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+                const senderName = senderRes.rows[0]?.full_name || 'Someone';
+                await (0, push_notification_service_1.pushIncomingCall)(counterpartId, counterpartRole, senderName, tripId);
+            }
+            catch (pushErr) {
+                console.error(`[RIDE] ⚠️ Incoming call push failed (non-fatal): ${pushErr.message}`);
+            }
         }
         catch (error) {
             console.error(`[RIDE] ❌ Mint call token error: ${error.message}`);

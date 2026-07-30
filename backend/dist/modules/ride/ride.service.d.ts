@@ -10,7 +10,7 @@ export declare class RideService {
         address: string;
     }, destination: Location & {
         address: string;
-    }, requestedClass?: VehicleClass, scheduledAt?: Date, isScheduled?: boolean): Promise<Trip>;
+    }, requestedClass?: VehicleClass, scheduledAt?: Date, isScheduled?: boolean, idempotencyKey?: string): Promise<Trip>;
     static acceptTrip(tripId: string, driverId: string): Promise<Trip>;
     static updateTripStatus(tripId: string, status: any, userId: string): Promise<Trip>;
     static cancelTrip(tripId: string, userId: string): Promise<Trip>;

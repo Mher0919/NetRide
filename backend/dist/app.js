@@ -68,6 +68,8 @@ const geospatial_routes_1 = __importDefault(require("./modules/geospatial/geospa
 const navigation_routes_1 = __importDefault(require("./modules/navigation/navigation.routes"));
 const routing_routes_1 = __importDefault(require("./modules/routing/routing.routes"));
 const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
+const routing_api_1 = __importDefault(require("./routing/api/routing-api"));
+const push_routes_1 = __importDefault(require("./modules/push/push.routes"));
 const geospatial_service_1 = require("./modules/geospatial/geospatial.service");
 const upload_service_1 = require("./services/upload.service");
 const speeding_detector_1 = require("./services/speeding_detector");
@@ -98,8 +100,8 @@ app.use((0, cors_1.default)());
 // instead of the proxy IP. This fixes rate-limit key collisions
 // where all users share one rate-limit bucket behind Render.
 app.set('trust proxy', 1);
-app.use(express_1.default.json({ limit: '50mb' }));
-app.use(express_1.default.urlencoded({ limit: '50mb', extended: true }));
+app.use(express_1.default.json({ limit: '8mb' }));
+app.use(express_1.default.urlencoded({ limit: '8mb', extended: true }));
 // Request-id + child logger context. Mount BEFORE rate-limit so even
 // 429s get a log line and a metric.
 app.use(pinoHttp_1.requestContext);
@@ -186,8 +188,10 @@ app.use('/api/ride', ride_routes_1.default);
 app.use('/api/geospatial', geospatial_routes_1.default);
 app.use('/api/navigation', navigation_routes_1.default);
 app.use('/api/routing', routing_routes_1.default);
+app.use('/api/routing', routing_api_1.default);
 app.use('/api/admin', admin_routes_1.default);
 app.use('/api/files', files_routes_1.default);
+app.use('/api/push', push_routes_1.default);
 app.post('/api/upload', upload_service_1.UploadService.upload);
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -483,9 +487,54 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
     await runMigrations();
     logger_1.logger.info({ port: Number(PORT), env: env_1.env.NODE_ENV }, 'server_listening');
     logger_1.logger.info({ set: !!env_1.env.JWT_SECRET, length: env_1.env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
-    // Pre-cache OSRM routes for the launch market (Hollywood / UCLA /
-    // Beverly Hills / Westwood). The coords are landmarks, not
-    // pre-cached OD pairs — preCacheHotZones computes the full grid.
+    // Initialize A* routing engine (self-hosted, in-memory).
+    // Loads preprocessed graph from disk if ROUTING_GRAPH_PATH is set.
+    try {
+        const { astarEngine } = await Promise.resolve().then(() => __importStar(require('./routing/engine/astar-engine')));
+        if (env_1.env.ROUTING_GRAPH_PATH) {
+            await astarEngine.loadGraph(env_1.env.ROUTING_GRAPH_PATH);
+            logger_1.logger.info({ path: env_1.env.ROUTING_GRAPH_PATH }, 'astar_engine_initialized');
+        }
+        else {
+            logger_1.logger.warn('routing_graph_path_not_set_engine_not_loaded');
+        }
+    }
+    catch (astarErr) {
+        logger_1.logger.warn({ err: astarErr.message }, 'astar_engine_init_failed_falling_back');
+    }
+    logger_1.logger.info({
+        astar: 'PRIMARY',
+        osrm: env_1.env.OSRM_BASE_URL ? '(fallback)' : '(not set)',
+        ors: env_1.env.ORS_API_KEY ? '(last resort)' : '(not set)',
+    }, 'routing_engines');
+    // -----------------------------------------------------------------
+    // Self-keep-alive: ping our own /health/live every 60s so Render
+    // free-tier doesn't spin the service down. Uses Node's http module
+    // because curl isn't available in the Docker image.
+    // -----------------------------------------------------------------
+    const keepAliveUrl = `http://127.0.0.1:${PORT}/health/live`;
+    setInterval(() => {
+        const http = require('http');
+        http.get(keepAliveUrl, (res) => {
+            // consume data to free memory
+            res.resume();
+        }).on('error', () => {
+            // silent — the endpoint may not be ready yet during cold start
+        });
+    }, 60000);
+    // Ping OSRM every 60s to prevent its free-tier service from spinning down.
+    if (env_1.env.OSRM_BASE_URL) {
+        const osrmUrl = `${env_1.env.OSRM_BASE_URL}/health`;
+        setInterval(() => {
+            const client = osrmUrl.startsWith('https') ? require('https') : require('http');
+            client.get(osrmUrl, (res) => {
+                res.resume();
+            }).on('error', () => { });
+        }, 60000);
+    }
+    // Pre-cache routes for the launch market (Hollywood / UCLA / Beverly Hills
+    // / Westwood). preCacheHotZones computes the full grid — the routing
+    // service caches the results so future identical requests are instant.
     geospatial_service_1.GeospatialService.preCacheHotZones([
         [34.0928, -118.3287], // Hollywood
         [34.0639, -118.4455], // Westwood / UCLA

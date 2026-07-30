@@ -2,44 +2,42 @@
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
-var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GeospatialService = void 0;
 const axios_1 = __importDefault(require("axios"));
-const http_1 = __importDefault(require("http"));
-const p_throttle_1 = __importDefault(require("p-throttle"));
-const env_1 = require("../../config/env");
 const redis_1 = require("../../config/redis");
-const ml_eta_service_1 = require("../../services/ml-eta.service");
-const road_classifier_1 = require("../../utils/road-classifier");
-const local_osrm_engine_1 = require("../routing/local-osrm.engine");
+const env_1 = require("../../config/env");
+const routing_service_1 = require("../routing/routing.service");
+const logger_1 = require("../../observability/logger");
+const circuit_breaker_1 = require("../../utils/circuit-breaker");
 class GeospatialService {
+    /**
+     * All routing flows through the single RoutingService (which owns the
+     * provider selection, cache, dedup, retries, and fallback). GeospatialService
+     * is a thin adapter that maps the routing result into the legacy `RouteResponse`
+     * shape the dispatch / navigation / controller layers expect.
+     */
     static async getRoute(start, end, isPreCache = false) {
-        const cacheKey = this.generateCacheKey(start, end);
-        // 1. L1 - CACHE LAYER
-        const cached = await redis_1.redis.get(cacheKey);
-        if (cached) {
-            const result = JSON.parse(cached);
-            result.cache_hit = true;
-            return result;
-        }
-        if (this.inFlightRequests.has(cacheKey)) {
-            return this.inFlightRequests.get(cacheKey);
-        }
         const requestStartTime = Date.now();
-        const requestPromise = this.fetchAndProcessRoute(start, end, cacheKey, isPreCache ? 5 : 0);
-        this.inFlightRequests.set(cacheKey, requestPromise);
-        try {
-            const result = await requestPromise;
+        const route = await routing_service_1.RoutingService.calculateRoute([start[0], start[1]], [end[0], end[1]]);
+        const multiplier = route.durationSeconds > 0
+            ? route.etaSeconds / route.durationSeconds
+            : 1.2;
+        if (!isPreCache) {
             const totalLatency = Date.now() - requestStartTime;
-            if (!isPreCache && this.isOsrmOnline) {
-                console.log(`[GEOSPATIAL] ⚡ Request resolved in ${totalLatency}ms (Engine: ${result.engine}, Cache: ${result.cache_hit})`);
-            }
-            return result;
+            logger_1.logger.info({ latencyMs: totalLatency, engine: route.engine, cacheHit: route.cacheHit }, 'geospatial_route');
         }
-        finally {
-            this.inFlightRequests.delete(cacheKey);
-        }
+        return {
+            distance: route.distanceMeters,
+            osrm_duration: route.durationSeconds,
+            eta: route.etaSeconds,
+            geometry: route.geometry,
+            steps: route.steps,
+            speedLimitsByRoad: route.speedLimitsByRoad,
+            cache_hit: route.cacheHit,
+            model_multiplier: Math.round(multiplier * 100) / 100,
+            engine: route.engine,
+        };
     }
     static isInCalifornia(lat, lon) {
         return (lat >= this.CA_BBOX.south &&
@@ -62,7 +60,7 @@ class GeospatialService {
             // cache miss or redis down — proceed
         }
         try {
-            const resp = await axios_1.default.get('https://nominatim.openstreetmap.org/search', {
+            const resp = await circuit_breaker_1.nominatimBreaker.execute(() => axios_1.default.get('https://nominatim.openstreetmap.org/search', {
                 params: {
                     q: zip,
                     format: 'json',
@@ -71,7 +69,7 @@ class GeospatialService {
                 },
                 headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
                 timeout: 5000,
-            });
+            }));
             const data = resp.data;
             if (!Array.isArray(data) || data.length === 0)
                 return null;
@@ -134,20 +132,20 @@ class GeospatialService {
                 try {
                     const formParams = new URLSearchParams();
                     formParams.append('data', overpassQuery);
-                    const resp = await axios_1.default.post('https://overpass-api.de/api/interpreter', formParams, {
+                    const resp = await circuit_breaker_1.overpassBreaker.execute(() => axios_1.default.post('https://overpass-api.de/api/interpreter', formParams, {
                         headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
                         timeout: 25000,
-                    });
+                    }));
                     return resp.data?.elements ?? [];
                 }
                 catch (postErr) {
                     console.warn(`[GEOSPATIAL] Overpass POST failed (${postErr.message}), trying GET...`);
                     // Fallback to GET
-                    const resp = await axios_1.default.get('https://overpass-api.de/api/interpreter', {
+                    const resp = await circuit_breaker_1.overpassBreaker.execute(() => axios_1.default.get('https://overpass-api.de/api/interpreter', {
                         params: { data: overpassQuery },
                         headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
                         timeout: 25000,
-                    });
+                    }));
                     return resp.data?.elements ?? [];
                 }
             };
@@ -202,399 +200,347 @@ class GeospatialService {
         results.sort((a, b) => (a.distance_miles ?? 999) - (b.distance_miles ?? 999));
         return results.slice(0, 15);
     }
+    static get googleMapsApiKey() {
+        return env_1.env.GOOGLE_ROUTES_API_KEY || env_1.env.GOOGLE_MAPS_API_KEY;
+    }
+    /** Google Places Text Search — returns nearby places with coordinates. */
+    static async googlePlacesSearchText(query, userLat, userLon) {
+        const apiKey = this.googleMapsApiKey;
+        if (!apiKey)
+            return [];
+        try {
+            const params = {
+                query,
+                key: apiKey,
+                language: 'en',
+            };
+            if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+                params.location = `${userLat},${userLon}`;
+                params.radius = 50000;
+            }
+            const resp = await circuit_breaker_1.googlePlacesBreaker.execute(() => axios_1.default.get(`${this.GOOGLE_PLACES_BASE}/textsearch/json`, { params, timeout: 5000 }));
+            const results = resp.data?.results ?? [];
+            if (results.length === 0)
+                return [];
+            return results.slice(0, this.MAX_PLACES).map((r) => {
+                const loc = r.geometry?.location || {};
+                const lat = loc.lat ?? 0;
+                const lng = loc.lng ?? 0;
+                const addr = r.formatted_address || '';
+                const shortAddr = addr.split(',')[0] || '';
+                const displayName = r.name && shortAddr ? `${r.name}, ${shortAddr}` : (r.name || addr || query);
+                const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon) && lat
+                    ? this.haversineMiles({ lat: userLat, lon: userLon }, { lat, lon: lng })
+                    : undefined;
+                return {
+                    display_name: displayName,
+                    lat,
+                    lon: lng,
+                    type: (r.types?.[0] || 'point_of_interest').replace(/_/g, ' ').toLowerCase(),
+                    state: '',
+                    distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
+                    address: {
+                        road: addr.split(',')[0] || '',
+                        city: addr.split(',')[1]?.trim() || '',
+                        state: addr.split(',')[2]?.trim()?.split(' ')[0] || '',
+                        postcode: '',
+                    },
+                    is_suggestion: false,
+                    place_id: r.place_id,
+                };
+            });
+        }
+        catch {
+            return [];
+        }
+    }
+    /** Google Places Query Autocomplete — cheap call, no Place Details.
+     *  Uses user's coordinates as approximate location for results.
+     *  Place Details ($17/1000) is deferred until user selects a result. */
+    static async googlePlacesAutocomplete(query, userLat, userLon) {
+        const apiKey = this.googleMapsApiKey;
+        if (!apiKey)
+            return [];
+        try {
+            const params = {
+                input: query,
+                key: apiKey,
+                language: 'en',
+            };
+            if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+                params.location = `${userLat},${userLon}`;
+                params.radius = 50000;
+            }
+            const resp = await circuit_breaker_1.googlePlacesBreaker.execute(() => axios_1.default.get(`${this.GOOGLE_PLACES_BASE}/queryautocomplete/json`, { params, timeout: 5000 }));
+            const predictions = resp.data?.predictions ?? [];
+            if (predictions.length === 0)
+                return [];
+            const lat = Number.isFinite(userLat) ? userLat : 0;
+            const lon = Number.isFinite(userLon) ? userLon : 0;
+            return predictions.slice(0, 5).map((p) => {
+                const distMiles = lat
+                    ? Math.round(this.haversineMiles({ lat, lon }, { lat, lon }) * 10) / 10
+                    : undefined;
+                return {
+                    display_name: p.description || query,
+                    lat, lon,
+                    type: 'suggestion',
+                    state: '',
+                    distance_miles: distMiles,
+                    is_suggestion: true,
+                    place_id: p.place_id,
+                };
+            });
+        }
+        catch {
+            return [];
+        }
+    }
+    /** Map common free-text queries to Geoapify category filters. */
+    static geoapifyCategory(query) {
+        const ql = query.toLowerCase();
+        const has = (...terms) => terms.some((t) => ql.includes(t));
+        if (has('coffee', 'cafe', 'espresso', 'starbucks', 'peet', 'starb'))
+            return ['catering.cafe', 'catering.coffee_shop'];
+        if (has('restaurant', 'dining', 'dinner', 'lunch', 'breakfast', 'brunch'))
+            return ['catering.restaurant'];
+        if (has('fast', 'mcdonald', 'burger', 'kfc', 'wendy', 'taco', 'chipotle', 'subway', 'pizza', 'food'))
+            return ['catering.fast_food'];
+        if (has('bar', 'pub', 'nightclub', 'cocktail', 'beer', 'lounge'))
+            return ['catering.bar', 'catering.pub'];
+        if (has('gas', 'fuel', 'shell', 'chevron', 'arco', 'exxon', 'charging'))
+            return ['service.vehicle.fuel'];
+        if (has('hotel', 'motel', 'inn', 'lodging', 'airbnb', 'hostel'))
+            return ['accommodation.hotel'];
+        if (has('grocery', 'market', 'supermarket', 'whole foods', 'trader', 'costco'))
+            return ['commercial.supermarket'];
+        if (has('target', 'walmart', 'store', 'shop', 'mall'))
+            return ['commercial'];
+        if (has('park', 'playground', 'garden', 'zoo'))
+            return ['leisure.park'];
+        if (has('hospital', 'clinic', 'urgent', 'medical', 'doctor'))
+            return ['healthcare'];
+        if (has('pharmacy', 'drug', 'cvs', 'walgreen', 'rite aid'))
+            return ['healthcare.pharmacy'];
+        if (has('school', 'university', 'college', 'campus'))
+            return ['education'];
+        if (has('bank', 'atm', 'chase', 'wells', 'bofa', 'citi'))
+            return ['service.financial'];
+        if (has('airport', 'lax', 'burbank', 'sfo', 'oakland'))
+            return ['transport.airport'];
+        if (has('disney', 'disn', 'theme park', 'amusement'))
+            return ['leisure.theme_park'];
+        if (has('gym', 'fitness', 'workout', 'la fitness', 'planet fitness', 'equinox'))
+            return ['sport.fitness_centre'];
+        if (has('stadium', 'arena', 'concert', 'venue', 'sofi', 'dodger'))
+            return ['leisure.stadium', 'leisure.sports_hall'];
+        if (has('movie', 'cinema', 'theater', 'amc', 'regal'))
+            return ['entertainment.cinema'];
+        if (has('post', 'mail', 'fedex', 'ups'))
+            return ['service.post_office'];
+        return [];
+    }
     /**
-     * Search for points of interest near the rider.
+     * Search for places near the user or get autocomplete suggestions.
      *
-     * Architecture (the 50–100mi bug fix):
-     *   The previous implementation used Nominatim *text search* over the whole
-     *   state of California. Nominatim is a geocoder, not a nearby-POI finder;
-     *   without a tight proximity bias it returns the most "notable" matches
-     *   statewide, so "coffee" / "Starbucks" / "McDonald's" came back 50–100mi
-     *   away. We now query the **Overpass API** with an `around:<radius>` filter
-     *   centered on the rider — a real spatial POI search that returns the
-     *   literally-nearest coffee shops / restaurants / brands first. Overpass is
-     *   free and OSM-backed (Google-level POI coverage).
-     *
-     *   Nominatim is kept ONLY as a graceful fallback for address-like queries
-     *   (street addresses, intersections) where a geocoder is the right tool
-     *   and no rider location is available.
+     * Tries: Google Places Text Search → Geoapify Places API → Autocomplete fallback.
      */
     static async searchPlaces(query, userLat, userLon) {
         const q = (query || '').trim();
         if (!q)
             return [];
-        // When we have the rider's location, do a true nearby POI search.
-        if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
-            const results = await this.searchPlacesNearby(q, userLat, userLon);
-            if (results.length > 0)
-                return results;
-            // Fall through to Nominatim only if Overpass found nothing.
-        }
-        return this.searchPlacesNominatim(q, userLat, userLon);
-    }
-    /// Map a free-text query to OSM amenity/shop tags for the Overpass search.
-    static poiTagFilters(query) {
-        const ql = query.toLowerCase();
-        const has = (...terms) => terms.some((t) => ql.includes(t));
-        // Brand / chain name matches still resolve to an amenity via `name~`.
-        if (has('coffee', 'cafe', 'espresso', 'starbucks', 'peet', 'blue bottle')) {
-            return ['node["amenity"="cafe"]', 'way["amenity"="cafe"]', 'node["amenity"="coffee_shop"]', 'way["amenity"="coffee_shop"]'];
-        }
-        if (has('restaurant', 'dining', 'dinner', 'lunch')) {
-            return ['node["amenity"="restaurant"]', 'way["amenity"="restaurant"]'];
-        }
-        if (has('fast', 'mcdonald', 'burger', 'kfc', 'wendy', 'taco', 'chipotle', 'subway', 'pizza', 'food')) {
-            return ['node["amenity"="fast_food"]', 'way["amenity"="fast_food"]'];
-        }
-        if (has('bar', 'pub', 'nightclub', 'cocktail', 'beer')) {
-            return ['node["amenity"="bar"]', 'way["amenity"="bar"]', 'node["amenity"="pub"]', 'way["amenity"="pub"]'];
-        }
-        if (has('gas', 'fuel', 'shell', 'chevron', 'arco', '76', 'exxon')) {
-            return ['node["amenity"="fuel"]', 'way["amenity"="fuel"]'];
-        }
-        if (has('hotel', 'motel', 'inn', 'lodging', 'airbnb')) {
-            return ['node["tourism"="hotel"]', 'way["tourism"="hotel"]', 'node["tourism"="motel"]', 'way["tourism"="motel"]'];
-        }
-        if (has('grocery', 'market', 'supermarket', 'whole foods', 'trader', 'target', 'walmart', 'store', 'shop')) {
-            return ['node["shop"="supermarket"]', 'way["shop"="supermarket"]', 'node["shop"="convenience"]', 'way["shop"="convenience"]'];
-        }
-        if (has('park', 'playground', 'garden')) {
-            return ['node["leisure"="park"]', 'way["leisure"="park"]'];
-        }
-        if (has('hospital', 'clinic', 'urgent', 'medical', 'doctor', 'pharmacy', 'cvs', 'walgreens')) {
-            return ['node["amenity"="hospital"]', 'way["amenity"="hospital"]', 'node["amenity"="pharmacy"]', 'way["amenity"="pharmacy"]'];
-        }
-        if (has('school', 'university', 'college', 'campus')) {
-            return ['node["amenity"="school"]', 'way["amenity"="school"]', 'node["amenity"="university"]', 'way["amenity"="university"]'];
-        }
-        if (has('bank', 'atm', 'chase', 'wells', 'bofa', 'citi')) {
-            return ['node["amenity"="bank"]', 'way["amenity"="bank"]', 'node["amenity"="atm"]', 'way["amenity"="atm"]'];
-        }
-        // Generic: broad net so the search still returns something useful.
-        return [
-            'node["amenity"~"cafe|restaurant|fast_food|bar|pub|fuel|bank|pharmacy"]',
-            'way["amenity"~"cafe|restaurant|fast_food|bar|pub|fuel|bank|pharmacy"]',
-            'node["shop"]',
-            'way["shop"]',
-        ];
-    }
-    static async searchPlacesNearby(query, lat, lon) {
-        // Search radius in meters. 1500m (≈1mi) captures the nearest options
-        // first; if too few, the caller's Overpass query can be widened here.
-        const radiusM = 2000;
-        const tagFilters = this.poiTagFilters(query);
-        // Build a brand/name regex for chain searches (Starbucks, McDonald's…).
-        const brand = query.replace(/[^a-z0-9]/gi, '').toLowerCase();
-        const brandClauses = brand.length >= 3
-            ? tagFilters.map((f) => f.replace(/\]$/, `]["name"~"${brand}",i]`))
-            : [];
-        const unionParts = [...tagFilters, ...brandClauses];
-        const overpassQuery = [
-            '[out:json][timeout:25];',
-            '(',
-            ...unionParts.map((f) => `${f}(around:${radiusM},${lat},${lon});`),
-            ');',
-            'out center 30;',
-        ].join('');
-        const haversineMiles = (a, b) => {
-            const R = 3958.8;
-            const toRad = (d) => (d * Math.PI) / 180;
-            const dLat = toRad(b.lat - a.lat);
-            const dLng = toRad(b.lon - a.lon);
-            const x = Math.sin(dLat / 2) ** 2 +
-                Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
-            return 2 * R * Math.asin(Math.sqrt(x));
-        };
+        const latKey = Number.isFinite(userLat) ? userLat.toFixed(1) : '0';
+        const lonKey = Number.isFinite(userLon) ? userLon.toFixed(1) : '0';
+        const cacheKey = `search:${q.toLowerCase()}:${latKey}:${lonKey}`;
+        // Check Redis cache
         try {
-            const form = new URLSearchParams();
-            form.append('data', overpassQuery);
-            const resp = await axios_1.default.post('https://overpass-api.de/api/interpreter', form, {
-                headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
-                timeout: 25000,
-            });
-            const elements = resp.data?.elements ?? [];
-            const seen = new Set();
-            const results = [];
-            for (const el of elements) {
-                const tags = el.tags ?? {};
-                const name = tags.name || tags.brand || tags.operator;
-                if (!name)
-                    continue;
-                const elLat = el.type === 'node' ? el.lat : el.center?.lat;
-                const elLon = el.type === 'node' ? el.lon : el.center?.lon;
-                if (!Number.isFinite(elLat) || !Number.isFinite(elLon))
-                    continue;
-                const key = `${name}|${elLat.toFixed(5)},${elLon.toFixed(5)}`;
-                if (seen.has(key))
-                    continue;
-                seen.add(key);
-                const distMiles = haversineMiles({ lat, lon }, { lat: elLat, lon: elLon });
-                results.push({
-                    display_name: this.formatPoiName(name, tags, elLat, elLon),
-                    lat: elLat,
-                    lon: elLon,
-                    type: tags.amenity || tags.shop || tags.tourism || 'poi',
-                    state: 'CA',
-                    distance_miles: Math.round(distMiles * 10) / 10,
-                    address: {
-                        road: tags['addr:street'] ?? '',
-                        city: tags['addr:city'] ?? '',
-                        state: tags['addr:state'] ?? 'CA',
-                        postcode: tags['addr:postcode'] ?? '',
-                    },
-                });
+            const cached = await redis_1.redis.get(cacheKey);
+            if (cached)
+                return JSON.parse(cached);
+        }
+        catch { /* cache miss */ }
+        // Deduplicate in-flight requests
+        const inFlight = this.inFlight.get(cacheKey);
+        if (inFlight)
+            return inFlight;
+        const promise = this._searchPlaces(q, userLat, userLon, cacheKey);
+        this.inFlight.set(cacheKey, promise);
+        try {
+            return await promise;
+        }
+        finally {
+            this.inFlight.delete(cacheKey);
+        }
+    }
+    static async _searchPlaces(q, userLat, userLon, cacheKey) {
+        // 1. Google Places Text Search — expensive ($32/1000), skip for short queries
+        if (this.googleMapsApiKey && q.length >= this.MIN_TEXT_SEARCH_LEN) {
+            const googleResults = await this.googlePlacesSearchText(q, userLat, userLon);
+            if (googleResults.length > 0) {
+                if (cacheKey)
+                    this.cacheSearchResults(cacheKey, googleResults, this.TEXT_SEARCH_CACHE_TTL_S);
+                return googleResults;
             }
-            results.sort((a, b) => a.distance_miles - b.distance_miles);
-            return results.slice(0, 15);
         }
-        catch (err) {
-            console.warn(`[GEOSPATIAL] Overpass POI search failed: ${err.message}`);
-            return [];
-        }
-    }
-    static formatPoiName(name, tags, lat, lon) {
-        const parts = [name];
-        const road = tags['addr:street'];
-        const city = tags['addr:city'] || tags['addr:suburb'] || tags['addr:town'];
-        if (road)
-            parts.push(road);
-        if (city)
-            parts.push(city);
-        if (parts.length === 1)
-            parts.push(`${lat.toFixed(4)}, ${lon.toFixed(4)}`);
-        return parts.join(', ');
-    }
-    /// Fallback geocoder (Nominatim) for address-like queries without a rider
-    /// location. Bounded to California so results stay in-region.
-    static async searchPlacesNominatim(query, userLat, userLon) {
-        try {
-            const CA_VIEWBOX = '-124.5,42.0,-114.0,32.5';
-            const CA_SOUTH = 32.5, CA_NORTH = 42.0, CA_WEST = -124.5, CA_EAST = -114.0;
-            const response = await this.axiosClient.get('https://nominatim.openstreetmap.org/search', {
-                params: {
-                    q: query,
-                    format: 'json',
-                    addressdetails: 1,
-                    limit: 20,
-                    viewbox: CA_VIEWBOX,
-                    bounded: 1,
-                    countrycodes: 'us',
-                },
-                headers: { 'User-Agent': 'NetRide-Enterprise/1.0' },
-            });
-            const hits = Array.isArray(response.data) ? response.data : [];
-            const isCalifornia = (h) => {
-                const a = h.address || {};
-                const state = (a.state || '').toString().toLowerCase();
-                const code = (a.state_code || a['ISO3166-2-lvl4'] || '').toString().toLowerCase();
-                if (state === 'california' || code === 'us-ca' || code === 'ca')
-                    return true;
-                const lat = parseFloat(h.lat), lon = parseFloat(h.lon);
-                if (Number.isFinite(lat) && Number.isFinite(lon)) {
-                    return lat >= CA_SOUTH && lat <= CA_NORTH && lon >= CA_WEST && lon <= CA_EAST;
+        // 2. Geoapify Places API (progressive radii, free tier 3000/day)
+        if (env_1.env.GEOAPIFY_API_KEY && Number.isFinite(userLat) && Number.isFinite(userLon)) {
+            const lat = userLat;
+            const lon = userLon;
+            const categories = this.geoapifyCategory(q);
+            for (const radiusMi of this.SEARCH_RADII_MILES) {
+                const radiusM = Math.round(radiusMi * 1609.34);
+                try {
+                    const params = {
+                        apiKey: env_1.env.GEOAPIFY_API_KEY,
+                        filter: `circle:${lon},${lat},${radiusM}`,
+                        limit: String(this.MAX_PLACES),
+                        lang: 'en',
+                        text: q,
+                    };
+                    if (categories.length > 0) {
+                        params.categories = categories.join(',');
+                    }
+                    const resp = await circuit_breaker_1.geoapifyBreaker.execute(() => axios_1.default.get(`${this.GEOAPIFY_BASE}/v2/places`, { params, timeout: 8000 }));
+                    const features = resp.data?.features ?? [];
+                    if (features.length === 0)
+                        continue;
+                    const results = features.map((f) => {
+                        const props = f.properties || {};
+                        const coords = f.geometry?.coordinates || [0, 0];
+                        const distMiles = this.haversineMiles({ lat, lon }, { lat: coords[1], lon: coords[0] });
+                        return {
+                            display_name: this.formatGeoapifyName(props),
+                            lat: coords[1], lon: coords[0],
+                            type: props.categories?.[0] || props.result_type || 'poi',
+                            state: props.state || 'CA',
+                            distance_miles: Math.round(distMiles * 10) / 10,
+                            address: { road: props.street || '', city: props.city || '', state: props.state || 'CA', postcode: props.postcode || '' },
+                        };
+                    }).slice(0, this.MAX_PLACES);
+                    if (cacheKey)
+                        this.cacheSearchResults(cacheKey, results, this.SEARCH_CACHE_TTL_S);
+                    return results;
                 }
-                return false;
-            };
-            const haversineMiles = (a, b) => {
-                const R = 3958.8;
-                const toRad = (d) => (d * Math.PI) / 180;
-                const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lon - a.lon);
-                const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
-                return 2 * R * Math.asin(Math.sqrt(x));
-            };
-            const results = hits.filter(isCalifornia).map((h) => {
-                const lat = parseFloat(h.lat), lon = parseFloat(h.lon);
-                return {
-                    display_name: h.display_name,
-                    lat: h.lat,
-                    lon: h.lon,
-                    type: h.type,
-                    state: 'CA',
-                    distance_miles: Number.isFinite(userLat) && Number.isFinite(userLon)
-                        ? Math.round(haversineMiles({ lat, lon }, { lat: userLat, lon: userLon }) * 10) / 10
-                        : undefined,
-                    address: h.address,
-                };
-            });
-            results.sort((a, b) => (a.distance_miles ?? 0) - (b.distance_miles ?? 0));
-            return results.slice(0, 10);
+                catch { /* Try next radius */ }
+            }
         }
-        catch (err) {
-            console.error(`[GEOSPATIAL] ❌ Nominatim fallback failed: ${err.message}`);
-            return [];
-        }
+        // 3. Autocomplete fallback (cheap Google Autocomplete → Geoapify → static suggestions)
+        const results = await this.autocompleteSearch(q, userLat, userLon);
+        if (cacheKey)
+            this.cacheSearchResults(cacheKey, results, this.SEARCH_CACHE_TTL_S);
+        return results;
     }
-    static async fetchAndProcessRoute(start, end, cacheKey, retries = 0) {
-        // Try the embedded in-process OSRM first (primary, Google-level, free).
+    static async cacheSearchResults(cacheKey, results, ttl = this.SEARCH_CACHE_TTL_S) {
+        if (results.length === 0)
+            return;
         try {
-            const res = await local_osrm_engine_1.LocalOsrmEngine.route(start, end);
-            if (res) {
-                this.isOsrmOnline = true;
-                const multiplier = ml_eta_service_1.MLEtaService.predictMultiplier(start[0], start[1], res.distanceMeters);
-                const result = {
-                    distance: res.distanceMeters,
-                    osrm_duration: res.durationSeconds,
-                    eta: Math.round(res.durationSeconds * multiplier),
-                    geometry: res.geometry,
-                    steps: res.steps,
-                    speedLimitsByRoad: res.speedLimitsByRoad,
-                    cache_hit: false,
-                    model_multiplier: multiplier,
-                    engine: 'OSRM',
+            await redis_1.redis.set(cacheKey, JSON.stringify(results), 'EX', ttl).catch(() => { });
+        }
+        catch { /* cache write failure is non-critical */ }
+    }
+    /**
+     * Autocomplete using Google Places, then Geoapify, then static suggestions.
+     */
+    static async autocompleteSearch(query, userLat, userLon) {
+        const q = (query || '').trim();
+        if (q.length < this.MIN_AUTOCOMPLETE_LEN)
+            return [];
+        // 1. Google Places Autocomplete (returns real coordinates via Place Details)
+        if (this.googleMapsApiKey) {
+            const googleResults = await this.googlePlacesAutocomplete(q, userLat, userLon);
+            if (googleResults.length > 0)
+                return googleResults;
+        }
+        // 2. Geoapify Geocoding Autocomplete
+        if (env_1.env.GEOAPIFY_API_KEY) {
+            try {
+                const params = {
+                    text: q,
+                    apiKey: env_1.env.GEOAPIFY_API_KEY,
+                    limit: 8,
+                    lang: 'en',
+                    type: 'amenity',
                 };
-                await redis_1.redis.set(cacheKey, JSON.stringify(result), 'EX', 600).catch(() => { });
-                return result;
-            }
-        }
-        catch (err) {
-            console.error(`[GEOSPATIAL] ❌ Embedded OSRM failed: ${err.message}`);
-        }
-        // Secondary: remote OSRM_URL if configured.
-        if (env_1.env.OSRM_URL) {
-            try {
-                const result = await this.fetchOsrmRoute(start, end, cacheKey);
-                if (result)
-                    return result;
-            }
-            catch (err) {
-                if (this.isOsrmOnline) {
-                    console.error(`[GEOSPATIAL] ❌ Router connection lost: ${err.message}`);
-                    this.isOsrmOnline = false;
-                }
-            }
-        }
-        return this.calculateSyntheticRoute(start, end);
-    }
-    static async fetchOsrmRoute(start, end, cacheKey) {
-        const url = `${env_1.env.OSRM_URL}/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true&annotations=true`;
-        const response = await this.throttledGet(url);
-        if (response.status !== 200 || !response.data.routes?.length)
-            return null;
-        this.isOsrmOnline = true;
-        const route = response.data.routes[0];
-        const multiplier = ml_eta_service_1.MLEtaService.predictMultiplier(start[0], start[1], route.distance);
-        const rawSteps = route.legs?.[0]?.steps ?? [];
-        const enrichedSteps = (0, road_classifier_1.enrichSteps)(rawSteps);
-        const speedLimitsByRoad = this.buildSpeedMap(enrichedSteps);
-        const result = {
-            distance: route.distance,
-            osrm_duration: route.duration,
-            eta: Math.round(route.duration * multiplier),
-            geometry: route.geometry,
-            steps: enrichedSteps,
-            speedLimitsByRoad,
-            cache_hit: false,
-            model_multiplier: multiplier,
-            engine: 'OSRM-ML'
-        };
-        await redis_1.redis.set(cacheKey, JSON.stringify(result), 'EX', 600);
-        return result;
-    }
-    static buildSpeedMap(steps) {
-        const map = {};
-        for (const step of steps) {
-            const limit = step.speedLimitMph;
-            if (!limit)
-                continue;
-            const keys = [step.name, step.ref].filter(k => typeof k === 'string' && k.length > 0);
-            for (const k of keys)
-                map[k] = limit;
-        }
-        return map;
-    }
-    static generateCacheKey(start, end) {
-        const p = 4;
-        return `route:${start[0].toFixed(p)}:${start[1].toFixed(p)}:${end[0].toFixed(p)}:${end[1].toFixed(p)}:driving`;
-    }
-    static calculateSyntheticRoute(start, end) {
-        const speed = 6.1;
-        const detour = 1.35;
-        const lat1 = start[0], lon1 = start[1];
-        const lat2 = end[0], lon2 = end[1];
-        const R = 6371e3;
-        const φ1 = lat1 * Math.PI / 180;
-        const φ2 = lat2 * Math.PI / 180;
-        const Δφ = (lat2 - lat1) * Math.PI / 180;
-        const Δλ = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const distance = R * c * detour;
-        const duration = distance / speed;
-        // Road-shaped (Manhattan/grid) polyline — never a single straight line.
-        const midLat = (lat1 + lat2) / 2;
-        const midLng = (lon1 + lon2) / 2;
-        const qLat = lat1 + (lat2 - lat1) * 0.25;
-        const qLng = lon1 + (lon2 - lon1) * 0.25;
-        const tLat = lat1 + (lat2 - lat1) * 0.75;
-        const tLng = lon1 + (lon2 - lon1) * 0.75;
-        const coordinates = [
-            [lon1, lat1],
-            [qLng, lat1],
-            [qLng, midLat],
-            [midLng, midLat],
-            [midLng, tLat],
-            [tLng, tLat],
-            [tLng, lat2],
-            [lon2, lat2],
-        ];
-        return {
-            distance,
-            osrm_duration: duration,
-            eta: Math.round(duration * 1.2),
-            geometry: { type: 'LineString', coordinates },
-            steps: [],
-            speedLimitsByRoad: {},
-            cache_hit: false,
-            model_multiplier: 1.2,
-            engine: 'Synthetic-Fallback'
-        };
-    }
-    static async preCacheHotZones(zones) {
-        console.log('[GEOSPATIAL] Router health check started in background...');
-        let checks = 0;
-        const maxChecks = 12;
-        const checkInterval = setInterval(async () => {
-            checks++;
-            try {
-                if (env_1.env.GEOAPIFY_API_KEY) {
-                    await this.axiosClient.get(`https://api.geoapify.com/v1/routing?waypoints=${zones[0][0]},${zones[0][1]}|${zones[0][0] + 0.01},${zones[0][1] + 0.01}&mode=drive&apiKey=${env_1.env.GEOAPIFY_API_KEY}`, { timeout: 2000 });
+                if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+                    params.bias = `proximity:${userLon},${userLat}`;
+                    params.filter = `countrycode:us`;
                 }
                 else {
-                    const url = `${env_1.env.OSRM_URL.replace('/route/v1/driving', '/nearest/v1/driving')}/${zones[0][1]},${zones[0][0]}?number=1`;
-                    await this.axiosClient.get(url);
+                    params.filter = `countrycode:us`;
                 }
-                console.log('[GEOSPATIAL] 🟢 Router is ready. Triggering LA pre-cache...');
-                this.isOsrmOnline = true;
-                clearInterval(checkInterval);
-                for (const start of zones) {
-                    for (const end of zones) {
-                        if (start === end)
-                            continue;
-                        this.getRoute(start, end, true).catch(() => { });
-                    }
+                const resp = await circuit_breaker_1.geoapifyBreaker.execute(() => axios_1.default.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, { params, timeout: 5000 }));
+                const features = resp.data?.features ?? [];
+                if (features.length > 0) {
+                    return features.map((f) => {
+                        const props = f.properties || {};
+                        const coords = f.geometry?.coordinates || [0, 0];
+                        const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon)
+                            ? this.haversineMiles({ lat: userLat, lon: userLon }, { lat: coords[1], lon: coords[0] })
+                            : undefined;
+                        return {
+                            display_name: props.formatted || props.name || props.address_line1 || q,
+                            lat: coords[1], lon: coords[0],
+                            type: props.result_type || 'suggestion',
+                            state: props.state || '',
+                            distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
+                            is_suggestion: true,
+                            place_id: props.place_id,
+                        };
+                    });
                 }
             }
-            catch (e) {
-                if (checks >= maxChecks) {
-                    console.log('[GEOSPATIAL] ℹ️ Router still offline. Continuing with synthetic fallback. Pre-caching disabled.');
-                    clearInterval(checkInterval);
-                }
+            catch { /* fall through */ }
+        }
+        // 3. Static suggestion fallback — use user's location so results appear nearby
+        const fallbackLat = Number.isFinite(userLat) ? userLat : 0;
+        const fallbackLon = Number.isFinite(userLon) ? userLon : 0;
+        return STATIC_SUGGESTIONS
+            .filter((s) => s.label.toLowerCase().startsWith(q.toLowerCase()) ||
+            s.prefixes.some((p) => p.startsWith(q.toLowerCase())))
+            .slice(0, 6)
+            .map((s) => ({
+            display_name: s.label,
+            lat: fallbackLat, lon: fallbackLon,
+            type: 'suggestion',
+            state: '',
+            distance_miles: undefined,
+            is_suggestion: true,
+        }));
+    }
+    static formatGeoapifyName(props) {
+        const name = props.name || props.address_line1 || '';
+        const street = props.street || '';
+        const city = props.city || '';
+        const parts = [name];
+        if (street && !name.includes(street))
+            parts.push(street);
+        if (city && !name.includes(city))
+            parts.push(city);
+        return parts.join(', ');
+    }
+    static haversineMiles(a, b) {
+        const R = 3958.8;
+        const toRad = (d) => (d * Math.PI) / 180;
+        const dLat = toRad(b.lat - a.lat);
+        const dLng = toRad(b.lon - a.lon);
+        const x = Math.sin(dLat / 2) ** 2 +
+            Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
+        return 2 * R * Math.asin(Math.sqrt(x));
+    }
+    static async preCacheHotZones(zones) {
+        logger_1.logger.info({ zoneCount: zones.length }, 'geospatial_precache_start');
+        // Pre-warm the cache by asking for routes between every pair of hot zones.
+        // The RoutingService handles caching internally, so we just fire requests.
+        for (const start of zones) {
+            for (const end of zones) {
+                if (start === end)
+                    continue;
+                this.getRoute(start, end, true).catch(() => { });
             }
-        }, 5000);
+        }
     }
 }
 exports.GeospatialService = GeospatialService;
-_a = GeospatialService;
-GeospatialService.inFlightRequests = new Map();
-GeospatialService.isOsrmOnline = false; // Readiness Guard
-GeospatialService.throttler = (0, p_throttle_1.default)({ limit: 50, interval: 1000 });
-GeospatialService.axiosClient = axios_1.default.create({
-    httpAgent: new http_1.default.Agent({ keepAlive: true, maxSockets: 100 }),
-    timeout: 2000,
-});
-GeospatialService.throttledGet = _a.throttler(async (url) => {
-    return _a.axiosClient.get(url);
-});
 // ---- Inspection-location helpers (driver app) --------------------------
 /// CA bounding constants used for validating geocoded ZIPs.
 GeospatialService.CA_BBOX = {
@@ -603,4 +549,86 @@ GeospatialService.CA_BBOX = {
     west: -124.5,
     east: -114.0,
 };
+// ---- Places search & autocomplete (Google Places + Geoapify) -----------
+//
+// Primary: Google Places API (uses GOOGLE_MAPS_API_KEY / GOOGLE_ROUTES_API_KEY).
+// Falls back to Geoapify, then static suggestions.
+GeospatialService.GOOGLE_PLACES_BASE = 'https://maps.googleapis.com/maps/api/place';
+GeospatialService.GEOAPIFY_BASE = 'https://api.geoapify.com';
+GeospatialService.SEARCH_RADII_MILES = [1, 3, 5, 10, 25, 50];
+GeospatialService.MAX_PLACES = 10;
+GeospatialService.SEARCH_CACHE_TTL_S = 600;
+GeospatialService.TEXT_SEARCH_CACHE_TTL_S = 300;
+GeospatialService.MIN_AUTOCOMPLETE_LEN = 2;
+GeospatialService.MIN_TEXT_SEARCH_LEN = 4;
+GeospatialService.inFlight = new Map();
+/**
+ * Curated dictionary mapping short search prefixes to common destination
+ * names. Used by autocompleteSearch to suggest completions based on what
+ * people most commonly search for. Populated from real-world ride-hailing
+ * search data and OSM brand popularity.
+ *
+ * Entry fields:
+ *   label    — the suggested completion text
+ *   prefixes — one or more prefix strings that trigger this suggestion
+ *   score    — popularity ranking (higher = more common search)
+ */
+const STATIC_SUGGESTIONS = [
+    { label: 'Starbucks', prefixes: ['star', 'starb'], score: 100 },
+    { label: 'McDonald\'s', prefixes: ['mcd', 'mcdo', 'mcdon'], score: 99 },
+    { label: 'Walmart', prefixes: ['wal', 'walm', 'walt'], score: 90 },
+    { label: 'Target', prefixes: ['tar', 'targ'], score: 85 },
+    { label: 'Costco', prefixes: ['cost', 'costc'], score: 80 },
+    { label: 'Home Depot', prefixes: ['home', 'home d'], score: 75 },
+    { label: 'Lowe\'s', prefixes: ['low', 'lowe'], score: 70 },
+    { label: 'Chipotle', prefixes: ['chip', 'chipot'], score: 65 },
+    { label: 'Subway', prefixes: ['sub', 'subw'], score: 60 },
+    { label: 'Pizza Hut', prefixes: ['pizz'], score: 55 },
+    { label: 'Domino\'s Pizza', prefixes: ['domi'], score: 54 },
+    { label: 'KFC', prefixes: ['kfc', 'kentucky'], score: 53 },
+    { label: 'Taco Bell', prefixes: ['taco', 'taco b'], score: 52 },
+    { label: 'Wendy\'s', prefixes: ['wend'], score: 51 },
+    { label: 'Burger King', prefixes: ['burger'], score: 50 },
+    { label: 'In-N-Out', prefixes: ['inn', 'in n'], score: 49 },
+    { label: 'LAX Airport', prefixes: ['lax', 'airport', 'la air'], score: 95 },
+    { label: 'Universal Studios Hollywood', prefixes: ['univ', 'univer', 'universal'], score: 45 },
+    { label: 'Disneyland', prefixes: ['disn', 'disne'], score: 44 },
+    { label: 'Six Flags Magic Mountain', prefixes: ['six', 'magic'], score: 40 },
+    { label: 'CVS Pharmacy', prefixes: ['cvs', 'pharm'], score: 78 },
+    { label: 'Walgreens', prefixes: ['walg', 'walgr'], score: 76 },
+    { label: 'Rite Aid', prefixes: ['rite'], score: 50 },
+    { label: 'Shell Gas Station', prefixes: ['shell', 'gas'], score: 72 },
+    { label: 'Chevron Gas Station', prefixes: ['chev'], score: 68 },
+    { label: 'Exxon Gas Station', prefixes: ['exxo'], score: 60 },
+    { label: 'Cheesecake Factory', prefixes: ['chees'], score: 35 },
+    { label: 'The Coffee Bean & Tea Leaf', prefixes: ['coffee'], score: 34 },
+    { label: 'Whole Foods Market', prefixes: ['whole', 'whole f'], score: 48 },
+    { label: 'Trader Joe\'s', prefixes: ['trad', 'trader'], score: 47 },
+    { label: 'Panda Express', prefixes: ['pand'], score: 38 },
+    { label: 'Chase Bank', prefixes: ['chas', 'chase'], score: 42 },
+    { label: 'Bank of America', prefixes: ['bank', 'bofa'], score: 41 },
+    { label: 'Wells Fargo', prefixes: ['wells'], score: 40 },
+    { label: 'Marriott Hotel', prefixes: ['marri'], score: 33 },
+    { label: 'Hilton Hotel', prefixes: ['hilt'], score: 32 },
+    { label: 'Holiday Inn', prefixes: ['holid'], score: 31 },
+    { label: 'Crypto.com Arena', prefixes: ['crypt', 'staples', 'arena'], score: 30 },
+    { label: 'SoFi Stadium', prefixes: ['sofi', 'stadi'], score: 29 },
+    { label: 'Dodger Stadium', prefixes: ['dodg'], score: 28 },
+    { label: 'Hollywood Walk of Fame', prefixes: ['holly', 'hollywood'], score: 25 },
+    { label: 'Santa Monica Pier', prefixes: ['santa m', 'pier'], score: 24 },
+    { label: 'Venice Beach', prefixes: ['veni'], score: 23 },
+    { label: 'Huntington Beach', prefixes: ['hunt', 'huntington'], score: 20 },
+    { label: 'UCLA', prefixes: ['ucl', 'ucla'], score: 36 },
+    { label: 'USC', prefixes: ['usc'], score: 35 },
+    { label: 'California Science Center', prefixes: ['scien', 'calif'], score: 18 },
+    { label: 'Grifith Observatory', prefixes: ['grif', 'observ'], score: 17 },
+    { label: 'Petco Park', prefixes: ['petc'], score: 15 },
+    { label: 'Angel Stadium', prefixes: ['ange'], score: 14 },
+    { label: 'Los Angeles Zoo', prefixes: ['zoo'], score: 22 },
+    { label: 'Planet Fitness', prefixes: ['plan', 'planet'], score: 12 },
+    { label: '24 Hour Fitness', prefixes: ['24', 'hour f'], score: 11 },
+    { label: 'Equinox', prefixes: ['equi'], score: 10 },
+    { label: 'AMC Theatres', prefixes: ['amc'], score: 16 },
+    { label: 'Regal Cinemas', prefixes: ['rega'], score: 13 },
+];
 //# sourceMappingURL=geospatial.service.js.map

@@ -432,6 +432,13 @@ class AuthService {
      */
     static async resolveActiveRole(userId, appRoleHint) {
         const hint = (appRoleHint ?? '').toString().trim().toUpperCase();
+        // If the user's database role is ADMIN, always resolve as ADMIN
+        // regardless of the app hint. The hint-based logic below is for
+        // dual-role (RIDER + DRIVER) users only.
+        const userRes = await database_1.pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+        if (userRes.rows.length > 0 && userRes.rows[0].role === types_1.UserRole.ADMIN) {
+            return { role: 'ADMIN', driverId: null, riderId: userId };
+        }
         const driverRes = await database_1.pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [userId]);
         const hasDriverProfile = driverRes.rows.length > 0;
         // Rider profile is the users row itself; it always exists for an

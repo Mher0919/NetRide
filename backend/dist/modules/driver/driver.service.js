@@ -1251,6 +1251,9 @@ class DriverService {
     static async creditOnRideComplete(driverId, fareCents, rideId) {
         if (!driverId || fareCents <= 0)
             return;
+        const platformFeePct = 0.10; // 10% platform fee
+        const driverNetCents = Math.round(fareCents * (1 - platformFeePct));
+        const platformFeeCents = fareCents - driverNetCents;
         const client = await database_1.pool.connect();
         try {
             await client.query('BEGIN');
@@ -1259,10 +1262,11 @@ class DriverService {
          SET balance_cents = balance_cents + $1,
              lifetime_earnings_cents = lifetime_earnings_cents + $1,
              updated_at = NOW()
-         WHERE driver_id = $2`, [fareCents, driverId]);
+         WHERE driver_id = $2`, [driverNetCents, driverId]);
             await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
-         VALUES ($1, $2, 0, $2, 'PAID', 'RIDE_CREDIT', $3)
-         ON CONFLICT (ride_id) WHERE method = 'RIDE_CREDIT' DO NOTHING`, [driverId, fareCents, rideId]);
+         VALUES ($1, $2, $3, $1, 'PAID', 'RIDE_CREDIT', $4)
+         ON CONFLICT (ride_id) WHERE method = 'RIDE_CREDIT' DO NOTHING`, [driverNetCents, fareCents, platformFeeCents, rideId]);
+            console.log(`[WALLET] 💰 Ride ${rideId}: rider paid $${(fareCents / 100).toFixed(2)}, driver received $${(driverNetCents / 100).toFixed(2)} (90%), platform fee $${(platformFeeCents / 100).toFixed(2)} (10%)`);
             await client.query('COMMIT');
         }
         catch (err) {
