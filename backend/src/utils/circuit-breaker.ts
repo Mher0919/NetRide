@@ -228,3 +228,9 @@ export const googleRoutesBreaker = circuitBreakerRegistry.get('googleRoutes', {
   successThreshold: 2,
   timeout: 60_000,
 });
+
+export const googlePlacesBreaker = circuitBreakerRegistry.get('googlePlaces', {
+  failureThreshold: 3,
+  successThreshold: 2,
+  timeout: 30_000,
+});

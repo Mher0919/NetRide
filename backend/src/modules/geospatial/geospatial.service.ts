@@ -5,6 +5,7 @@ import { RoutingService, RoutingResult } from '../routing/routing.service';
 import { logger } from '../../observability/logger';
 import {
   geoapifyBreaker,
+  googlePlacesBreaker,
   nominatimBreaker,
   overpassBreaker,
 } from '../../utils/circuit-breaker';
@@ -273,16 +274,146 @@ export class GeospatialService {
     return results.slice(0, 15);
   }
 
-  // ---- Places search & autocomplete (Geoapify API) -----------------------
+  // ---- Places search & autocomplete (Google Places + Geoapify) -----------
   //
-  // Geoapify provides a free tier (3,000 req/day) with both a Places API for
-  // nearby POI search and a Geocoding Autocomplete API for search suggestions.
-  // This replaces the earlier Overpass solution which was unreliable due to
-  // rate limits and timeouts on the community-run free tier.
+  // Primary: Google Places API (uses GOOGLE_MAPS_API_KEY / GOOGLE_ROUTES_API_KEY).
+  // Falls back to Geoapify, then static suggestions.
 
+  private static readonly GOOGLE_PLACES_BASE = 'https://maps.googleapis.com/maps/api/place';
   private static readonly GEOAPIFY_BASE = 'https://api.geoapify.com';
   private static readonly SEARCH_RADII_MILES = [1, 3, 5, 10, 25, 50];
   private static readonly MAX_PLACES = 10;
+
+  private static get googleMapsApiKey(): string | undefined {
+    return env.GOOGLE_ROUTES_API_KEY || env.GOOGLE_MAPS_API_KEY;
+  }
+
+  /** Google Places Text Search — returns nearby places with coordinates. */
+  private static async googlePlacesSearchText(query: string, userLat?: number, userLon?: number): Promise<any[]> {
+    const apiKey = this.googleMapsApiKey;
+    if (!apiKey) return [];
+
+    try {
+      const params: Record<string, any> = {
+        query,
+        key: apiKey,
+        language: 'en',
+      };
+      if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+        params.location = `${userLat},${userLon}`;
+        params.radius = 50000;
+      }
+
+      const resp = await googlePlacesBreaker.execute(() =>
+        axios.get(`${this.GOOGLE_PLACES_BASE}/textsearch/json`, { params, timeout: 5000 })
+      );
+
+      const results: any[] = resp.data?.results ?? [];
+      if (results.length === 0) return [];
+
+      return results.slice(0, this.MAX_PLACES).map((r: any) => {
+        const loc = r.geometry?.location || {};
+        const lat = loc.lat ?? 0;
+        const lng = loc.lng ?? 0;
+        const addr = r.formatted_address || '';
+        const shortAddr = addr.split(',')[0] || '';
+        const displayName = r.name && shortAddr ? `${r.name}, ${shortAddr}` : (r.name || addr || query);
+        const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon) && lat
+          ? this.haversineMiles(
+              { lat: userLat as number, lon: userLon as number },
+              { lat, lon: lng },
+            )
+          : undefined;
+
+        return {
+          display_name: displayName,
+          lat,
+          lon: lng,
+          type: (r.types?.[0] || 'point_of_interest').replace(/_/g, ' ').toLowerCase(),
+          state: '',
+          distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
+          address: {
+            road: addr.split(',')[0] || '',
+            city: addr.split(',')[1]?.trim() || '',
+            state: addr.split(',')[2]?.trim()?.split(' ')[0] || '',
+            postcode: '',
+          },
+          is_suggestion: false,
+          place_id: r.place_id,
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /** Google Places Query Autocomplete + Place Details for coordinates. */
+  private static async googlePlacesAutocomplete(query: string, userLat?: number, userLon?: number): Promise<any[]> {
+    const apiKey = this.googleMapsApiKey;
+    if (!apiKey) return [];
+
+    try {
+      const params: Record<string, any> = {
+        input: query,
+        key: apiKey,
+        language: 'en',
+      };
+      if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+        params.location = `${userLat},${userLon}`;
+        params.radius = 50000;
+      }
+
+      const resp = await googlePlacesBreaker.execute(() =>
+        axios.get(`${this.GOOGLE_PLACES_BASE}/queryautocomplete/json`, { params, timeout: 5000 })
+      );
+
+      const predictions: any[] = resp.data?.predictions ?? [];
+      if (predictions.length === 0) return [];
+
+      const top = predictions.slice(0, 5);
+      const withCoords = await Promise.all(top.map(async (p: any) => {
+        try {
+          const detail = await axios.get(`${this.GOOGLE_PLACES_BASE}/details/json`, {
+            params: { place_id: p.place_id, key: apiKey, fields: 'geometry,formatted_address' },
+            timeout: 3000,
+          });
+          const loc = detail.data?.result?.geometry?.location || {};
+          const addr = detail.data?.result?.formatted_address || '';
+          const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon) && loc.lat != null
+            ? this.haversineMiles(
+                { lat: userLat as number, lon: userLon as number },
+                { lat: loc.lat, lon: loc.lng },
+              )
+            : undefined;
+
+          return {
+            display_name: p.description || addr || query,
+            lat: loc.lat || 0,
+            lon: loc.lng || 0,
+            type: 'suggestion',
+            state: '',
+            distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
+            is_suggestion: true,
+            place_id: p.place_id,
+          };
+        } catch {
+          return {
+            display_name: p.description || query,
+            lat: 0, lon: 0,
+            type: 'suggestion',
+            state: '',
+            distance_miles: undefined,
+            is_suggestion: true,
+            place_id: p.place_id,
+          };
+        }
+      }));
+
+      return withCoords.filter(r => r.lat !== 0 || r.lon !== 0 || r.is_suggestion);
+    } catch {
+      return [];
+    }
+  }
 
   /** Map common free-text queries to Geoapify category filters. */
   private static geoapifyCategory(query: string): string[] {
@@ -332,37 +463,29 @@ export class GeospatialService {
   /**
    * Search for places near the user or get autocomplete suggestions.
    *
-   * With lat/lon: uses Geoapify Places API (progressive radius 1–50mi).
-   * Without lat/lon: uses Geoapify Autocomplete API.
-   * Falls back to static suggestions if Geoapify is unreachable.
+   * Tries: Google Places Text Search → Geoapify Places API → Autocomplete fallback.
    */
   static async searchPlaces(query: string, userLat?: number, userLon?: number): Promise<any[]> {
     const q = (query || '').trim();
     if (!q) return [];
 
-    // Check Redis cache first
     const cacheKey = `search:${q.toLowerCase()}:${userLat?.toFixed(2) ?? '0'}:${userLon?.toFixed(2) ?? '0'}`;
     try {
       const cached = await redis.get(cacheKey);
-      if (cached) {
-        return JSON.parse(cached);
+      if (cached) return JSON.parse(cached);
+    } catch { /* cache miss — proceed */ }
+
+    // 1. Try Google Places Text Search (returns real coordinates)
+    if (this.googleMapsApiKey) {
+      const googleResults = await this.googlePlacesSearchText(q, userLat, userLon);
+      if (googleResults.length > 0) {
+        this.cacheSearchResults(cacheKey, googleResults);
+        return googleResults;
       }
-    } catch {
-      // cache miss or redis down — proceed
     }
 
-    let results: any[] = [];
-
-    if (!env.GEOAPIFY_API_KEY) {
-      logger.warn('geospatial_no_geoapify_key');
-      results = await this.autocompleteSearch(q, userLat, userLon);
-      this.cacheSearchResults(cacheKey, results);
-      return results;
-    }
-
-    const apiKey = env.GEOAPIFY_API_KEY;
-
-    if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+    // 2. Try Geoapify Places API (progressive radii)
+    if (env.GEOAPIFY_API_KEY && Number.isFinite(userLat) && Number.isFinite(userLon)) {
       const lat = userLat as number;
       const lon = userLon as number;
       const categories = this.geoapifyCategory(q);
@@ -371,64 +494,45 @@ export class GeospatialService {
         const radiusM = Math.round(radiusMi * 1609.34);
         try {
           const params: Record<string, string> = {
-            apiKey,
+            apiKey: env.GEOAPIFY_API_KEY,
             filter: `circle:${lon},${lat},${radiusM}`,
             limit: String(this.MAX_PLACES),
             lang: 'en',
+            text: q,
           };
           if (categories.length > 0) {
             params.categories = categories.join(',');
-          } else {
-            params.text = q;
           }
 
           const resp = await geoapifyBreaker.execute(() =>
-            axios.get(`${this.GEOAPIFY_BASE}/v2/places`, {
-              params,
-              timeout: 8000,
-            })
+            axios.get(`${this.GEOAPIFY_BASE}/v2/places`, { params, timeout: 8000 })
           );
 
           const features: any[] = resp.data?.features ?? [];
           if (features.length === 0) continue;
 
-          results = features.map((f: any) => {
+          const results = features.map((f: any) => {
             const props = f.properties || {};
             const coords = f.geometry?.coordinates || [0, 0];
-            const distMiles = this.haversineMiles(
-              { lat, lon },
-              { lat: coords[1], lon: coords[0] },
-            );
-
+            const distMiles = this.haversineMiles({ lat, lon }, { lat: coords[1], lon: coords[0] });
             return {
               display_name: this.formatGeoapifyName(props),
-              lat: coords[1],
-              lon: coords[0],
+              lat: coords[1], lon: coords[0],
               type: props.categories?.[0] || props.result_type || 'poi',
               state: props.state || 'CA',
               distance_miles: Math.round(distMiles * 10) / 10,
-              address: {
-                road: props.street || '',
-                city: props.city || '',
-                state: props.state || 'CA',
-                postcode: props.postcode || '',
-              },
+              address: { road: props.street || '', city: props.city || '', state: props.state || 'CA', postcode: props.postcode || '' },
             };
           }).slice(0, this.MAX_PLACES);
 
           this.cacheSearchResults(cacheKey, results);
           return results;
-        } catch {
-          // Try next radius
-        }
+        } catch { /* Try next radius */ }
       }
-
-      results = await this.autocompleteSearch(q, userLat, userLon);
-      this.cacheSearchResults(cacheKey, results);
-      return results;
     }
 
-    results = await this.autocompleteSearch(q, userLat, userLon);
+    // 3. Fallback to autocomplete (Google → Geoapify → static suggestions)
+    const results = await this.autocompleteSearch(q, userLat, userLon);
     this.cacheSearchResults(cacheKey, results);
     return results;
   }
@@ -437,20 +541,23 @@ export class GeospatialService {
     if (results.length === 0) return;
     try {
       await redis.set(cacheKey, JSON.stringify(results), 'EX', 300).catch(() => {});
-    } catch {
-      // cache write failure is non-critical
-    }
+    } catch { /* cache write failure is non-critical */ }
   }
 
   /**
-   * Autocomplete using Geoapify Geocoding Autocomplete API.
-   * Uses location bias when user lat/lon is provided.
-   * Falls back to static suggestions if Geoapify is unavailable.
+   * Autocomplete using Google Places, then Geoapify, then static suggestions.
    */
   static async autocompleteSearch(query: string, userLat?: number, userLon?: number): Promise<any[]> {
     const q = (query || '').trim();
     if (q.length < 2) return [];
 
+    // 1. Google Places Autocomplete (returns real coordinates via Place Details)
+    if (this.googleMapsApiKey) {
+      const googleResults = await this.googlePlacesAutocomplete(q, userLat, userLon);
+      if (googleResults.length > 0) return googleResults;
+    }
+
+    // 2. Geoapify Geocoding Autocomplete
     if (env.GEOAPIFY_API_KEY) {
       try {
         const params: Record<string, any> = {
@@ -460,7 +567,6 @@ export class GeospatialService {
           lang: 'en',
           type: 'amenity',
         };
-
         if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
           params.bias = `proximity:${userLon},${userLat}`;
           params.filter = `countrycode:us`;
@@ -469,11 +575,8 @@ export class GeospatialService {
         }
 
         const resp = await geoapifyBreaker.execute(() =>
-            axios.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, {
-              params,
-              timeout: 5000,
-            })
-          );
+          axios.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, { params, timeout: 5000 })
+        );
 
         const features: any[] = resp.data?.features ?? [];
         if (features.length > 0) {
@@ -486,11 +589,9 @@ export class GeospatialService {
                   { lat: coords[1], lon: coords[0] },
                 )
               : undefined;
-
             return {
               display_name: props.formatted || props.name || props.address_line1 || q,
-              lat: coords[1],
-              lon: coords[0],
+              lat: coords[1], lon: coords[0],
               type: props.result_type || 'suggestion',
               state: props.state || '',
               distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
@@ -499,13 +600,11 @@ export class GeospatialService {
             };
           });
         }
-      } catch {
-        // Fall through to static suggestions
-      }
+      } catch { /* fall through */ }
     }
 
-    // Static suggestion fallback with location-aware results
-    const suggestions = STATIC_SUGGESTIONS
+    // 3. Static suggestion fallback
+    return STATIC_SUGGESTIONS
       .filter((s) => s.prefixes.some((p) => q.toLowerCase().startsWith(p)))
       .slice(0, 6)
       .map((s) => ({
@@ -516,8 +615,6 @@ export class GeospatialService {
         distance_miles: undefined,
         is_suggestion: true,
       }));
-
-    return suggestions;
   }
 
   private static formatGeoapifyName(props: any): string {
