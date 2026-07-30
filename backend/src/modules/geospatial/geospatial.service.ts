@@ -4,7 +4,6 @@ import { env } from '../../config/env';
 import { RoutingService, RoutingResult } from '../routing/routing.service';
 import { logger } from '../../observability/logger';
 import {
-  geoapifyBreaker,
   nominatimBreaker,
   overpassBreaker,
 } from '../../utils/circuit-breaker';
@@ -492,7 +491,17 @@ export class GeospatialService {
   }
 
   private static async _searchPlaces(q: string, userLat?: number, userLon?: number, cacheKey?: string): Promise<any[]> {
-    // 1. Google Places Text Search — expensive ($32/1000), skip for short queries
+    // Primary: Geoapify Geocoding Autocomplete — works for ALL queries, returns real coordinates
+    if (env.GEOAPIFY_API_KEY) {
+      const geoapifyResults = await this.geoapifyAutocomplete(q, userLat, userLon);
+      if (geoapifyResults.length > 0) {
+        const sorted = this.sortByDistance(geoapifyResults);
+        if (cacheKey) this.cacheSearchResults(cacheKey, sorted, this.SEARCH_CACHE_TTL_S);
+        return sorted;
+      }
+    }
+
+    // Fallback: Google Places Text Search — only if API key has Places API enabled
     if (this.googleMapsApiKey && q.length >= this.MIN_TEXT_SEARCH_LEN) {
       const googleResults = await this.googlePlacesSearchText(q, userLat, userLon);
       if (googleResults.length > 0) {
@@ -501,57 +510,10 @@ export class GeospatialService {
       }
     }
 
-    // 2. Geoapify Places API (progressive radii, free tier 3000/day)
-    //    Requires `categories` or `type` param — skip when category is unknown to avoid 400 errors
-    const categories = this.geoapifyCategory(q);
-    if (env.GEOAPIFY_API_KEY && categories.length > 0 && Number.isFinite(userLat) && Number.isFinite(userLon)) {
-      const lat = userLat as number;
-      const lon = userLon as number;
-
-      for (const radiusMi of this.SEARCH_RADII_MILES) {
-        const radiusM = Math.round(radiusMi * 1609.34);
-        try {
-          const resp = await axios.get(`${this.GEOAPIFY_BASE}/v2/places`, {
-            params: {
-              apiKey: env.GEOAPIFY_API_KEY,
-              filter: `circle:${lon},${lat},${radiusM}`,
-              categories: categories.join(','),
-              limit: String(this.MAX_PLACES),
-              lang: 'en',
-              text: q,
-            },
-            timeout: 8000,
-          });
-
-          const features: any[] = resp.data?.features ?? [];
-          if (features.length === 0) continue;
-
-          const results = features.map((f: any) => {
-            const props = f.properties || {};
-            const coords = f.geometry?.coordinates || [0, 0];
-            const distMiles = this.haversineMiles({ lat, lon }, { lat: coords[1], lon: coords[0] });
-            return {
-              display_name: this.formatGeoapifyName(props),
-              lat: coords[1], lon: coords[0],
-              type: props.categories?.[0] || props.result_type || 'poi',
-              state: props.state || 'CA',
-              distance_miles: Math.round(distMiles * 10) / 10,
-              address: { road: props.street || '', city: props.city || '', state: props.state || 'CA', postcode: props.postcode || '' },
-            };
-          }).slice(0, this.MAX_PLACES);
-
-          if (cacheKey) this.cacheSearchResults(cacheKey, results, this.SEARCH_CACHE_TTL_S);
-          return results;
-        } catch (err: any) {
-          logger.warn({ err: err?.message, radius: radiusMi }, 'geoapify_places_failed');
-        }
-      }
-    }
-
-    // 3. Autocomplete fallback (cheap Google Autocomplete → Geoapify → static suggestions)
-    const results = this.sortByDistance(await this.autocompleteSearch(q, userLat, userLon));
-    if (cacheKey) this.cacheSearchResults(cacheKey, results, this.SEARCH_CACHE_TTL_S);
-    return results;
+    // Final fallback: static suggestions with user's location
+    const fallbackResults = this.sortByDistance(await this.autocompleteSearch(q, userLat, userLon));
+    if (cacheKey) this.cacheSearchResults(cacheKey, fallbackResults, this.SEARCH_CACHE_TTL_S);
+    return fallbackResults;
   }
 
   private static async cacheSearchResults(cacheKey: string, results: any[], ttl = this.SEARCH_CACHE_TTL_S): Promise<void> {
@@ -561,66 +523,73 @@ export class GeospatialService {
     } catch { /* cache write failure is non-critical */ }
   }
 
+  /** Geoapify Geocoding Autocomplete — PRIMARY provider. Returns real nearby coordinates. */
+  private static async geoapifyAutocomplete(query: string, userLat?: number, userLon?: number): Promise<any[]> {
+    if (!env.GEOAPIFY_API_KEY) return [];
+
+    try {
+      const params: Record<string, any> = {
+        text: query,
+        apiKey: env.GEOAPIFY_API_KEY,
+        limit: this.MAX_PLACES,
+        lang: 'en',
+        type: 'amenity',
+      };
+      if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+        params.bias = `proximity:${userLon},${userLat}`;
+        params.filter = `countrycode:us`;
+      } else {
+        params.filter = `countrycode:us`;
+      }
+
+      const resp = await axios.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, { params, timeout: 5000 });
+
+      const features: any[] = resp.data?.features ?? [];
+      if (features.length === 0) return [];
+
+      return features.map((f: any) => {
+        const props = f.properties || {};
+        const coords = f.geometry?.coordinates || [0, 0];
+        const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon)
+          ? Math.round(this.haversineMiles(
+              { lat: userLat as number, lon: userLon as number },
+              { lat: coords[1], lon: coords[0] },
+            ) * 10) / 10
+          : undefined;
+        return {
+          display_name: props.formatted || props.name || props.address_line1 || query,
+          lat: coords[1], lon: coords[0],
+          type: props.categories?.[0] || props.result_type || 'poi',
+          state: props.state || 'CA',
+          distance_miles: distMiles,
+          address: {
+            road: props.street || '', city: props.city || '',
+            state: props.state || 'CA', postcode: props.postcode || '',
+          },
+          is_suggestion: false,
+          place_id: props.place_id,
+        };
+      });
+    } catch (err: any) {
+      logger.warn({ err: err?.message, status: err?.response?.status }, 'geoapify_autocomplete_failed');
+      return [];
+    }
+  }
+
   /**
-   * Autocomplete using Google Places, then Geoapify, then static suggestions.
+   * Fallback autocomplete: Google Places → static suggestions.
    */
   static async autocompleteSearch(query: string, userLat?: number, userLon?: number): Promise<any[]> {
     const q = (query || '').trim();
     if (q.length < this.MIN_AUTOCOMPLETE_LEN) return [];
 
-    // 1. Google Places Autocomplete (returns real coordinates via Place Details)
+    // Google Places Autocomplete fallback
     if (this.googleMapsApiKey) {
       const googleResults = await this.googlePlacesAutocomplete(q, userLat, userLon);
       if (googleResults.length > 0) return googleResults;
     }
 
-    // 2. Geoapify Geocoding Autocomplete
-    if (env.GEOAPIFY_API_KEY) {
-      try {
-        const params: Record<string, any> = {
-          text: q,
-          apiKey: env.GEOAPIFY_API_KEY,
-          limit: 8,
-          lang: 'en',
-          type: 'amenity',
-        };
-        if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
-          params.bias = `proximity:${userLon},${userLat}`;
-          params.filter = `countrycode:us`;
-        } else {
-          params.filter = `countrycode:us`;
-        }
-
-        const resp = await axios.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, { params, timeout: 5000 });
-
-        const features: any[] = resp.data?.features ?? [];
-        if (features.length > 0) {
-          return features.map((f: any) => {
-            const props = f.properties || {};
-            const coords = f.geometry?.coordinates || [0, 0];
-            const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon)
-              ? this.haversineMiles(
-                  { lat: userLat as number, lon: userLon as number },
-                  { lat: coords[1], lon: coords[0] },
-                )
-              : undefined;
-            return {
-              display_name: props.formatted || props.name || props.address_line1 || q,
-              lat: coords[1], lon: coords[0],
-              type: props.result_type || 'suggestion',
-              state: props.state || '',
-              distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
-              is_suggestion: true,
-              place_id: props.place_id,
-            };
-          });
-        }
-      } catch (err: any) {
-        logger.warn({ err: err?.message, status: err?.response?.status }, 'geoapify_autocomplete_failed');
-      }
-    }
-
-    // 3. Static suggestion fallback — use user's location so results appear nearby
+    // Static suggestion fallback — use user's location so results appear nearby
     const fallbackLat = Number.isFinite(userLat) ? userLat! : 0;
     const fallbackLon = Number.isFinite(userLon) ? userLon! : 0;
     return STATIC_SUGGESTIONS
