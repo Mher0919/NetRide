@@ -30,7 +30,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
     setState(() => _isLoading = true);
     try {
-      final res = await AuthService.verifyOTP(
+      await AuthService.verifyOTP(
         email: widget.email,
         code: code,
         fullName: widget.fullName,
@@ -38,15 +38,11 @@ class _VerificationScreenState extends State<VerificationScreen> {
       );
       
       if (mounted) {
-        final onboarding = res['onboarding'] as Map<String, dynamic>?;
-        final riderComplete = onboarding?['rider'] is Map &&
-            onboarding!['rider']['onboarding_complete'] == true;
-
         Navigator.pushNamedAndRemoveUntil(
           context,
           '/splash',
           (route) => false,
-          arguments: {'targetRoute': riderComplete ? '/' : '/onboarding'},
+          arguments: {'targetRoute': '/'},
         );
       }
     } catch (e) {

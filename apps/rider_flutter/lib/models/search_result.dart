@@ -5,6 +5,7 @@ class SearchResult {
   final String state;
   final double? distanceMiles;
   final String type;
+  final bool isSuggestion;
 
   SearchResult({
     required this.displayName,
@@ -13,6 +14,7 @@ class SearchResult {
     required this.state,
     this.distanceMiles,
     this.type = 'poi',
+    this.isSuggestion = false,
   });
 
   factory SearchResult.fromJson(Map<String, dynamic> json) {
@@ -24,6 +26,7 @@ class SearchResult {
       state: (json['state'] as String?)?.trim() ?? 'CA',
       distanceMiles: distance is num ? distance.toDouble() : null,
       type: (json['type'] as String?)?.trim() ?? 'poi',
+      isSuggestion: json['is_suggestion'] == true,
     );
   }
 

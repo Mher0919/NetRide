@@ -195,7 +195,7 @@ export class AdminController {
       }
       const row = userRes.rows[0];
 
-      // Reconstruct user (top-level) fields and nest driver fields.
+      // Reconstruct user (top-level) fields.
       const user: Record<string, any> = {
         id: row.id,
         email: row.email,
@@ -216,6 +216,13 @@ export class AdminController {
         created_at: row.created_at,
         updated_at: row.updated_at,
       };
+
+      // Riders have no driver record (d.user_id is NULL)
+      if (row.user_id === null) {
+        user.driver_profile = null;
+        res.json(user);
+        return;
+      }
 
       // Build driver_profile
       const driverProfile: Record<string, any> = {

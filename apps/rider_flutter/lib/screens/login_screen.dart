@@ -45,24 +45,15 @@ class _LoginScreenState extends State<LoginScreen> {
               token: session.accessToken,
             );
             
-            final userData = res['user'];
-            final onboarding = res['onboarding'] as Map<String, dynamic>?;
-            final riderComplete = onboarding?['rider'] is Map &&
-                onboarding!['rider']['onboarding_complete'] == true;
-
             if (mounted) {
-              debugPrint('[LOGIN] ✅ Backend sync successful. User ID: ${userData['id']}');
+              debugPrint('[LOGIN] ✅ Backend sync successful. User ID: ${res['user']['id']}');
               AuthService.isAuthenticatedNotifier.value = true;
               Provider.of<RideProvider>(context, listen: false).initSocket(res['token']);
 
-              // Route by authoritative backend onboarding state, not local
-              // guesses. A shared Google account that already completed Rider
-              // onboarding enters the app; otherwise it resumes onboarding.
-              final target = riderComplete ? '/' : '/onboarding';
               Navigator.pushReplacementNamed(
                 context,
                 '/splash',
-                arguments: {'targetRoute': target}
+                arguments: {'targetRoute': '/'}
               );
             }
           } catch (e) {
@@ -148,14 +139,10 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else {
-          final onboarding = res['onboarding'] as Map<String, dynamic>?;
-          final riderComplete = onboarding?['rider'] is Map &&
-              onboarding!['rider']['onboarding_complete'] == true;
-
           Navigator.pushReplacementNamed(
             context,
             '/splash',
-            arguments: {'targetRoute': riderComplete ? '/' : '/onboarding'}
+            arguments: {'targetRoute': '/'}
           );
         }
       }

@@ -74,7 +74,8 @@ class SearchService {
       final lat = item['lat'];
       final lon = item['lon'];
       if (lat == null || lon == null) continue;
-      if (lat == 0 && lon == 0) continue;
+      // Skip zero-coordinate results unless they're static suggestions
+      if (lat == 0 && lon == 0 && item['is_suggestion'] != true) continue;
 
       final key = name.toLowerCase();
       if (seen.contains(key)) continue;

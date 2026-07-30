@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/ride_provider.dart';
-import '../services/auth_service.dart';
 import 'map_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
@@ -36,26 +35,6 @@ class _MainWrapperState extends State<MainWrapper> {
     if (token == null) {
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-      }
-      return;
-    }
-
-    // The backend is the single source of truth for onboarding completion.
-    // Even if this screen is reached via a deep link or back-stack, an
-    // un-onboarded (e.g. un-phone-verified) user must be sent back to
-    // onboarding and never allowed into the main app.
-    try {
-      final complete = await AuthService.isRiderOnboardingComplete();
-      if (!complete) {
-        if (mounted) {
-          Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
-        }
-        return;
-      }
-    } catch (_) {
-      // If the backend can't be reached, fail safe: stay in onboarding.
-      if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
       }
       return;
     }

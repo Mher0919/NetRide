@@ -232,12 +232,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         focusNode: _focusNodes[index],
         keyboardType: TextInputType.number,
         textAlign: TextAlign.center,
+        textAlignVertical: TextAlignVertical.center,
         maxLength: 1,
-        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        cursorColor: Colors.black,
+        style: const TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+          color: Colors.black,
+        ),
         decoration: InputDecoration(
           counterText: "",
           filled: true,
           fillColor: Colors.grey.shade50,
+          contentPadding: EdgeInsets.zero,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
@@ -250,7 +257,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           } else if (value.isEmpty && index > 0) {
             _focusNodes[index - 1].requestFocus();
           }
-          
+
           if (_codeControllers.every((c) => c.text.isNotEmpty)) {
             _verifyAndSubmit();
           }

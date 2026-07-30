@@ -11,14 +11,12 @@ import '../models/trip_models.dart' as models;
 import '../services/routing_service.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
-import '../services/api_service.dart';
 import '../services/route_cache_service.dart';
 import '../services/eta_cache_service.dart';
 import '../models/search_result.dart';
 import 'address_search_delegate.dart';
 import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
-import '../components/verification_banner.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -42,9 +40,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _shouldFollowUser = true;
   StreamSubscription<Position>? _positionSubscription;
   String _firstName = "";
-  String _verificationStatus = "VERIFIED";
-  String? _rejectionReason;
-  bool _feedbackSeen = true;
+
 
   // Ride-selection panel state (kept on the map, never navigates away).
   bool _panelOpen = false;
@@ -90,9 +86,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         setState(() {
           final fullName = profile['full_name'] ?? 'User';
           _firstName = fullName.split(' ')[0];
-          _verificationStatus = profile['verification_status'] ?? "VERIFIED";
-          _rejectionReason = profile['rejection_reason'];
-          _feedbackSeen = profile['verification_feedback_seen'] == true;
         });
       }
     } catch (e) {
@@ -106,52 +99,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       }
       debugPrint('Error fetching profile: $e');
     }
-  }
-
-  Future<void> _dismissFeedback() async {
-    try {
-      await ApiService.dio.patch('/ride/verification/dismiss');
-      setState(() => _feedbackSeen = true);
-    } catch (e) {
-      debugPrint('Error dismissing feedback: $e');
-    }
-  }
-
-  void _showRejectionDetails() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Rejection Feedback', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Administrative feedback on your application:', style: TextStyle(fontSize: 13, color: Colors.grey)),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.red.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.withOpacity(0.1))),
-              child: Text(
-                _rejectionReason ?? 'No specific reason provided. Please contact support.',
-                style: const TextStyle(fontWeight: FontWeight.w600, height: 1.5),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('DISMISS')),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // Navigation to verification could go here
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-            child: const Text('UPDATE ID PHOTOS'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -304,7 +251,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _openRidePanel() async {
-    if (_verificationStatus == 'PENDING') return;
     setState(() {
       _panelOpen = true;
       _loadingEstimates = true;
@@ -583,16 +529,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 child: Column(
                   children: [
-                    if (!_feedbackSeen || _verificationStatus == 'PENDING')
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: VerificationBanner(
-                          status: _verificationStatus,
-                          reason: _rejectionReason,
-                          onDismiss: _dismissFeedback,
-                          onViewDetails: _showRejectionDetails,
-                        ),
-                      ),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -679,7 +615,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
             if (_panelOpen && _pickup != null && _destination != null)
               _buildRidePanel(theme)
-            else if (_pickup != null && _destination != null && _verificationStatus != 'PENDING')
+            else if (_pickup != null && _destination != null)
               Positioned(
                 bottom: 40,
                 left: 20,

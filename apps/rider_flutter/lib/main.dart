@@ -97,10 +97,8 @@ void main() async {
         kInitialBlockedReason = profile['blocked_reason'] as String?;
         kInitialIsBlocked = true;
         kInitialTargetRoute = '/blocked';
-      } else if (await AuthService.isRiderOnboardingComplete()) {
-        kInitialTargetRoute = '/';
       } else {
-        kInitialTargetRoute = '/onboarding';
+        kInitialTargetRoute = '/';
       }
     } catch (_) {
       // Backend unreachable — but we have a valid JWT. The user already

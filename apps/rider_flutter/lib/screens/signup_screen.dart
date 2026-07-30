@@ -92,7 +92,7 @@ class _SignupScreenState extends State<SignupScreen> {
             context, 
             '/splash', 
             (route) => false,
-            arguments: {'targetRoute': '/onboarding'},
+            arguments: {'targetRoute': '/'},
           );
         }
       }
