@@ -283,6 +283,11 @@ export class GeospatialService {
   private static readonly GEOAPIFY_BASE = 'https://api.geoapify.com';
   private static readonly SEARCH_RADII_MILES = [1, 3, 5, 10, 25, 50];
   private static readonly MAX_PLACES = 10;
+  private static readonly SEARCH_CACHE_TTL_S = 600;
+  private static readonly TEXT_SEARCH_CACHE_TTL_S = 300;
+  static readonly MIN_AUTOCOMPLETE_LEN = 2;
+  private static readonly MIN_TEXT_SEARCH_LEN = 4;
+  private static inFlight = new Map<string, Promise<any[]>>();
 
   private static get googleMapsApiKey(): string | undefined {
     return env.GOOGLE_ROUTES_API_KEY || env.GOOGLE_MAPS_API_KEY;
@@ -347,7 +352,9 @@ export class GeospatialService {
     }
   }
 
-  /** Google Places Query Autocomplete + Place Details for coordinates. */
+  /** Google Places Query Autocomplete — cheap call, no Place Details.
+   *  Uses user's coordinates as approximate location for results.
+   *  Place Details ($17/1000) is deferred until user selects a result. */
   private static async googlePlacesAutocomplete(query: string, userLat?: number, userLon?: number): Promise<any[]> {
     const apiKey = this.googleMapsApiKey;
     if (!apiKey) return [];
@@ -370,46 +377,23 @@ export class GeospatialService {
       const predictions: any[] = resp.data?.predictions ?? [];
       if (predictions.length === 0) return [];
 
-      const top = predictions.slice(0, 5);
-      const withCoords = await Promise.all(top.map(async (p: any) => {
-        try {
-          const detail = await axios.get(`${this.GOOGLE_PLACES_BASE}/details/json`, {
-            params: { place_id: p.place_id, key: apiKey, fields: 'geometry,formatted_address' },
-            timeout: 3000,
-          });
-          const loc = detail.data?.result?.geometry?.location || {};
-          const addr = detail.data?.result?.formatted_address || '';
-          const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon) && loc.lat != null
-            ? this.haversineMiles(
-                { lat: userLat as number, lon: userLon as number },
-                { lat: loc.lat, lon: loc.lng },
-              )
-            : undefined;
+      const lat = Number.isFinite(userLat) ? userLat! : 0;
+      const lon = Number.isFinite(userLon) ? userLon! : 0;
 
-          return {
-            display_name: p.description || addr || query,
-            lat: loc.lat || 0,
-            lon: loc.lng || 0,
-            type: 'suggestion',
-            state: '',
-            distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
-            is_suggestion: true,
-            place_id: p.place_id,
-          };
-        } catch {
-          return {
-            display_name: p.description || query,
-            lat: 0, lon: 0,
-            type: 'suggestion',
-            state: '',
-            distance_miles: undefined,
-            is_suggestion: true,
-            place_id: p.place_id,
-          };
-        }
-      }));
-
-      return withCoords.filter(r => r.lat !== 0 || r.lon !== 0 || r.is_suggestion);
+      return predictions.slice(0, 5).map((p: any) => {
+        const distMiles = lat
+          ? Math.round(this.haversineMiles({ lat, lon }, { lat, lon }) * 10) / 10
+          : undefined;
+        return {
+          display_name: p.description || query,
+          lat, lon,
+          type: 'suggestion',
+          state: '',
+          distance_miles: distMiles,
+          is_suggestion: true,
+          place_id: p.place_id,
+        };
+      });
     } catch {
       return [];
     }
@@ -469,22 +453,40 @@ export class GeospatialService {
     const q = (query || '').trim();
     if (!q) return [];
 
-    const cacheKey = `search:${q.toLowerCase()}:${userLat?.toFixed(2) ?? '0'}:${userLon?.toFixed(2) ?? '0'}`;
+    const latKey = Number.isFinite(userLat) ? userLat!.toFixed(1) : '0';
+    const lonKey = Number.isFinite(userLon) ? userLon!.toFixed(1) : '0';
+    const cacheKey = `search:${q.toLowerCase()}:${latKey}:${lonKey}`;
+
+    // Check Redis cache
     try {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
-    } catch { /* cache miss — proceed */ }
+    } catch { /* cache miss */ }
 
-    // 1. Try Google Places Text Search (returns real coordinates)
-    if (this.googleMapsApiKey) {
+    // Deduplicate in-flight requests
+    const inFlight = this.inFlight.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    const promise = this._searchPlaces(q, userLat, userLon, cacheKey);
+    this.inFlight.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      this.inFlight.delete(cacheKey);
+    }
+  }
+
+  private static async _searchPlaces(q: string, userLat?: number, userLon?: number, cacheKey?: string): Promise<any[]> {
+    // 1. Google Places Text Search — expensive ($32/1000), skip for short queries
+    if (this.googleMapsApiKey && q.length >= this.MIN_TEXT_SEARCH_LEN) {
       const googleResults = await this.googlePlacesSearchText(q, userLat, userLon);
       if (googleResults.length > 0) {
-        this.cacheSearchResults(cacheKey, googleResults);
+        if (cacheKey) this.cacheSearchResults(cacheKey, googleResults, this.TEXT_SEARCH_CACHE_TTL_S);
         return googleResults;
       }
     }
 
-    // 2. Try Geoapify Places API (progressive radii)
+    // 2. Geoapify Places API (progressive radii, free tier 3000/day)
     if (env.GEOAPIFY_API_KEY && Number.isFinite(userLat) && Number.isFinite(userLon)) {
       const lat = userLat as number;
       const lon = userLon as number;
@@ -525,22 +527,22 @@ export class GeospatialService {
             };
           }).slice(0, this.MAX_PLACES);
 
-          this.cacheSearchResults(cacheKey, results);
+          if (cacheKey) this.cacheSearchResults(cacheKey, results, this.SEARCH_CACHE_TTL_S);
           return results;
         } catch { /* Try next radius */ }
       }
     }
 
-    // 3. Fallback to autocomplete (Google → Geoapify → static suggestions)
+    // 3. Autocomplete fallback (cheap Google Autocomplete → Geoapify → static suggestions)
     const results = await this.autocompleteSearch(q, userLat, userLon);
-    this.cacheSearchResults(cacheKey, results);
+    if (cacheKey) this.cacheSearchResults(cacheKey, results, this.SEARCH_CACHE_TTL_S);
     return results;
   }
 
-  private static async cacheSearchResults(cacheKey: string, results: any[]): Promise<void> {
+  private static async cacheSearchResults(cacheKey: string, results: any[], ttl = this.SEARCH_CACHE_TTL_S): Promise<void> {
     if (results.length === 0) return;
     try {
-      await redis.set(cacheKey, JSON.stringify(results), 'EX', 300).catch(() => {});
+      await redis.set(cacheKey, JSON.stringify(results), 'EX', ttl).catch(() => {});
     } catch { /* cache write failure is non-critical */ }
   }
 
@@ -549,7 +551,7 @@ export class GeospatialService {
    */
   static async autocompleteSearch(query: string, userLat?: number, userLon?: number): Promise<any[]> {
     const q = (query || '').trim();
-    if (q.length < 2) return [];
+    if (q.length < this.MIN_AUTOCOMPLETE_LEN) return [];
 
     // 1. Google Places Autocomplete (returns real coordinates via Place Details)
     if (this.googleMapsApiKey) {
@@ -603,7 +605,9 @@ export class GeospatialService {
       } catch { /* fall through */ }
     }
 
-    // 3. Static suggestion fallback
+    // 3. Static suggestion fallback — use user's location so results appear nearby
+    const fallbackLat = Number.isFinite(userLat) ? userLat! : 0;
+    const fallbackLon = Number.isFinite(userLon) ? userLon! : 0;
     return STATIC_SUGGESTIONS
       .filter((s) =>
         s.label.toLowerCase().startsWith(q.toLowerCase()) ||
@@ -612,7 +616,7 @@ export class GeospatialService {
       .slice(0, 6)
       .map((s) => ({
         display_name: s.label,
-        lat: 0, lon: 0,
+        lat: fallbackLat, lon: fallbackLon,
         type: 'suggestion',
         state: '',
         distance_miles: undefined,

@@ -34,7 +34,7 @@ router.post('/route', authMiddleware, async (req, res) => {
 router.get('/autocomplete', authMiddleware, async (req, res) => {
   try {
     const q = (req.query.q as string || '').trim();
-    if (q.length < 2) {
+    if (q.length < GeospatialService.MIN_AUTOCOMPLETE_LEN) {
       return res.status(400).json({ error: 'Query (q) must be at least 2 characters' });
     }
 
