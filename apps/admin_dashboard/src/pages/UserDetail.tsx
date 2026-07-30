@@ -83,7 +83,7 @@ const UserDetail: React.FC = () => {
   // When opened from a specific section, scope the view to that role even if
   // the account has both rider and driver profiles.
   const viewIsDriver =
-    section === 'drivers' ? true : section === 'riders' ? false : hasDriverProfile;
+    section === 'drivers' ? true : section === 'riders' ? false : user?.role === 'DRIVER';
   const isDriver = viewIsDriver;
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
@@ -357,8 +357,8 @@ const UserDetail: React.FC = () => {
             <Link component={RouterLink} underline="hover" color="inherit" to="/" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
               Admin
             </Link>
-            <Link component={RouterLink} underline="hover" color="inherit" to={section === 'riders' ? '/riders' : section === 'drivers' ? '/drivers' : user.driver_profile ? '/drivers' : '/riders'} sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
-              {section === 'riders' ? 'Riders' : section === 'drivers' ? 'Drivers' : user.driver_profile ? 'Drivers' : 'Riders'}
+            <Link component={RouterLink} underline="hover" color="inherit" to={section === 'riders' ? '/riders' : section === 'drivers' ? '/drivers' : isDriver ? '/drivers' : '/riders'} sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
+              {section === 'riders' ? 'Riders' : section === 'drivers' ? 'Drivers' : isDriver ? 'Drivers' : 'Riders'}
             </Link>
             <Typography color="text.primary" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>User Profile</Typography>
           </Breadcrumbs>
@@ -414,7 +414,7 @@ const UserDetail: React.FC = () => {
               
               <Box>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PLATFORM ROLE</Typography>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>{user.driver_profile ? 'DRIVER' : user.role}</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>{isDriver ? 'DRIVER' : user.role}</Typography>
               </Box>
               
               <Box>
@@ -489,7 +489,7 @@ const UserDetail: React.FC = () => {
         {/* Detailed Info & Documents */}
         <Grid item xs={12} md={8} {...({ component: 'div' } as any)}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {user.driver_profile && (
+            {isDriver && hasDriverProfile && (
               <>
                 <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -1124,7 +1124,7 @@ const UserDetail: React.FC = () => {
               </>
             )}
 
-            {user.role === 'RIDER' && !user.driver_profile && (
+            {!isDriver && user.role === 'RIDER' && (
               <Box>
                 <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 800 }}>Identity Verification (KYC)</Typography>
                 <Grid container spacing={2} {...({ component: 'div' } as any)}>
