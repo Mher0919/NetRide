@@ -16,7 +16,6 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
     _controller.updateLocation(userLat, userLon);
   }
 
-  /// Loads recent searches from the server (once per delegate lifetime).
   Future<void> _loadHistory() async {
     if (_loadedHistory) return;
     _loadedHistory = true;
@@ -122,40 +121,8 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
                 ),
                 itemBuilder: (context, index) {
                   final result = searches[index];
-                  return ListTile(
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    leading: const Icon(Icons.history_rounded,
-                        color: AppTheme.secondaryDarkText, size: 22),
-                    title: Text(
-                      result.displayName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.secondaryDarkText,
-                      ),
-                    ),
-                    subtitle: Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Row(
-                        children: [
-                          _CaBadge(),
-                          if (result.distanceMiles != null) ...[
-                            const SizedBox(width: 6),
-                            Text(
-                              '${result.distanceMiles!.toStringAsFixed(1)} mi',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                                color: AppTheme.secondaryDarkText.withOpacity(0.7),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
+                  return _buildResultTile(result, Icons.history_rounded,
+                    iconColor: AppTheme.secondaryDarkText,
                     onTap: () => _selectResult(context, result),
                   );
                 },
@@ -167,7 +134,87 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
     );
   }
 
-  /// Selects a result, saves it to history, and closes the delegate.
+  Widget _buildResultTile(
+    SearchResult result,
+    IconData icon, {
+    Color? iconColor,
+    VoidCallback? onTap,
+  }) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: Icon(icon, color: iconColor ?? AppTheme.primaryBrandGreen, size: 22),
+      title: Text(
+        result.displayName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppTheme.secondaryDarkText,
+        ),
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Row(
+          children: [
+            _CaBadge(),
+            if (result.displayAddress.isNotEmpty) ...[
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  result.displayAddress,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.secondaryDarkText.withOpacity(0.6),
+                  ),
+                ),
+              ),
+            ],
+            if (result.distanceMiles != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryBrandGreen.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  '${result.distanceMiles!.toStringAsFixed(1)} mi',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryBrandGreen.withOpacity(0.8),
+                  ),
+                ),
+              ),
+            ],
+            if (result.etaText.isNotEmpty) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppTheme.secondaryDarkText.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  result.etaText,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.secondaryDarkText.withOpacity(0.6),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      onTap: onTap,
+    );
+  }
+
   void _selectResult(BuildContext context, SearchResult result) {
     SearchHistoryService.instance.save(result);
     close(context, result);
@@ -218,40 +265,8 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
       ),
       itemBuilder: (context, index) {
         final result = results[index];
-        return ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          leading: const Icon(Icons.location_on_rounded,
-              color: AppTheme.primaryBrandGreen),
-          title: Text(
-            result.displayName,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.secondaryDarkText,
-            ),
-          ),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Row(
-              children: [
-                _CaBadge(),
-                if (result.distanceMiles != null) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    '${result.distanceMiles!.toStringAsFixed(1)} mi',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.secondaryDarkText.withOpacity(0.7),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
+        return _buildResultTile(
+          result, Icons.location_on_rounded,
           onTap: () => _selectResult(context, result),
         );
       },
@@ -279,7 +294,7 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
             ),
             const SizedBox(height: 4),
             Text(
-              'NetRide only operates in California right now — try a different search.',
+              'NetRide only operates in California right now \u2014 try a different search.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,

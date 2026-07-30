@@ -35,7 +35,7 @@ export declare class GeospatialService {
         lon: number;
     } | null>;
     static findNearbyInspections(lat: number, lon: number): Promise<InspectionStation[]>;
-    private static readonly GOOGLE_PLACES_BASE;
+    private static readonly GOOGLE_PLACES_NEW;
     private static readonly GEOAPIFY_BASE;
     private static readonly SEARCH_RADII_MILES;
     private static readonly MAX_PLACES;
@@ -45,11 +45,13 @@ export declare class GeospatialService {
     private static readonly MIN_TEXT_SEARCH_LEN;
     private static inFlight;
     private static get googleMapsApiKey();
-    /** Google Places Text Search — returns nearby places with coordinates. */
+    /** Google Places Text Search (New API) — returns nearby places with coordinates.
+     *  Uses Places API (New) endpoint which is enabled on the existing API key.
+     *  See: https://developers.google.com/maps/documentation/places/web-service/text-search */
     private static googlePlacesSearchText;
-    /** Google Places Query Autocomplete — cheap call, no Place Details.
-     *  Uses user's coordinates as approximate location for results.
-     *  Place Details ($17/1000) is deferred until user selects a result. */
+    /** Google Places Autocomplete (New API) — cheap call ($2.83/1000), no Place Details.
+     *  Uses Places API (New) endpoint, defers coordinate resolution until user selects result.
+     *  See: https://developers.google.com/maps/documentation/places/web-service/autocomplete */
     private static googlePlacesAutocomplete;
     /** Map common free-text queries to Geoapify category filters. */
     private static geoapifyCategory;
@@ -61,10 +63,14 @@ export declare class GeospatialService {
     static searchPlaces(query: string, userLat?: number, userLon?: number): Promise<any[]>;
     private static _searchPlaces;
     private static cacheSearchResults;
+    /** Geoapify Geocoding Autocomplete — PRIMARY provider. Returns real nearby coordinates. */
+    private static geoapifyAutocomplete;
     /**
-     * Autocomplete using Google Places, then Geoapify, then static suggestions.
+     * Fallback autocomplete: Google Places → static suggestions.
      */
     static autocompleteSearch(query: string, userLat?: number, userLon?: number): Promise<any[]>;
+    /** Sort results by distance (closest first). Results without distance go last. */
+    private static sortByDistance;
     private static formatGeoapifyName;
     private static haversineMiles;
     static preCacheHotZones(zones: [number, number][]): Promise<void>;

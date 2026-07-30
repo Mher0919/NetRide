@@ -52,6 +52,12 @@ class SearchHistoryService {
         'state': result.state,
         'type': result.type,
         if (result.distanceMiles != null) 'distance_miles': result.distanceMiles,
+        if (result.formattedAddress != null) 'formatted_address': result.formattedAddress,
+        if (result.street != null) 'street': result.street,
+        if (result.city != null) 'city': result.city,
+        if (result.zip != null) 'zip': result.zip,
+        if (result.category != null) 'category': result.category,
+        if (result.subcategory != null) 'subcategory': result.subcategory,
         if (routeInfo != null) 'route_info': routeInfo.toJson(),
       };
       final originHash = SpatialHash.encode(result.lat, result.lon);

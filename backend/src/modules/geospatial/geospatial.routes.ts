@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { GeospatialService } from './geospatial.service';
+import { PlacesService } from '../places/places.service';
 import { authMiddleware } from '../../middleware/auth.middleware';
 
 const router = Router();
@@ -52,6 +53,9 @@ router.get('/autocomplete', authMiddleware, async (req, res) => {
 /**
  * GET /api/geospatial/search
  * Query: q, lat, lon
+ *
+ * Primary: Local PostGIS database with combined text + proximity ranking.
+ * Fallback: External API providers (Geoapify → Google Places → static).
  */
 router.get('/search', authMiddleware, async (req, res) => {
   try {
@@ -60,12 +64,26 @@ router.get('/search', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Search query (q) is required' });
     }
 
-    const results = await GeospatialService.searchPlaces(
+    const userLat = lat ? parseFloat(lat as string) : undefined;
+    const userLon = lon ? parseFloat(lon as string) : undefined;
+
+    // Primary: local PostGIS places database
+    const localResults = await PlacesService.search(
       q as string,
-      lat ? parseFloat(lat as string) : undefined,
-      lon ? parseFloat(lon as string) : undefined
+      userLat,
+      userLon,
     );
-    res.json(results);
+    if (localResults.length >= 3) {
+      return res.json(localResults);
+    }
+
+    // Fallback: external API providers
+    const apiResults = await GeospatialService.searchPlaces(
+      q as string,
+      userLat,
+      userLon,
+    );
+    res.json(apiResults);
   } catch (err: any) {
     console.error('[GEOSPATIAL] Search Controller Error:', err.message);
     res.status(500).json({ error: 'Failed to search places' });

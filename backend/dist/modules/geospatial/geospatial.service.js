@@ -203,96 +203,116 @@ class GeospatialService {
     static get googleMapsApiKey() {
         return env_1.env.GOOGLE_ROUTES_API_KEY || env_1.env.GOOGLE_MAPS_API_KEY;
     }
-    /** Google Places Text Search — returns nearby places with coordinates. */
+    /** Google Places Text Search (New API) — returns nearby places with coordinates.
+     *  Uses Places API (New) endpoint which is enabled on the existing API key.
+     *  See: https://developers.google.com/maps/documentation/places/web-service/text-search */
     static async googlePlacesSearchText(query, userLat, userLon) {
         const apiKey = this.googleMapsApiKey;
         if (!apiKey)
             return [];
         try {
-            const params = {
-                query,
-                key: apiKey,
-                language: 'en',
+            const body = {
+                textQuery: query,
+                languageCode: 'en',
+                maxResultCount: this.MAX_PLACES,
             };
             if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
-                params.location = `${userLat},${userLon}`;
-                params.radius = 50000;
+                body.locationBias = {
+                    circle: {
+                        center: { latitude: userLat, longitude: userLon },
+                        radius: 50000.0,
+                    },
+                };
             }
-            const resp = await circuit_breaker_1.googlePlacesBreaker.execute(() => axios_1.default.get(`${this.GOOGLE_PLACES_BASE}/textsearch/json`, { params, timeout: 5000 }));
-            const results = resp.data?.results ?? [];
-            if (results.length === 0)
+            const resp = await axios_1.default.post(`${this.GOOGLE_PLACES_NEW}:searchText`, body, {
+                headers: {
+                    'X-Goog-Api-Key': apiKey,
+                    'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.types,places.id',
+                },
+                timeout: 5000,
+            });
+            const places = resp.data?.places ?? [];
+            if (places.length === 0)
                 return [];
-            return results.slice(0, this.MAX_PLACES).map((r) => {
-                const loc = r.geometry?.location || {};
-                const lat = loc.lat ?? 0;
-                const lng = loc.lng ?? 0;
-                const addr = r.formatted_address || '';
+            return places.map((r) => {
+                const loc = r.location || {};
+                const lat = loc.latitude ?? 0;
+                const lng = loc.longitude ?? 0;
+                const name = r.displayName?.text || '';
+                const addr = r.formattedAddress || '';
                 const shortAddr = addr.split(',')[0] || '';
-                const displayName = r.name && shortAddr ? `${r.name}, ${shortAddr}` : (r.name || addr || query);
+                const displayName = name && shortAddr ? `${name}, ${shortAddr}` : (name || addr || query);
                 const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon) && lat
-                    ? this.haversineMiles({ lat: userLat, lon: userLon }, { lat, lon: lng })
+                    ? Math.round(this.haversineMiles({ lat: userLat, lon: userLon }, { lat, lon: lng }) * 10) / 10
                     : undefined;
                 return {
                     display_name: displayName,
-                    lat,
-                    lon: lng,
+                    lat, lon: lng,
                     type: (r.types?.[0] || 'point_of_interest').replace(/_/g, ' ').toLowerCase(),
                     state: '',
-                    distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
+                    distance_miles: distMiles,
                     address: {
-                        road: addr.split(',')[0] || '',
-                        city: addr.split(',')[1]?.trim() || '',
-                        state: addr.split(',')[2]?.trim()?.split(' ')[0] || '',
-                        postcode: '',
+                        road: shortAddr, city: addr.split(',')[1]?.trim() || '',
+                        state: addr.split(',')[2]?.trim()?.split(' ')[0] || '', postcode: '',
                     },
                     is_suggestion: false,
-                    place_id: r.place_id,
+                    place_id: r.id,
                 };
             });
         }
-        catch {
+        catch (err) {
+            logger_1.logger.warn({ err: err?.message, status: err?.response?.status }, 'google_places_text_search_failed');
             return [];
         }
     }
-    /** Google Places Query Autocomplete — cheap call, no Place Details.
-     *  Uses user's coordinates as approximate location for results.
-     *  Place Details ($17/1000) is deferred until user selects a result. */
+    /** Google Places Autocomplete (New API) — cheap call ($2.83/1000), no Place Details.
+     *  Uses Places API (New) endpoint, defers coordinate resolution until user selects result.
+     *  See: https://developers.google.com/maps/documentation/places/web-service/autocomplete */
     static async googlePlacesAutocomplete(query, userLat, userLon) {
         const apiKey = this.googleMapsApiKey;
         if (!apiKey)
             return [];
         try {
-            const params = {
+            const body = {
                 input: query,
-                key: apiKey,
-                language: 'en',
+                languageCode: 'en',
+                origin: undefined,
             };
             if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
-                params.location = `${userLat},${userLon}`;
-                params.radius = 50000;
+                body.locationBias = {
+                    circle: {
+                        center: { latitude: userLat, longitude: userLon },
+                        radius: 50000.0,
+                    },
+                };
             }
-            const resp = await circuit_breaker_1.googlePlacesBreaker.execute(() => axios_1.default.get(`${this.GOOGLE_PLACES_BASE}/queryautocomplete/json`, { params, timeout: 5000 }));
-            const predictions = resp.data?.predictions ?? [];
-            if (predictions.length === 0)
+            const resp = await axios_1.default.post(`${this.GOOGLE_PLACES_NEW}:autocomplete`, body, {
+                headers: {
+                    'X-Goog-Api-Key': apiKey,
+                    'X-Goog-FieldMask': 'suggestions.placePrediction.text,suggestions.placePrediction.placeId',
+                },
+                timeout: 5000,
+            });
+            const suggestions = resp.data?.suggestions ?? [];
+            if (suggestions.length === 0)
                 return [];
             const lat = Number.isFinite(userLat) ? userLat : 0;
             const lon = Number.isFinite(userLon) ? userLon : 0;
-            return predictions.slice(0, 5).map((p) => {
-                const distMiles = lat
-                    ? Math.round(this.haversineMiles({ lat, lon }, { lat, lon }) * 10) / 10
-                    : undefined;
+            return suggestions.slice(0, 5).map((s) => {
+                const pp = s.placePrediction || {};
                 return {
-                    display_name: p.description || query,
+                    display_name: pp.text?.text || pp.text || query,
                     lat, lon,
                     type: 'suggestion',
                     state: '',
-                    distance_miles: distMiles,
+                    distance_miles: lat ? Math.round(this.haversineMiles({ lat, lon }, { lat, lon }) * 10) / 10 : undefined,
                     is_suggestion: true,
-                    place_id: p.place_id,
+                    place_id: pp.placeId,
                 };
             });
         }
-        catch {
+        catch (err) {
+            logger_1.logger.warn({ err: err?.message, status: err?.response?.status }, 'google_places_autocomplete_failed');
             return [];
         }
     }
@@ -373,7 +393,17 @@ class GeospatialService {
         }
     }
     static async _searchPlaces(q, userLat, userLon, cacheKey) {
-        // 1. Google Places Text Search — expensive ($32/1000), skip for short queries
+        // Primary: Geoapify Geocoding Autocomplete — works for ALL queries, returns real coordinates
+        if (env_1.env.GEOAPIFY_API_KEY) {
+            const geoapifyResults = await this.geoapifyAutocomplete(q, userLat, userLon);
+            if (geoapifyResults.length > 0) {
+                const sorted = this.sortByDistance(geoapifyResults);
+                if (cacheKey)
+                    this.cacheSearchResults(cacheKey, sorted, this.SEARCH_CACHE_TTL_S);
+                return sorted;
+            }
+        }
+        // Fallback: Google Places Text Search — only if API key has Places API enabled
         if (this.googleMapsApiKey && q.length >= this.MIN_TEXT_SEARCH_LEN) {
             const googleResults = await this.googlePlacesSearchText(q, userLat, userLon);
             if (googleResults.length > 0) {
@@ -382,53 +412,11 @@ class GeospatialService {
                 return googleResults;
             }
         }
-        // 2. Geoapify Places API (progressive radii, free tier 3000/day)
-        if (env_1.env.GEOAPIFY_API_KEY && Number.isFinite(userLat) && Number.isFinite(userLon)) {
-            const lat = userLat;
-            const lon = userLon;
-            const categories = this.geoapifyCategory(q);
-            for (const radiusMi of this.SEARCH_RADII_MILES) {
-                const radiusM = Math.round(radiusMi * 1609.34);
-                try {
-                    const params = {
-                        apiKey: env_1.env.GEOAPIFY_API_KEY,
-                        filter: `circle:${lon},${lat},${radiusM}`,
-                        limit: String(this.MAX_PLACES),
-                        lang: 'en',
-                        text: q,
-                    };
-                    if (categories.length > 0) {
-                        params.categories = categories.join(',');
-                    }
-                    const resp = await circuit_breaker_1.geoapifyBreaker.execute(() => axios_1.default.get(`${this.GEOAPIFY_BASE}/v2/places`, { params, timeout: 8000 }));
-                    const features = resp.data?.features ?? [];
-                    if (features.length === 0)
-                        continue;
-                    const results = features.map((f) => {
-                        const props = f.properties || {};
-                        const coords = f.geometry?.coordinates || [0, 0];
-                        const distMiles = this.haversineMiles({ lat, lon }, { lat: coords[1], lon: coords[0] });
-                        return {
-                            display_name: this.formatGeoapifyName(props),
-                            lat: coords[1], lon: coords[0],
-                            type: props.categories?.[0] || props.result_type || 'poi',
-                            state: props.state || 'CA',
-                            distance_miles: Math.round(distMiles * 10) / 10,
-                            address: { road: props.street || '', city: props.city || '', state: props.state || 'CA', postcode: props.postcode || '' },
-                        };
-                    }).slice(0, this.MAX_PLACES);
-                    if (cacheKey)
-                        this.cacheSearchResults(cacheKey, results, this.SEARCH_CACHE_TTL_S);
-                    return results;
-                }
-                catch { /* Try next radius */ }
-            }
-        }
-        // 3. Autocomplete fallback (cheap Google Autocomplete → Geoapify → static suggestions)
-        const results = await this.autocompleteSearch(q, userLat, userLon);
+        // Final fallback: static suggestions with user's location
+        const fallbackResults = this.sortByDistance(await this.autocompleteSearch(q, userLat, userLon));
         if (cacheKey)
-            this.cacheSearchResults(cacheKey, results, this.SEARCH_CACHE_TTL_S);
-        return results;
+            this.cacheSearchResults(cacheKey, fallbackResults, this.SEARCH_CACHE_TTL_S);
+        return fallbackResults;
     }
     static async cacheSearchResults(cacheKey, results, ttl = this.SEARCH_CACHE_TTL_S) {
         if (results.length === 0)
@@ -438,60 +426,69 @@ class GeospatialService {
         }
         catch { /* cache write failure is non-critical */ }
     }
+    /** Geoapify Geocoding Autocomplete — PRIMARY provider. Returns real nearby coordinates. */
+    static async geoapifyAutocomplete(query, userLat, userLon) {
+        if (!env_1.env.GEOAPIFY_API_KEY)
+            return [];
+        try {
+            const params = {
+                text: query,
+                apiKey: env_1.env.GEOAPIFY_API_KEY,
+                limit: this.MAX_PLACES,
+                lang: 'en',
+                type: 'amenity',
+            };
+            if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
+                params.bias = `proximity:${userLon},${userLat}`;
+                params.filter = `countrycode:us`;
+            }
+            else {
+                params.filter = `countrycode:us`;
+            }
+            const resp = await axios_1.default.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, { params, timeout: 5000 });
+            const features = resp.data?.features ?? [];
+            if (features.length === 0)
+                return [];
+            return features.map((f) => {
+                const props = f.properties || {};
+                const coords = f.geometry?.coordinates || [0, 0];
+                const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon)
+                    ? Math.round(this.haversineMiles({ lat: userLat, lon: userLon }, { lat: coords[1], lon: coords[0] }) * 10) / 10
+                    : undefined;
+                return {
+                    display_name: props.formatted || props.name || props.address_line1 || query,
+                    lat: coords[1], lon: coords[0],
+                    type: props.categories?.[0] || props.result_type || 'poi',
+                    state: props.state || 'CA',
+                    distance_miles: distMiles,
+                    address: {
+                        road: props.street || '', city: props.city || '',
+                        state: props.state || 'CA', postcode: props.postcode || '',
+                    },
+                    is_suggestion: false,
+                    place_id: props.place_id,
+                };
+            });
+        }
+        catch (err) {
+            logger_1.logger.warn({ err: err?.message, status: err?.response?.status }, 'geoapify_autocomplete_failed');
+            return [];
+        }
+    }
     /**
-     * Autocomplete using Google Places, then Geoapify, then static suggestions.
+     * Fallback autocomplete: Google Places → static suggestions.
      */
     static async autocompleteSearch(query, userLat, userLon) {
         const q = (query || '').trim();
         if (q.length < this.MIN_AUTOCOMPLETE_LEN)
             return [];
-        // 1. Google Places Autocomplete (returns real coordinates via Place Details)
+        // Google Places Autocomplete fallback
         if (this.googleMapsApiKey) {
             const googleResults = await this.googlePlacesAutocomplete(q, userLat, userLon);
             if (googleResults.length > 0)
                 return googleResults;
         }
-        // 2. Geoapify Geocoding Autocomplete
-        if (env_1.env.GEOAPIFY_API_KEY) {
-            try {
-                const params = {
-                    text: q,
-                    apiKey: env_1.env.GEOAPIFY_API_KEY,
-                    limit: 8,
-                    lang: 'en',
-                    type: 'amenity',
-                };
-                if (Number.isFinite(userLat) && Number.isFinite(userLon)) {
-                    params.bias = `proximity:${userLon},${userLat}`;
-                    params.filter = `countrycode:us`;
-                }
-                else {
-                    params.filter = `countrycode:us`;
-                }
-                const resp = await circuit_breaker_1.geoapifyBreaker.execute(() => axios_1.default.get(`${this.GEOAPIFY_BASE}/v1/geocode/autocomplete`, { params, timeout: 5000 }));
-                const features = resp.data?.features ?? [];
-                if (features.length > 0) {
-                    return features.map((f) => {
-                        const props = f.properties || {};
-                        const coords = f.geometry?.coordinates || [0, 0];
-                        const distMiles = Number.isFinite(userLat) && Number.isFinite(userLon)
-                            ? this.haversineMiles({ lat: userLat, lon: userLon }, { lat: coords[1], lon: coords[0] })
-                            : undefined;
-                        return {
-                            display_name: props.formatted || props.name || props.address_line1 || q,
-                            lat: coords[1], lon: coords[0],
-                            type: props.result_type || 'suggestion',
-                            state: props.state || '',
-                            distance_miles: distMiles !== undefined ? Math.round(distMiles * 10) / 10 : undefined,
-                            is_suggestion: true,
-                            place_id: props.place_id,
-                        };
-                    });
-                }
-            }
-            catch { /* fall through */ }
-        }
-        // 3. Static suggestion fallback — use user's location so results appear nearby
+        // Static suggestion fallback — use user's location so results appear nearby
         const fallbackLat = Number.isFinite(userLat) ? userLat : 0;
         const fallbackLon = Number.isFinite(userLon) ? userLon : 0;
         return STATIC_SUGGESTIONS
@@ -506,6 +503,16 @@ class GeospatialService {
             distance_miles: undefined,
             is_suggestion: true,
         }));
+    }
+    /** Sort results by distance (closest first). Results without distance go last. */
+    static sortByDistance(results) {
+        if (!results.some(r => r.distance_miles != null))
+            return results;
+        return results.sort((a, b) => {
+            const da = a.distance_miles ?? 99999;
+            const db = b.distance_miles ?? 99999;
+            return da - db;
+        });
     }
     static formatGeoapifyName(props) {
         const name = props.name || props.address_line1 || '';
@@ -553,7 +560,7 @@ GeospatialService.CA_BBOX = {
 //
 // Primary: Google Places API (uses GOOGLE_MAPS_API_KEY / GOOGLE_ROUTES_API_KEY).
 // Falls back to Geoapify, then static suggestions.
-GeospatialService.GOOGLE_PLACES_BASE = 'https://maps.googleapis.com/maps/api/place';
+GeospatialService.GOOGLE_PLACES_NEW = 'https://places.googleapis.com/v1/places';
 GeospatialService.GEOAPIFY_BASE = 'https://api.geoapify.com';
 GeospatialService.SEARCH_RADII_MILES = [1, 3, 5, 10, 25, 50];
 GeospatialService.MAX_PLACES = 10;

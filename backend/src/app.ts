@@ -35,6 +35,7 @@ import routingRoutes from './modules/routing/routing.routes';
 import adminRoutes from './modules/admin/admin.routes';
 import routingApi from './routing/api/routing-api';
 import pushRoutes from './modules/push/push.routes';
+import placesRoutes from './modules/places/places.routes';
 import { GeospatialService } from './modules/geospatial/geospatial.service';
 import { UploadService } from './services/upload.service';
 import { SpeedingDetector } from './services/speeding_detector';
@@ -168,6 +169,7 @@ app.use('/api/routing', routingApi);
 app.use('/api/admin', adminRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/push', pushRoutes);
+app.use('/api/places', placesRoutes);
 app.post('/api/upload', UploadService.upload);
 
 // Global Error Handler
@@ -492,6 +494,16 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ Vehicle classification + ride preferences schema (031) applied');
+    }
+
+    // Places search with PostGIS (033)
+    const hasPlacesTable = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'places'");
+    if (hasPlacesTable.rowCount === 0) {
+      console.log('⚡ Applying places search schema with PostGIS (033)...');
+      const schemaPath = path.join(__dirname, '../migrations/033_places_search.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Places search schema (033) applied successfully');
     }
 
     console.log('🚀 All migrations completed');

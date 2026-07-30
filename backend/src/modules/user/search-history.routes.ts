@@ -17,6 +17,12 @@ interface SearchHistoryEntry {
   state: string;
   type: string;
   savedAt: number;
+  formatted_address?: string;
+  street?: string;
+  city?: string;
+  zip?: string;
+  category?: string;
+  subcategory?: string;
 }
 
 /**
@@ -35,7 +41,23 @@ router.get('/search-history', authMiddleware, async (req, res) => {
 
     const history = raw.map((item) => {
       try {
-        return JSON.parse(item) as SearchHistoryEntry;
+        const parsed = JSON.parse(item) as SearchHistoryEntry & Record<string, any>;
+        // Normalize camelCase storage keys to snake_case for Flutter compatibility
+        return {
+          display_name: parsed.displayName,
+          lat: parsed.lat,
+          lon: parsed.lon,
+          state: parsed.state,
+          type: parsed.type,
+          distance_miles: parsed.distance ? parseFloat(parsed.distance) : undefined,
+          is_suggestion: false,
+          formatted_address: parsed.formatted_address || parsed.address,
+          street: parsed.street,
+          city: parsed.city,
+          zip: parsed.zip,
+          category: parsed.category,
+          subcategory: parsed.subcategory,
+        };
       } catch {
         return null;
       }
@@ -60,7 +82,7 @@ router.post('/search-history', authMiddleware, async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { displayName, lat, lon, state, type, address, distance } = req.body;
+    const { displayName, lat, lon, state, type, address, distance, formatted_address, street, city, zip, category, subcategory } = req.body;
     if (!displayName || lat == null || lon == null) {
       return res.status(400).json({ error: 'displayName, lat, lon are required' });
     }
@@ -74,6 +96,12 @@ router.post('/search-history', authMiddleware, async (req, res) => {
       state: String(state || 'CA'),
       type: String(type || 'poi'),
       savedAt: Date.now(),
+      formatted_address: formatted_address ? String(formatted_address).slice(0, 300) : undefined,
+      street: street ? String(street).slice(0, 200) : undefined,
+      city: city ? String(city).slice(0, 100) : undefined,
+      zip: zip ? String(zip).slice(0, 20) : undefined,
+      category: category ? String(category).slice(0, 50) : undefined,
+      subcategory: subcategory ? String(subcategory).slice(0, 50) : undefined,
     };
 
     const key = `${HISTORY_KEY_PREFIX}${userId}`;
