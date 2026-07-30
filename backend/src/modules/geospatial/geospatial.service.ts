@@ -605,7 +605,10 @@ export class GeospatialService {
 
     // 3. Static suggestion fallback
     return STATIC_SUGGESTIONS
-      .filter((s) => s.prefixes.some((p) => q.toLowerCase().startsWith(p)))
+      .filter((s) =>
+        s.label.toLowerCase().startsWith(q.toLowerCase()) ||
+        s.prefixes.some((p) => p.startsWith(q.toLowerCase()))
+      )
       .slice(0, 6)
       .map((s) => ({
         display_name: s.label,
