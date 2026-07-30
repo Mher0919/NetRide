@@ -222,3 +222,9 @@ export const overpassBreaker = circuitBreakerRegistry.get('overpass', {
   successThreshold: 2,
   timeout: 120_000,
 });
+
+export const googleRoutesBreaker = circuitBreakerRegistry.get('googleRoutes', {
+  failureThreshold: 3,
+  successThreshold: 2,
+  timeout: 60_000,
+});

@@ -13,5 +13,6 @@ const router = Router();
  * This is the only endpoint the rider app's planning flow should call.
  */
 router.post('/plan', rateLimitMiddleware, RoutingController.plan);
+router.post('/google-plan', rateLimitMiddleware, RoutingController.googlePlan);
 
 export default router;

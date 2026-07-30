@@ -3,8 +3,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 import 'api_service.dart';
+import 'route_cache_service.dart';
 
-/// Result of a trip-plan call: road-following geometry + ETA + full fare.
 class TripPlan {
   const TripPlan({
     required this.points,
@@ -15,21 +15,23 @@ class TripPlan {
     required this.engine,
     required this.cacheHit,
     required this.decodeMicros,
+    this.trafficDurationSeconds,
   });
 
   final List<LatLng> points;
   final double distanceMeters;
   final double durationSeconds;
   final double etaSeconds;
+  final double? trafficDurationSeconds;
   final Map<String, dynamic> fare;
   final String engine;
   final bool cacheHit;
-  /// Polyline-decode time in microseconds (instrumented for perf budgets).
   final int decodeMicros;
 }
 
 class RoutingService {
   final Dio _dio = ApiService.dio;
+  final RouteCacheService _routeCache = RouteCacheService.instance;
 
   void setTestPost(Future<Response> Function(
     String path, {
@@ -45,9 +47,6 @@ class RoutingService {
     Options? options,
   })? _testPost;
 
-  final String _baseUrl = 'https://netride.onrender.com';
-
-  /// Key excludes vehicleClass so all 3 class estimates share one request.
   final Map<String, CancelToken> _inflight = {};
   final Map<String, Future<TripPlan>> _dedupe = {};
 
@@ -69,6 +68,16 @@ class RoutingService {
       }
     }
 
+    final cached = _routeCache.get(
+      originLat: origin.latitude,
+      originLng: origin.longitude,
+      destLat: destination.latitude,
+      destLng: destination.longitude,
+    );
+    if (cached != null) {
+      return _hydrateCached(cached, origin, destination, 'RouteCache');
+    }
+
     final token = CancelToken();
     _inflight[key] = token;
 
@@ -87,6 +96,63 @@ class RoutingService {
     String vehicleClass,
     CancelToken token,
   ) async {
+    try {
+      final response = await (_testPost ??
+          (path, {required data, cancelToken, options}) =>
+              _dio.post(path, data: data, cancelToken: cancelToken, options: options))(
+        '/routing/google-plan',
+        data: {
+          'origin': [origin.latitude, origin.longitude],
+          'destination': [destination.latitude, destination.longitude],
+          'vehicleClass': vehicleClass,
+        },
+        cancelToken: token,
+        options: Options(
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        final data = response.data as Map<String, dynamic>;
+        final points = _parsePolyline(data['polyline']);
+
+        final fare = _localFare(
+          (data['distanceMeters'] as num?)?.toDouble() ?? 0,
+          (data['durationSeconds'] as num?)?.toDouble() ?? 0,
+        );
+
+        final plan = TripPlan(
+          points: points,
+          distanceMeters: (data['distanceMeters'] as num?)?.toDouble() ?? 0,
+          durationSeconds: (data['durationSeconds'] as num?)?.toDouble() ?? 0,
+          etaSeconds: (data['etaSeconds'] as num?)?.toDouble() ?? 0,
+          trafficDurationSeconds: (data['trafficDurationSeconds'] as num?)?.toDouble(),
+          fare: fare,
+          engine: data['engine']?.toString() ?? 'GoogleRoutes',
+          cacheHit: data['cacheHit'] as bool? ?? false,
+          decodeMicros: 0,
+        );
+
+        _routeCache.set(
+          originLat: origin.latitude,
+          originLng: origin.longitude,
+          destLat: destination.latitude,
+          destLng: destination.longitude,
+          distanceMeters: plan.distanceMeters,
+          durationSeconds: plan.durationSeconds,
+          trafficDurationSeconds: plan.trafficDurationSeconds,
+        );
+
+        return plan;
+      }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) rethrow;
+      debugPrint('[ROUTING] Google-plan failed: $e');
+    } catch (e) {
+      debugPrint('[ROUTING] Google-plan unexpected error: $e');
+    }
+
     try {
       final response = await (_testPost ??
           (path, {required data, cancelToken, options}) =>
@@ -116,9 +182,9 @@ class RoutingService {
 
         return TripPlan(
           points: points,
-          distanceMeters: (data['distanceMeters'] as num?)?.toDouble() ?? 0.0,
-          durationSeconds: (data['durationSeconds'] as num?)?.toDouble() ?? 0.0,
-          etaSeconds: (data['etaSeconds'] as num?)?.toDouble() ?? 0.0,
+          distanceMeters: (data['distanceMeters'] as num?)?.toDouble() ?? 0,
+          durationSeconds: (data['durationSeconds'] as num?)?.toDouble() ?? 0,
+          etaSeconds: (data['etaSeconds'] as num?)?.toDouble() ?? 0,
           fare: fare,
           engine: data['engine']?.toString() ?? 'Backend',
           cacheHit: data['cacheHit'] as bool? ?? false,
@@ -126,28 +192,33 @@ class RoutingService {
         );
       }
     } on DioException catch (e) {
-      if (e.type == DioExceptionType.cancel) {
-        // Silent — superseded by a newer request.
-        rethrow;
-      }
-      debugPrint('[ROUTING] Backend call failed: $e');
+      if (e.type == DioExceptionType.cancel) rethrow;
+      debugPrint('[ROUTING] Backend plan failed: $e');
     } catch (e) {
       debugPrint('[ROUTING] Unexpected error: $e');
     }
 
-    // High-quality local fallback keeps the UI responsive offline.
     return _calculateLocalPremiumFallback(origin, destination);
   }
 
-  /// Flatten a GeoJSON LineString geometry into LatLng points that follow
-  /// the real road geometry returned by the backend.
+  List<LatLng> _parsePolyline(dynamic polyline) {
+    if (polyline is List) {
+      return polyline.map((c) {
+        if (c is List && c.length >= 2) {
+          return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
+        }
+        return null;
+      }).whereType<LatLng>().toList();
+    }
+    return [];
+  }
+
   List<LatLng> _flattenGeometry(dynamic geometry) {
     final List<LatLng> out = [];
 
     void addLine(List coords) {
       for (final c in coords) {
         if (c is List && c.length >= 2) {
-          // GeoJSON coordinates are [lng, lat].
           out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
         }
       }
@@ -166,16 +237,28 @@ class RoutingService {
     return out;
   }
 
+  TripPlan _hydrateCached(CachedRouteData cached, LatLng origin, LatLng destination, String source) {
+    return TripPlan(
+      points: [origin, destination],
+      distanceMeters: cached.distanceMeters,
+      durationSeconds: cached.durationSeconds,
+      etaSeconds: cached.trafficDurationSeconds ?? cached.durationSeconds,
+      trafficDurationSeconds: cached.trafficDurationSeconds,
+      fare: _localFare(cached.distanceMeters, cached.durationSeconds),
+      engine: source,
+      cacheHit: true,
+      decodeMicros: 0,
+    );
+  }
+
   TripPlan _calculateLocalPremiumFallback(LatLng start, LatLng end) {
-    const double urbanSpeedMps = 5.5; // ~20 km/h
+    const double urbanSpeedMps = 5.5;
     const double detourFactor = 1.4;
 
     final directDistance = const Distance().as(LengthUnit.Meter, start, end);
     final streetDist = directDistance * detourFactor;
     final durationSeconds = streetDist / urbanSpeedMps;
 
-    // Road-shaped (Manhattan-style) fallback path — two bends through a
-    // midpoint corner so it reads as city-grid travel, never a straight line.
     final midLat = (start.latitude + end.latitude) / 2;
     final midLng = (start.longitude + end.longitude) / 2;
     final points = [
@@ -191,7 +274,6 @@ class RoutingService {
       distanceMeters: streetDist,
       durationSeconds: durationSeconds,
       etaSeconds: durationSeconds * 1.2,
-      // Compute a local fare so the rider never sees $0 while offline.
       fare: _localFare(streetDist, durationSeconds),
       engine: 'Local-Premium-Fallback',
       cacheHit: false,
@@ -199,8 +281,6 @@ class RoutingService {
     );
   }
 
-  /// Mirror of the backend in-memory fare formula so the offline fallback
-  /// still shows a realistic, non-zero price.
   Map<String, dynamic> _localFare(double distanceMeters, double durationSeconds) {
     const base = 3.50;
     const perKm = 1.50;

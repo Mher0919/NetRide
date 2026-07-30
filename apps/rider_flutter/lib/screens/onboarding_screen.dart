@@ -157,7 +157,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               const SizedBox(height: 12),
               Text(
                 _codeSent
-                    ? 'Enter the 6-digit code sent to your phone.'
+                    ? 'Enter the 6-digit code sent to\n${_phoneController.text}'
                     : 'Verify your phone number to start riding.',
                 style: GoogleFonts.poppins(fontSize: 16, color: Colors.grey[600]),
               ),

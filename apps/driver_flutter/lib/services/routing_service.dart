@@ -1,13 +1,27 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 import 'api_service.dart';
+import 'google_routes_service.dart';
+import '../models/route_models.dart';
 
 class RoutingService {
   final Dio _dio = ApiService.dio;
+  final GoogleRoutesService _googleRoutes = GoogleRoutesService();
 
   Future<Map<String, dynamic>> getRoute(LatLng start, LatLng end) async {
+    try {
+      final routeResponse = await _googleRoutes.getRoute(
+        origin: start,
+        destination: end,
+      );
+
+      return _hydrateFromRoute(routeResponse);
+    } catch (e) {
+      debugPrint('[ROUTING] Google Routes failed: $e');
+    }
+
     try {
       final response = await _dio.post(
         '/geospatial/route',
@@ -39,23 +53,15 @@ class RoutingService {
         }
       }
     } catch (e) {
-      print('[ROUTING] Backend Call Failed: $e');
+      debugPrint('[ROUTING] Backend Call Failed: $e');
     }
 
-    // High-Quality Local Fallback
     return calculateLocalFallback(start, end);
   }
 
-  /**
-   * Ask the server for a manual reroute. The backend re-runs OSRM
-   * from the supplied start, replaces the cached leg, and emits the
-   * navigationRouteUpdated / navigationRerouteRequested events. Returns
-   * the fresh route payload so the caller can rehydrate its local
-   * NavigationRoute immediately (without waiting for the socket).
-   */
   Future<Map<String, dynamic>?> requestReroute({
     required String tripId,
-    required String leg, // 'pickup' | 'destination'
+    required String leg,
     required LatLng from,
   }) async {
     try {
@@ -78,16 +84,11 @@ class RoutingService {
         if (route != null) return _hydrate(route);
       }
     } catch (e) {
-      print('[ROUTING] Manual reroute failed: $e');
+      debugPrint('[ROUTING] Manual reroute failed: $e');
     }
     return null;
   }
 
-  /**
-   * Read the cached leg for the trip from the backend's per-leg cache.
-   * The driver app calls this on socket rehydrate so we don't make a
-   * second OSRM round-trip after a navigationStarted event.
-   */
   Future<Map<String, dynamic>?> getCachedLeg({
     required String tripId,
     required String leg,
@@ -107,68 +108,46 @@ class RoutingService {
         return _hydrate(m['route'] as Map<String, dynamic>);
       }
     } catch (e) {
-      print('[ROUTING] Cached-leg fetch failed: $e');
+      debugPrint('[ROUTING] Cached-leg fetch failed: $e');
     }
     return null;
   }
 
   Map<String, dynamic> _hydrate(Map<String, dynamic> data) {
-    final geometry = data['geometry'];
-    final points = _flattenGeometry(geometry);
     return {
-      'points_list': points,
+      'points_list': data['points_list'] ?? data['polyline'] ?? <LatLng>[],
       'distance': (data['distance'] as num?)?.toDouble() ?? 0.0,
-      'duration': (data['eta'] as num?)?.toDouble() ?? 0.0,
+      'duration': (data['duration'] as num?)?.toDouble() ?? (data['eta'] as num?)?.toDouble() ?? 0.0,
       'osrm_duration': (data['osrm_duration'] as num?)?.toDouble() ?? 0.0,
-      'engine': data['engine'] ?? 'Backend-Gateway',
-      'cache_hit': data['cache_hit'] ?? false,
+      'engine': data['engine'] ?? 'GoogleRoutes',
+      'cache_hit': data['cacheHit'] as bool? ?? data['cache_hit'] as bool? ?? false,
       'steps': (data['steps'] as List?) ?? const [],
       'speedLimitsByRoad': (data['speedLimitsByRoad'] as Map?) ?? const {},
       'cachedAt': data['cachedAt'],
     };
   }
 
-  /// Flatten a GeoJSON geometry (LineString or MultiLineString) — or a
-  /// Geoapify-style FeatureCollection/Feature — into road-following points.
-  List<LatLng> _flattenGeometry(dynamic geometry) {
-    final List<LatLng> out = [];
-    void addLine(List coords) {
-      for (final c in coords) {
-        if (c is List && c.length >= 2) {
-          out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
-        }
-      }
-    }
-
-    if (geometry is Map) {
-      final type = geometry['type'];
-      if (type == 'LineString') {
-        addLine(geometry['coordinates'] as List);
-      } else if (type == 'MultiLineString') {
-        for (final line in (geometry['coordinates'] as List)) {
-          addLine(line as List);
-        }
-      } else if (type == 'FeatureCollection') {
-        for (final f in (geometry['features'] as List? ?? [])) {
-          final g = (f as Map)['geometry'];
-          if (g != null) out.addAll(_flattenGeometry(g));
-        }
-      } else if (type == 'Feature') {
-        final g = geometry['geometry'];
-        if (g != null) out.addAll(_flattenGeometry(g));
-      }
-    }
-    return out;
+  Map<String, dynamic> _hydrateFromRoute(RouteResponse route) {
+    return {
+      'points_list': route.polyline,
+      'distance': route.distanceMeters,
+      'duration': route.durationSeconds,
+      'eta': route.trafficDurationSeconds ?? route.durationSeconds,
+      'engine': route.engine,
+      'cache_hit': route.cacheHit,
+      'steps': route.steps.map((s) => s.toJson()).toList(),
+      'speedLimitsByRoad': <String, int>{},
+      'cachedAt': DateTime.now().toIso8601String(),
+    };
   }
 
   Map<String, dynamic> calculateLocalFallback(LatLng start, LatLng end) {
-    const double urbanSpeedMps = 5.5; // ~20 km/h
+    const double urbanSpeedMps = 5.5;
     const double detourFactor = 1.4;
 
     double directDistance = const Distance().as(LengthUnit.Meter, start, end);
     double streetDist = directDistance * detourFactor;
 
-    // Create a "Premium Staircase" path (mimics urban grid)
     List<LatLng> points = [
       start,
       LatLng(start.latitude, end.longitude),

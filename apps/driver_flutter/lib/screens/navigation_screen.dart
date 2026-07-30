@@ -1,18 +1,6 @@
-// apps/driver_flutter/lib/screens/navigation_screen.dart
-//
-// The driver-app navigation view. Replaces the OSM map inside
-// trip_screen.dart with a heading-up GoogleMap, the five palette-
-// matched components (TopManeuverCard, RoutingOptionsBar,
-// SpeedHudCard, LaneGuidance, BottomSheetCard), and a rotated driver
-// marker driven by the GPS heading.
-//
-// The screen is a passive consumer of NavigationService + GpsTracker;
-// the trip_screen wires it in by passing the existing trip context
-// (pickup/destination coords, trip id) and listening to the socket
-// events (navigationLegAdvanced, navigationRouteUpdated).
-
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../components/navigation/bottom_sheet_card.dart';
@@ -30,9 +18,6 @@ import '../services/navigation_voice_service.dart';
 import '../theme/app_theme.dart';
 
 class NavigationScreen extends StatefulWidget {
-  /// `true` if the driver is on the pickup leg (button should say
-  /// "PICK UP RIDER"). `false` once they're heading to the destination
-  /// ("COMPLETE TRIP" instead).
   final bool canPickupRider;
   final bool canCompleteTrip;
   final VoidCallback? onPickupRider;
@@ -59,7 +44,7 @@ class NavigationScreen extends StatefulWidget {
 }
 
 class _NavigationScreenState extends State<NavigationScreen> {
-  gmaps.GoogleMapController? _mapController;
+  final MapController _mapController = MapController();
 
   @override
   Widget build(BuildContext context) {
@@ -68,45 +53,44 @@ class _NavigationScreenState extends State<NavigationScreen> {
     final route = nav.route;
     final progress = nav.progress;
 
-    // Polyline set for the GoogleMap. Single segment from cached leg.
-    final polylines = <gmaps.Polyline>{};
+    final polylines = <Polyline<Object>>[];
     if (route != null && route.polyline.length >= 2) {
       polylines.add(
-        gmaps.Polyline(
-          polylineId: const gmaps.PolylineId('route'),
-          points: route.polyline
-              .map((p) => gmaps.LatLng(p.latitude, p.longitude))
-              .toList(),
-          width: 7,
+        Polyline<Object>(
+          points: route.polyline,
           color: AppTheme.primaryBrandGreen,
-          endCap: gmaps.Cap.roundCap,
-          startCap: gmaps.Cap.roundCap,
-          jointType: gmaps.JointType.round,
+          strokeWidth: 7.0,
+          borderColor: Colors.white,
+          borderStrokeWidth: 2.0,
         ),
       );
     }
 
-    // Driver marker. Heading is the compass bearing from the GPS fix;
-    // GoogleMap rotates the marker counter-clockwise so we feed it
-    // `360 - heading` to align north-up → map-heading-up.
-    final markers = <gmaps.Marker>{};
+    final markers = <Marker>[];
     if (gps != null) {
       markers.add(
-        gmaps.Marker(
-          markerId: const gmaps.MarkerId('driver'),
-          position:
-              gmaps.LatLng(gps.position.latitude, gps.position.longitude),
-          rotation: (360 - gps.headingDeg) % 360,
-          flat: true,
-          anchor: const Offset(0.5, 0.5),
-          icon: gmaps.BitmapDescriptor.defaultMarkerWithHue(
-            gmaps.BitmapDescriptor.hueAzure,
-          ),
+        Marker(
+          point: gps.position,
+          width: 40,
+          height: 40,
+          child: _buildDriverMarker(gps.headingDeg),
         ),
       );
     }
 
-    // Top maneuver card data.
+    if (route != null) {
+      if (route.polyline.isNotEmpty) {
+        markers.add(
+          Marker(
+            point: route.polyline.last,
+            width: 30,
+            height: 30,
+            child: _buildDestinationMarker(),
+          ),
+        );
+      }
+    }
+
     final currentStep = progress?.currentStep;
     final nextStep = progress?.nextStep;
     final nextManeuver = currentStep ?? nextStep;
@@ -121,7 +105,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
         ? maneuverIconFromOSRM(nextManeuver.type, nextManeuver.modifier)
         : Icons.navigation_rounded;
 
-    // Lanes from the OSRM step.
     final lanes = <LaneGuidance>[];
     if (route != null &&
         progress != null &&
@@ -144,37 +127,33 @@ class _NavigationScreenState extends State<NavigationScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // 1. The map — fill the entire screen behind the overlays.
           Positioned.fill(
-            child: gmaps.GoogleMap(
-              initialCameraPosition: gmaps.CameraPosition(
-                target: gps != null
-                    ? gmaps.LatLng(
-                        gps.position.latitude, gps.position.longitude)
-                    : const gmaps.LatLng(34.0522, -118.2437),
-                zoom: 17,
-                tilt: 60,
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: gps?.position ?? const LatLng(34.0522, -118.2437),
+                initialZoom: 17.0,
+                minZoom: 12,
+                maxZoom: 18,
+                onMapReady: () {
+                  if (gps != null) {
+                    _mapController.move(gps.position, 17.0);
+                  }
+                },
               ),
-              myLocationButtonEnabled: false,
-              compassEnabled: true,
-              zoomControlsEnabled: false,
-              mapToolbarEnabled: false,
-              polylines: polylines,
-              markers: markers,
-              onMapCreated: (c) {
-                _mapController = c;
-                // Animate to current GPS position once the map is ready.
-                if (gps != null) {
-                  c.animateCamera(gmaps.CameraUpdate.newLatLngZoom(
-                    gmaps.LatLng(gps.position.latitude, gps.position.longitude),
-                    17,
-                  ));
-                }
-              },
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                  subdomains: const ['a', 'b', 'c', 'd'],
+                  userAgentPackageName: 'com.NetRide.driver',
+                ),
+                if (polylines.isNotEmpty)
+                  PolylineLayer(polylines: polylines),
+                MarkerLayer(markers: markers),
+              ],
             ),
           ),
 
-          // 2. Top: Maneuver card + routing options bar.
           Positioned(
             top: 0,
             left: 0,
@@ -205,9 +184,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
             ),
           ),
 
-          // 3. Top-right: Speed HUD. Subscribes to SpeedMonitor's
-          //    ValueNotifier so it rebuilds only when visible state
-          //    changes (under/over limit), not every GPS tick.
           Positioned(
             top: 0,
             right: 16,
@@ -224,10 +200,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
             ),
           ),
 
-          // 4. Voice Mute Floating Pill
           Positioned(
             right: 16,
-            bottom: 250, // Pill sits above the BottomSheetCard
+            bottom: 250,
             child: ValueListenableBuilder<bool>(
               valueListenable: NavigationVoiceService.instance.mutedListenable,
               builder: (context, muted, _) {
@@ -271,7 +246,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
             ),
           ),
 
-          // 5. Bottom: CTA sheet — driven by leg.
           Positioned(
             left: 0,
             right: 0,
@@ -298,7 +272,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
         isPickupLeg ? widget.onPickupRider : widget.onCompleteTrip;
 
     final etaLabel =
-        etaSec > 0 ? 'ETA ${(etaSec / 60).ceil()} min' : 'ETA —';
+        etaSec > 0 ? 'ETA ${(etaSec / 60).ceil()} min' : 'ETA \u2014';
     final remainingLabel = nav.formatDistance(remaining);
 
     final comm = context.watch<CommunicationService>();
@@ -322,6 +296,41 @@ class _NavigationScreenState extends State<NavigationScreen> {
     );
   }
 
+  Widget _buildDriverMarker(double headingDeg) {
+    return Transform.rotate(
+      angle: headingDeg * (3.14159 / 180),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: AppTheme.primaryBrandGreen,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 3),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.navigation,
+          color: Colors.white,
+          size: 18,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDestinationMarker() {
+    return const Icon(
+      Icons.location_on,
+      color: Color(0xFFC65A5A),
+      size: 30,
+    );
+  }
+
   bool _isFreewayName(String name) {
     if (name.isEmpty) return false;
     return RegExp(
@@ -336,7 +345,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
   }
 }
 
-// Re-export for tests; TopManeuverCard owns the canonical mapping.
 IconData maneuverIconFromOSRM(String type, String modifier) {
   switch (type) {
     case 'arrive':

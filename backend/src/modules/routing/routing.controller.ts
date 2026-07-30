@@ -22,6 +22,14 @@ const PlanSchema = z.object({
   vehicleClass: z.nativeEnum(VehicleClass).optional(),
 });
 
+const GooglePlanSchema = z.object({
+  origin: z.tuple([z.number(), z.number()]),
+  destination: z.tuple([z.number(), z.number()]),
+  originHex: z.string().optional(),
+  destHex: z.string().optional(),
+  vehicleClass: z.nativeEnum(VehicleClass).optional(),
+});
+
 export class RoutingController {
   static async plan(req: Request, res: Response): Promise<void> {
     try {
@@ -60,6 +68,44 @@ export class RoutingController {
         return;
       }
       logger.error({ err: err.message }, 'routing_plan_failed');
+      res.status(500).json({ error: 'Routing failed. Please try again.' });
+    }
+  }
+
+  static async googlePlan(req: Request, res: Response): Promise<void> {
+    try {
+      const parsed = GooglePlanSchema.parse(req.body);
+      const origin = parseCoordinates(parsed.origin, 'origin');
+      const destination = parseCoordinates(parsed.destination, 'destination');
+
+      const plan: PlanResponse = await RoutingService.plan({
+        origin,
+        destination,
+        vehicleClass: parsed.vehicleClass ?? VehicleClass.CORE,
+      });
+
+      res.json({
+        distanceMeters: plan.distanceMeters,
+        durationSeconds: plan.durationSeconds,
+        etaSeconds: plan.etaSeconds,
+        trafficDurationSeconds: plan.durationSeconds,
+        originHex: parsed.originHex ?? '',
+        destHex: parsed.destHex ?? '',
+        polyline: plan.geometry.coordinates,
+        engine: plan.engine,
+        cacheHit: plan.cacheHit,
+        steps: [],
+      });
+    } catch (err: any) {
+      if (err instanceof InvalidCoordinatesError) {
+        res.status(400).json({ error: err.detail });
+        return;
+      }
+      if (err?.name === 'ZodError') {
+        res.status(400).json({ error: 'Invalid request body', detail: err.errors });
+        return;
+      }
+      logger.error({ err: err.message }, 'routing_google_plan_failed');
       res.status(500).json({ error: 'Routing failed. Please try again.' });
     }
   }

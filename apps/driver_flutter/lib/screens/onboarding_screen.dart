@@ -42,11 +42,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   // Step 2: Phone Verification
   final _phoneController = TextEditingController();
+  final List<TextEditingController> _codeControllers = List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _codeFocusNodes = List.generate(6, (_) => FocusNode());
   bool _isPhoneVerified = false;
   bool _isSendingCode = false;
   bool _codeSent = false;
   bool _phoneValid = false;
-  final _otpController = TextEditingController();
 
   // Step 3: Documents
   String? _licensePhotoFrontUrl;
@@ -98,7 +99,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _nameController.dispose();
     _dobController.dispose();
     _phoneController.dispose();
-    _otpController.dispose();
+    for (final c in _codeControllers) c.dispose();
+    for (final f in _codeFocusNodes) f.dispose();
     _plateNumberController.dispose();
     _zipController.dispose();
     super.dispose();
@@ -563,15 +565,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             if (_codeSent) ...[
               const SizedBox(height: 24),
-              TextField(
-                controller: _otpController,
-                decoration: _inputDecoration('Verification Code').copyWith(
-                  hintText: '6-digit code',
-                ),
-                keyboardType: TextInputType.number,
-                maxLength: 6,
+              Text(
+                'Enter the 6-digit code sent to\n${_phoneController.text}',
+                style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List.generate(6, (index) => _buildCodeBox(index)),
+              ),
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 height: 48,
@@ -601,7 +604,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 onPressed: () {
                   setState(() {
                     _codeSent = false;
-                    _otpController.clear();
+                    for (final c in _codeControllers) c.clear();
                   });
                 },
                 child: const Text(
@@ -686,7 +689,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _verifyPhoneCode() async {
-    if (_otpController.text.trim().length != 6) {
+    String code = _codeControllers.map((c) => c.text).join();
+    if (code.length < 6) {
       _showError('Please enter the 6-digit verification code.');
       return;
     }
@@ -698,7 +702,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               country: CountryDialCode.unitedStates,
             ) ??
             _phoneController.text.trim(),
-        code: _otpController.text.trim(),
+        code: code,
       );
       setState(() {
         _isPhoneVerified = true;
@@ -709,6 +713,41 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() => _isSendingCode = false);
       _showError(ErrorHandler.friendly(e));
     }
+  }
+
+  Widget _buildCodeBox(int index) {
+    return SizedBox(
+      width: 45,
+      height: 55,
+      child: TextField(
+        controller: _codeControllers[index],
+        focusNode: _codeFocusNodes[index],
+        keyboardType: TextInputType.number,
+        textAlign: TextAlign.center,
+        maxLength: 1,
+        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        decoration: InputDecoration(
+          counterText: '',
+          filled: true,
+          fillColor: Colors.grey.shade50,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.black, width: 1.5),
+          ),
+        ),
+        onChanged: (value) {
+          if (value.isNotEmpty && index < 5) {
+            _codeFocusNodes[index + 1].requestFocus();
+          } else if (value.isEmpty && index > 0) {
+            _codeFocusNodes[index - 1].requestFocus();
+          }
+          if (_codeControllers.every((c) => c.text.isNotEmpty)) {
+            _verifyPhoneCode();
+          }
+        },
+      ),
+    );
   }
 
   Future<void> _pickDate() async {

@@ -31,6 +31,7 @@ import { fareService, FareBreakdown } from '../../services/fare.service';
 import { RoadSnapperService } from '../../services/road-snapper.service';
 import { VehicleClass } from '../../types';
 import { RouteEngine } from './route-engine';
+import { GoogleRoutesEngine } from './google-routes.engine';
 import { AStarEngineAdapter } from './astar-engine-adapter';
 import { OSEngine } from './osrm.engine';
 import { ORSEngine } from './ors.engine';
@@ -61,7 +62,7 @@ export interface RoutingResult {
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
-  engine: 'A*' | 'OSRM' | 'ORS' | 'Synthetic';
+  engine: 'GoogleRoutes' | 'A*' | 'OSRM' | 'ORS' | 'Synthetic';
   cacheHit: boolean;
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
@@ -144,6 +145,7 @@ export class RoutingService {
     match: (origin: [number, number], destination: [number, number]) => boolean;
     engine: RouteEngine;
   }> = [
+    { match: () => true,        engine: GoogleRoutesEngine },
     { match: () => true,        engine: AStarEngineAdapter },
     { match: () => true,        engine: OSEngine },
     { match: () => true,        engine: ORSEngine },
@@ -435,13 +437,13 @@ export class RoutingService {
 
     try {
       // Try engines in order: A* → OSRM → ORS → Synthetic fallback
-      const engines = [AStarEngineAdapter, OSEngine, ORSEngine];
+      const engines = [GoogleRoutesEngine, AStarEngineAdapter, OSEngine, ORSEngine];
       for (const engine of engines) {
         try {
           const res = await engine.route(routeOrigin, routeDest);
           if (res) {
             const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
-            const engineName = engine.name as 'A*' | 'OSRM' | 'ORS';
+            const engineName = engine.name as 'GoogleRoutes' | 'A*' | 'OSRM' | 'ORS';
             result = {
               distanceMeters: res.distanceMeters,
               durationSeconds: res.durationSeconds,

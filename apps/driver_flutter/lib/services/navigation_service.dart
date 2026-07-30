@@ -1,22 +1,3 @@
-// apps/driver_flutter/lib/services/navigation_service.dart
-//
-// In-app navigation coordinator for the driver app. Holds the cached
-// route for the active leg, integrates the GPS feed (GpsTracker),
-// the speed HUD (SpeedMonitor), and the local-only progress
-// calculator (RouteProgressCalculator). Owns the off-route detection
-// + manual reroute handshake with the backend.
-//
-// Two-leg model:
-//
-//   - pickup       : driver → rider pickup point
-//   - destination  : rider pickup → drop-off
-//
-// The transition from `pickup` to `destination` happens when the
-// driver app calls `arriveAtPickup()`. The backend emits the
-// `navigationLegAdvanced` socket event when the trip status flips
-// ACCEPTED → IN_PROGRESS; this service listens for that and swaps
-// the cached route + steps + speed-limit map.
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
@@ -35,6 +16,7 @@ class NavigationRoute {
   final List<ProgressStep> steps;
   final double totalMeters;
   final double etaSeconds;
+  final double? trafficEtaSeconds;
   final Map<String, int> speedLimitsByRoad;
   final String engine;
   final bool cacheHit;
@@ -45,44 +27,135 @@ class NavigationRoute {
     required this.steps,
     required this.totalMeters,
     required this.etaSeconds,
+    this.trafficEtaSeconds,
     required this.speedLimitsByRoad,
     required this.engine,
     required this.cacheHit,
   });
 
   factory NavigationRoute.fromServer(Map<String, dynamic> data) {
-    final polyline = (data['points_list'] as List?)?.cast<LatLng>() ?? <LatLng>[];
-    final rawSteps = ((data['steps'] as List?) ?? const [])
-        .cast<Map<String, dynamic>>();
+    final dynamic pointsRaw = data['points_list'] ?? data['polyline'] ?? [];
+    final List<LatLng> polyline;
+    if (pointsRaw is List) {
+      polyline = pointsRaw.whereType<LatLng>().toList();
+    } else {
+      polyline = [];
+    }
+
+    final rawSteps = _normalizeSteps(data['steps'] as List? ?? []);
     final steps = RouteProgressCalculator.buildSteps(rawSteps);
+
+    final engine = (data['engine'] as String?) ?? 'Backend-Gateway';
+    final etaSec = (data['eta'] as num?)?.toDouble() ?? 0;
+    final durationSec = (data['duration'] as num?)?.toDouble() ?? 0;
+
     return NavigationRoute(
       polyline: polyline,
       rawSteps: rawSteps,
       steps: steps,
       totalMeters: (data['distance'] as num?)?.toDouble() ?? 0.0,
-      etaSeconds: (data['duration'] as num?)?.toDouble() ?? 0.0,
+      etaSeconds: etaSec > 0 ? etaSec : durationSec,
+      trafficEtaSeconds: (data['trafficDurationSeconds'] as num?)?.toDouble(),
       speedLimitsByRoad: ((data['speedLimitsByRoad'] as Map?) ?? const {})
           .map((k, v) => MapEntry(k as String, (v as num).toInt())),
-      engine: (data['engine'] as String?) ?? 'Backend-Gateway',
-      cacheHit: data['cache_hit'] == true,
+      engine: engine,
+      cacheHit: data['cache_hit'] == true || data['cacheHit'] == true,
     );
+  }
+
+  static List<Map<String, dynamic>> _normalizeSteps(List<dynamic> rawSteps) {
+    return rawSteps.map((s) {
+      if (s is! Map) return <String, dynamic>{};
+      final step = Map<String, dynamic>.from(s);
+
+      if (step['maneuver'] != null) return step;
+
+      final instruction = step['instruction'] as String? ?? '';
+      final maneuver = step['maneuverStr'] as String? ?? step['maneuver'] as String? ?? '';
+
+      if (maneuver.isNotEmpty || instruction.isNotEmpty) {
+        final osrmMan = _googleManeuverToOsrm(maneuver);
+        final roadName = _extractRoadName(instruction);
+        step['name'] = roadName;
+        step['maneuver'] = {
+          'type': osrmMan['type'],
+          'modifier': osrmMan['modifier'],
+          'location': [0.0, 0.0],
+        };
+        step['distance'] = (step['distanceMeters'] as num?)?.toDouble() ?? 0;
+        step['duration'] = (step['durationSeconds'] as num?)?.toDouble() ?? 0;
+      }
+
+      return step;
+    }).toList();
+  }
+
+  static Map<String, String> _googleManeuverToOsrm(String maneuver) {
+    switch (maneuver.toUpperCase()) {
+      case 'TURN_LEFT':
+      case 'SLIGHT_LEFT':
+        return {'type': 'turn', 'modifier': 'left'};
+      case 'TURN_RIGHT':
+      case 'SLIGHT_RIGHT':
+        return {'type': 'turn', 'modifier': 'right'};
+      case 'TURN_SHARP_LEFT':
+        return {'type': 'turn', 'modifier': 'sharp left'};
+      case 'TURN_SHARP_RIGHT':
+        return {'type': 'turn', 'modifier': 'sharp right'};
+      case 'STRAIGHT':
+      case 'KEEP_STRAIGHT':
+        return {'type': 'continue', 'modifier': 'straight'};
+      case 'FORK_LEFT':
+        return {'type': 'fork', 'modifier': 'left'};
+      case 'FORK_RIGHT':
+        return {'type': 'fork', 'modifier': 'right'};
+      case 'MERGE':
+        return {'type': 'merge', 'modifier': 'straight'};
+      case 'ROUNDABOUT_LEFT':
+      case 'ROUNDABOUT_RIGHT':
+        return {'type': 'roundabout', 'modifier': 'left'};
+      case 'EXIT_LEFT':
+        return {'type': 'off ramp', 'modifier': 'left'};
+      case 'EXIT_RIGHT':
+        return {'type': 'off ramp', 'modifier': 'right'};
+      case 'ENTER_HIGHWAY_LEFT':
+      case 'ENTER_HIGHWAY_RIGHT':
+        return {'type': 'on ramp', 'modifier': 'right'};
+      case 'KEEP_LEFT':
+        return {'type': 'new name', 'modifier': 'left'};
+      case 'KEEP_RIGHT':
+        return {'type': 'new name', 'modifier': 'right'};
+      case 'UTURN_LEFT':
+      case 'UTURN_RIGHT':
+        return {'type': 'uturn', 'modifier': 'left'};
+      case 'ARRIVE':
+      case 'DESTINATION':
+        return {'type': 'arrive', 'modifier': 'straight'};
+      case 'DEPART':
+        return {'type': 'depart', 'modifier': 'straight'};
+      default:
+        return {'type': 'continue', 'modifier': 'straight'};
+    }
+  }
+
+  static String _extractRoadName(String instruction) {
+    final ontoMatch = RegExp(r'onto\s+(.+?)(?:\.|$)', caseSensitive: false).firstMatch(instruction);
+    if (ontoMatch != null) return ontoMatch.group(1)!.trim();
+
+    final atMatch = RegExp(r'at\s+(.+?)(?:\.|$)', caseSensitive: false).firstMatch(instruction);
+    if (atMatch != null) return atMatch.group(1)!.trim();
+
+    return '';
   }
 }
 
 class RerouteManager {
-  /// Sustained over-threshold samples needed before we reroute.
-  /// 3 ticks @ 1 Hz = 3 seconds.
   static const int requiredTicks = 3;
-
-  /// > 60 m off-route is "significant deviation" per the spec.
   static const double offRouteThresholdM = 60;
 
   int _consecutiveOff = 0;
   bool _isRerouting = false;
 
-  /// Returns true when the manager decided a reroute should fire this
-  /// tick. The caller is responsible for actually fetching the new
-  /// route and resetting the manager.
   bool consider(double offRouteMeters) {
     if (_isRerouting) return false;
     if (offRouteMeters > offRouteThresholdM) {
@@ -115,7 +188,6 @@ class NavigationService extends ChangeNotifier {
 
   StreamSubscription<GpsFix>? _gpsSub;
 
-  // Public surface
   NavigationLeg get leg => _leg;
   NavigationRoute? get route => _route;
   RouteProgress? get progress => _progress;
@@ -124,10 +196,6 @@ class NavigationService extends ChangeNotifier {
   NavigationLeg? get currentLeg => _leg;
   RerouteManager reroute = RerouteManager();
 
-  /// Begin navigation for a leg. Called from the driver app's
-  /// `acceptTrip` (pickup) and `pickUpRider` (destination) flows. If
-  /// `cachedRoute` is supplied, we skip the OSRM call (the server
-  /// already pushed the route via navigationStarted).
   Future<void> startNavigation({
     required String tripId,
     required NavigationLeg leg,
@@ -140,8 +208,6 @@ class NavigationService extends ChangeNotifier {
 
     Map<String, dynamic>? data = cachedRoute;
     if (data == null) {
-      // Fallback: ask the backend for the cached leg first (cheap),
-      // then fall back to a fresh OSRM call.
       data = await _routingService.getCachedLeg(tripId: tripId, leg: leg.name);
       if (data == null) {
         data = await _routingService.getRoute(start, end);
@@ -150,11 +216,8 @@ class NavigationService extends ChangeNotifier {
 
     _route = NavigationRoute.fromServer(data);
 
-    // Wire up the speed monitor with the freshly loaded limits.
     await _speedMonitor.start(route: data);
 
-    // Subscribe to GPS. The GpsTracker is the single source of truth
-    // for position updates — no double-subscribing from trip_screen.
     await GpsTracker.instance.start();
     _gpsSub?.cancel();
     _gpsSub = GpsTracker.instance.fixes.listen(_onGpsFix);
@@ -164,8 +227,6 @@ class NavigationService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Switch from the pickup leg to the destination leg. Called when
-  /// the driver app receives the navigationLegAdvanced socket event.
   Future<void> advanceToDestination({
     required LatLng start,
     required LatLng end,
@@ -194,18 +255,12 @@ class NavigationService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// External hook called by trip_screen when the driver's status
-  /// moves to IN_PROGRESS — keeps the leg in sync with the trip
-  /// lifecycle.
   void setLeg(NavigationLeg leg) {
     if (_leg == leg) return;
     _leg = leg;
     notifyListeners();
   }
 
-  /// Manual reroute request. Asks the server to re-route from the
-  /// supplied position; replaces the cached leg + emits the
-  /// navigationRouteUpdated payload to the driver room.
   Future<void> requestReroute(LatLng from) async {
     if (_tripId == null || _route == null) return;
     reroute.markRerouting(true);
@@ -225,8 +280,6 @@ class NavigationService extends ChangeNotifier {
     }
   }
 
-  // ---- Internals ---------------------------------------------------------
-
   void _onGpsFix(GpsFix fix) {
     final route = _route;
     if (route == null || route.polyline.length < 2) return;
@@ -240,8 +293,6 @@ class NavigationService extends ChangeNotifier {
     );
     _progress = progress;
 
-    // Notify the speed monitor when we step onto a new OSRM step so
-    // the displayed speed limit tracks the road we're actually on.
     if (progress != null &&
         progress.currentStep != null &&
         progress.currentStepIndex != _lastNotifiedStepIndex) {
@@ -250,16 +301,12 @@ class NavigationService extends ChangeNotifier {
         route.rawSteps,
       );
       _lastNotifiedStepIndex = progress.currentStepIndex;
-      
+
       if (!NavigationVoiceService.instance.muted) {
         _speakNextManeuver(progress);
       }
     }
 
-    // Reroute manager: if sustained off-route, ask the server for a
-    // fresh leg. This is fire-and-forget; on success the new
-    // route payload will arrive via the navigationRouteUpdated socket
-    // event (which the driver provider already listens for).
     if (progress != null &&
         reroute.consider(progress.snappedDistanceFromPolyline)) {
       requestReroute(fix.position).catchError((_) {});
@@ -300,7 +347,7 @@ class NavigationService extends ChangeNotifier {
   void _speakNextManeuver(RouteProgress progress) {
     final nextManeuver = progress.currentStep ?? progress.nextStep;
     if (nextManeuver == null) return;
-    
+
     final distanceStr = formatDistance(progress.distanceToNextManeuver);
     String instruction = "";
     if (nextManeuver.name.isNotEmpty) {

@@ -56,9 +56,13 @@ enum ComplianceStatus {
 
 enum VehicleCategory {
   ECONOMY
+  EXTRA
   PREMIUM
+  LUX
   SUV
+  SUV_LUX
   VAN
+  PREMIER
 
   @@map("vehicle_category")
 }

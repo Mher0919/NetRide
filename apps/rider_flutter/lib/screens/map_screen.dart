@@ -12,6 +12,8 @@ import '../services/routing_service.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../services/route_cache_service.dart';
+import '../services/eta_cache_service.dart';
 import '../models/search_result.dart';
 import 'address_search_delegate.dart';
 import '../components/state_container.dart';
@@ -55,9 +57,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _initCacheServices();
     _initLiveLocation();
     _fetchProfile();
     _startGeohashUpdates();
+  }
+
+  Future<void> _initCacheServices() async {
+    final prefs = await SharedPreferences.getInstance();
+    await RouteCacheService.instance.init(prefs);
+    await EtaCacheService.instance.init(prefs);
   }
 
   void _startGeohashUpdates() {
@@ -333,33 +342,69 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   /// Pull a full ride-option set (route geometry + fare per class).
-  /// Makes ONE backend call for route data; computes per-class fares locally.
+  /// Checks ETA cache first; makes ONE backend call for route data;
+  /// computes per-class fares locally. Writes to cache on success.
   Future<void> _fetchAllEstimates() async {
     if (_pickup == null || _destination == null) return;
     setState(() => _loadingEstimates = true);
     const classes = models.VehicleClass.values;
     final results = <models.VehicleClass, Map<String, dynamic>>{};
 
+    final originLat = _pickup!.lat;
+    final originLng = _pickup!.lng;
+    final destLat = _destination!.lat;
+    final destLng = _destination!.lng;
+
+    final cachedEta = EtaCacheService.instance.get(
+      originLat: originLat,
+      originLng: originLng,
+      destLat: destLat,
+      destLng: destLng,
+    );
+
+    if (cachedEta != null) {
+      _buildEstimatesFromRouteData(
+        results,
+        classes,
+        distanceMeters: cachedEta.distanceMeters,
+        durationSeconds: cachedEta.durationSeconds,
+        etaSeconds: cachedEta.trafficDurationSeconds ?? cachedEta.durationSeconds,
+        engine: 'EtaCache',
+      );
+      if (mounted) {
+        setState(() {
+          _estimates = results;
+          _loadingEstimates = false;
+        });
+      }
+      return;
+    }
+
     try {
       final plan = await _routingService.plan(
-        origin: LatLng(_pickup!.lat, _pickup!.lng),
-        destination: LatLng(_destination!.lat, _destination!.lng),
+        origin: LatLng(originLat, originLng),
+        destination: LatLng(destLat, destLng),
         vehicleClass: 'CORE',
       );
 
-      for (final c in classes) {
-        results[c] = {
-          'maxFare': _computeClassFare(
-            distanceMeters: plan.distanceMeters,
-            durationSeconds: plan.durationSeconds,
-            vehicleClass: c,
-          ),
-          'savingLikelihood': 0,
-          'distanceKm': plan.distanceMeters / 1000.0,
-          'engine': plan.engine,
-          'etaSeconds': plan.etaSeconds,
-        };
-      }
+      EtaCacheService.instance.set(
+        originLat: originLat,
+        originLng: originLng,
+        destLat: destLat,
+        destLng: destLng,
+        distanceMeters: plan.distanceMeters,
+        durationSeconds: plan.durationSeconds,
+        trafficDurationSeconds: plan.trafficDurationSeconds,
+      );
+
+      _buildEstimatesFromRouteData(
+        results,
+        classes,
+        distanceMeters: plan.distanceMeters,
+        durationSeconds: plan.durationSeconds,
+        etaSeconds: plan.etaSeconds,
+        engine: plan.engine,
+      );
 
       if (mounted) {
         setState(() {
@@ -380,6 +425,29 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           _loadingEstimates = false;
         });
       }
+    }
+  }
+
+  void _buildEstimatesFromRouteData(
+    Map<models.VehicleClass, Map<String, dynamic>> results,
+    List<models.VehicleClass> classes, {
+    required double distanceMeters,
+    required double durationSeconds,
+    required double etaSeconds,
+    required String engine,
+  }) {
+    for (final c in classes) {
+      results[c] = {
+        'maxFare': _computeClassFare(
+          distanceMeters: distanceMeters,
+          durationSeconds: durationSeconds,
+          vehicleClass: c,
+        ),
+        'savingLikelihood': 0,
+        'distanceKm': distanceMeters / 1000.0,
+        'engine': engine,
+        'etaSeconds': etaSeconds,
+      };
     }
   }
 

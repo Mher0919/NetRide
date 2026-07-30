@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   const adminPassword = await bcrypt.hash('AdminPassword123!', 10);
-  const userPassword = await bcrypt.hash('UserPassword123!', 10);
+  const userPassword = await bcrypt.hash('password123', 10);
 
   console.log('🌱 Seeding Admin User...');
   const admin = await prisma.user.upsert({
@@ -22,29 +22,29 @@ async function main() {
   });
   console.log('✅ Admin User created:', admin.email);
 
-  console.log('🌱 Seeding Test Rider (Pending)...');
+  console.log('🌱 Seeding Test Rider...');
   await prisma.user.upsert({
-    where: { email: 'rider@example.com' },
+    where: { email: 'rider@NetRide.dev' },
     update: {},
     create: {
-      email: 'rider@example.com',
+      email: 'rider@NetRide.dev',
       full_name: 'Test Rider',
       password_hash: userPassword,
       role: UserRole.RIDER,
-      verification_status: VerificationStatus.PENDING,
+      verification_status: VerificationStatus.VERIFIED,
     },
   });
 
-  console.log('🌱 Seeding Test Driver (Pending)...');
+  console.log('🌱 Seeding Test Driver...');
   const driverUser = await prisma.user.upsert({
-    where: { email: 'driver@example.com' },
+    where: { email: 'driver@NetRide.dev' },
     update: {},
     create: {
-      email: 'driver@example.com',
+      email: 'driver@NetRide.dev',
       full_name: 'Test Driver',
       password_hash: userPassword,
       role: UserRole.DRIVER,
-      verification_status: VerificationStatus.PENDING,
+      verification_status: VerificationStatus.VERIFIED,
     },
   });
 
@@ -61,7 +61,7 @@ async function main() {
     },
   });
 
-  console.log('✅ Test users seeded.');
+  console.log('✅ Test users seeded (password: password123).');
 }
 
 main()

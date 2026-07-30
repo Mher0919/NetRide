@@ -11,6 +11,7 @@ const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   JWT_SECRET: z.string(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
+  GOOGLE_ROUTES_API_KEY: z.string().optional(),
   // ---- Routing engine: A* (PRIMARY) ----------------------------------------
   // Self-hosted A* routing engine. Loads preprocessed graph from disk.
   // Fast, free, and runs entirely in-memory. No external API calls.
