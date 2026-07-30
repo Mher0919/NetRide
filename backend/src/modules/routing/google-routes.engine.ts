@@ -224,6 +224,14 @@ export const GoogleRoutesEngine: RouteEngine = {
           logger.error({ status, msg: err.message }, 'google_routes_engine_server_error');
           return null;
         }
+        if (status === 400) {
+          logger.error({
+            status,
+            msg: err.message,
+            responseBody: err.response.data,
+          }, 'google_routes_engine_bad_request');
+          return null;
+        }
       }
 
       logger.error({ msg: err.message }, 'google_routes_engine_error');

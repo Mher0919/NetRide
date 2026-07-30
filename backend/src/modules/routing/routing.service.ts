@@ -9,32 +9,24 @@
 // Architecture:
 //
 //   Flutter App → Backend API → Ride/Dispatch/Nav → RoutingService →
-//     → A* Engine (self-hosted, PRIMARY) → OSRM (fallback) → ORS (last resort)
-//
-// No business logic calls any routing provider directly. The active engine
-// is selected at runtime. A* is the primary provider — fast, free,
-// and runs entirely in-memory. OSRM serves as fallback if A* is unavailable.
+//     → Google Routes API (sole provider, cached with geohash neighbors)
 //
 // Design goals:
-//   - Fast:        cache-first, A* <50ms, fare in microseconds.
-//   - Road geometry: A* returns true road-following geometry (GeoJSON).
+//   - Fast:        cache-first with 5x5 geohash neighbor grid, Google Routes <2s.
+//   - Road geometry: Google Routes returns true road-following geometry (GeoJSON).
 //   - Lightweight:  no per-request DB hits in the hot path.
-//   - Resilient:    never crash; degrade to a road-shaped synthetic route.
+//   - Resilient:    never crash; degrade to a synthetic city-grid route.
 //   - Observable:   every stage is instrumented via prom-client + structured logs.
 //   - Scalable:     stateless + Redis cache + request dedup map + concurrent-safe.
-//   - Extensible:   provider swap = implement RouteEngine + change engine map.
+//   - Cost-effective: aggressive geohash caching minimizes Google API calls.
 
 import ngeohash from 'ngeohash';
 import { redis } from '../../config/redis';
 import { MLEtaService } from '../../services/ml-eta.service';
 import { fareService, FareBreakdown } from '../../services/fare.service';
-import { RoadSnapperService } from '../../services/road-snapper.service';
 import { VehicleClass } from '../../types';
 import { RouteEngine } from './route-engine';
 import { GoogleRoutesEngine } from './google-routes.engine';
-import { AStarEngineAdapter } from './astar-engine-adapter';
-import { OSEngine } from './osrm.engine';
-import { ORSEngine } from './ors.engine';
 import { RoutingError } from './routing.errors';
 import {
   routingRequestsTotal,
@@ -62,7 +54,7 @@ export interface RoutingResult {
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
-  engine: 'GoogleRoutes' | 'A*' | 'OSRM' | 'ORS' | 'Synthetic';
+  engine: 'GoogleRoutes' | 'Synthetic';
   cacheHit: boolean;
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
@@ -137,18 +129,13 @@ export function parseCoordinates(raw: unknown, label: string): LatLng {
 
 export class RoutingService {
   // ---- Provider map --------------------------------------------------------
-  // A* engine (self-hosted, in-memory) is the PRIMARY routing engine —
-  // fast, free, and runs entirely in the Node.js process.
-  // OSRM is the fallback for when the A* graph is not loaded.
-  // ORS is the last resort.
+  // Google Routes API is the sole routing engine. Results are cached
+  // aggressively using geohash neighbors so nearby OD pairs reuse cached routes.
   private static readonly providers: Array<{
     match: (origin: [number, number], destination: [number, number]) => boolean;
     engine: RouteEngine;
   }> = [
-    { match: () => true,        engine: GoogleRoutesEngine },
-    { match: () => true,        engine: AStarEngineAdapter },
-    { match: () => true,        engine: OSEngine },
-    { match: () => true,        engine: ORSEngine },
+    { match: () => true, engine: GoogleRoutesEngine },
   ];
 
   private static selectEngine(
@@ -158,7 +145,7 @@ export class RoutingService {
     for (const p of this.providers) {
       if (p.match(origin, destination)) return p.engine;
     }
-    return ORSEngine;
+    return GoogleRoutesEngine;
   }
 
   // ---- Request deduplication (collision-free in-flight map) ---------------
@@ -168,9 +155,9 @@ export class RoutingService {
 
   // ---- Cache tuning -------------------------------------------------------
   /** Exact-match TTL — identical OD pairs. */
-  private static readonly EXACT_TTL_S = 600;
+  private static readonly EXACT_TTL_S = 1800; // 30 min
   /** Nearby-match TTL — reused for OD pairs within the same geohash cell. */
-  private static readonly NEARBY_TTL_S = 300;
+  private static readonly NEARBY_TTL_S = 900; // 15 min
   /** Geohash precision (~0.6km × 1.2km cell in LA) — "nearby" bucket size. */
   private static readonly GEOHASH_PRECISION = 6;
 
@@ -419,57 +406,41 @@ export class RoutingService {
       return result;
     }
 
-    // Snap endpoints to drivable roads before routing. This prevents
-    // routes from starting/ending inside buildings, parks, or otherwise
-    // inaccessible locations. Snapping is best-effort; if it fails we
-    // proceed with the original coordinates.
-    const [snappedOrigin, snappedDestination] = await Promise.all([
-      RoadSnapperService.snapIfNeeded(origin[0], origin[1]),
-      RoadSnapperService.snapIfNeeded(destination[0], destination[1]),
-    ]);
-
-    const routeOrigin: LatLng = snappedOrigin.snapped
-      ? [snappedOrigin.lat, snappedOrigin.lng]
-      : origin;
-    const routeDest: LatLng = snappedDestination.snapped
-      ? [snappedDestination.lat, snappedDestination.lng]
-      : destination;
+    // Use original coordinates directly (no road-snapping — that required OSRM).
+    // Google Routes API handles coordinate snapping internally.
+    const routeOrigin: LatLng = origin;
+    const routeDest: LatLng = destination;
 
     try {
-      // Try engines in order: A* → OSRM → ORS → Synthetic fallback
-      const engines = [GoogleRoutesEngine, AStarEngineAdapter, OSEngine, ORSEngine];
-      for (const engine of engines) {
-        try {
-          const res = await engine.route(routeOrigin, routeDest);
-          if (res) {
-            const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
-            const engineName = engine.name as 'GoogleRoutes' | 'A*' | 'OSRM' | 'ORS';
-            result = {
-              distanceMeters: res.distanceMeters,
-              durationSeconds: res.durationSeconds,
-              etaSeconds: Math.round(res.durationSeconds * multiplier),
-              geometry: res.geometry,
-              confidence: engine.name === 'A*' ? 0.99 : 0.95,
-              engine: engineName,
-              cacheHit: false,
-              steps: res.steps,
-              speedLimitsByRoad: res.speedLimitsByRoad,
-            };
-            routingEngineRequestsTotal.inc({ status: 'ok' });
-            break;
-          } else {
-            logger.warn({ engine: engine.name }, 'routing_engine_returned_null');
-            routingEngineRequestsTotal.inc({ status: 'empty' });
-          }
-        } catch (engineErr: any) {
-          if (engineErr instanceof RoutingError) {
-            logger.warn({ engine: engine.name, err: engineErr.message }, 'routing_engine_bad_input');
-            routingEngineRequestsTotal.inc({ status: 'bad_input' });
-            break;
-          } else {
-            logger.error({ engine: engine.name, err: engineErr.message }, 'routing_engine_error');
-            routingEngineRequestsTotal.inc({ status: 'error' });
-          }
+      // Use Google Routes API as the sole routing engine.
+      const engine = GoogleRoutesEngine;
+      try {
+        const res = await engine.route(routeOrigin, routeDest);
+        if (res) {
+          const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], res.distanceMeters);
+          result = {
+            distanceMeters: res.distanceMeters,
+            durationSeconds: res.durationSeconds,
+            etaSeconds: Math.round(res.durationSeconds * multiplier),
+            geometry: res.geometry,
+            confidence: 0.95,
+            engine: 'GoogleRoutes',
+            cacheHit: false,
+            steps: res.steps,
+            speedLimitsByRoad: res.speedLimitsByRoad,
+          };
+          routingEngineRequestsTotal.inc({ status: 'ok' });
+        } else {
+          logger.warn({ engine: engine.name }, 'routing_engine_returned_null');
+          routingEngineRequestsTotal.inc({ status: 'empty' });
+        }
+      } catch (engineErr: any) {
+        if (engineErr instanceof RoutingError) {
+          logger.warn({ engine: engine.name, err: engineErr.message }, 'routing_engine_bad_input');
+          routingEngineRequestsTotal.inc({ status: 'bad_input' });
+        } else {
+          logger.error({ engine: engine.name, err: engineErr.message }, 'routing_engine_error');
+          routingEngineRequestsTotal.inc({ status: 'error' });
         }
       }
 
@@ -614,7 +585,15 @@ export class RoutingService {
 
   private static geohashNeighbors(coord: LatLng): string[] {
     const base = ngeohash.encode(coord[0], coord[1], this.GEOHASH_PRECISION);
-    return [base, ...ngeohash.neighbors(base)];
+    // 5x5 grid: base + 8 immediate neighbors + 16 second-ring neighbors = 25 cells
+    const firstRing = [base, ...ngeohash.neighbors(base)];
+    const secondRing = new Set<string>();
+    for (const hash of firstRing) {
+      for (const neighbor of ngeohash.neighbors(hash)) {
+        secondRing.add(neighbor);
+      }
+    }
+    return [...firstRing, ...secondRing];
   }
 
   // -------------------------------------------------------------------------

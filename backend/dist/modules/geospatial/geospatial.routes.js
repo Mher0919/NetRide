@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const geospatial_service_1 = require("./geospatial.service");
+const places_service_1 = require("../places/places.service");
 const auth_middleware_1 = require("../../middleware/auth.middleware");
 const router = (0, express_1.Router)();
 /**
@@ -48,6 +49,9 @@ router.get('/autocomplete', auth_middleware_1.authMiddleware, async (req, res) =
 /**
  * GET /api/geospatial/search
  * Query: q, lat, lon
+ *
+ * Primary: Local PostGIS database with combined text + proximity ranking.
+ * Fallback: External API providers (Geoapify → Google Places → static).
  */
 router.get('/search', auth_middleware_1.authMiddleware, async (req, res) => {
     try {
@@ -55,8 +59,23 @@ router.get('/search', auth_middleware_1.authMiddleware, async (req, res) => {
         if (!q) {
             return res.status(400).json({ error: 'Search query (q) is required' });
         }
-        const results = await geospatial_service_1.GeospatialService.searchPlaces(q, lat ? parseFloat(lat) : undefined, lon ? parseFloat(lon) : undefined);
-        res.json(results);
+        const userLat = lat ? parseFloat(lat) : undefined;
+        const userLon = lon ? parseFloat(lon) : undefined;
+        // Primary: local PostGIS places database
+        let localResults = [];
+        try {
+            localResults = await places_service_1.PlacesService.search(q, userLat, userLon);
+        }
+        catch {
+            // Places table may not exist yet (migration deferred or PgBouncer blocked)
+            // Fall through to API providers.
+        }
+        if (localResults.length >= 3) {
+            return res.json(localResults);
+        }
+        // Fallback: external API providers
+        const apiResults = await geospatial_service_1.GeospatialService.searchPlaces(q, userLat, userLon);
+        res.json(apiResults);
     }
     catch (err) {
         console.error('[GEOSPATIAL] Search Controller Error:', err.message);

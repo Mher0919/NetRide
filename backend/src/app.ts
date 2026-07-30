@@ -528,24 +528,11 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
 
   logger.info({ set: !!env.JWT_SECRET, length: env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
 
-  // Initialize A* routing engine (self-hosted, in-memory).
-  // Loads preprocessed graph from disk if ROUTING_GRAPH_PATH is set.
-  try {
-    const { astarEngine } = await import('./routing/engine/astar-engine');
-    if (env.ROUTING_GRAPH_PATH) {
-      await astarEngine.loadGraph(env.ROUTING_GRAPH_PATH);
-      logger.info({ path: env.ROUTING_GRAPH_PATH }, 'astar_engine_initialized');
-    } else {
-      logger.warn('routing_graph_path_not_set_engine_not_loaded');
-    }
-  } catch (astarErr: any) {
-    logger.warn({ err: astarErr.message }, 'astar_engine_init_failed_falling_back');
-  }
-
   logger.info({
-    astar: 'PRIMARY',
-    osrm: env.OSRM_BASE_URL ? '(fallback)' : '(not set)',
-    ors: env.ORS_API_KEY ? '(last resort)' : '(not set)',
+    googleRoutes: 'SOLE',
+    osrm: '(removed)',
+    ors: '(removed)',
+    astar: '(removed)',
   }, 'routing_engines');
 
   // -----------------------------------------------------------------

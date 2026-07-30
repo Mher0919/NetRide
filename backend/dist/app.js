@@ -70,6 +70,7 @@ const routing_routes_1 = __importDefault(require("./modules/routing/routing.rout
 const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
 const routing_api_1 = __importDefault(require("./routing/api/routing-api"));
 const push_routes_1 = __importDefault(require("./modules/push/push.routes"));
+const places_routes_1 = __importDefault(require("./modules/places/places.routes"));
 const geospatial_service_1 = require("./modules/geospatial/geospatial.service");
 const upload_service_1 = require("./services/upload.service");
 const speeding_detector_1 = require("./services/speeding_detector");
@@ -192,6 +193,7 @@ app.use('/api/routing', routing_api_1.default);
 app.use('/api/admin', admin_routes_1.default);
 app.use('/api/files', files_routes_1.default);
 app.use('/api/push', push_routes_1.default);
+app.use('/api/places', places_routes_1.default);
 app.post('/api/upload', upload_service_1.UploadService.upload);
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -468,6 +470,15 @@ async function runMigrations() {
             await database_1.pool.query(schema);
             console.log('✅ Vehicle classification + ride preferences schema (031) applied');
         }
+        // Places search with PostGIS (033)
+        const hasPlacesTable = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'places'");
+        if (hasPlacesTable.rowCount === 0) {
+            console.log('⚡ Applying places search schema with PostGIS (033)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/033_places_search.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Places search schema (033) applied successfully');
+        }
         console.log('🚀 All migrations completed');
     }
     catch (err) {
@@ -487,25 +498,11 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
     await runMigrations();
     logger_1.logger.info({ port: Number(PORT), env: env_1.env.NODE_ENV }, 'server_listening');
     logger_1.logger.info({ set: !!env_1.env.JWT_SECRET, length: env_1.env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
-    // Initialize A* routing engine (self-hosted, in-memory).
-    // Loads preprocessed graph from disk if ROUTING_GRAPH_PATH is set.
-    try {
-        const { astarEngine } = await Promise.resolve().then(() => __importStar(require('./routing/engine/astar-engine')));
-        if (env_1.env.ROUTING_GRAPH_PATH) {
-            await astarEngine.loadGraph(env_1.env.ROUTING_GRAPH_PATH);
-            logger_1.logger.info({ path: env_1.env.ROUTING_GRAPH_PATH }, 'astar_engine_initialized');
-        }
-        else {
-            logger_1.logger.warn('routing_graph_path_not_set_engine_not_loaded');
-        }
-    }
-    catch (astarErr) {
-        logger_1.logger.warn({ err: astarErr.message }, 'astar_engine_init_failed_falling_back');
-    }
     logger_1.logger.info({
-        astar: 'PRIMARY',
-        osrm: env_1.env.OSRM_BASE_URL ? '(fallback)' : '(not set)',
-        ors: env_1.env.ORS_API_KEY ? '(last resort)' : '(not set)',
+        googleRoutes: 'SOLE',
+        osrm: '(removed)',
+        ors: '(removed)',
+        astar: '(removed)',
     }, 'routing_engines');
     // -----------------------------------------------------------------
     // Self-keep-alive: ping our own /health/live every 60s so Render
