@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:latlong2/latlong.dart';
 import '../utils/spatial_hash.dart';
 
 class CachedRouteData {
@@ -8,12 +9,14 @@ class CachedRouteData {
   final double durationSeconds;
   final double? trafficDurationSeconds;
   final DateTime cachedAt;
+  final List<LatLng>? polyline;
 
   const CachedRouteData({
     required this.distanceMeters,
     required this.durationSeconds,
     this.trafficDurationSeconds,
     required this.cachedAt,
+    this.polyline,
   });
 
   bool get isExpired {
@@ -27,6 +30,7 @@ class CachedRouteData {
     'durationSeconds': durationSeconds,
     'trafficDurationSeconds': trafficDurationSeconds,
     'cachedAt': cachedAt.toIso8601String(),
+    'polyline': polyline?.map((p) => [p.latitude, p.longitude]).toList(),
   };
 
   factory CachedRouteData.fromJson(Map<String, dynamic> json) => CachedRouteData(
@@ -34,6 +38,7 @@ class CachedRouteData {
     durationSeconds: (json['durationSeconds'] as num).toDouble(),
     trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)?.toDouble(),
     cachedAt: DateTime.parse(json['cachedAt'] as String),
+    polyline: (json['polyline'] as List?)?.map((c) => LatLng((c[0] as num).toDouble(), (c[1] as num).toDouble())).toList(),
   );
 }
 
@@ -86,6 +91,7 @@ class RouteCacheService {
     required double distanceMeters,
     required double durationSeconds,
     double? trafficDurationSeconds,
+    List<LatLng>? polyline,
   }) async {
     final originHash = SpatialHash.encode(originLat, originLng);
     final destHash = SpatialHash.encode(destLat, destLng);
@@ -96,6 +102,7 @@ class RouteCacheService {
       durationSeconds: durationSeconds,
       trafficDurationSeconds: trafficDurationSeconds,
       cachedAt: DateTime.now(),
+      polyline: polyline,
     );
 
     _memoryCache[key] = data;

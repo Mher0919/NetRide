@@ -115,7 +115,10 @@ class RoutingService {
 
       if (response.statusCode == 200 && response.data != null) {
         final data = response.data as Map<String, dynamic>;
-        final points = _parsePolyline(data['polyline']);
+        final polyline = data['polyline'];
+        debugPrint('[ROUTING] google-plan response: polyline type=${polyline.runtimeType}, length=${polyline is List ? polyline.length : 'N/A'}, engine=${data['engine']}, cacheHit=${data['cacheHit']}, distanceMeters=${data['distanceMeters']}');
+        final points = _parsePolyline(polyline);
+        debugPrint('[ROUTING] Parsed points: ${points.length}');
 
         final fare = _localFare(
           (data['distanceMeters'] as num?)?.toDouble() ?? 0,
@@ -142,6 +145,7 @@ class RoutingService {
           distanceMeters: plan.distanceMeters,
           durationSeconds: plan.durationSeconds,
           trafficDurationSeconds: plan.trafficDurationSeconds,
+          polyline: points,
         );
 
         return plan;
@@ -149,10 +153,13 @@ class RoutingService {
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) rethrow;
       debugPrint('[ROUTING] Google-plan failed: $e');
+      // Don't fall through - return fallback
     } catch (e) {
       debugPrint('[ROUTING] Google-plan unexpected error: $e');
+      // Don't fall through - return fallback
     }
 
+    debugPrint('[ROUTING] Falling back to /routing/plan');
     try {
       final response = await (_testPost ??
           (path, {required data, cancelToken, options}) =>
@@ -239,7 +246,7 @@ class RoutingService {
 
   TripPlan _hydrateCached(CachedRouteData cached, LatLng origin, LatLng destination, String source) {
     return TripPlan(
-      points: [origin, destination],
+      points: cached.polyline ?? [origin, destination],
       distanceMeters: cached.distanceMeters,
       durationSeconds: cached.durationSeconds,
       etaSeconds: cached.trafficDurationSeconds ?? cached.durationSeconds,

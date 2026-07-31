@@ -283,7 +283,7 @@ export class GeospatialService {
   private static readonly MAX_PLACES = 10;
   private static readonly SEARCH_CACHE_TTL_S = 600;
   private static readonly TEXT_SEARCH_CACHE_TTL_S = 300;
-  static readonly MIN_AUTOCOMPLETE_LEN = 2;
+  static readonly MIN_AUTOCOMPLETE_LEN = 1;
   private static readonly MIN_TEXT_SEARCH_LEN = 4;
   private static inFlight = new Map<string, Promise<any[]>>();
 
