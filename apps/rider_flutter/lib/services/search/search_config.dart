@@ -1,7 +1,7 @@
 class SearchConfig {
   SearchConfig._();
 
-  static const int minQueryLength = 1;
+  static const int minQueryLength = 3;
   static const int debounceMilliseconds = 400;
   static const int maxResults = 15;
   static const int cacheTtlMinutes = 5;

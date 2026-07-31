@@ -13,6 +13,7 @@ import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/route_cache_service.dart';
 import '../services/eta_cache_service.dart';
+import '../services/search_history_service.dart';
 import '../models/search_result.dart';
 import 'address_search_delegate.dart';
 import '../components/state_container.dart';
@@ -200,6 +201,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       delegate: AddressSearchDelegate(
         userLat: _userPosition?.latitude,
         userLon: _userPosition?.longitude,
+        isDestination: !isPickup,
+        pickupLat: _pickup?.lat,
+        pickupLon: _pickup?.lng,
+        pickupName: _pickup?.address,
       ),
     );
 
@@ -239,6 +244,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         ]);
         _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)));
       }
+
+      // Save route to history for caching (async, don't block UI)
+      _saveRouteToHistory(plan);
     } catch (e) {
       debugPrint('Route error: $e');
     }
@@ -247,6 +255,27 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     // fetch the ride options for every class in a single batch call.
     if (_pickup != null && _destination != null && !_panelOpen) {
       _openRidePanel();
+    }
+  }
+
+  Future<void> _saveRouteToHistory(TripPlan plan) async {
+    try {
+      if (_pickup == null || _destination == null) return;
+      
+      // Convert polyline points to [[lat, lng], ...] format for API
+      final polyline = plan.points.map((p) => [p.latitude, p.longitude]).toList();
+      
+      await SearchHistoryService.instance.saveRouteOnly(
+        originLat: _pickup!.lat,
+        originLng: _pickup!.lng,
+        destLat: _destination!.lat,
+        destLng: _destination!.lng,
+        distanceMeters: plan.distanceMeters,
+        durationSeconds: plan.durationSeconds,
+        trafficDurationSeconds: plan.trafficDurationSeconds,
+      );
+    } catch (e) {
+      debugPrint('Save route history error: $e');
     }
   }
 

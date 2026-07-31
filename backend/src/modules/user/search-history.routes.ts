@@ -155,4 +155,119 @@ router.delete('/search-history', authMiddleware, async (req, res) => {
   }
 });
 
+const ROUTE_HISTORY_KEY_PREFIX = 'route:history:';
+const MAX_ROUTE_HISTORY = 20;
+const ROUTE_HISTORY_TTL = 60 * 60 * 24 * 30; // 30 days
+
+interface RouteHistoryEntry {
+  originLat: number;
+  originLon: number;
+  destLat: number;
+  destLon: number;
+  originName: string;
+  destName: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  trafficDurationSeconds?: number;
+  polyline: number[][];
+  savedAt: number;
+  vehicleClass: string;
+}
+
+/**
+ * GET /api/user/search-history/routes
+ * Returns the user's saved route history for cached routing.
+ */
+router.get('/search-history/routes', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const key = `${ROUTE_HISTORY_KEY_PREFIX}${userId}`;
+    const raw = await redis.lrange(key, 0, MAX_ROUTE_HISTORY - 1);
+
+    const history = raw.map((item) => {
+      try {
+        return JSON.parse(item) as RouteHistoryEntry;
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
+
+    res.json(history);
+  } catch (err: any) {
+    console.error('[ROUTE_HISTORY] GET error:', err.message);
+    res.json([]);
+  }
+});
+
+/**
+ * POST /api/user/search-history/routes
+ * Body: { originLat, originLon, destLat, destLon, originName, destName, distanceMeters, durationSeconds, trafficDurationSeconds?, polyline, vehicleClass }
+ * Saves a route to user's history for caching.
+ */
+router.post('/search-history/routes', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { originLat, originLon, destLat, destLon, originName, destName, distanceMeters, durationSeconds, trafficDurationSeconds, polyline, vehicleClass } = req.body;
+    
+    if (originLat == null || originLon == null || destLat == null || destLon == null || !originName || !destName || distanceMeters == null || durationSeconds == null || !polyline || !vehicleClass) {
+      return res.status(400).json({ error: 'Missing required route fields' });
+    }
+
+    const entry: RouteHistoryEntry = {
+      originLat: Number(originLat),
+      originLon: Number(originLon),
+      destLat: Number(destLat),
+      destLon: Number(destLon),
+      originName: String(originName).slice(0, 200),
+      destName: String(destName).slice(0, 200),
+      distanceMeters: Number(distanceMeters),
+      durationSeconds: Number(durationSeconds),
+      trafficDurationSeconds: trafficDurationSeconds ? Number(trafficDurationSeconds) : undefined,
+      polyline: polyline as number[][],
+      savedAt: Date.now(),
+      vehicleClass: String(vehicleClass),
+    };
+
+    const key = `${ROUTE_HISTORY_KEY_PREFIX}${userId}`;
+    const serialized = JSON.stringify(entry);
+
+    // Remove any existing entry with same origin/dest/vehicleClass (dedup)
+    const existing = await redis.lrange(key, 0, -1);
+    for (const raw of existing) {
+      try {
+        const parsed = JSON.parse(raw) as RouteHistoryEntry;
+        if (Math.abs(parsed.originLat - entry.originLat) < 0.0001 && 
+            Math.abs(parsed.originLon - entry.originLon) < 0.0001 &&
+            Math.abs(parsed.destLat - entry.destLat) < 0.0001 &&
+            Math.abs(parsed.destLon - entry.destLon) < 0.0001 &&
+            parsed.vehicleClass === entry.vehicleClass) {
+          await redis.lrem(key, 1, raw);
+        }
+      } catch { /* skip corrupt entries */ }
+    }
+
+    // Push new entry to the front
+    await redis.lpush(key, serialized);
+
+    // Trim to max size
+    await redis.ltrim(key, 0, MAX_ROUTE_HISTORY - 1);
+
+    // Set expiry
+    await redis.expire(key, ROUTE_HISTORY_TTL);
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('[ROUTE_HISTORY] POST error:', err.message);
+    res.status(500).json({ error: 'Failed to save route history' });
+  }
+});
+
 export default router;

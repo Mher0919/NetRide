@@ -2,17 +2,29 @@ import 'package:flutter/material.dart';
 import '../models/search_result.dart';
 import '../services/search/search_controller.dart' as sc;
 import '../services/search_history_service.dart';
+import '../services/routing_service.dart';
 import '../theme/app_theme.dart';
 
 class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
   final sc.SearchController _controller = sc.SearchController();
   final double? userLat;
   final double? userLon;
+  final bool isDestination;
+  final LatLng? pickupLocation;
+  final String? vehicleClass;
 
   List<SearchResult> _recentSearches = [];
+  List<Map<String, dynamic>> _recentRoutes = [];
   bool _loadedHistory = false;
+  bool _loadedRoutes = false;
 
-  AddressSearchDelegate({this.userLat, this.userLon}) {
+  AddressSearchDelegate({
+    this.userLat,
+    this.userLon,
+    this.isDestination = false,
+    this.pickupLocation,
+    this.vehicleClass,
+  }) {
     _controller.updateLocation(userLat, userLon);
   }
 
@@ -20,6 +32,12 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
     if (_loadedHistory) return;
     _loadedHistory = true;
     _recentSearches = await SearchHistoryService.instance.fetch();
+  }
+
+  Future<void> _loadRoutes() async {
+    if (_loadedRoutes) return;
+    _loadedRoutes = true;
+    _recentRoutes = await SearchHistoryService.instance.fetchRecentRoutes();
   }
 
   @override
@@ -57,8 +75,17 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
   }
 
   Widget _buildBody() {
-    if (query.length < 2) {
-      return _buildRecentSearches();
+    // Show recent searches/routes when query is empty (especially for destination)
+    if (query.length < 3) {
+      return FutureBuilder(
+        future: isDestination ? _loadRoutes().then((_) => _loadHistory()) : _loadHistory(),
+        builder: (context, snapshot) {
+          if (isDestination && _recentRoutes.isNotEmpty) {
+            return _buildRecentRoutes();
+          }
+          return _buildRecentSearches();
+        },
+      );
     }
 
     return ListenableBuilder(
@@ -87,48 +114,169 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
   }
 
   Widget _buildRecentSearches() {
-    return FutureBuilder<List<SearchResult>>(
-      future: _loadHistory().then((_) => Future.value(_recentSearches)),
-      builder: (context, snapshot) {
-        final searches = snapshot.data ?? _recentSearches;
+    if (_recentSearches.isEmpty) {
+      return _buildEmptyHint();
+    }
 
-        if (searches.isEmpty) {
-          return _buildEmptyHint();
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(
-                'Recent',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.secondaryDarkText.withOpacity(0.5),
-                  letterSpacing: 0.5,
-                ),
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Text(
+            'Recent Searches',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.secondaryDarkText.withOpacity(0.5),
+              letterSpacing: 0.5,
             ),
-            Expanded(
-              child: ListView.separated(
-                itemCount: searches.length,
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                separatorBuilder: (_, __) => Divider(
-                  height: 1,
-                  color: AppTheme.softBorderColor.withOpacity(0.6),
-                ),
-                itemBuilder: (context, index) {
-                  final result = searches[index];
-                  return _buildResultTile(result, Icons.history_rounded,
-                    iconColor: AppTheme.secondaryDarkText,
-                    onTap: () => _selectResult(context, result),
-                  );
-                },
+          ),
+        ),
+        Expanded(
+          child: ListView.separated(
+            itemCount: _recentSearches.length,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            separatorBuilder: (_, __) => Divider(
+              height: 1,
+              color: AppTheme.softBorderColor.withOpacity(0.6),
+            ),
+            itemBuilder: (context, index) {
+              final result = _recentSearches[index];
+              return _buildResultTile(result, Icons.history_rounded,
+                iconColor: AppTheme.secondaryDarkText,
+                onTap: () => _selectResult(context, result),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecentRoutes() {
+    if (_recentRoutes.isEmpty) {
+      return _buildRecentSearches();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Text(
+            'Recent Routes',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.secondaryDarkText.withOpacity(0.5),
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        Expanded(
+          child: ListView.separated(
+            itemCount: _recentRoutes.length,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            separatorBuilder: (_, __) => Divider(
+              height: 1,
+              color: AppTheme.softBorderColor.withOpacity(0.6),
+            ),
+            itemBuilder: (context, index) {
+              final route = _recentRoutes[index];
+              final destName = route['destName']?.toString() ?? 'Destination';
+              final originName = route['originName']?.toString() ?? 'Pickup';
+              return _buildRouteTile(
+                destName: destName,
+                originName: originName,
+                onTap: () => _selectRoute(context, route),
+              );
+            },
+          ),
+        ),
+        if (_recentSearches.isNotEmpty) ...[
+          Divider(height: 1, color: AppTheme.softBorderColor.withOpacity(0.6)),
+          _buildRecentSearches(),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildRouteTile({
+    required String destName,
+    required String originName,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: const Icon(Icons.route_rounded, color: AppTheme.primaryBrandGreen, size: 22),
+      title: Text(
+        destName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppTheme.secondaryDarkText,
+        ),
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Row(
+          children: [
+            const _CaBadge(),
+            const SizedBox(width: 6),
+            Text(
+              'From $originName',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: AppTheme.secondaryDarkText.withOpacity(0.6),
               ),
             ),
           ],
+        ),
+      ),
+      onTap: onTap,
+    );
+  }
+
+  Future<void> _selectRoute(BuildContext context, Map<String, dynamic> route) async {
+    // Save route to search history
+    final destLat = route['destLat'] as double;
+    final destLon = route['destLon'] as double;
+    final destName = route['destName'] as String;
+    
+    final result = SearchResult(
+      displayName: destName,
+      lat: destLat,
+      lon: destLon,
+      displayAddress: '',
+      state: 'CA',
+      type: 'poi',
+    );
+    
+    await SearchHistoryService.instance.save(result);
+    
+    // Close with the result so map_screen can use cached route
+    close(context, result);
+  }
+
+  Widget _buildResultsList() {
+    final results = _controller.results;
+    return ListView.separated(
+      itemCount: results.length,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      separatorBuilder: (_, __) => Divider(
+        height: 1,
+        color: AppTheme.softBorderColor.withOpacity(0.6),
+      ),
+      itemBuilder: (context, index) {
+        final result = results[index];
+        return _buildResultTile(
+          result, Icons.location_on_rounded,
+          onTap: () => _selectResult(context, result),
         );
       },
     );
@@ -254,25 +402,6 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
     );
   }
 
-  Widget _buildResultsList() {
-    final results = _controller.results;
-    return ListView.separated(
-      itemCount: results.length,
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      separatorBuilder: (_, __) => Divider(
-        height: 1,
-        color: AppTheme.softBorderColor.withOpacity(0.6),
-      ),
-      itemBuilder: (context, index) {
-        final result = results[index];
-        return _buildResultTile(
-          result, Icons.location_on_rounded,
-          onTap: () => _selectResult(context, result),
-        );
-      },
-    );
-  }
-
   Widget _buildNoResults() {
     return Center(
       child: Padding(
@@ -294,7 +423,7 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
             ),
             const SizedBox(height: 4),
             Text(
-              'NetRide only operates in California right now \u2014 try a different search.',
+              'NetRide only operates in California right now — try a different search.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,

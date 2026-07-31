@@ -26,6 +26,65 @@ class HistoryRouteInfo {
   );
 }
 
+class CachedRoute {
+  final double originLat;
+  final double originLon;
+  final double destLat;
+  final double destLon;
+  final String originName;
+  final String destName;
+  final double distanceMeters;
+  final double durationSeconds;
+  final double? trafficDurationSeconds;
+  final List<LatLng> polyline;
+  final String vehicleClass;
+  final DateTime savedAt;
+
+  const CachedRoute({
+    required this.originLat,
+    required this.originLon,
+    required this.destLat,
+    required this.destLon,
+    required this.originName,
+    required this.destName,
+    required this.distanceMeters,
+    required this.durationSeconds,
+    this.trafficDurationSeconds,
+    required this.polyline,
+    required this.vehicleClass,
+    required this.savedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'originLat': originLat,
+    'originLon': originLon,
+    'destLat': destLat,
+    'destLon': destLon,
+    'originName': originName,
+    'destName': destName,
+    'distanceMeters': distanceMeters,
+    'durationSeconds': durationSeconds,
+    'trafficDurationSeconds': trafficDurationSeconds,
+    'polyline': polyline.map((p) => [p.latitude, p.longitude]).toList(),
+    'vehicleClass': vehicleClass,
+  };
+
+  factory CachedRoute.fromJson(Map<String, dynamic> json) => CachedRoute(
+    originLat: (json['originLat'] as num).toDouble(),
+    originLon: (json['originLon'] as num).toDouble(),
+    destLat: (json['destLat'] as num).toDouble(),
+    destLon: (json['destLon'] as num).toDouble(),
+    originName: json['originName'] as String,
+    destName: json['destName'] as String,
+    distanceMeters: (json['distanceMeters'] as num).toDouble(),
+    durationSeconds: (json['durationSeconds'] as num).toDouble(),
+    trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)?.toDouble(),
+    polyline: (json['polyline'] as List).map((c) => LatLng((c[0] as num).toDouble(), (c[1] as num).toDouble())).toList(),
+    vehicleClass: json['vehicleClass'] as String,
+    savedAt: DateTime.fromMillisecondsSinceEpoch(json['savedAt'] as int),
+  );
+}
+
 class SearchHistoryService {
   static final SearchHistoryService instance = SearchHistoryService._();
   SearchHistoryService._();
@@ -75,9 +134,9 @@ class SearchHistoryService {
 
   Future<void> saveRouteOnly({
     required double originLat,
-    required double originLng,
+    required double originLon,
     required double destLat,
-    required double destLng,
+    required double destLon,
     required double distanceMeters,
     required double durationSeconds,
     double? trafficDurationSeconds,
@@ -88,9 +147,9 @@ class SearchHistoryService {
 
       await ApiService.dio.post('user/search-history/route', data: {
         'origin_lat': originLat,
-        'origin_lng': originLng,
+        'origin_lng': originLon,
         'dest_lat': destLat,
-        'dest_lng': destLng,
+        'dest_lng': destLon,
         'origin_geohash': originHash,
         'dest_geohash': destHash,
         'distance_meters': distanceMeters,
@@ -100,13 +159,19 @@ class SearchHistoryService {
     } catch (_) {}
   }
 
-  Future<List<Map<String, dynamic>>> fetchRecentRoutes() async {
+  Future<List<CachedRoute>> fetchRecentRoutes() async {
     try {
       final response = await ApiService.dio.get('user/search-history/routes');
       if (response.data is! List) return [];
-      return (response.data as List).cast<Map<String, dynamic>>();
+      return (response.data as List).cast<Map<String, dynamic>>().map((j) => CachedRoute.fromJson(j)).toList();
     } catch (_) {
       return [];
     }
+  }
+
+  Future<void> saveRoute(CachedRoute route) async {
+    try {
+      await ApiService.dio.post('user/search-history/routes', data: route.toJson());
+    } catch (_) {}
   }
 }

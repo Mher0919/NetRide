@@ -577,13 +577,43 @@ export class GeospatialService {
   }
 
   /**
-   * Fallback autocomplete: Google Places → static suggestions.
+   * Autocomplete search using local PostGIS database (primary) with Google Places as fallback.
+   * Uses PostGIS for nearby places with text matching + proximity ranking.
    */
   static async autocompleteSearch(query: string, userLat?: number, userLon?: number): Promise<any[]> {
     const q = (query || '').trim();
     if (q.length < this.MIN_AUTOCOMPLETE_LEN) return [];
 
-    // Google Places Autocomplete fallback
+    // Primary: Local PostGIS database search (closest places first)
+    const lat = Number.isFinite(userLat) ? userLat! : 34.0522;
+    const lon = Number.isFinite(userLon) ? userLon! : -118.2437;
+    try {
+      const { placesRepository } = await import('./places.repository');
+      const localResults = await placesRepository.searchByTextAndProximity(q, lat, lon, 10);
+      if (localResults.length > 0) {
+        return localResults.map((r: any) => ({
+          display_name: r.name + (r.formatted_address ? ', ' + r.formatted_address : ''),
+          lat: r.lat,
+          lon: r.lon,
+          type: r.category?.toLowerCase() || 'point_of_interest',
+          state: r.state || 'CA',
+          distance_miles: r.distance_miles,
+          address: {
+            road: r.street || '',
+            city: r.city || '',
+            state: r.state || '',
+            postcode: r.zip || '',
+          },
+          is_suggestion: false,
+          place_id: r.id,
+        }));
+      }
+    } catch (err: any) {
+      // Places table may not exist yet, fall through to Google
+      logger.debug({ err: err?.message }, 'autocomplete_local_fallback');
+    }
+
+    // Fallback: Google Places Autocomplete
     if (this.googleMapsApiKey) {
       const googleResults = await this.googlePlacesAutocomplete(q, userLat, userLon);
       if (googleResults.length > 0) return googleResults;
