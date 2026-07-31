@@ -588,7 +588,7 @@ export class GeospatialService {
     const lat = Number.isFinite(userLat) ? userLat! : 34.0522;
     const lon = Number.isFinite(userLon) ? userLon! : -118.2437;
     try {
-      const { placesRepository } = await import('./places.repository');
+      const { placesRepository } = await import('../places/places.repository');
       const localResults = await placesRepository.searchByTextAndProximity(q, lat, lon, 10);
       if (localResults.length > 0) {
         return localResults.map((r: any) => ({

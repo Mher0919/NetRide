@@ -202,9 +202,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         userLat: _userPosition?.latitude,
         userLon: _userPosition?.longitude,
         isDestination: !isPickup,
-        pickupLat: _pickup?.lat,
-        pickupLon: _pickup?.lng,
-        pickupName: _pickup?.address,
+        pickupLocation: _pickup != null ? LatLng(_pickup!.lat, _pickup!.lng) : null,
       ),
     );
 
@@ -262,14 +260,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     try {
       if (_pickup == null || _destination == null) return;
       
-      // Convert polyline points to [[lat, lng], ...] format for API
-      final polyline = plan.points.map((p) => [p.latitude, p.longitude]).toList();
-      
       await SearchHistoryService.instance.saveRouteOnly(
         originLat: _pickup!.lat,
-        originLng: _pickup!.lng,
+        originLon: _pickup!.lng,
         destLat: _destination!.lat,
-        destLng: _destination!.lng,
+        destLon: _destination!.lng,
         distanceMeters: plan.distanceMeters,
         durationSeconds: plan.durationSeconds,
         trafficDurationSeconds: plan.trafficDurationSeconds,

@@ -1,3 +1,4 @@
+import 'package:latlong2/latlong.dart';
 import '../models/search_result.dart';
 import '../services/api_service.dart';
 import '../utils/spatial_hash.dart';
@@ -142,8 +143,8 @@ class SearchHistoryService {
     double? trafficDurationSeconds,
   }) async {
     try {
-      final originHash = SpatialHash.encode(originLat, originLng, 7);
-      final destHash = SpatialHash.encode(destLat, destLng, 7);
+      final originHash = SpatialHash.encode(originLat, originLon, 7);
+      final destHash = SpatialHash.encode(destLat, destLon, 7);
 
       await ApiService.dio.post('user/search-history/route', data: {
         'origin_lat': originLat,

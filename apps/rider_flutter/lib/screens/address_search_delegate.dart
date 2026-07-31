@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import '../models/search_result.dart';
 import '../services/search/search_controller.dart' as sc;
 import '../services/search_history_service.dart';
-import '../services/routing_service.dart';
 import '../theme/app_theme.dart';
 
 class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
@@ -14,7 +14,7 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
   final String? vehicleClass;
 
   List<SearchResult> _recentSearches = [];
-  List<Map<String, dynamic>> _recentRoutes = [];
+  List<CachedRoute> _recentRoutes = [];
   bool _loadedHistory = false;
   bool _loadedRoutes = false;
 
@@ -184,8 +184,8 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
             ),
             itemBuilder: (context, index) {
               final route = _recentRoutes[index];
-              final destName = route['destName']?.toString() ?? 'Destination';
-              final originName = route['originName']?.toString() ?? 'Pickup';
+              final destName = route.destName;
+              final originName = route.originName;
               return _buildRouteTile(
                 destName: destName,
                 originName: originName,
@@ -195,7 +195,7 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
           ),
         ),
         if (_recentSearches.isNotEmpty) ...[
-          Divider(height: 1, color: AppTheme.softBorderColor.withOpacity(0.6)),
+          Divider(height: 1, color: AppTheme.softBorderColor.withValues(alpha: 0.6)),
           _buildRecentSearches(),
         ],
       ],
@@ -224,7 +224,7 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
         padding: const EdgeInsets.only(top: 2),
         child: Row(
           children: [
-            const _CaBadge(),
+            _CaBadge(),
             const SizedBox(width: 6),
             Text(
               'From $originName',
@@ -242,19 +242,19 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
     );
   }
 
-  Future<void> _selectRoute(BuildContext context, Map<String, dynamic> route) async {
+  Future<void> _selectRoute(BuildContext context, CachedRoute route) async {
     // Save route to search history
-    final destLat = route['destLat'] as double;
-    final destLon = route['destLon'] as double;
-    final destName = route['destName'] as String;
+    final destLat = route.destLat;
+    final destLon = route.destLon;
+    final destName = route.destName;
     
     final result = SearchResult(
       displayName: destName,
       lat: destLat,
       lon: destLon,
-      displayAddress: '',
       state: 'CA',
       type: 'poi',
+      formattedAddress: '',
     );
     
     await SearchHistoryService.instance.save(result);
