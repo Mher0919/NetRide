@@ -26,7 +26,7 @@ async function main() {
 
   // 2. Market conditions from Redis + DB counters.
   const market = await computeMarketConditions();
-  check('computeMarketConditions reads Redis presence', market.demandRatio >= 0, `demandRatio=${market.demandRatio.toFixed(3)} t=${market.timeOfDay}`);
+  check('computeMarketConditions reads Redis presence', market.demandRatio >= 0, `demandRatio=${market.demandRatio.toFixed(3)} hour=${market.hourOfDay} timeMul=${market.timeMultiplier}`);
 
   // 3. refreshMarketConditions persists to Redis.
   await pricingService.refreshMarketConditions();
@@ -61,8 +61,9 @@ async function main() {
        RETURNING id`,
       [rider.rows.length ? rider.rows[0].id : null]
     );
-    tempRideId = ins.rows[0].id;
-    rideId = tempRideId;
+    const tempId: string = ins.rows[0].id;
+    tempRideId = tempId;
+    rideId = tempId;
     snapInput = { distanceMeters: 5000, durationSeconds: 600 };
     console.log(`⚠ no rides existed — inserted temp ride ${rideId} for the snapshot round-trip`);
   } else {
