@@ -7,7 +7,6 @@
 
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { VehicleClass } from '../../types';
 import {
   RoutingService,
   PlanResponse,
@@ -19,7 +18,6 @@ import { logger } from '../../observability/logger';
 const PlanSchema = z.object({
   origin: z.tuple([z.number(), z.number()]),
   destination: z.tuple([z.number(), z.number()]),
-  vehicleClass: z.nativeEnum(VehicleClass).optional(),
 });
 
 const GooglePlanSchema = z.object({
@@ -27,7 +25,6 @@ const GooglePlanSchema = z.object({
   destination: z.tuple([z.number(), z.number()]),
   originHex: z.string().optional(),
   destHex: z.string().optional(),
-  vehicleClass: z.nativeEnum(VehicleClass).optional(),
 });
 
 export class RoutingController {
@@ -40,14 +37,12 @@ export class RoutingController {
       const plan: PlanResponse = await RoutingService.plan({
         origin,
         destination,
-        vehicleClass: parsed.vehicleClass ?? VehicleClass.CORE,
       });
 
       // Lean payload — only send what the map + fare card need.
       res.json({
         origin: plan.origin,
         destination: plan.destination,
-        vehicleClass: plan.vehicleClass,
         distanceMeters: plan.distanceMeters,
         durationSeconds: plan.durationSeconds,
         etaSeconds: plan.etaSeconds,
@@ -81,7 +76,6 @@ export class RoutingController {
       const plan: PlanResponse = await RoutingService.plan({
         origin,
         destination,
-        vehicleClass: parsed.vehicleClass ?? VehicleClass.CORE,
       });
 
       res.json({

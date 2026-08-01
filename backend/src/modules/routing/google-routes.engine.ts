@@ -52,6 +52,7 @@ interface GoogleRoutesResponse {
       duration?: { text: string };
     };
     duration?: string;
+    staticDuration?: string;
     distanceMeters?: number;
   }>;
 }
@@ -157,7 +158,7 @@ export const GoogleRoutesEngine: RouteEngine = {
           headers: {
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': apiKey,
-            'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.staticDuration,routes.legs.polyline.encodedPolyline,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction,routes.legs.steps.polyline.encodedPolyline',
+            'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.staticDuration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.legs.staticDuration,routes.legs.polyline.encodedPolyline,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.navigationInstruction,routes.legs.steps.polyline.encodedPolyline',
           },
         })
       );
@@ -173,6 +174,14 @@ export const GoogleRoutesEngine: RouteEngine = {
       const distanceMeters = apiRoute.distanceMeters ?? legs.reduce((sum, l) => sum + (l.distanceMeters ?? 0), 0);
       const durationStr = apiRoute.duration ?? legs[0]?.duration ?? '0s';
       const durationSeconds = parseDuration(durationStr);
+
+      // Static (no-traffic) duration — the stable value that can be
+      // cached for 7 days. Falls back to summing the legs' static
+      // durations, then to the traffic-aware duration.
+      const staticStr =
+        apiRoute.staticDuration ??
+        (legs.length > 0 ? legs.map((l) => parseDuration(l.staticDuration ?? '0s')).reduce((a, b) => a + b, 0).toString() + 's' : null);
+      const staticDurationSeconds = staticStr != null ? parseDuration(staticStr) : durationSeconds;
 
       const polylineStr = apiRoute.polyline?.encodedPolyline ?? legs[0]?.polyline?.encodedPolyline ?? '';
       const coordinates = polylineStr ? decodePolyline(polylineStr) : [];
@@ -195,6 +204,8 @@ export const GoogleRoutesEngine: RouteEngine = {
       return {
         distanceMeters,
         durationSeconds,
+        staticDurationSeconds,
+        trafficDurationSeconds: durationSeconds,
         geometry: {
           type: 'LineString',
           coordinates,

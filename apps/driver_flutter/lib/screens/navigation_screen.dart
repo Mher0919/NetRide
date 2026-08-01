@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -10,6 +12,8 @@ import '../components/navigation/speed_hud.dart';
 import '../components/navigation/top_maneuver_card.dart';
 import '../services/gps_tracker.dart';
 import '../services/navigation_service.dart';
+import '../services/off_route_detector.dart';
+import '../services/reroute_controller.dart';
 import '../services/route_progress_calculator.dart';
 import '../services/speed_monitor.dart';
 import '../services/communication_service.dart';
@@ -46,12 +50,58 @@ class NavigationScreen extends StatefulWidget {
 class _NavigationScreenState extends State<NavigationScreen> {
   final MapController _mapController = MapController();
 
+  /// While true the camera tracks the driver; any user pan/fling pauses
+  /// follow for [_followPause] so the driver can inspect the map.
+  bool _following = true;
+  bool _mapReady = false;
+  Timer? _followPauseTimer;
+  static const Duration _followPause = Duration(seconds: 12);
+  GpsFix? _lastFollowedFix;
+
+  @override
+  void initState() {
+    super.initState();
+    GpsTracker.instance.addListener(_onGpsTick);
+  }
+
+  @override
+  void dispose() {
+    _followPauseTimer?.cancel();
+    GpsTracker.instance.removeListener(_onGpsTick);
+    super.dispose();
+  }
+
+  void _onGpsTick() {
+    if (!_following || !_mapReady) return;
+    final fix = GpsTracker.instance.lastFix;
+    if (fix == null || fix == _lastFollowedFix) return;
+    _lastFollowedFix = fix;
+    _mapController.move(fix.position, _mapController.camera.zoom);
+  }
+
+  void _onUserMapGesture() {
+    _following = false;
+    _followPauseTimer?.cancel();
+    _followPauseTimer = Timer(_followPause, () {
+      _following = true;
+      _lastFollowedFix = null; // snap back on the next fix
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final nav = context.watch<NavigationService>();
     final gps = GpsTracker.instance.lastFix;
     final route = nav.route;
     final progress = nav.progress;
+
+    // Off-route / reroute banner.
+    final rerouteStage = nav.rerouteStage;
+    final offRoute = nav.offRoutePhase == OffRoutePhase.offRoute;
+    final showRerouteBanner =
+        offRoute ||
+        rerouteStage == RerouteStage.localRecovery ||
+        rerouteStage == RerouteStage.backendRequest;
 
     final polylines = <Polyline<Object>>[];
     if (route != null && route.polyline.length >= 2) {
@@ -136,8 +186,16 @@ class _NavigationScreenState extends State<NavigationScreen> {
                 minZoom: 12,
                 maxZoom: 18,
                 onMapReady: () {
+                  _mapReady = true;
                   if (gps != null) {
                     _mapController.move(gps.position, 17.0);
+                  }
+                },
+                onMapEvent: (event) {
+                  if (event is MapEventMoveStart ||
+                      event is MapEventFlingAnimationStart ||
+                      event is MapEventDoubleTapZoomEnd) {
+                    _onUserMapGesture();
                   }
                 },
               ),
@@ -169,6 +227,12 @@ class _NavigationScreenState extends State<NavigationScreen> {
                       instruction: instruction,
                       lanes: lanes,
                     ),
+                    if (showRerouteBanner) ...[
+                      const SizedBox(height: 10),
+                      _buildRerouteBanner(
+                        rerouteStage == RerouteStage.backendRequest,
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     RoutingOptionsBar(
                       primaryRoad: currentStep?.name ?? '',
@@ -292,6 +356,45 @@ class _NavigationScreenState extends State<NavigationScreen> {
         onChat: widget.onChat,
         onCall: widget.onCall,
         callActive: comm.callPhase != CallPhase.idle,
+      ),
+    );
+  }
+
+  Widget _buildRerouteBanner(bool fetching) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF0B429), width: 1),
+      ),
+      child: Row(
+        children: [
+          if (fetching) ...[
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 10),
+          ] else ...[
+            const Icon(Icons.swap_horiz_rounded,
+                color: Color(0xFFB97A00), size: 18),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: Text(
+              fetching
+                  ? 'Rerouting\u2026'
+                  : 'Off route \u2014 finding the best way back',
+              style: const TextStyle(
+                color: Color(0xFF8A5A00),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

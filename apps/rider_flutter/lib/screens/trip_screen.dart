@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -8,7 +8,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/ride_provider.dart';
 import '../models/trip_models.dart' as models;
-import '../services/routing_service.dart';
 import '../services/communication_service.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/state_container.dart';
@@ -25,11 +24,8 @@ class TripScreen extends StatefulWidget {
 
 class _TripScreenState extends State<TripScreen> {
   final MapController _mapController = MapController();
-  final RoutingService _routingService = RoutingService();
   LatLng? _riderLocation;
-  List<LatLng> _routePoints = [];
   StreamSubscription<Position>? _positionSubscription;
-  LatLng? _lastDriverLocation;
   bool _isMapReady = false;
   bool _dialogShown = false;
 
@@ -37,40 +33,6 @@ class _TripScreenState extends State<TripScreen> {
   void initState() {
     super.initState();
     _initLocationTracking();
-    _fetchRoute();
-    _listenToDriverLocation();
-  }
-
-  void _listenToDriverLocation() {
-    final rideProvider = Provider.of<RideProvider>(context, listen: false);
-    rideProvider.addListener(_onDriverLocationChanged);
-  }
-
-  void _onDriverLocationChanged() {
-    final rideProvider = Provider.of<RideProvider>(context, listen: false);
-    final driver = rideProvider.driver;
-    
-    if (driver == null || driver.location == null) return;
-    
-    final newLoc = LatLng(driver.location!.lat, driver.location!.lng);
-    
-    // Only refresh route if driver moved significantly (>50m)
-    if (_lastDriverLocation == null || 
-        _distance(newLoc, _lastDriverLocation!) > 50) {
-      _lastDriverLocation = newLoc;
-      _fetchRoute();
-    }
-  }
-
-  double _distance(LatLng a, LatLng b) {
-    const R = 6371000.0;
-    final dLat = (b.latitude - a.latitude) * 3.14159 / 180;
-    final dLng = (b.longitude - a.longitude) * 3.14159 / 180;
-    final latA = a.latitude * 3.14159 / 180;
-    final latB = b.latitude * 3.14159 / 180;
-    final x = sin(dLat / 2) * sin(dLat / 2) + 
-      cos(latA) * cos(latB) * sin(dLng / 2) * sin(dLng / 2);
-    return 2 * R * asin(sqrt(x));
   }
 
   Future<void> _initLocationTracking() async {
@@ -89,39 +51,9 @@ class _TripScreenState extends State<TripScreen> {
     });
   }
 
-  Future<void> _fetchRoute() async {
-    final rideProvider = Provider.of<RideProvider>(context, listen: false);
-    final trip = rideProvider.currentTrip;
-    final driver = rideProvider.driver;
-    
-    if (trip == null || driver == null || driver.location == null) return;
-
-    try {
-      LatLng start = LatLng(driver.location!.lat, driver.location!.lng);
-      LatLng end = trip.status == models.TripStatus.ACCEPTED 
-          ? LatLng(trip.pickup.lat, trip.pickup.lng)
-          : LatLng(trip.destination.lat, trip.destination.lng);
-
-      final plan = await _routingService.plan(
-        origin: start,
-        destination: end,
-        vehicleClass: 'CORE',
-      );
-      if (mounted) {
-        setState(() {
-          _routePoints = plan.points;
-        });
-      }
-    } catch (e) {
-      debugPrint('Route fetch error: $e');
-    }
-  }
-
   @override
   void dispose() {
     _positionSubscription?.cancel();
-    final rideProvider = Provider.of<RideProvider>(context, listen: false);
-    rideProvider.removeListener(_onDriverLocationChanged);
     super.dispose();
   }
 
@@ -167,6 +99,13 @@ class _TripScreenState extends State<TripScreen> {
     final rideProvider = Provider.of<RideProvider>(context);
     final driver = rideProvider.driver;
     final theme = Theme.of(context);
+
+    // Authoritative route pushed by the backend (navigationStarted /
+    // navigationRerouteRequested). Never re-planned from this screen —
+    // that used to fire a routing API call every ~50 m of driver
+    // movement.
+    final navigationRoute = rideProvider.navigationRoute;
+    final etaSec = rideProvider.driverEtaSeconds ?? rideProvider.navigationEtaSeconds;
 
     if (rideProvider.status == models.TripStatus.COMPLETED && !_dialogShown) {
       _dialogShown = true;
@@ -224,11 +163,11 @@ class _TripScreenState extends State<TripScreen> {
                 subdomains: const ['a', 'b', 'c', 'd'],
                 userAgentPackageName: 'com.NetRide.rider',
               ),
-              if (_routePoints.isNotEmpty)
+              if (navigationRoute != null && navigationRoute.length >= 2)
                 PolylineLayer(
                   polylines: [
                     Polyline(
-                      points: _routePoints,
+                      points: navigationRoute,
                       color: const Color(0xFF5B7760),
                       strokeWidth: 4.0,
                     ),
@@ -347,6 +286,25 @@ class _TripScreenState extends State<TripScreen> {
                     height: 4,
                     decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(2)),
                   ),
+                  if (etaSec != null && etaSec > 0) ...[
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Icon(Icons.schedule, color: Color(0xFF5B7760), size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          rideProvider.status == models.TripStatus.ACCEPTED
+                              ? 'Arriving in ${(etaSec / 60).ceil()} min'
+                              : 'ETA ${(etaSec / 60).ceil()} min',
+                          style: const TextStyle(
+                            color: Color(0xFF2F3A32),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   Row(
                     children: [

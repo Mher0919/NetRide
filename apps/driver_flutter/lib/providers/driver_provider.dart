@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -29,12 +28,7 @@ enum DriverComplianceStatus {
 
 class DriverProvider with ChangeNotifier {
   models.DriverStatus _status = models.DriverStatus.offline;
-  models.VehicleClass _activeClass = models.VehicleClass.CORE;
 
-  // --- Ride-type preferences (eligibility vs. opt-in) ---
-  String _vehicleClass = 'CORE';
-  List<String> _eligibleRideTypes = ['CORE'];
-  Map<String, bool> _ridePreferences = {'CORE': true};
   models.Trip? _currentTrip;
   models.Trip? _incomingRequest;
   IO.Socket? _socket;
@@ -43,22 +37,6 @@ class DriverProvider with ChangeNotifier {
   double _heading = 0;
   models.Location? _riderLocation;
   List<models.ChatMessage> _messages = [];
-  Map<String, dynamic>? _recommendation;
-
-  double _pricePerMile = 2.00;
-  double _priceRangeMin = 1.00;
-  double _priceRangeMax = 3.00;
-  double _recommendedPrice = 2.00;
-  DateTime? _priceLastChanged;
-
-  // --- Server-derived cooldown state (authoritative) ---
-  // These are populated from the backend and are the SINGLE SOURCE OF TRUTH
-  // for the lock state and countdown. The UI never derives cooldown from a
-  // local timer alone; it always reconciles against these values.
-  bool _cooldownActive = false;
-  int _cooldownRemainingMs = 0;
-  int _cooldownMs = 4 * 60 * 60 * 1000; // default 4h
-  int _serverTime = 0;
 
   bool _hasPendingProfileChange = false;
   String? _pendingRequestId;
@@ -110,14 +88,7 @@ class DriverProvider with ChangeNotifier {
   bool get feedbackSeen => _feedbackSeen;
 
   models.DriverStatus get status => _status;
-  models.VehicleClass get activeClass => _activeClass;
 
-  String get vehicleClass => _vehicleClass;
-  List<String> get eligibleRideTypes => _eligibleRideTypes;
-  Map<String, bool> get ridePreferences => _ridePreferences;
-  /// Ride types the driver opted INTO (enabled among eligible).
-  List<String> get enabledRideTypes =>
-      _eligibleRideTypes.where((t) => _ridePreferences[t] == true).toList();
   models.Trip? get currentTrip => _currentTrip;
   models.Trip? get incomingRequest => _incomingRequest;
   bool get isConnected => _isConnected;
@@ -125,20 +96,8 @@ class DriverProvider with ChangeNotifier {
   double get heading => _heading;
   models.Location? get riderLocation => _riderLocation;
   List<models.ChatMessage> get messages => _messages;
-  Map<String, dynamic>? get recommendation => _recommendation;
 
   IO.Socket? get socket => _socket;
-
-  double get pricePerMile => _pricePerMile;
-  double get priceRangeMin => _priceRangeMin;
-  double get priceRangeMax => _priceRangeMax;
-  double get recommendedPrice => _recommendedPrice;
-  DateTime? get priceLastChanged => _priceLastChanged;
-
-  bool get cooldownActive => _cooldownActive;
-  int get cooldownRemainingMs => _cooldownRemainingMs;
-  int get cooldownMs => _cooldownMs;
-  int get serverTime => _serverTime;
 
   bool get hasPendingProfileChange => _hasPendingProfileChange;
   String? get pendingRequestId => _pendingRequestId;
@@ -263,12 +222,6 @@ class DriverProvider with ChangeNotifier {
         _fetchAndCacheProfile(),
         _fetchAndCacheDocumentRequirements(),
       ]);
-
-      // Also revalidate pricing if stale
-      final pricingKey = CacheKeys.driverPricing(_cacheRepo.driverId);
-      if (CacheService.instance.staleness(pricingKey) != Staleness.fresh) {
-        await fetchPricing();
-      }
     } catch (e) {
       debugPrint('[CACHE] Foreground revalidation error: $e');
     }
@@ -278,214 +231,6 @@ class DriverProvider with ChangeNotifier {
 
   void updateToken(String token) {
     initSocket(token);
-    _fetchOperatingClass();
-    _fetchRecommendations();
-    fetchPricing();
-  }
-
-  Future<void> fetchPricing() async {
-    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
-    debugPrint('[PRICING] fetchPricing called (driverId=${driverId ?? "pending"})');
-
-    // 1) Instant render aid ONLY: paint last-known cached value immediately
-    //    so the UI is never blank. This is NOT authoritative — the network
-    //    response below always wins.
-    if (driverId != null) {
-      final cached = CacheService.instance.get(CacheKeys.driverPricing(driverId));
-      if (cached != null) {
-        final data = cached as Map<String, dynamic>;
-        _applyPricing(data);
-        notifyListeners();
-        debugPrint('[PRICING] applied cached price=\$' + '$_pricePerMile (will be reconciled with backend)');
-      }
-    }
-
-    // 2) AUTHORITATIVE load from backend. The network result is the single
-    //    source of truth and always overwrites any cached/default value.
-    //    This GET does NOT depend on driverId being set yet (auth uses JWT).
-    try {
-      final response = await ApiService.dio.get('/driver/pricing');
-      final data = response.data as Map<String, dynamic>;
-      _applyPricing(data);
-      if (driverId != null) {
-        await CacheService.instance.set(
-          CacheKeys.driverPricing(driverId),
-          data,
-          CachePolicy.pricing,
-        );
-      }
-      notifyListeners();
-      debugPrint('[PRICING] backend price=\$' +
-          '$_pricePerMile range=$_priceRangeMin..$_priceRangeMax lastChanged=$_priceLastChanged cooldownActive=$_cooldownActive');
-    } catch (e) {
-      // Network failure: keep whatever we have (cached or default) but DO NOT
-      // silently reset to the $2.00 default. Surface the error so it is visible.
-      debugPrint('[PRICING] ❌ backend fetch failed, retaining current state: $e');
-    }
-  }
-
-  void _applyPricing(Map<String, dynamic> data) {
-    // Never let a missing field silently revert to the $2.00 default.
-    // Only overwrite when the backend actually returns a value.
-    if (data['price_per_mile'] != null) {
-      _pricePerMile = (data['price_per_mile'] as num).toDouble();
-    }
-    if (data['price_range_min'] != null) {
-      _priceRangeMin = (data['price_range_min'] as num).toDouble();
-    }
-    if (data['price_range_max'] != null) {
-      _priceRangeMax = (data['price_range_max'] as num).toDouble();
-    }
-    if (data['recommended_price'] != null) {
-      _recommendedPrice = (data['recommended_price'] as num).toDouble();
-    }
-    if (data['price_last_changed'] != null) {
-      _priceLastChanged = DateTime.parse(data['price_last_changed']);
-    }
-    // Server-derived cooldown (authoritative). Falls back gracefully when the
-    // backend has not returned these fields yet (e.g. older cached payloads).
-    _cooldownActive = data['cooldown_active'] == true;
-    _cooldownRemainingMs = (data['cooldown_remaining_ms'] as num?)?.toInt() ?? 0;
-    _cooldownMs = (data['cooldown_ms'] as num?)?.toInt() ?? (4 * 60 * 60 * 1000);
-    _serverTime = (data['server_time'] as num?)?.toInt() ?? 0;
-  }
-
-  /// Returns the remaining cooldown in milliseconds computed against the
-  /// device clock but anchored to the backend-persisted [price_last_changed]
-  /// timestamp. This is drift-free: we never store elapsed time, only the
-  /// timestamp, and recompute remaining = end - now on every read.
-  int remainingCooldownMs() {
-    if (_priceLastChanged == null) return 0;
-    final end = _priceLastChanged!.millisecondsSinceEpoch + _cooldownMs;
-    final remaining = end - DateTime.now().millisecondsSinceEpoch;
-    return remaining > 0 ? remaining : 0;
-  }
-
-  /// True when the driver is currently locked from changing price.
-  bool get isPriceLocked => remainingCooldownMs() > 0;
-
-  Future<void> updatePrice(double newPrice) async {
-    try {
-      debugPrint('[PRICING] SAVE requested price=\$$newPrice');
-      final response = await ApiService.dio.post('/driver/pricing/update', data: {
-        'pricePerMile': newPrice,
-      });
-      final data = response.data as Map<String, dynamic>;
-      debugPrint('[PRICING] SAVE response price=\$' +
-          '${data['price_per_mile']} lastChanged=${data['price_last_changed']} cooldownActive=${data['cooldown_active']}');
-      _applyPricing(data);
-      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
-      if (driverId != null) {
-        await CacheService.instance.set(
-          CacheKeys.driverPricing(driverId),
-          data,
-          CachePolicy.pricing,
-        );
-      }
-      notifyListeners();
-    } on DioException catch (e) {
-      // Surface structured cooldown rejections (HTTP 429) with the exact
-      // remaining time returned by the server, so the UI can show an
-      // accurate countdown instead of a generic error.
-      if (e.response?.statusCode == 429 && e.response?.data?['code'] == 'COOLDOWN_ACTIVE') {
-        final remaining = (e.response?.data?['remainingMs'] as num?)?.toInt() ?? 0;
-        _cooldownActive = true;
-        _cooldownRemainingMs = remaining;
-        notifyListeners();
-        throw Exception(e.response?.data?['error'] ?? 'Price change is on cooldown.');
-      }
-      debugPrint('Error updating price: $e');
-      rethrow;
-    } catch (e) {
-      debugPrint('Error updating price: $e');
-      rethrow;
-    }
-  }
-
-  Future<void> _fetchOperatingClass() async {
-    try {
-      final profile = await UserService.getProfile();
-      if (profile['active_class'] != null) {
-        _activeClass = models.VehicleClass.values.firstWhere(
-          (e) => e.toString().split('.').last == profile['active_class'],
-          orElse: () => models.VehicleClass.CORE,
-        );
-        notifyListeners();
-      }
-    } catch (e) {
-      debugPrint('Error fetching operating class: $e');
-    }
-  }
-
-  Future<void> updateOperatingClass(models.VehicleClass newClass) async {
-    try {
-      final className = newClass.toString().split('.').last;
-      await ApiService.dio.patch('/driver/operating-class', data: {'activeClass': className});
-      _activeClass = newClass;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error updating operating class: $e');
-      rethrow;
-    }
-  }
-
-  /// Loads the driver's verified vehicle class, the ride types they are
-  /// ELIGIBLE for, and their current opt-in preferences.
-  Future<void> fetchRidePreferences() async {
-    try {
-      final response = await ApiService.dio.get('/driver/ride-preferences');
-      final data = response.data as Map<String, dynamic>;
-      _vehicleClass = data['vehicleClass']?.toString() ?? 'CORE';
-      _eligibleRideTypes = (data['eligibleRideTypes'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          ['CORE'];
-      final prefs = data['preferences'] as Map<String, dynamic>? ?? {};
-      _ridePreferences = {
-        for (final t in _eligibleRideTypes)
-          t: prefs[t] == true,
-      };
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error fetching ride preferences: $e');
-      rethrow;
-    }
-  }
-
-  /// Persists the set of enabled ride types. Only eligible types are accepted
-  /// by the backend; ineligible types in the payload are ignored server-side.
-  Future<void> saveRidePreferences(List<String> enabled) async {
-    try {
-      final response = await ApiService.dio.put(
-        '/driver/ride-preferences',
-        data: {'enabled': enabled},
-      );
-      final data = response.data as Map<String, dynamic>;
-      _vehicleClass = data['vehicleClass']?.toString() ?? _vehicleClass;
-      _eligibleRideTypes = (data['eligibleRideTypes'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          _eligibleRideTypes;
-      final prefs = data['preferences'] as Map<String, dynamic>? ?? {};
-      _ridePreferences = {
-        for (final t in _eligibleRideTypes)
-          t: prefs[t] == true,
-      };
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error saving ride preferences: $e');
-      rethrow;
-    }
-  }
-
-  Future<void> _fetchRecommendations() async {
-    try {
-      final response = await ApiService.dio.get('/driver/recommendations');
-      _recommendation = response.data;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error fetching recommendations: $e');
-    }
   }
 
   // ── Cache-aware profile fetching ─────────────────────────────────
@@ -693,19 +438,6 @@ class DriverProvider with ChangeNotifier {
 
     _socket!.on('newTripRequest', (data) {
       _incomingRequest = models.Trip.fromJson(data);
-      notifyListeners();
-    });
-
-    _socket!.on('pricingUpdate', (data) {
-      _applyPricing(data as Map<String, dynamic>);
-      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
-      if (driverId != null) {
-        CacheService.instance.set(
-          CacheKeys.driverPricing(driverId),
-          data,
-          CachePolicy.pricing,
-        );
-      }
       notifyListeners();
     });
 

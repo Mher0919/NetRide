@@ -21,8 +21,7 @@
 //   - Cost-effective: client-side caching minimizes Google API calls.
 
 import { MLEtaService } from '../../services/ml-eta.service';
-import { fareService, FareBreakdown } from '../../services/fare.service';
-import { VehicleClass } from '../../types';
+import { computeEstimate, FareBreakdown } from '../../services/pricing.service';
 import { RouteEngine } from './route-engine';
 import { GoogleRoutesEngine } from './google-routes.engine';
 import { RoutingError } from './routing.errors';
@@ -48,11 +47,13 @@ export interface RouteGeometry {
 export interface RoutingResult {
   distanceMeters: number;
   durationSeconds: number;
+  /** Static (no-traffic) duration when the engine exposed it. */
+  staticDurationSeconds?: number | null;
   etaSeconds: number;
   geometry: RouteGeometry;
   confidence: number; // 0..1 — 1 = real engine, lower = fallback
   engine: 'GoogleRoutes' | 'Synthetic';
-  cacheHit: boolean; // always false (no server cache)
+  cacheHit: boolean; // true when served from the server-side OD cache
   /** Populated for real engines; empty for synthetic fallback. */
   steps: any[];
   speedLimitsByRoad: Record<string, number>;
@@ -61,13 +62,11 @@ export interface RoutingResult {
 export interface PlanRequest {
   origin: LatLng;
   destination: LatLng;
-  vehicleClass: VehicleClass;
 }
 
 export interface PlanResponse {
   origin: LatLng;
   destination: LatLng;
-  vehicleClass: VehicleClass;
   distanceMeters: number;
   durationSeconds: number;
   etaSeconds: number;
@@ -150,30 +149,10 @@ export class RoutingService {
 
       const fareStart = process.hrtime.bigint();
 
-      // Fetch the highest default latest price per mile for this class from
-      // the cached pricing engine conditions. Fall through gracefully to the
-      // static rate when no pricing data is available.
-      let pricePerMile: number | undefined;
-      try {
-        const conditionsRaw = await this.withRedisTimeout(() => redis.get('pricing:system_conditions'));
-        if (conditionsRaw) {
-          const conditions = JSON.parse(conditionsRaw) as { xShift?: number };
-          const xShift = conditions.xShift ?? 0;
-          const classBarriers: Record<string, number> = {
-            [VehicleClass.CORE]: 3.0,
-            [VehicleClass.ELITE]: 6.0,
-            [VehicleClass.PRESTIGE]: 10.0,
-          };
-          const baseBarrier = classBarriers[request.vehicleClass] ?? 3.0;
-          pricePerMile = Math.round((baseBarrier + xShift) * 100) / 100;
-        }
-      } catch (_) { /* use static rate */ }
-
-      const fare = fareService.computeFare({
+      // Platform pricing — synchronous, in-memory, no I/O on the hot path.
+      const fare = computeEstimate({
         distanceMeters: route.distanceMeters,
         durationSeconds: route.durationSeconds,
-        vehicleClass: request.vehicleClass,
-        pricePerMile,
       });
       routingFareSeconds.observe(Number(process.hrtime.bigint() - fareStart) / 1e9);
 
@@ -198,7 +177,6 @@ export class RoutingService {
       return {
         origin: request.origin,
         destination: request.destination,
-        vehicleClass: request.vehicleClass,
         distanceMeters: route.distanceMeters,
         durationSeconds: route.durationSeconds,
         etaSeconds: route.etaSeconds,
@@ -251,13 +229,11 @@ export class RoutingService {
   static async calculateFareRoute(
     origin: LatLng,
     destination: LatLng,
-    vehicleClass: VehicleClass,
   ): Promise<{ route: RoutingResult; fare: FareBreakdown }> {
     const route = await this.route(origin, destination);
-    const fare = fareService.computeFare({
+    const fare = computeEstimate({
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
-      vehicleClass,
     });
     return { route, fare };
   }
@@ -320,6 +296,41 @@ export class RoutingService {
     const routeOrigin: LatLng = origin;
     const routeDest: LatLng = destination;
 
+    // 0. OD cache lookup before any engine call. Serving a nearby
+    //    origin/destination pair from a stored Google result avoids the
+    //    API round trip entirely; the multiplier is recomputed so the
+    //    returned ETA is consistent with a fresh call.
+    try {
+      const cached = await RouteStoreService.findOdcache(origin, destination, 1);
+      if (cached) {
+        // Prefer the traffic-aware duration while it is still fresh
+        // (<= 15 min); otherwise fall back to the static duration so
+        // geometry reuse never serves a stale traffic figure.
+        const freshTraffic = cached.trafficDurationSeconds != null &&
+          Date.now() - new Date(cached.createdAt).getTime() < 15 * 60 * 1000;
+        const baseDuration = freshTraffic && cached.trafficDurationSeconds != null
+          ? cached.trafficDurationSeconds
+          : cached.durationSeconds;
+        const multiplier = MLEtaService.predictMultiplier(origin[0], origin[1], cached.distanceMeters);
+        result = {
+          distanceMeters: cached.distanceMeters,
+          durationSeconds: baseDuration,
+          staticDurationSeconds: cached.durationSeconds,
+          etaSeconds: Math.round(baseDuration * multiplier),
+          geometry: cached.geometry,
+          confidence: 0.95,
+          engine: 'GoogleRoutes',
+          cacheHit: true,
+          steps: cached.steps,
+          speedLimitsByRoad: {},
+        };
+        routingEngineRequestsTotal.inc({ status: 'cache_hit' });
+        return result;
+      }
+    } catch (cacheErr) {
+      logger.warn({ err: (cacheErr as Error).message }, 'routing_od_cache_lookup_failed');
+    }
+
     try {
       // Google Routes API as the sole routing engine.
       const engine = GoogleRoutesEngine;
@@ -330,6 +341,7 @@ export class RoutingService {
           result = {
             distanceMeters: res.distanceMeters,
             durationSeconds: res.durationSeconds,
+            staticDurationSeconds: res.staticDurationSeconds ?? null,
             etaSeconds: Math.round(res.durationSeconds * multiplier),
             geometry: res.geometry,
             confidence: 0.95,
@@ -339,6 +351,21 @@ export class RoutingService {
             speedLimitsByRoad: res.speedLimitsByRoad,
           };
           routingEngineRequestsTotal.inc({ status: 'ok' });
+
+          // Persist successful engine results into the OD reuse cache.
+          // Best-effort and fire-and-forget — the hot path never waits.
+          RouteStoreService.saveOdcache(
+            origin,
+            destination,
+            res.geometry,
+            res.distanceMeters,
+            res.staticDurationSeconds ?? res.durationSeconds,
+            res.trafficDurationSeconds ?? null,
+            res.steps,
+            'GoogleRoutes',
+          ).catch((persistErr) => {
+            logger.warn({ err: (persistErr as Error).message }, 'routing_od_cache_persist_failed');
+          });
         } else {
           logger.warn({ engine: engine.name }, 'routing_engine_returned_null');
           routingEngineRequestsTotal.inc({ status: 'empty' });
@@ -435,25 +462,6 @@ export class RoutingService {
   private static elapsed(start: bigint): number {
     return Number(process.hrtime.bigint() - start) / 1e9;
   }
-
-  // ---- Redis timeout wrapper for pricing:system_conditions (only Redis use) ----
-  private static readonly REDIS_OP_TIMEOUT_MS = 800;
-
-  private static async withRedisTimeout<T>(op: () => Promise<T>): Promise<T | null> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), this.REDIS_OP_TIMEOUT_MS);
-    });
-    const opPromise = op().catch(() => null as T | null);
-    try {
-      return await Promise.race([opPromise, timeout]);
-    } catch {
-      return null;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
 }
 
-// Need to import redis for pricing cache only
-import { redis } from '../../config/redis';
+import { RouteStoreService } from '../../services/route-store.service';

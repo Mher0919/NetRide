@@ -20,11 +20,13 @@ class HistoryRouteInfo {
     'trafficDurationSeconds': trafficDurationSeconds,
   };
 
-  factory HistoryRouteInfo.fromJson(Map<String, dynamic> json) => HistoryRouteInfo(
-    distanceMeters: (json['distanceMeters'] as num).toDouble(),
-    durationSeconds: (json['durationSeconds'] as num).toDouble(),
-    trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)?.toDouble(),
-  );
+  factory HistoryRouteInfo.fromJson(Map<String, dynamic> json) =>
+      HistoryRouteInfo(
+        distanceMeters: (json['distanceMeters'] as num).toDouble(),
+        durationSeconds: (json['durationSeconds'] as num).toDouble(),
+        trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)
+            ?.toDouble(),
+      );
 }
 
 class CachedRoute {
@@ -79,8 +81,11 @@ class CachedRoute {
     destName: json['destName'] as String,
     distanceMeters: (json['distanceMeters'] as num).toDouble(),
     durationSeconds: (json['durationSeconds'] as num).toDouble(),
-    trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)?.toDouble(),
-    polyline: (json['polyline'] as List).map((c) => LatLng((c[0] as num).toDouble(), (c[1] as num).toDouble())).toList(),
+    trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)
+        ?.toDouble(),
+    polyline: (json['polyline'] as List)
+        .map((c) => LatLng((c[0] as num).toDouble(), (c[1] as num).toDouble()))
+        .toList(),
     vehicleClass: json['vehicleClass'] as String,
     savedAt: DateTime.fromMillisecondsSinceEpoch(json['savedAt'] as int),
   );
@@ -106,13 +111,14 @@ class SearchHistoryService {
   Future<void> save(SearchResult result, {HistoryRouteInfo? routeInfo}) async {
     try {
       final data = <String, dynamic>{
-        'display_name': result.displayName,
+        'displayName': result.displayName,
         'lat': result.lat,
         'lon': result.lon,
         'state': result.state,
         'type': result.type,
-        if (result.distanceMiles != null) 'distance_miles': result.distanceMiles,
-        if (result.formattedAddress != null) 'formatted_address': result.formattedAddress,
+        if (result.distanceMiles != null) 'distance': result.distanceMiles,
+        if (result.formattedAddress != null)
+          'formatted_address': result.formattedAddress,
         if (result.street != null) 'street': result.street,
         if (result.city != null) 'city': result.city,
         if (result.zip != null) 'zip': result.zip,
@@ -133,38 +139,14 @@ class SearchHistoryService {
     } catch (_) {}
   }
 
-  Future<void> saveRouteOnly({
-    required double originLat,
-    required double originLon,
-    required double destLat,
-    required double destLon,
-    required double distanceMeters,
-    required double durationSeconds,
-    double? trafficDurationSeconds,
-  }) async {
-    try {
-      final originHash = SpatialHash.encode(originLat, originLon, 7);
-      final destHash = SpatialHash.encode(destLat, destLon, 7);
-
-      await ApiService.dio.post('user/search-history/route', data: {
-        'origin_lat': originLat,
-        'origin_lng': originLon,
-        'dest_lat': destLat,
-        'dest_lng': destLon,
-        'origin_geohash': originHash,
-        'dest_geohash': destHash,
-        'distance_meters': distanceMeters,
-        'duration_seconds': durationSeconds,
-        'traffic_duration_seconds': trafficDurationSeconds,
-      });
-    } catch (_) {}
-  }
-
   Future<List<CachedRoute>> fetchRecentRoutes() async {
     try {
       final response = await ApiService.dio.get('user/search-history/routes');
       if (response.data is! List) return [];
-      return (response.data as List).cast<Map<String, dynamic>>().map((j) => CachedRoute.fromJson(j)).toList();
+      return (response.data as List)
+          .cast<Map<String, dynamic>>()
+          .map((j) => CachedRoute.fromJson(j))
+          .toList();
     } catch (_) {
       return [];
     }
@@ -172,7 +154,10 @@ class SearchHistoryService {
 
   Future<void> saveRoute(CachedRoute route) async {
     try {
-      await ApiService.dio.post('user/search-history/routes', data: route.toJson());
+      await ApiService.dio.post(
+        'user/search-history/routes',
+        data: route.toJson(),
+      );
     } catch (_) {}
   }
 }

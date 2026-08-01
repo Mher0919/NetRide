@@ -13,12 +13,6 @@ router.post('/onboarding/step', authMiddleware, DriverController.saveOnboardingS
 router.post('/onboarding/complete', authMiddleware, DriverController.completeOnboarding);
 router.post('/onboard', authMiddleware, DriverController.onboard);
 router.get('/vehicles', DriverController.getVehicles);
-router.patch('/operating-class', authMiddleware, DriverController.updateOperatingClass);
-router.get('/ride-preferences', authMiddleware, DriverController.getRidePreferences);
-router.put('/ride-preferences', authMiddleware, DriverController.setRidePreferences);
-router.get('/pricing', authMiddleware, DriverController.getPricing);
-router.post('/pricing/update', authMiddleware, DriverController.updatePrice);
-router.get('/recommendations', authMiddleware, DriverController.getRecommendations);
 
 // Vehicle Model Search
 router.get('/vehicle-models/search', DriverController.searchVehicleModels);

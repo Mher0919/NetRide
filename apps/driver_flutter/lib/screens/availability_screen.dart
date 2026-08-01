@@ -26,65 +26,20 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionSubscription;
   Timer? _heartbeatTimer;
-  Timer? _cooldownTimer;
-  int _lastKnownRemainingMs = 0;
   Position? _lastPosition;
   bool _shouldFollowUser = true;
   ViewState _state = ViewState.loading;
   String? _errorMessage;
   bool _isMapReady = false;
   String _firstName = "";
-  double? _tempPrice;
-  bool _isDragging = false;
   String? _lastIncomingRequestId;
   bool _isTogglingOnline = false;
-  bool _isConfirmingPrice = false;
 
   @override
   void initState() {
     super.initState();
     _checkPermissions();
     _fetchProfile();
-    _startCooldownTimer();
-    // Guarantee authoritative pricing state is loaded from the backend every
-    // time this screen opens (hot restart, route push, background return).
-    // The backend is the single source of truth; this prevents the UI from
-    // ever displaying the hardcoded $2.00 default after a lifecycle event.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        Provider.of<DriverProvider>(context, listen: false).fetchPricing();
-      }
-    });
-  }
-
-  /// Self-refreshing cooldown timer.
-  ///
-  /// The countdown is ALWAYS derived from the backend-persisted
-  /// [price_last_changed] timestamp (see [DriverProvider.remainingCooldownMs]),
-  /// never from a local timer value. This timer simply ticks the UI so the
-  /// remaining time updates every second and the slider auto-unlocks when the
-  /// cooldown elapses — even if the app was backgrounded/closed. A slower
-  /// cadence re-syncs authoritative state from the backend (covering clock
-  /// changes, logout/login, and server-side updates).
-  void _startCooldownTimer() {
-    _cooldownTimer?.cancel();
-    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!mounted) return;
-      final provider = Provider.of<DriverProvider>(context, listen: false);
-      final remaining = provider.remainingCooldownMs();
-
-      // Re-sync from backend every 60s, or the moment we think it expired,
-      // so the unlock is authoritative and resilient to device clock drift.
-      if (remaining == 0 && _lastKnownRemainingMs > 0) {
-        await provider.fetchPricing();
-      } else if (timer.tick % 60 == 0) {
-        await provider.fetchPricing();
-      }
-      _lastKnownRemainingMs = remaining;
-
-      // Trigger a rebuild so the countdown/locks reflect the new value.
-      if (mounted) setState(() {});
-    });
   }
 
   Future<void> _fetchProfile() async {
@@ -116,14 +71,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       } catch (_) {
         // Refresh failures are non-fatal — the gate stays in its last
         // known state. The next socket-driven review will reconcile.
-      }
-
-      // Load ride-type preferences (eligibility + opt-in) for the
-      // Preferences screen. Non-fatal if it fails.
-      try {
-        await provider.fetchRidePreferences();
-      } catch (_) {
-        debugPrint('Ride preferences load failed (non-fatal)');
       }
     } catch (e) {
       if (e is DioException && e.response?.statusCode == 404) {
@@ -477,7 +424,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   void dispose() {
     _positionSubscription?.cancel();
     _heartbeatTimer?.cancel();
-    _cooldownTimer?.cancel();
     super.dispose();
   }
 
@@ -849,7 +795,27 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     if (isOnline && driverProvider.incomingRequest == null)
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
-                        child: _buildPricingBar(driverProvider),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.95),
+                            borderRadius: BorderRadius.circular(24),
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 8)),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.directions_car_outlined, size: 18, color: Color(0xFF5B7760)),
+                              SizedBox(width: 10),
+                              Text(
+                                'Online — ride requests are forwarded automatically',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -878,23 +844,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                 ),
               ),
 
-            // Top-right Preferences entry point (ride-type toggles).
-            Positioned(
-              top: 56,
-              right: 20,
-              child: FloatingActionButton(
-                heroTag: 'preferences_fab',
-                mini: true,
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFF5B7760),
-                elevation: 4,
-                shape: const CircleBorder(),
-                tooltip: 'Ride Preferences',
-                onPressed: () => Navigator.pushNamed(context, '/driver-preferences'),
-                child: const Icon(Icons.tune_rounded),
-              ),
-            ),
-
             if (driverProvider.incomingRequest != null)
               Positioned(
                 bottom: 40,
@@ -908,77 +857,24 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                 bottom: 100,
                 left: 0,
                 right: 0,
-                child: Column(
-                  children: [
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF5B7760),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(color: const Color(0xFF5B7760).withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8)),
-                          ],
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-                            SizedBox(width: 12),
-                            Text('SEARCHING', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
-                          ],
-                        ),
-                      ),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF5B7760),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(color: const Color(0xFF5B7760).withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8)),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    if (driverProvider.recommendation != null)
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 40),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFC79A4A),
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                driverProvider.recommendation!['reason'],
-                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-
-            if (isOnline)
-              Positioned(
-                bottom: driverProvider.incomingRequest != null ? 360 : 40,
-                left: 20,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFD8D2CA)),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.layers_outlined, size: 18, color: Color(0xFF5B7760)),
-                      const SizedBox(width: 10),
-                      Text(
-                        'MODE: ${driverProvider.activeClass.toString().split('.').last}',
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
-                      ),
-                    ],
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                        SizedBox(width: 12),
+                        Text('SEARCHING', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1001,230 +897,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
             boxShadow: [BoxShadow(blurRadius: 8, color: color.withOpacity(0.3))],
           ),
         ),
-      ),
-    );
-  }
-
-  void _confirmPriceChange(double value, DriverProvider provider) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Confirm Price Change', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text(
-          'You chose your driving price to be \$${value.toStringAsFixed(2)} dollars per mile. '
-          'You will be able to change your price again after 4 hours. '
-          'Are you sure you want to change?'
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _tempPrice = null;
-              });
-              Navigator.pop(context);
-            },
-            child: const Text('CANCEL', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-          ),
-          ElevatedButton(
-            onPressed: _isConfirmingPrice
-                ? null
-                : () async {
-                    setState(() => _isConfirmingPrice = true);
-                    final messenger = ScaffoldMessenger.of(context);
-                    Navigator.pop(context);
-                    try {
-                      await provider.updatePrice(value);
-                      if (mounted) {
-                        messenger.showSnackBar(
-                          SnackBar(
-                            content: Text('Driving price successfully set to \$${value.toStringAsFixed(2)}/mi.'),
-                            backgroundColor: const Color(0xFF5B7760),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        messenger.showSnackBar(
-                          SnackBar(
-                            content: Text('Error: ${e.toString().replaceAll('Exception: ', '')}'),
-                            backgroundColor: Colors.red,
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      }
-                    } finally {
-                      setState(() {
-                        _isConfirmingPrice = false;
-                        _tempPrice = null;
-                      });
-                    }
-                  },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5B7760), foregroundColor: Colors.white),
-            child: _isConfirmingPrice
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('CONFIRM', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPricingBar(DriverProvider driverProvider) {
-    final min = driverProvider.priceRangeMin;
-    final max = driverProvider.priceRangeMax;
-    final current = _tempPrice ?? driverProvider.pricePerMile;
-    final rec = driverProvider.recommendedPrice;
-
-    final double recFraction = (max - min) > 0 ? (rec - min) / (max - min) : 0.5;
-
-    // Authoritative cooldown derived from the backend-persisted
-    // price_last_changed timestamp. We never store elapsed time locally, so
-    // hot restarts / redeploys cannot reset the countdown.
-    final remainingMs = driverProvider.remainingCooldownMs();
-    final bool isCooldown = remainingMs > 0;
-
-    String cooldownText = "";
-    if (isCooldown) {
-      final remaining = Duration(milliseconds: remainingMs);
-      final hours = remaining.inHours;
-      final minutes = remaining.inMinutes % 60;
-      final seconds = remaining.inSeconds % 60;
-      cooldownText = "Locked ${hours}h ${minutes}m ${seconds}s";
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 8)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'YOUR RIDE FARE RANGE',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF5B7760), letterSpacing: 1.2),
-              ),
-              if (isCooldown)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(color: const Color(0xFFC65A5A).withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.lock_clock, size: 12, color: Color(0xFFC65A5A)),
-                      const SizedBox(width: 4),
-                      Text(cooldownText, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFFC65A5A))),
-                    ],
-                  ),
-                )
-              else
-                Text(
-                  'Active Rate: \$${driverProvider.pricePerMile.toStringAsFixed(2)}/mi',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              '\$${current.toStringAsFixed(2)}/mi',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w900,
-                color: _isDragging 
-                    ? const Color(0xFF8FA894).withOpacity(0.7) // Lighter green color while dragging
-                    : const Color(0xFF2F3A32),
-                letterSpacing: -0.5,
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final trackWidth = constraints.maxWidth - 32;
-              final recLeftOffset = 16 + (recFraction * trackWidth);
-              
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      activeTrackColor: const Color(0xFF5B7760),
-                      inactiveTrackColor: const Color(0xFFD8D2CA),
-                      thumbColor: isCooldown ? Colors.grey : const Color(0xFF5B7760),
-                      overlayColor: const Color(0xFF5B7760).withOpacity(0.12),
-                      valueIndicatorColor: const Color(0xFF5B7760).withOpacity(0.9),
-                      valueIndicatorTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                      showValueIndicator: ShowValueIndicator.always,
-                    ),
-                    child: Slider(
-                      min: min,
-                      max: max,
-                      divisions: ((max - min) / 0.25).round(),
-                      value: current,
-                      onChanged: isCooldown ? null : (val) {
-                        setState(() {
-                          _tempPrice = val;
-                          _isDragging = true;
-                        });
-                      },
-                      onChangeEnd: (val) {
-                        setState(() {
-                          _isDragging = false;
-                        });
-                        _confirmPriceChange(val, driverProvider);
-                      },
-                    ),
-                  ),
-                  Positioned(
-                    left: recLeftOffset,
-                    top: 36,
-                    child: FractionalTranslation(
-                      translation: const Offset(-0.5, 0),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.arrow_drop_up_rounded, size: 14, color: Color(0xFFC79A4A)),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF7F4EF),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFFC79A4A), width: 0.5),
-                            ),
-                            child: Text(
-                              'Rec: \$${rec.toStringAsFixed(2)}',
-                              style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Color(0xFFC79A4A)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Min: \$${min.toStringAsFixed(2)}/mi', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: const Color(0xFF2F3A32).withOpacity(0.5))),
-              Text('Max: \$${max.toStringAsFixed(2)}/mi', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: const Color(0xFF2F3A32).withOpacity(0.5))),
-            ],
-          ),
-        ],
       ),
     );
   }

@@ -68,7 +68,6 @@ export const RiderUpdateLocationSchema = LocationSchema;
 export const RequestRideSchema = z.object({
   pickup: LocationWithAddressSchema,
   destination: LocationWithAddressSchema,
-  requestedClass: z.enum(['CORE', 'ELITE', 'PRESTIGE']).optional(),
   isScheduled: z.boolean().optional(),
   scheduledAt: z.string().datetime().optional(),
   favoritePriority: z.boolean().optional(),

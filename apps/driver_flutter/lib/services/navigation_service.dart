@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'gps_tracker.dart';
+import 'off_route_detector.dart';
+import 'reroute_controller.dart';
+import 'route_matcher.dart';
 import 'route_progress_calculator.dart';
 import 'routing_service.dart';
 import 'speed_monitor.dart';
@@ -34,13 +37,7 @@ class NavigationRoute {
   });
 
   factory NavigationRoute.fromServer(Map<String, dynamic> data) {
-    final dynamic pointsRaw = data['points_list'] ?? data['polyline'] ?? [];
-    final List<LatLng> polyline;
-    if (pointsRaw is List) {
-      polyline = pointsRaw.whereType<LatLng>().toList();
-    } else {
-      polyline = [];
-    }
+    final polyline = parseServerPolyline(data);
 
     final rawSteps = _normalizeSteps(data['steps'] as List? ?? []);
     final steps = RouteProgressCalculator.buildSteps(rawSteps);
@@ -48,6 +45,7 @@ class NavigationRoute {
     final engine = (data['engine'] as String?) ?? 'Backend-Gateway';
     final etaSec = (data['eta'] as num?)?.toDouble() ?? 0;
     final durationSec = (data['duration'] as num?)?.toDouble() ?? 0;
+    final trafficEta = (data['trafficDurationSeconds'] as num?)?.toDouble();
 
     return NavigationRoute(
       polyline: polyline,
@@ -55,12 +53,91 @@ class NavigationRoute {
       steps: steps,
       totalMeters: (data['distance'] as num?)?.toDouble() ?? 0.0,
       etaSeconds: etaSec > 0 ? etaSec : durationSec,
-      trafficEtaSeconds: (data['trafficDurationSeconds'] as num?)?.toDouble(),
+      trafficEtaSeconds: trafficEta,
       speedLimitsByRoad: ((data['speedLimitsByRoad'] as Map?) ?? const {})
           .map((k, v) => MapEntry(k as String, (v as num).toInt())),
       engine: engine,
       cacheHit: data['cache_hit'] == true || data['cacheHit'] == true,
     );
+  }
+
+  /// Parse every polyline shape the backend may emit into a LatLng list:
+  ///   - `points_list`: List<LatLng> (legacy) or List<[lng,lat]>
+  ///   - `polyline`:    List<[lng,lat]>
+  ///   - `geometry`:    GeoJSON LineString coordinates
+  ///   - `encodedPolyline`: polyline6 string
+  /// Order of precedence is fixed so a well-formed payload always wins
+  /// regardless of which keys the wire happens to carry.
+  static List<LatLng> parseServerPolyline(Map<String, dynamic> data) {
+    final raw = data['points_list'] ?? data['polyline'];
+    if (raw is List && raw.isNotEmpty) {
+      final first = raw.first;
+      if (first is LatLng) {
+        return raw.whereType<LatLng>().toList();
+      }
+      final out = <LatLng>[];
+      for (final c in raw) {
+        if (c is List && c.length >= 2 && c[0] is num && c[1] is num) {
+          out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+        }
+      }
+      if (out.isNotEmpty) return out;
+    }
+
+    final geometry = data['geometry'];
+    if (geometry is Map && geometry['type'] == 'LineString') {
+      final coords = geometry['coordinates'] as List? ?? [];
+      final out = <LatLng>[];
+      for (final c in coords) {
+        if (c is List && c.length >= 2 && c[0] is num && c[1] is num) {
+          out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+        }
+      }
+      if (out.isNotEmpty) return out;
+    }
+
+    final encoded = data['encodedPolyline'];
+    if (encoded is String && encoded.isNotEmpty) {
+      return decodePolyline6(encoded);
+    }
+
+    return const [];
+  }
+
+  /// Google polyline6 decoder (precision 1e5) -> List<LatLng>.
+  static List<LatLng> decodePolyline6(String encoded) {
+    final points = <LatLng>[];
+    int index = 0;
+    final len = encoded.length;
+    int lat = 0;
+    int lng = 0;
+
+    while (index < len) {
+      int b;
+      int shift = 0;
+      int result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      final dlat = (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      final dlng = (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      lng += dlng;
+
+      points.add(LatLng(lat / 1e5, lng / 1e5));
+    }
+
+    return points;
   }
 
   static List<Map<String, dynamic>> _normalizeSteps(List<dynamic> rawSteps) {
@@ -149,42 +226,22 @@ class NavigationRoute {
   }
 }
 
-class RerouteManager {
-  static const int requiredTicks = 3;
-  static const double offRouteThresholdM = 60;
-
-  int _consecutiveOff = 0;
-  bool _isRerouting = false;
-
-  bool consider(double offRouteMeters) {
-    if (_isRerouting) return false;
-    if (offRouteMeters > offRouteThresholdM) {
-      _consecutiveOff += 1;
-      if (_consecutiveOff >= requiredTicks) {
-        _consecutiveOff = 0;
-        return true;
-      }
-    } else {
-      _consecutiveOff = 0;
-    }
-    return false;
-  }
-
-  void markRerouting(bool busy) {
-    _isRerouting = busy;
-    if (!busy) _consecutiveOff = 0;
-  }
-}
-
 class NavigationService extends ChangeNotifier {
   final RoutingService _routingService = RoutingService();
   final SpeedMonitor _speedMonitor = SpeedMonitor();
+  late final RerouteController _rerouteController = RerouteController(
+    onBackendReroute: _requestBackendReroute,
+  );
 
   NavigationLeg _leg = NavigationLeg.pickup;
   NavigationRoute? _route;
   String? _tripId;
   RouteProgress? _progress;
   bool _isNavigating = false;
+
+  /// Local map-matcher over the active route polyline. Rebuilt when a
+  /// new route is applied; null between routes.
+  RouteMatcher? _matcher;
 
   StreamSubscription<GpsFix>? _gpsSub;
 
@@ -194,7 +251,19 @@ class NavigationService extends ChangeNotifier {
   bool get isNavigating => _isNavigating;
   SpeedMonitor get speedMonitor => _speedMonitor;
   NavigationLeg? get currentLeg => _leg;
-  RerouteManager reroute = RerouteManager();
+  RerouteStage get rerouteStage => _rerouteController.stage;
+  OffRoutePhase get offRoutePhase =>
+      _rerouteController.offRoutePhase;
+  double get offRouteDeviationM =>
+      _matcher?.lastSnap?.distanceMeters ?? 0;
+
+  void _applyRoute(NavigationRoute route) {
+    _route = route;
+    _matcher = RouteMatcher.forPolyline(route.polyline);
+    _progress = null;
+    _lastNotifiedStepIndex = -1;
+    _rerouteController.onRouteApplied();
+  }
 
   Future<void> startNavigation({
     required String tripId,
@@ -214,7 +283,7 @@ class NavigationService extends ChangeNotifier {
       }
     }
 
-    _route = NavigationRoute.fromServer(data);
+    _applyRoute(NavigationRoute.fromServer(data));
 
     await _speedMonitor.start(route: data);
 
@@ -246,11 +315,13 @@ class NavigationService extends ChangeNotifier {
   void stopNavigation() {
     _isNavigating = false;
     _route = null;
+    _matcher = null;
     _progress = null;
     _tripId = null;
     _gpsSub?.cancel();
     _gpsSub = null;
     _speedMonitor.stop();
+    _rerouteController.reset();
     NavigationVoiceService.instance.stop();
     notifyListeners();
   }
@@ -261,9 +332,15 @@ class NavigationService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Manual reroute (UI "refresh route" button) and the controller's
+  /// backend escalation both land here.
   Future<void> requestReroute(LatLng from) async {
+    await _requestBackendReroute(from);
+  }
+
+  Future<void> _requestBackendReroute(LatLng from) async {
     if (_tripId == null || _route == null) return;
-    reroute.markRerouting(true);
+    _rerouteController.rerouting = true;
     try {
       final fresh = await _routingService.requestReroute(
         tripId: _tripId!,
@@ -271,12 +348,12 @@ class NavigationService extends ChangeNotifier {
         from: from,
       );
       if (fresh != null) {
-        _route = NavigationRoute.fromServer(fresh);
+        _applyRoute(NavigationRoute.fromServer(fresh));
         await _speedMonitor.start(route: fresh);
         notifyListeners();
       }
     } finally {
-      reroute.markRerouting(false);
+      _rerouteController.rerouting = false;
     }
   }
 
@@ -284,12 +361,25 @@ class NavigationService extends ChangeNotifier {
     final route = _route;
     if (route == null || route.polyline.length < 2) return;
 
+    final matcher = _matcher;
+    if (matcher == null) return;
+
+    // 1. Snap the fix onto the route (segment projection, spatial index).
+    final headingValid = fix.speedMps > 0.5;
+    final snap = matcher.match(
+      fix.position,
+      headingDeg: headingValid ? fix.headingDeg : null,
+    );
+    if (snap == null) return;
+
+    // 2. Progress numbers come from the projection — no vertex scan.
     final progress = RouteProgressCalculator.compute(
       gps: fix.position,
       polyline: route.polyline,
       steps: route.steps,
       speedMps: fix.speedMps,
       totalMeters: route.totalMeters,
+      snap: snap,
     );
     _progress = progress;
 
@@ -307,10 +397,15 @@ class NavigationService extends ChangeNotifier {
       }
     }
 
-    if (progress != null &&
-        reroute.consider(progress.snappedDistanceFromPolyline)) {
-      requestReroute(fix.position).catchError((_) {});
-    }
+    // 3. Reroute state machine: hysteresis detector → local recovery →
+    //    backend (cache ladder → Google), single-flight + cooldown.
+    _rerouteController.onGpsFix(
+      position: fix.position,
+      snap: snap,
+      speedMps: fix.speedMps,
+      headingDeg: headingValid ? fix.headingDeg : null,
+      headingValid: headingValid,
+    );
 
     notifyListeners();
   }

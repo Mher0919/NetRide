@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:uuid/uuid.dart';
@@ -17,6 +18,19 @@ class RideProvider with ChangeNotifier {
   List<ChatMessage> _messages = [];
   final Map<String, Location> _nearbyDrivers = {};
 
+  /// Authoritative route pushed by the backend (navigationStarted /
+  /// navigationRerouteRequested). Rendering this — instead of calling
+  /// the routing API from the trip screen — keeps the rider map in sync
+  /// with the driver's actual route without any extra Google calls.
+  List<LatLng>? _navigationRoute;
+  double? _navigationEtaSeconds;
+  bool _navigationCacheHit = false;
+
+  /// Live ETA pushed by the gateway (10 s throttled) while the driver
+  /// is en route.
+  double? _driverEtaSeconds;
+  int? _driverRemainingMeters;
+
   TripStatus get status => _status;
   String? get tripId => _tripId;
   DriverInfo? get driver => _driver;
@@ -25,6 +39,11 @@ class RideProvider with ChangeNotifier {
   Trip? get currentTrip => _currentTrip;
   List<ChatMessage> get messages => _messages;
   Map<String, Location> get nearbyDrivers => _nearbyDrivers;
+  List<LatLng>? get navigationRoute => _navigationRoute;
+  double? get navigationEtaSeconds => _navigationEtaSeconds;
+  bool get navigationCacheHit => _navigationCacheHit;
+  double? get driverEtaSeconds => _driverEtaSeconds;
+  int? get driverRemainingMeters => _driverRemainingMeters;
 
   /// Exposed so the CommunicationService can hook into the same socket
   /// the rest of the ride flow uses. Returns null if the socket hasn't
@@ -149,6 +168,34 @@ class RideProvider with ChangeNotifier {
       notifyListeners();
     });
 
+    _socket!.on('navigationStarted', (data) {
+      _setNavigationRoute(data);
+    });
+
+    _socket!.on('navigationLegAdvanced', (data) {
+      _setNavigationRoute(data);
+    });
+
+    _socket!.on('navigationRerouteRequested', (data) {
+      _setNavigationRoute(data);
+    });
+
+    _socket!.on('driverEtaUpdate', (data) {
+      if (data is! Map) return;
+      if (data['tripId'] != null && data['tripId'] != _tripId) return;
+      _driverEtaSeconds = (data['etaSeconds'] as num?)?.toDouble();
+      _driverRemainingMeters = (data['remainingMeters'] as num?)?.toInt();
+      notifyListeners();
+    });
+
+    _socket!.on('navigationEnded', (data) {
+      _navigationRoute = null;
+      _navigationEtaSeconds = null;
+      _driverEtaSeconds = null;
+      _driverRemainingMeters = null;
+      notifyListeners();
+    });
+
     _socket!.on('tipReceived', (data) {
       try {
         SoundService.instance.play(SoundEffect.tipReceived);
@@ -177,7 +224,6 @@ class RideProvider with ChangeNotifier {
   }
 
   void requestRide(Location pickup, Location destination, {
-    VehicleClass requestedClass = VehicleClass.CORE,
     bool isScheduled = false,
     DateTime? scheduledAt,
     bool favoritePriority = false,
@@ -196,7 +242,6 @@ class RideProvider with ChangeNotifier {
     _socket?.emit('requestRide', {
       'pickup': pickup.toJson(),
       'destination': destination.toJson(),
-      'requestedClass': requestedClass.toString().split('.').last,
       'isScheduled': isScheduled,
       'scheduledAt': scheduledAt?.toIso8601String(),
       'favoritePriority': favoritePriority,
@@ -226,11 +271,111 @@ class RideProvider with ChangeNotifier {
     _tripId = null;
     _driver = null;
     _estimatedFare = null;
+    _navigationRoute = null;
+    _navigationEtaSeconds = null;
+    _driverEtaSeconds = null;
+    _driverRemainingMeters = null;
     notifyListeners();
   }
 
   void updateLocation(double lat, double lng) {
     _socket?.emit('updateLocation', {'lat': lat, 'lng': lng});
+  }
+
+  /// Parse the route payload shipped with navigationStarted /
+  /// navigationRerouteRequested and make it the authoritative route for
+  /// the trip screen. Handles every shape the backend emits:
+  ///   - `polyline`:        [[lng, lat], ...]
+  ///   - `points_list`:     [[lng, lat], ...]
+  ///   - `geometry`:        GeoJSON LineString coordinates
+  ///   - `encodedPolyline`: polyline6 string
+  void _setNavigationRoute(dynamic data) {
+    if (data is! Map) return;
+    if (data['tripId'] != null && data['tripId'] != _tripId) return;
+
+    final route = data['route'];
+    if (route is! Map) return;
+    final routeMap = Map<String, dynamic>.from(route);
+
+    final points = _decodeRoutePoints(routeMap);
+    if (points.isEmpty) return;
+
+    _navigationRoute = points;
+    final eta = (routeMap['eta'] as num?)?.toDouble() ?? 0;
+    final duration = (routeMap['duration'] as num?)?.toDouble() ?? 0;
+    final traffic = (routeMap['trafficDurationSeconds'] as num?)?.toDouble();
+    _navigationEtaSeconds = (traffic ?? (eta > 0 ? eta : duration)).toDouble();
+    _navigationCacheHit =
+        routeMap['cache_hit'] == true || routeMap['cacheHit'] == true;
+    notifyListeners();
+  }
+
+  List<LatLng> _decodeRoutePoints(Map<String, dynamic> route) {
+    final raw = route['points_list'] ?? route['polyline'];
+    if (raw is List && raw.isNotEmpty) {
+      final first = raw.first;
+      if (first is LatLng) {
+        return raw.whereType<LatLng>().toList();
+      }
+      final out = <LatLng>[];
+      for (final c in raw) {
+        if (c is List && c.length >= 2 && c[0] is num && c[1] is num) {
+          out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+        }
+      }
+      if (out.isNotEmpty) return out;
+    }
+
+    final geometry = route['geometry'];
+    if (geometry is Map && geometry['type'] == 'LineString') {
+      final coords = geometry['coordinates'] as List? ?? [];
+      final out = <LatLng>[];
+      for (final c in coords) {
+        if (c is List && c.length >= 2 && c[0] is num && c[1] is num) {
+          out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+        }
+      }
+      if (out.isNotEmpty) return out;
+    }
+
+    final encoded = route['encodedPolyline'];
+    if (encoded is String && encoded.isNotEmpty) {
+      return _decodePolyline6(encoded);
+    }
+
+    return const [];
+  }
+
+  /// Google polyline6 decoder -> List<LatLng>.
+  List<LatLng> _decodePolyline6(String encoded) {
+    final points = <LatLng>[];
+    int index = 0;
+    final len = encoded.length;
+    int lat = 0;
+    int lng = 0;
+    while (index < len) {
+      int b;
+      int shift = 0;
+      int result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      final dlat = (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      lat += dlat;
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      final dlng = (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      lng += dlng;
+      points.add(LatLng(lat / 1e5, lng / 1e5));
+    }
+    return points;
   }
 
   Future<void> rateRide(String rideId, int rating, String reviewText, {bool favorite = false}) async {

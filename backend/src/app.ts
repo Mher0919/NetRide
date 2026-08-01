@@ -506,6 +506,28 @@ async function runMigrations() {
       console.log('✅ Places search schema (033) applied successfully');
     }
 
+    // Google Routes OD cache tables (032) — created once, then fed by
+    // RouteStoreService. Wrapped in its own guard because the table was
+    // defined before the bootstrap ever applied it.
+    const hasRouteCache = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'route_cache'");
+    if (hasRouteCache.rowCount === 0) {
+      console.log('⚡ Applying Google Routes cache schema (032)...');
+      const schemaPath = path.join(__dirname, '../migrations/032_google_routes_cache.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Google Routes cache schema (032) applied');
+    }
+
+    // Ride-scoped authoritative route store (034)
+    const hasRideRoutes = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'ride_routes'");
+    if (hasRideRoutes.rowCount === 0) {
+      console.log('⚡ Applying ride route store schema (034)...');
+      const schemaPath = path.join(__dirname, '../migrations/034_ride_routes.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Ride route store schema (034) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);
@@ -589,14 +611,17 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
     }, 60 * 1000);
   });
 
-  // Recalculate Driver Pricing Ranges (Every 30 minutes)
-  import('./services/fare.service').then(({ fareService }) => {
-    setInterval(() => {
-      fareService.recalculateDriverRanges();
-    }, 30 * 60 * 1000);
+  // Refresh Platform Pricing Market Conditions (Every 5 minutes)
+  import('./services/pricing.service').then(({ pricingService }) => {
+    const refresh = () => {
+      pricingService.refreshMarketConditions().catch((err: any) => {
+        console.error(`[PRICING] ❌ Market refresh failed: ${err.message}`);
+      });
+    };
+    setInterval(refresh, 5 * 60 * 1000);
 
     // Initial run on start
-    fareService.recalculateDriverRanges();
+    refresh();
   });
 
   // Vehicle Data Background Sync (Once on start)

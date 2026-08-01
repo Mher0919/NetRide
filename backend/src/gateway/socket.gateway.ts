@@ -5,6 +5,8 @@ import { RideService } from '../modules/ride/ride.service';
 import { RideMessagesRepository } from '../modules/ride/ride_messages.repository';
 import { matchingService } from '../services/matching.service';
 import { NavigationService } from '../services/navigation.service';
+import { RerouteService } from '../services/reroute.service';
+import { RouteStoreService } from '../services/route-store.service';
 import { pool } from '../config/database';
 import { UserRole, Location, TripStatus } from '../types';
 import { env } from '../config/env';
@@ -340,6 +342,36 @@ export function setupSocketGateway(io: Server) {
             driverId: id,
             ...validated.data
           });
+
+          // Live ETA push (throttled to 10 s per trip): compute the
+          // remaining distance over the stored authoritative leg and
+          // emit an updated arrival time — zero Google calls.
+          const leg: 'pickup' | 'destination' =
+            currentTrip.status === TripStatus.ACCEPTED ? 'pickup' : 'destination';
+          const etaThrottleKey = `eta:live:${currentTrip.id}`;
+          try {
+            const lastEta = await redis.get(etaThrottleKey);
+            const nowS = Date.now();
+            if (!lastEta || nowS - parseInt(lastEta, 10) > 10000) {
+              const stored = await RouteStoreService.getRideRoute(currentTrip.id, leg);
+              if (stored && stored.geometry.coordinates.length >= 2) {
+                const { remainingMeters, etaSeconds } = RouteStoreService.computeRemaining(
+                  stored.geometry.coordinates,
+                  validated.data.lat,
+                  validated.data.lng,
+                );
+                io.to(`rider:${currentTrip.rider_id}`).emit('driverEtaUpdate', {
+                  tripId: currentTrip.id,
+                  leg,
+                  etaSeconds,
+                  remainingMeters: Math.round(remainingMeters),
+                });
+                await redis.set(etaThrottleKey, nowS.toString(), 'EX', 30);
+              }
+            }
+          } catch {
+            // ETA push is best-effort — never block location updates on it.
+          }
         }
       });
 
@@ -585,17 +617,13 @@ export function setupSocketGateway(io: Server) {
             }
           }
 
-          const end =
-            data.leg === 'pickup' ? trip.pickup : trip.destination;
-          const route = await NavigationService.cacheRouteLeg(
+          // Reroute through the decision ladder: stored ride leg → OD
+          // route cache → Google Routes API (last resort only).
+          const route = await RerouteService.reroute(
             data.tripId,
             data.leg,
-            [data.lat, data.lng],
-            [end.lat, end.lng]
-          );
-          await pool.query(
-            `UPDATE rides SET route_metadata = route_metadata || $1::jsonb WHERE id = $2`,
-            [JSON.stringify({ [data.leg]: route }), data.tripId]
+            data.lat,
+            data.lng
           );
           
           // Store current position for distance check on next reroute
@@ -668,17 +696,16 @@ export function setupSocketGateway(io: Server) {
         } catch (err) {}
       });
 
-      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; requestedClass?: any; idempotencyKey?: string }) => {
+      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; idempotencyKey?: string }) => {
         const validated = validate(RequestRideSchema, data, socket, 'requestRide');
         if (!validated.success || !validated.data) return;
         
-        console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address} (Class: ${validated.data.requestedClass})`);
+        console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address}`);
         try {
           const trip = await RideService.requestRide(
             id, 
             data.pickup, 
-            data.destination, 
-            data.requestedClass as any,
+            data.destination,
             undefined,
             false,
             data.idempotencyKey

@@ -42,9 +42,6 @@ class CacheKeys {
   static String driverProfileChange(String driverId) =>
       'profile:change:$driverId';
 
-  static String driverPricing(String driverId) =>
-      'pricing:driver:$driverId';
-
   static String driverPayoutCard(String driverId) =>
       'wallet:payout_card:$driverId';
 
@@ -78,7 +75,6 @@ class CacheKeys {
         driverVehicleSubmissions(driverId),
         driverEligibility(driverId),
         driverProfileChange(driverId),
-        driverPricing(driverId),
         driverPayoutCard(driverId),
         driverWallet(driverId),
         driverPayouts(driverId),

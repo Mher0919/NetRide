@@ -3,19 +3,18 @@ import { Server } from 'socket.io';
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { RideRepository } from '../modules/ride/ride.repository';
-import { TripStatus, VehicleClass } from '../types';
+import { TripStatus } from '../types';
 import { LocationsService } from '../modules/location/locations.service';
 import { DispatchService, ScoredDriver } from './dispatch.service';
 import { GeospatialService } from '../modules/geospatial/geospatial.service';
-import { pool } from '../config/database';
+import { resolveRideFare } from './pricing.service';
 import { dispatchAcceptOutcomeTotal } from '../observability/metrics';
 
 /** @deprecated Use BullMQ queue (matchQueue.add) instead. Kept for LEGACY_SYNC_MATCHING fallback. */
 export const matchingService = {
-  async findAndDispatch(io: Server, tripId: string, pickupLat: number, pickupLng: number, requestedClass: VehicleClass, riderId?: string) {
+  async findAndDispatch(io: Server, tripId: string, pickupLat: number, pickupLng: number, riderId?: string) {
     const drivers = await DispatchService.getWeightedDrivers(
-      { lat: pickupLat, lng: pickupLng }, 
-      requestedClass,
+      { lat: pickupLat, lng: pickupLng },
       env.DRIVER_MATCH_RADIUS_KM || 10,
       riderId
     );
@@ -27,7 +26,7 @@ export const matchingService = {
         io.to(`rider:${trip.rider_id}`).emit('tripUpdate', {
           ...trip,
           status: TripStatus.CANCELLED,
-          cancelReason: 'No drivers available in this class',
+          cancelReason: 'No drivers available',
         });
       }
       return;
@@ -84,23 +83,12 @@ export const matchingService = {
       console.error(`[DISPATCH] Error getting trip route:`, e);
     }
 
-    // 2. Fetch driver pricing
-    let driverPricePerMile = 2.00;
-    try {
-      const driverPricing = await pool.query('SELECT price_per_mile FROM drivers WHERE user_id = $1', [driverId]);
-      if (driverPricing.rows.length > 0) {
-        driverPricePerMile = parseFloat(driverPricing.rows[0].price_per_mile || '2.00');
-      }
-    } catch (e) {
-      console.error(`[DISPATCH] Error getting driver pricing:`, e);
-    }
-
-    // 3. Calculate fare amount for this specific driver
+    // 2. Resolve the platform price from the ride's price snapshot.
     const distanceKm = tripRoute ? (tripRoute.distance / 1000) : (trip.distance_km || 10.0);
-    const distanceMiles = distanceKm * 0.621371;
-    const calculatedFare = Math.round(driverPricePerMile * distanceMiles * 100) / 100;
-    const maxFare = parseFloat((trip as any).initial_max_fare || '999');
-    const calculatedPrice = Math.min(maxFare, Math.max(5.00, calculatedFare));
+    const calculatedPrice = await resolveRideFare(tripId, {
+      distanceMeters: tripRoute ? tripRoute.distance : (trip.distance_km || 10.0) * 1000,
+      durationSeconds: tripRoute ? tripRoute.eta : (trip.duration_minutes ? trip.duration_minutes * 60 : 600),
+    });
 
     console.log(`[DISPATCH] Offering trip ${tripId} to driver ${driverId} (Score: ${drivers[index].score.toFixed(2)}) - Price: $${calculatedPrice}, Dist: ${distanceKm.toFixed(2)}km`);
     
@@ -114,7 +102,6 @@ export const matchingService = {
       route_geometry: tripRoute ? tripRoute.geometry : null,
       driver_to_pickup_eta: driverToPickupRoute ? driverToPickupRoute.eta : null,
       driver_to_pickup_distance: driverToPickupRoute ? driverToPickupRoute.distance : null,
-      driver_price_per_mile: driverPricePerMile
     });
 
     await redis.setex(

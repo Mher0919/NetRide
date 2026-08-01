@@ -4,13 +4,14 @@ import { RideRepository } from './ride.repository';
 console.log('[SVC_INIT] FULL findCurrentByDriverId toString:\n' + (RideRepository?.findCurrentByDriverId?.toString() || 'undefined'));
 import { LocationsService } from '../location/locations.service';
 import { GeospatialService } from '../geospatial/geospatial.service';
-import { Trip, Location, UserRole, VehicleClass, TripStatus } from '../../types';
+import { Trip, Location, UserRole, TripStatus } from '../../types';
 import { env } from '../../config/env';
 import { io } from '../../app';
 import { pool } from '../../config/database';
 import { redis } from '../../config/redis';
-import { fareService } from '../../services/fare.service';
-import { NavigationService } from '../../services/navigation.service';
+import { createPriceSnapshot, computeEstimate, getSnapshotForRide } from '../../services/pricing.service';
+import { NavigationService, CachedRoutePayload } from '../../services/navigation.service';
+import { RouteStoreService, haversineMeters } from '../../services/route-store.service';
 import { SpeedingDetector } from '../../services/speeding_detector';
 import { DriverService } from '../driver/driver.service';
 import { areBothTestUsers } from '../../utils/testUser';
@@ -115,14 +116,13 @@ export class RideService {
     riderId: string,
     pickup: Location & { address: string },
     destination: Location & { address: string },
-    requestedClass: VehicleClass = VehicleClass.CORE,
     scheduledAt?: Date,
     isScheduled: boolean = false,
     idempotencyKey?: string
   ): Promise<Trip> {
     return traceAsync('RideService.requestRide', async () => {
       const traceId = getCurrentTraceId();
-      console.log(`[RIDE] New request from rider ${riderId} for class ${requestedClass}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
+      console.log(`[RIDE] New request from rider ${riderId}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
 
       // Idempotency: if key provided, check for existing ride
       if (idempotencyKey) {
@@ -153,26 +153,15 @@ export class RideService {
       const distanceKm = route ? (route.distance / 1000) : 10.0;
       const etaSeconds = route ? route.eta : 600;
 
-      // Calculate maximum fare and saving likelihood
-      const fareStart = Date.now();
-      const estimate = await fareService.calculateRiderPriceEstimate(
-        pickup.lat,
-        pickup.lng,
-        requestedClass,
-        distanceKm
-      );
-      console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms`);
-
       // Use a transactional insert for safety
       const res = await pool.query(
         `INSERT INTO rides (
           rider_id, status, pickup_lat, pickup_lng, pickup_address,
           destination_lat, destination_lng, destination_address,
           requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
-          distance_meters, duration_seconds, initial_max_fare, saving_likelihood,
-          idempotency_key
+          distance_meters, duration_seconds, idempotency_key
         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          RETURNING *`,
         [
           riderId,
@@ -183,14 +172,12 @@ export class RideService {
           destination.lat,
           destination.lng,
           destination.address,
-          requestedClass || 'CORE',
+          'CORE',
           snapshotRating,
           scheduledAt || null,
           isScheduled,
           route ? Math.round(route.distance) : null,
           etaSeconds,
-          estimate.maxFare,
-          estimate.savingLikelihood,
           idempotencyKey || null
         ]
       );
@@ -198,8 +185,35 @@ export class RideService {
       const trip = await RideRepository.findById(res.rows[0].id);
       if (!trip) throw new Error('Failed to create trip record');
 
+      // Calculate the platform price and persist it as the ride's price
+      // snapshot. The fare quoted here is the fare charged at accept time.
+      const fareStart = Date.now();
+      const breakdown = await createPriceSnapshot(trip.id, {
+        distanceMeters: route ? route.distance : distanceKm * 1000,
+        durationSeconds: etaSeconds,
+      });
+      console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms (total=$${breakdown.totalFare})`);
+
       if (route) {
         (trip as any).route_geometry = route.geometry;
+
+        // Persist the rider-generated route as the authoritative
+        // destination leg (pickup → destination). The driver reuses it
+        // at IN_PROGRESS instead of requesting another Google route.
+        RouteStoreService.saveRideRoute({
+          rideId: trip.id,
+          leg: 'destination',
+          origin: [pickup.lat, pickup.lng],
+          destination: [destination.lat, destination.lng],
+          distanceMeters: route.distance,
+          durationSeconds: route.osrm_duration,
+          trafficDurationSeconds: null,
+          etaSeconds: route.eta,
+          geometry: route.geometry,
+          steps: route.steps ?? [],
+          engine: route.engine,
+          cacheHit: route.cache_hit === true,
+        }).catch((err) => console.error(`[RIDE] ride_routes persist failed: ${err.message}`));
       }
 
       // Trigger Matching ONLY if it's NOT a future scheduled ride
@@ -209,24 +223,18 @@ export class RideService {
       if (isNow) {
         if (env.LEGACY_SYNC_MATCHING) {
           import('../../services/matching.service').then(({ matchingService }) => {
-            matchingService.findAndDispatch(io, trip.id, pickup.lat, pickup.lng, requestedClass, riderId);
+            matchingService.findAndDispatch(io, trip.id, pickup.lat, pickup.lng, riderId);
           });
         } else {
           matchQueue.add('matchRide', {
             tripId: trip.id,
             pickupLat: pickup.lat,
             pickupLng: pickup.lng,
-            requestedClass,
             riderId,
           }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
           matchJobsTotal.inc({ outcome: 'enqueued' });
         }
       }
-
-      // Update Redis Demand
-      redis.incr(`demand:count:${requestedClass}`).then(() => {
-        redis.expire(`demand:count:${requestedClass}`, 600);
-      });
 
       return trip;
     });
@@ -254,17 +262,16 @@ export class RideService {
       }
     }
 
-    // Fetch driver's chosen price_per_mile
-    const driverPricing = await pool.query('SELECT price_per_mile FROM drivers WHERE user_id = $1', [driverId]);
-    const driverPricePerMile = parseFloat(driverPricing.rows[0]?.price_per_mile || '2.00');
-
-    // Distance in miles
-    const distanceMiles = (trip.distance_km || 0) * 0.621371;
-    const calculatedFare = Math.round(driverPricePerMile * distanceMiles * 100) / 100;
-    
-    // Final fare is the minimum of initial max fare and calculated driver fare
-    const maxFare = parseFloat((trip as any).initial_max_fare || '999');
-    const finalFare = Math.min(maxFare, Math.max(5.00, calculatedFare));
+    // Resolve the fare from the ride's price snapshot (platform price —
+    // identical for every driver). Falls back to a live estimate for
+    // legacy rides created before snapshots existed.
+    const snapshot = await getSnapshotForRide(tripId);
+    const finalFare = snapshot
+      ? snapshot.final_fare
+      : computeEstimate({
+          distanceMeters: (trip.distance_km || 10.0) * 1000,
+          durationSeconds: (trip.duration_minutes ? trip.duration_minutes * 60 : 600),
+        }).totalFare;
 
     // Capture Compliance Snapshot
     const driverProfile = await pool.query(
@@ -397,12 +404,45 @@ export class RideService {
       try {
         const driverLoc = await LocationsService.getDriverLocation(userId);
         if (driverLoc) {
-          const destRoute = await NavigationService.cacheRouteLeg(
-            tripId,
-            'destination',
-            [driverLoc.lat, driverLoc.lng],
-            [updatedTrip.destination.lat, updatedTrip.destination.lng]
-          );
+          // Reuse the rider-generated route (stored at request time) when
+          // the driver is at/near pickup and the route is fresh — no
+          // Google call. Only fall back to a fresh computation otherwise.
+          const storedDest = await RouteStoreService.getRideRoute(tripId, 'destination');
+          let destRoute: CachedRoutePayload | null = null;
+          if (storedDest && storedDest.geometry.coordinates.length >= 2) {
+            const ageMs = Date.now() - new Date(storedDest.createdAt).getTime();
+            const pickupDistM = haversineMeters(
+              [driverLoc.lat, driverLoc.lng],
+              [updatedTrip.pickup.lat, updatedTrip.pickup.lng],
+            );
+            if (ageMs <= 2 * 60 * 60 * 1000 && pickupDistM <= 500) {
+              destRoute = {
+                distance: storedDest.distanceMeters,
+                osrm_duration: storedDest.durationSeconds,
+                duration: storedDest.durationSeconds,
+                eta: storedDest.etaSeconds,
+                geometry: storedDest.geometry,
+                polyline: storedDest.geometry.coordinates,
+                steps: storedDest.steps,
+                speedLimitsByRoad: {},
+                cache_hit: storedDest.cacheHit,
+                model_multiplier: 1.0,
+                engine: storedDest.engine,
+                trafficDurationSeconds: storedDest.trafficDurationSeconds,
+                cachedAt: storedDest.createdAt,
+              };
+            }
+          }
+
+          if (!destRoute) {
+            destRoute = await NavigationService.cacheRouteLeg(
+              tripId,
+              'destination',
+              [driverLoc.lat, driverLoc.lng],
+              [updatedTrip.destination.lat, updatedTrip.destination.lng]
+            );
+          }
+
           await pool.query(
             `UPDATE rides SET route_metadata = route_metadata || $1::jsonb WHERE id = $2`,
             [JSON.stringify({ destination: destRoute }), tripId]

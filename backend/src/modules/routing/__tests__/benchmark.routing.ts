@@ -11,8 +11,7 @@
 // (or: npm run bench:routing). Works with or without a live ORS/Redis.
 
 import { RoutingService } from '../routing.service';
-import { fareService } from '../../../services/fare.service';
-import { VehicleClass } from '../../../types';
+import { computeEstimate } from '../../../services/pricing.service';
 
 const ORIGIN: [number, number] = [34.0522, -118.2437];   // Downtown LA
 const DEST: [number, number] = [34.0736, -118.4004];     // Beverly Hills
@@ -25,7 +24,7 @@ async function main() {
   console.log('=== NetRide Routing Pipeline Benchmark ===\n');
 
   // Warm up (first call may initialize connections).
-  await RoutingService.plan({ origin: ORIGIN, destination: DEST, vehicleClass: VehicleClass.CORE }).catch(() => {});
+  await RoutingService.plan({ origin: ORIGIN, destination: DEST }).catch(() => {});
 
   const ITER = 50;
   let totalMs = 0;
@@ -39,14 +38,13 @@ async function main() {
     const plan = await RoutingService.plan({
       origin: ORIGIN,
       destination: DEST,
-      vehicleClass: VehicleClass.CORE,
     });
     const t1 = performance.now();
     engines.add(plan.engine);
 
     // Isolate fare cost.
     const f0 = performance.now();
-    fareService.computeFare({ distanceMeters: plan.distanceMeters, durationSeconds: plan.durationSeconds, vehicleClass: VehicleClass.CORE });
+    computeEstimate({ distanceMeters: plan.distanceMeters, durationSeconds: plan.durationSeconds });
     const f1 = performance.now();
 
     const el = t1 - t0;

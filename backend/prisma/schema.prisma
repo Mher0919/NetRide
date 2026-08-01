@@ -295,11 +295,50 @@ model Ride {
   driver  User?    @relation("DriverRides", fields: [driver_id], references: [id])
   rating  Rating?
   payouts Payout[] @relation("RidePayouts")
+  price_snapshot RidePriceSnapshot?
 
   @@index([status, created_at(sort: Desc)])
   @@index([rider_id, created_at(sort: Desc)])
   @@index([driver_id, created_at(sort: Desc)])
   @@map("rides")
+}
+
+// ---------------------------------------------------------------------------
+// Platform pricing (035): config singleton + per-ride price snapshots.
+// The quoted fare at request time is the fare charged at accept time.
+// ---------------------------------------------------------------------------
+
+model PricingConfiguration {
+  id                    Int      @id @default(1)
+  base_fare             Decimal  @default(3.50) @db.Decimal(8, 2)
+  per_km_rate           Decimal  @default(1.50) @db.Decimal(8, 2)
+  per_minute_rate       Decimal  @default(0.35) @db.Decimal(8, 2)
+  minimum_fare          Decimal  @default(7.00) @db.Decimal(8, 2)
+  booking_fee           Decimal  @default(1.50) @db.Decimal(8, 2)
+  service_fee_rate      Decimal  @default(0.10) @db.Decimal(5, 4)
+  tax_rate              Decimal  @default(0.0875) @db.Decimal(5, 4)
+  max_demand_multiplier Decimal  @default(2.00) @db.Decimal(4, 2)
+  peak_time_multiplier  Decimal  @default(1.25) @db.Decimal(4, 2)
+  off_peak_multiplier   Decimal  @default(0.95) @db.Decimal(4, 2)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("pricing_configurations")
+}
+
+model RidePriceSnapshot {
+  id                   String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ride_id              String   @unique @db.Uuid
+  distance_km          Decimal  @db.Decimal(10, 3)
+  duration_minutes     Decimal  @db.Decimal(10, 2)
+  multiplier_breakdown Json     @default("{}")
+  config               Json     @default("{}")
+  final_fare           Decimal  @db.Decimal(10, 2)
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
+
+  ride Ride @relation(fields: [ride_id], references: [id], onDelete: Cascade)
+
+  @@index([ride_id])
+  @@map("ride_price_snapshots")
 }
 
 model Rating {

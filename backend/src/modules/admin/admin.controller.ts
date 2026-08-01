@@ -127,16 +127,13 @@ export class AdminController {
   }
 
   /**
-   * Admin view of a driver's vehicle classification vs. their ride-type
-   * preferences. Clearly separates:
-   *   - vehicleClass: the verified class derived from the vehicle
-   *   - eligibleRideTypes: everything the class can serve (tier-inclusive)
-   *   - preferences: which eligible types the driver opted INTO
+   * Admin view of a driver's ride eligibility. NetRide operates a single
+   * Standard Ride — every approved vehicle is eligible.
    */
   static async getDriverRidePreferences(req: AuthRequest, res: Response) {
     const { id } = req.params;
     try {
-      const { getEligibleRideTypes, ALL_RIDE_TYPES, rideTypeLabel } = await import('../../services/vehicleEligibility.service');
+      const { getEligibleRideTypes, rideTypeLabel } = await import('../../services/vehicleEligibility.service');
 
       const veh = await pool.query(
         `SELECT dv.service_class
@@ -149,18 +146,6 @@ export class AdminController {
       const vehicleClass = (veh.rows[0]?.service_class as any) || 'CORE';
       const eligible = getEligibleRideTypes(vehicleClass);
 
-      const prefsRes = await pool.query(
-        `SELECT ride_type, enabled FROM driver_ride_preferences WHERE driver_id = $1`,
-        [id]
-      );
-      const enabledByType = new Map<string, boolean>();
-      for (const r of prefsRes.rows) enabledByType.set(r.ride_type, r.enabled);
-
-      const preferences: Record<string, boolean> = {};
-      for (const rt of eligible) {
-        preferences[rt] = enabledByType.has(rt) ? enabledByType.get(rt)! : true;
-      }
-
       res.json({
         vehicleClass,
         vehicleClassLabel: rideTypeLabel(vehicleClass as any),
@@ -169,11 +154,10 @@ export class AdminController {
           acc[rt] = rideTypeLabel(rt as any);
           return acc;
         }, {}),
-        preferences,
       });
     } catch (error: any) {
-      console.error(`[ADMIN] ❌ Driver ride preferences error: ${error.message}`);
-      res.status(500).json({ error: 'Failed to load driver ride preferences.' });
+      console.error(`[ADMIN] ❌ Driver ride eligibility error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to load driver ride eligibility.' });
     }
   }
 

@@ -2,7 +2,6 @@
 import { prisma } from './prisma.service';
 import { matchingService } from './matching.service';
 import { io } from '../app';
-import { VehicleClass } from '../types';
 
 export const SchedulerService = {
   /**
@@ -36,8 +35,7 @@ export const SchedulerService = {
           io, 
           ride.id, 
           ride.pickup_lat!, 
-          ride.pickup_lng!, 
-          ride.requested_class as VehicleClass,
+          ride.pickup_lng!,
           ride.rider_id!
         );
         

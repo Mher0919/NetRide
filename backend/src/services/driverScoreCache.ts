@@ -11,8 +11,6 @@ export interface ScoreFactors {
   is_dangerous: boolean;
   is_flagged: boolean;
   last_cancellation_at: string | null;
-  price_per_mile: number;
-  active_class: string;
   cached_at: string;
 }
 
@@ -32,8 +30,6 @@ export async function getScoreFactors(driverId: string): Promise<ScoreFactors | 
     is_dangerous: data.is_dangerous === '1',
     is_flagged: data.is_flagged === '1',
     last_cancellation_at: data.last_cancellation_at || null,
-    price_per_mile: parseFloat(data.price_per_mile || '2.00'),
-    active_class: data.active_class || 'CORE',
     cached_at: data.cached_at,
   };
 }
@@ -49,8 +45,6 @@ export async function setScoreFactors(driverId: string, factors: Omit<ScoreFacto
     is_dangerous: factors.is_dangerous ? '1' : '0',
     is_flagged: factors.is_flagged ? '1' : '0',
     last_cancellation_at: factors.last_cancellation_at || '',
-    price_per_mile: String(factors.price_per_mile),
-    active_class: factors.active_class,
     cached_at: new Date().toISOString(),
   });
   pipe.expire(key(driverId), env.DRIVER_SCORE_CACHE_TTL_S);
@@ -84,8 +78,6 @@ export async function mgetScoreFactors(driverIds: string[]): Promise<Map<string,
         is_dangerous: data.is_dangerous === '1',
         is_flagged: data.is_flagged === '1',
         last_cancellation_at: data.last_cancellation_at || null,
-        price_per_mile: parseFloat(data.price_per_mile || '2.00'),
-        active_class: data.active_class || 'CORE',
         cached_at: data.cached_at,
       });
     } else {
@@ -110,8 +102,6 @@ export async function refreshFromDb(driverId: string): Promise<ScoreFactors> {
     is_dangerous: driver?.is_dangerous || false,
     is_flagged: driver?.is_flagged || false,
     last_cancellation_at: driver?.last_cancellation_at?.toISOString() || null,
-    price_per_mile: Number(driver?.price_per_mile || 2.00),
-    active_class: driver?.active_class || 'CORE',
   };
 
   await setScoreFactors(driverId, factors);

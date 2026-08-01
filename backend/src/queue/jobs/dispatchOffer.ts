@@ -3,11 +3,11 @@ import { redis } from '../../config/redis';
 import { RideRepository } from '../../modules/ride/ride.repository';
 import { LocationsService } from '../../modules/location/locations.service';
 import { GeospatialService } from '../../modules/geospatial/geospatial.service';
-import { pool } from '../../config/database';
 import { env } from '../../config/env';
 import { dispatchAcceptOutcomeTotal } from '../../observability/metrics';
 import { ScoredDriver } from '../../services/dispatch.service';
 import { TripStatus } from '../../types';
+import { resolveRideFare } from '../../services/pricing.service';
 import { matchQueue } from '../queue';
 
 interface DispatchOfferJobData {
@@ -55,19 +55,12 @@ export async function handleDispatchOffer(io: Server) {
         ).catch(() => null);
       } catch { /* skip */ }
 
-      let driverPricePerMile = 2.00;
-      try {
-        const driverPricing = await pool.query('SELECT price_per_mile FROM drivers WHERE user_id = $1', [driverId]);
-        if (driverPricing.rows.length > 0) {
-          driverPricePerMile = parseFloat(driverPricing.rows[0].price_per_mile || '2.00');
-        }
-      } catch { /* skip */ }
-
       const distanceKm = tripRoute ? (tripRoute.distance / 1000) : (trip.distance_km || 10.0);
-      const distanceMiles = distanceKm * 0.621371;
-      const calculatedFare = Math.round(driverPricePerMile * distanceMiles * 100) / 100;
-      const maxFare = parseFloat((trip as any).initial_max_fare || '999');
-      const calculatedPrice = Math.min(maxFare, Math.max(5.00, calculatedFare));
+      // Platform price — identical for every driver, from the ride's price snapshot.
+      const calculatedPrice = await resolveRideFare(tripId, {
+        distanceMeters: tripRoute ? tripRoute.distance : (trip.distance_km || 10.0) * 1000,
+        durationSeconds: tripRoute ? tripRoute.eta : (trip.duration_minutes ? trip.duration_minutes * 60 : 600),
+      });
 
       io.to(`driver:${driverId}`).emit('newTripRequest', {
         ...trip,
@@ -79,7 +72,6 @@ export async function handleDispatchOffer(io: Server) {
         route_geometry: tripRoute ? tripRoute.geometry : null,
         driver_to_pickup_eta: driverToPickupRoute ? driverToPickupRoute.eta : null,
         driver_to_pickup_distance: driverToPickupRoute ? driverToPickupRoute.distance : null,
-        driver_price_per_mile: driverPricePerMile,
       });
 
       console.log(`[DISPATCH] ✅ Sent newTripRequest to driver:${driverId} for trip ${tripId} (price=$${calculatedPrice})`);
@@ -123,7 +115,6 @@ export async function handleDispatchOffer(io: Server) {
               tripId,
               pickupLat: (t as any).pickup?.lat ?? 0,
               pickupLng: (t as any).pickup?.lng ?? 0,
-              requestedClass: (t as any).requested_class ?? 'CORE',
               riderId: t.rider_id,
               retryCount: nextRetryCount + 1,
             });

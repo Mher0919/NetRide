@@ -18,6 +18,8 @@
 import 'dart:math' as math;
 import 'package:latlong2/latlong.dart';
 
+import 'route_matcher.dart';
+
 /// Lightweight Step view that the calculator consumes. Built from the
 /// OSRM step payload (name, distance, location, maneuver).
 class ProgressStep {
@@ -69,39 +71,48 @@ class RouteProgressCalculator {
   /// Allocated once per `startNavigation`. Kept on the caller (the
   /// NavigationService), passed in to compute(). We keep an `Immutable`
   /// view here because the math is pure.
+  ///
+  /// When `snap` (the RouteMatcher output) is supplied, the HUD numbers
+  /// come from the true point-on-segment projection — O(1) instead of
+  /// the O(N) vertex scan, and accurate even on sparse polylines. The
+  /// vertex-scan path is kept as a fallback for callers without a
+  /// matcher.
   static RouteProgress? compute({
     required LatLng gps,
     required List<LatLng> polyline, // must have >=2 points
     required List<ProgressStep> steps,
     required double speedMps,
     required double totalMeters,
+    SnapResult? snap,
   }) {
     if (polyline.length < 2 || totalMeters <= 0) return null;
 
-    // 1. Snap GPS to the nearest polyline vertex (cheap O(N)). For
-    //    production we'd run a true point-on-segment projection here,
-    //    but the driver app's polyline is already dense (5-10m
-    //    between vertices after enrichSteps), so vertex-snapping is
-    //    accurate enough for HUD numbers and lane guidance.
-    int snapIdx = 0;
-    double minDist = double.infinity;
-    for (int i = 0; i < polyline.length; i++) {
-      final d = const Distance().as(LengthUnit.Meter, gps, polyline[i]);
-      if (d < minDist) {
-        minDist = d;
-        snapIdx = i;
-      }
-    }
-    final snapped = polyline[snapIdx];
-    final snappedDistanceFromPolyline = minDist;
-
-    // 2. Sum remaining distance from snap → end of leg. We treat each
-    //    vertex as a 1D coordinate along the polyline; the snapIdx
-    //    gives us a starting point.
+    // 1. Project GPS onto the route. With a matcher we get the exact
+    //    segment projection; otherwise fall back to vertex snapping.
     double remaining = 0;
-    for (int i = snapIdx; i < polyline.length - 1; i++) {
-      remaining += const Distance()
-          .as(LengthUnit.Meter, polyline[i], polyline[i + 1]);
+    final double snappedDistanceFromPolyline;
+    final LatLng snapped;
+    if (snap != null) {
+      remaining = math.max(0.0, totalMeters - snap.alongMeters);
+      snappedDistanceFromPolyline = snap.distanceMeters;
+      snapped = snap.point;
+    } else {
+      int snapIdx = 0;
+      double minDist = double.infinity;
+      for (int i = 0; i < polyline.length; i++) {
+        final d = const Distance().as(LengthUnit.Meter, gps, polyline[i]);
+        if (d < minDist) {
+          minDist = d;
+          snapIdx = i;
+        }
+      }
+      snapped = polyline[snapIdx];
+      snappedDistanceFromPolyline = minDist;
+
+      for (int i = snapIdx; i < polyline.length - 1; i++) {
+        remaining += const Distance()
+            .as(LengthUnit.Meter, polyline[i], polyline[i + 1]);
+      }
     }
 
     // 3. Figure out which step we're on. Steps are sequential and

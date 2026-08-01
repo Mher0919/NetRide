@@ -2,10 +2,10 @@
 import { Response } from 'express';
 import { RideService } from './ride.service';
 import { z } from 'zod';
-import { VehicleClass, TripStatus } from '../../types';
+import { TripStatus } from '../../types';
 import { prisma } from '../../services/prisma.service';
 
-import { fareService } from '../../services/fare.service';
+import { computeEstimate } from '../../services/pricing.service';
 import { GeospatialService } from '../geospatial/geospatial.service';
 import { RideMessagesRepository } from './ride_messages.repository';
 import { TwilioService } from '../../services/twilio.service';
@@ -23,7 +23,6 @@ const RequestRideSchema = z.object({
     lng: z.number(),
     address: z.string(),
   }),
-  requestedClass: z.nativeEnum(VehicleClass).optional(),
   scheduledAt: z.string().datetime().optional(),
   isScheduled: z.boolean().optional(),
 });
@@ -37,7 +36,6 @@ const EstimateRideSchema = z.object({
     lat: z.number(),
     lng: z.number(),
   }),
-  requestedClass: z.nativeEnum(VehicleClass).optional(),
 });
 
 const RateRideSchema = z.object({
@@ -63,7 +61,6 @@ export class RideController {
         riderId, 
         validatedData.pickup, 
         validatedData.destination,
-        validatedData.requestedClass,
         validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined,
         validatedData.isScheduled
       );
@@ -90,17 +87,16 @@ export class RideController {
 
       const distanceKm = route ? (route.distance / 1000) : 10.0; // fallback to 10km
 
-      const estimate = await fareService.calculateRiderPriceEstimate(
-        validatedData.pickup.lat,
-        validatedData.pickup.lng,
-        validatedData.requestedClass || VehicleClass.CORE,
-        distanceKm
-      );
+      const breakdown = computeEstimate({
+        distanceMeters: distanceKm * 1000,
+        durationSeconds: route ? route.eta : 600,
+      });
 
       res.json({
         distance_km: distanceKm,
         duration_seconds: route ? route.eta : 600,
-        ...estimate
+        fare: breakdown,
+        total_fare: breakdown.totalFare,
       });
     } catch (error: any) {
       console.error(`[RIDE] ❌ Estimate error: ${error.message}`);

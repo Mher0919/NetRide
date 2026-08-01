@@ -3,7 +3,7 @@ import { DispatchService } from '../../services/dispatch.service';
 import { env } from '../../config/env';
 import { redis } from '../../config/redis';
 import { RideRepository } from '../../modules/ride/ride.repository';
-import { TripStatus, VehicleClass } from '../../types';
+import { TripStatus } from '../../types';
 import { matchJobsTotal, matchJobDurationSeconds, dispatchFanoutSize } from '../../observability/metrics';
 import { dispatchQueue, matchQueue } from '../queue';
 
@@ -14,7 +14,6 @@ interface MatchRideJobData {
   tripId: string;
   pickupLat: number;
   pickupLng: number;
-  requestedClass: VehicleClass;
   riderId?: string;
   retryCount?: number;
 }
@@ -38,7 +37,6 @@ export async function handleMatchRide(io: Server) {
 
       const drivers = await DispatchService.getWeightedDrivers(
         { lat: data.pickupLat, lng: data.pickupLng },
-        data.requestedClass,
         env.DRIVER_MATCH_RADIUS_KM || 10,
         data.riderId
       );

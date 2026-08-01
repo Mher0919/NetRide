@@ -103,12 +103,15 @@ class RouteResponse {
   factory RouteResponse.fromJson(Map<String, dynamic> json) {
     final stepsRaw = json['steps'] as List<dynamic>? ?? [];
     return RouteResponse(
-      originHex: json['origin_hex'] as String? ?? '',
-      destHex: json['dest_hex'] as String? ?? '',
+      originHex: (json['origin_hex'] as String?) ?? (json['originHex'] as String?) ?? '',
+      destHex: (json['dest_hex'] as String?) ?? (json['destHex'] as String?) ?? '',
       distanceMeters: (json['distanceMeters'] as num?)?.toDouble() ?? 0,
       durationSeconds: (json['durationSeconds'] as num?)?.toDouble() ?? 0,
       trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)?.toDouble(),
-      polyline: _decodePolylineFromGeometry(json['geometry']),
+      polyline: _decodePolylineFromGeometry(json['geometry'])
+          .isNotEmpty
+          ? _decodePolylineFromGeometry(json['geometry'])
+          : _decodeCoordinates(json['polyline']),
       steps: stepsRaw.map((s) => RouteStep.fromJson(s as Map<String, dynamic>)).toList(),
       engine: json['engine'] as String? ?? 'GoogleRoutes',
       cacheHit: json['cacheHit'] as bool? ?? false,
@@ -146,6 +149,18 @@ class RouteResponse {
       }).toList();
     }
     return [];
+  }
+
+  /// Flat coordinate array `[[lng, lat], ...]` (backend `polyline` key).
+  static List<LatLng> _decodeCoordinates(dynamic raw) {
+    if (raw is! List || raw.isEmpty) return [];
+    final out = <LatLng>[];
+    for (final c in raw) {
+      if (c is List && c.length >= 2 && c[0] is num && c[1] is num) {
+        out.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+      }
+    }
+    return out;
   }
 }
 

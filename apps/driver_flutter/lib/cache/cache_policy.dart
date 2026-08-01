@@ -84,14 +84,7 @@ enum CachePolicy {
     persist: false,
   ),
 
-  // ── CLASS B (semi-dynamic) — Pricing & wallet ────────────────────
-  // Pricing data has a 4h server cooldown; cache matches that cadence.
-  pricing(
-    staleDuration: Duration(minutes: 5),
-    ttl: Duration(hours: 2),
-    persist: false,
-  ),
-
+  // ── CLASS B (semi-dynamic) — Wallet ──────────────────────────────
   wallet(
     staleDuration: Duration(seconds: 30),
     ttl: Duration(minutes: 5),

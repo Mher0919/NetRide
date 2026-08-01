@@ -205,8 +205,9 @@ router.get('/search-history/routes', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/user/search-history/routes
- * Body: { originLat, originLon, destLat, destLon, originName, destName, distanceMeters, durationSeconds, trafficDurationSeconds?, polyline, vehicleClass }
- * Saves a route to user's history for caching.
+ * Body: { originLat, originLon, destLat, destLon, originName, destName, distanceMeters, durationSeconds, trafficDurationSeconds?, polyline, vehicleClass? }
+ * Saves a route to user's history for caching. `vehicleClass` is optional
+ * (NetRide operates a single Standard Ride; retained for legacy payloads).
  */
 router.post('/search-history/routes', authMiddleware, async (req, res) => {
   try {
@@ -217,7 +218,7 @@ router.post('/search-history/routes', authMiddleware, async (req, res) => {
 
     const { originLat, originLon, destLat, destLon, originName, destName, distanceMeters, durationSeconds, trafficDurationSeconds, polyline, vehicleClass } = req.body;
     
-    if (originLat == null || originLon == null || destLat == null || destLon == null || !originName || !destName || distanceMeters == null || durationSeconds == null || !polyline || !vehicleClass) {
+    if (originLat == null || originLon == null || destLat == null || destLon == null || !originName || !destName || distanceMeters == null || durationSeconds == null || !polyline) {
       return res.status(400).json({ error: 'Missing required route fields' });
     }
 
@@ -233,7 +234,7 @@ router.post('/search-history/routes', authMiddleware, async (req, res) => {
       trafficDurationSeconds: trafficDurationSeconds ? Number(trafficDurationSeconds) : undefined,
       polyline: polyline as number[][],
       savedAt: Date.now(),
-      vehicleClass: String(vehicleClass),
+      vehicleClass: vehicleClass ? String(vehicleClass) : 'CORE',
     };
 
     const key = `${ROUTE_HISTORY_KEY_PREFIX}${userId}`;

@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { NavigationService } from '../../services/navigation.service';
-import { GeospatialService } from '../geospatial/geospatial.service';
+import { RerouteService } from '../../services/reroute.service';
 import { pool } from '../../config/database';
 
 const router = Router();
@@ -21,6 +21,9 @@ const router = Router();
  * Mirrors the socket `requestReroute` handler. The driver app uses
  * the socket path during a live trip and falls back to this REST
  * endpoint if the socket has dropped mid-ride.
+ *
+ * The RerouteService decides between: stored ride leg → OD route cache
+ * → Google Routes API (last resort).
  */
 router.post('/reroute', authMiddleware, async (req, res) => {
   try {
@@ -42,24 +45,8 @@ router.post('/reroute', authMiddleware, async (req, res) => {
     const ride = rideRes.rows[0];
     if (!ride) return res.status(404).json({ error: 'Trip not found' });
 
-    const end: [number, number] =
-      leg === 'pickup'
-        ? [ride.pickup_lat, ride.pickup_lng]
-        : [ride.destination_lat, ride.destination_lng];
-
-    // Re-route + refresh the Redis cache.
-    const route = await NavigationService.cacheRouteLeg(
-      tripId,
-      leg,
-      [lat, lng],
-      end
-    );
-
-    // Persist on the ride metadata.
-    await pool.query(
-      `UPDATE rides SET route_metadata = route_metadata || $1::jsonb WHERE id = $2`,
-      [JSON.stringify({ [leg]: route }), tripId]
-    );
+    // Reroute through the decision ladder (stored leg → OD cache → Google).
+    const route = await RerouteService.reroute(tripId, leg, lat, lng);
 
     res.json({ route });
   } catch (err: any) {

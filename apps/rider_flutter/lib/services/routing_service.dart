@@ -53,7 +53,6 @@ class RoutingService {
   Future<TripPlan> plan({
     required LatLng origin,
     required LatLng destination,
-    String vehicleClass = 'CORE',
   }) async {
     final key =
         '${origin.latitude},${origin.longitude}|${destination.latitude},${destination.longitude}';
@@ -81,7 +80,7 @@ class RoutingService {
     final token = CancelToken();
     _inflight[key] = token;
 
-    final future = _fetch(origin, destination, vehicleClass, token).whenComplete(() {
+    final future = _fetch(origin, destination, token).whenComplete(() {
       _inflight.remove(key);
       _dedupe.remove(key);
     });
@@ -93,7 +92,6 @@ class RoutingService {
   Future<TripPlan> _fetch(
     LatLng origin,
     LatLng destination,
-    String vehicleClass,
     CancelToken token,
   ) async {
     try {
@@ -104,7 +102,6 @@ class RoutingService {
         data: {
           'origin': [origin.latitude, origin.longitude],
           'destination': [destination.latitude, destination.longitude],
-          'vehicleClass': vehicleClass,
         },
         cancelToken: token,
         options: Options(
@@ -120,15 +117,15 @@ class RoutingService {
         final points = _parsePolyline(polyline);
         debugPrint('[ROUTING] Parsed points: ${points.length}');
 
-        final fare = _localFare(
-          (data['distanceMeters'] as num?)?.toDouble() ?? 0,
-          (data['durationSeconds'] as num?)?.toDouble() ?? 0,
-        );
+        final distanceMeters = (data['distanceMeters'] as num?)?.toDouble() ?? 0;
+        final durationSeconds = (data['durationSeconds'] as num?)?.toDouble() ?? 0;
+        final fare = data['fare'] as Map<String, dynamic>? ??
+            _localFare(distanceMeters, durationSeconds);
 
         final plan = TripPlan(
           points: points,
-          distanceMeters: (data['distanceMeters'] as num?)?.toDouble() ?? 0,
-          durationSeconds: (data['durationSeconds'] as num?)?.toDouble() ?? 0,
+          distanceMeters: distanceMeters,
+          durationSeconds: durationSeconds,
           etaSeconds: (data['etaSeconds'] as num?)?.toDouble() ?? 0,
           trafficDurationSeconds: (data['trafficDurationSeconds'] as num?)?.toDouble(),
           fare: fare,
@@ -168,7 +165,6 @@ class RoutingService {
         data: {
           'origin': [origin.latitude, origin.longitude],
           'destination': [destination.latitude, destination.longitude],
-          'vehicleClass': vehicleClass,
         },
         cancelToken: token,
         options: Options(

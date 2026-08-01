@@ -42,13 +42,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   StreamSubscription<Position>? _positionSubscription;
   String _firstName = "";
 
-
   // Ride-selection panel state (kept on the map, never navigates away).
   bool _panelOpen = false;
   bool _loadingEstimates = false;
   bool _requesting = false;
-  models.VehicleClass _selectedClass = models.VehicleClass.CORE;
-  Map<models.VehicleClass, Map<String, dynamic>> _estimates = {};
+  double _estimateFare = 0.0;
   bool _hasNavigatedToTrip = false;
 
   @override
@@ -70,8 +68,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _geohashTimer?.cancel();
     _geohashTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       if (_userPosition != null) {
-        Provider.of<RideProvider>(context, listen: false).subscribeToNearbyDrivers(
-          models.Location(lat: _userPosition!.latitude, lng: _userPosition!.longitude)
+        Provider.of<RideProvider>(
+          context,
+          listen: false,
+        ).subscribeToNearbyDrivers(
+          models.Location(
+            lat: _userPosition!.latitude,
+            lng: _userPosition!.longitude,
+          ),
         );
       }
     });
@@ -94,7 +98,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         debugPrint('User not found (404), logging out...');
         await AuthService.logout();
         if (mounted) {
-          Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            '/login',
+            (route) => false,
+          );
         }
         return;
       }
@@ -116,7 +124,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       if (!serviceEnabled) {
         setState(() {
           _state = ViewState.failure;
-          _errorMessage = 'Location services are disabled. Please enable them in your settings.';
+          _errorMessage =
+              'Location services are disabled. Please enable them in your settings.';
         });
         return;
       }
@@ -136,7 +145,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       if (permission == LocationPermission.deniedForever) {
         setState(() {
           _state = ViewState.failure;
-          _errorMessage = 'Location permissions are permanently denied. Please enable them in system settings.';
+          _errorMessage =
+              'Location permissions are permanently denied. Please enable them in system settings.';
         });
         return;
       }
@@ -144,42 +154,44 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.bestForNavigation,
       );
-      
+
       _userPosition = LatLng(position.latitude, position.longitude);
       _smoothedPosition = _userPosition;
       _updateUserLocation(position);
 
-      _positionSubscription = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 0,
-        ),
-      ).listen((position) {
-        _updateUserLocation(position);
-      });
+      _positionSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.bestForNavigation,
+              distanceFilter: 0,
+            ),
+          ).listen((position) {
+            _updateUserLocation(position);
+          });
 
       setState(() => _state = ViewState.success);
     } catch (e) {
       setState(() {
         _state = ViewState.failure;
-        _errorMessage = 'An error occurred while initializing location tracking.';
+        _errorMessage =
+            'An error occurred while initializing location tracking.';
       });
     }
   }
 
   void _updateUserLocation(Position position) {
     if (!mounted) return;
-    
+
     final newPos = LatLng(position.latitude, position.longitude);
-    
+
     setState(() {
       _userPosition = newPos;
       _smoothedPosition = newPos; // For simplicity now
       _pickup ??= models.Location(
-          lat: position.latitude, 
-          lng: position.longitude,
-          address: 'Current Location',
-        );
+        lat: position.latitude,
+        lng: position.longitude,
+        address: 'Current Location',
+      );
     });
 
     if (_shouldFollowUser && _smoothedPosition != null && _isMapReady) {
@@ -201,14 +213,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       delegate: AddressSearchDelegate(
         userLat: _userPosition?.latitude,
         userLon: _userPosition?.longitude,
-        isDestination: !isPickup,
-        pickupLocation: _pickup != null ? LatLng(_pickup!.lat, _pickup!.lng) : null,
       ),
     );
 
     if (result != null && mounted) {
       setState(() {
-        final loc = models.Location(lat: result.lat, lng: result.lon, address: result.displayName);
+        final loc = models.Location(
+          lat: result.lat,
+          lng: result.lon,
+          address: result.displayName,
+        );
         if (isPickup) {
           _pickup = loc;
         } else {
@@ -227,7 +241,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final plan = await _routingService.plan(
         origin: LatLng(_pickup!.lat, _pickup!.lng),
         destination: LatLng(_destination!.lat, _destination!.lng),
-        vehicleClass: _selectedClass.toString().split('.').last,
       );
 
       if (mounted) {
@@ -240,7 +253,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           LatLng(_destination!.lat, _destination!.lng),
           ..._routePoints,
         ]);
-        _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)));
+        _mapController.fitCamera(
+          CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)),
+        );
       }
 
       // Save route to history for caching (async, don't block UI)
@@ -259,16 +274,22 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Future<void> _saveRouteToHistory(TripPlan plan) async {
     try {
       if (_pickup == null || _destination == null) return;
-      
-      await SearchHistoryService.instance.saveRouteOnly(
+
+      final route = CachedRoute(
         originLat: _pickup!.lat,
         originLon: _pickup!.lng,
         destLat: _destination!.lat,
         destLon: _destination!.lng,
+        originName: _pickup!.address ?? 'Current Location',
+        destName: _destination!.address ?? 'Destination',
         distanceMeters: plan.distanceMeters,
         durationSeconds: plan.durationSeconds,
         trafficDurationSeconds: plan.trafficDurationSeconds,
+        polyline: plan.points,
+        vehicleClass: 'CORE',
+        savedAt: DateTime.now(),
       );
+      await SearchHistoryService.instance.saveRoute(route);
     } catch (e) {
       debugPrint('Save route history error: $e');
     }
@@ -278,47 +299,43 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     setState(() {
       _panelOpen = true;
       _loadingEstimates = true;
-      _estimates = {};
-      _selectedClass = models.VehicleClass.CORE;
+      _estimateFare = 0.0;
     });
-    await _fetchAllEstimates();
+    await _fetchEstimate();
   }
 
-  /// Backend-matching fare formula with class multiplier.
-  static double _computeClassFare({
+  /// Platform fare estimate. The backend computes the exact quote with the
+  /// same formula used for the ride's price snapshot, so the panel price is
+  /// what the rider will be charged.
+  static double _computeFare({
     required double distanceMeters,
     required double durationSeconds,
-    required models.VehicleClass vehicleClass,
   }) {
-    const base = 3.50, perKm = 1.50, perMin = 0.35, booking = 1.50, minFare = 7.00;
+    const base = 3.50,
+        perKm = 1.50,
+        perMin = 0.35,
+        booking = 1.50,
+        minFare = 7.00;
     const serviceRate = 0.10, taxRate = 0.0875;
-    final multiplier = _classMultiplier(vehicleClass);
     final distanceKm = distanceMeters / 1000.0;
     final minutes = durationSeconds / 60.0;
-    final subtotal = (base + distanceKm * perKm + minutes * perMin) * multiplier + booking;
+    final subtotal = base + distanceKm * perKm + minutes * perMin + booking;
     final service = subtotal * serviceRate;
     final taxable = subtotal + service;
     final taxes = taxable * taxRate;
     final raw = taxable + taxes;
-    return ((raw * 100).roundToDouble() / 100).clamp(minFare * multiplier, double.infinity);
+    return ((raw * 100).roundToDouble() / 100).clamp(
+      minFare,
+      double.infinity,
+    );
   }
 
-  static double _classMultiplier(models.VehicleClass c) {
-    switch (c) {
-      case models.VehicleClass.ELITE: return 1.6;
-      case models.VehicleClass.PRESTIGE: return 2.4;
-      default: return 1.0;
-    }
-  }
-
-  /// Pull a full ride-option set (route geometry + fare per class).
-  /// Checks ETA cache first; makes ONE backend call for route data;
-  /// computes per-class fares locally. Writes to cache on success.
-  Future<void> _fetchAllEstimates() async {
+  /// Pulls the ride estimate (route geometry + platform fare).
+  /// Checks the ETA cache first; makes ONE backend call for route data.
+  /// Writes to cache on success.
+  Future<void> _fetchEstimate() async {
     if (_pickup == null || _destination == null) return;
     setState(() => _loadingEstimates = true);
-    const classes = models.VehicleClass.values;
-    final results = <models.VehicleClass, Map<String, dynamic>>{};
 
     final originLat = _pickup!.lat;
     final originLng = _pickup!.lng;
@@ -333,19 +350,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
 
     if (cachedEta != null) {
-      _buildEstimatesFromRouteData(
-        results,
-        classes,
+      _buildEstimateFromRouteData(
         distanceMeters: cachedEta.distanceMeters,
         durationSeconds: cachedEta.durationSeconds,
-        etaSeconds: cachedEta.trafficDurationSeconds ?? cachedEta.durationSeconds,
         engine: 'EtaCache',
       );
       if (mounted) {
-        setState(() {
-          _estimates = results;
-          _loadingEstimates = false;
-        });
+        setState(() => _loadingEstimates = false);
       }
       return;
     }
@@ -354,7 +365,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final plan = await _routingService.plan(
         origin: LatLng(originLat, originLng),
         destination: LatLng(destLat, destLng),
-        vehicleClass: 'CORE',
       );
 
       EtaCacheService.instance.set(
@@ -367,68 +377,50 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         trafficDurationSeconds: plan.trafficDurationSeconds,
       );
 
-      _buildEstimatesFromRouteData(
-        results,
-        classes,
+      _buildEstimateFromRouteData(
         distanceMeters: plan.distanceMeters,
         durationSeconds: plan.durationSeconds,
-        etaSeconds: plan.etaSeconds,
+        backendFareTotal:
+            (plan.fare['totalFare'] as num?)?.toDouble() ?? 0.0,
         engine: plan.engine,
       );
 
       if (mounted) {
         setState(() {
           _routePoints = plan.points;
-          _estimates = results;
           _loadingEstimates = false;
         });
       }
     } catch (e) {
       if (e is DioException && e.type == DioExceptionType.cancel) return;
       debugPrint('Estimate error: $e');
-      for (final c in classes) {
-        results[c] = {'maxFare': 0.0, 'savingLikelihood': 0, 'distanceKm': 0.0};
-      }
       if (mounted) {
-        setState(() {
-          _estimates = results;
-          _loadingEstimates = false;
-        });
+        setState(() => _loadingEstimates = false);
       }
     }
   }
 
-  void _buildEstimatesFromRouteData(
-    Map<models.VehicleClass, Map<String, dynamic>> results,
-    List<models.VehicleClass> classes, {
+  void _buildEstimateFromRouteData({
     required double distanceMeters,
     required double durationSeconds,
-    required double etaSeconds,
+    double backendFareTotal = 0.0,
     required String engine,
   }) {
-    for (final c in classes) {
-      results[c] = {
-        'maxFare': _computeClassFare(
-          distanceMeters: distanceMeters,
-          durationSeconds: durationSeconds,
-          vehicleClass: c,
-        ),
-        'savingLikelihood': 0,
-        'distanceKm': distanceMeters / 1000.0,
-        'engine': engine,
-        'etaSeconds': etaSeconds,
-      };
-    }
+    _estimateFare = backendFareTotal > 0
+        ? backendFareTotal
+        : _computeFare(
+            distanceMeters: distanceMeters,
+            durationSeconds: durationSeconds,
+          );
   }
 
   void _confirmRide() {
     if (_pickup == null || _destination == null) return;
     setState(() => _requesting = true);
-    Provider.of<RideProvider>(context, listen: false).requestRide(
-      _pickup!,
-      _destination!,
-      requestedClass: _selectedClass,
-    );
+    Provider.of<RideProvider>(
+      context,
+      listen: false,
+    ).requestRide(_pickup!, _destination!);
   }
 
   void _closePanel() {
@@ -451,7 +443,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     final theme = Theme.of(context);
 
     // When a driver accepts, leave the map and go to the active trip screen.
-    if (rideProvider.status == models.TripStatus.ACCEPTED && !_hasNavigatedToTrip && _requesting) {
+    if (rideProvider.status == models.TripStatus.ACCEPTED &&
+        !_hasNavigatedToTrip &&
+        _requesting) {
       _hasNavigatedToTrip = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.pushReplacementNamed(context, '/trip');
@@ -484,13 +478,33 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                    urlTemplate:
+                        'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
                     subdomains: const ['a', 'b', 'c', 'd'],
                     userAgentPackageName: 'com.NetRide.rider',
                     tileBuilder: (context, tileWidget, tile) {
                       return ColorFiltered(
                         colorFilter: const ColorFilter.matrix(<double>[
-                          0.937, 0, 0, 0, 0, 0, 0.922, 0, 0, 0, 0, 0, 0.902, 0, 0, 0, 0, 0, 1, 0,
+                          0.937,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0.922,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0.902,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          1,
+                          0,
                         ]),
                         child: ColorFiltered(
                           colorFilter: ColorFilter.mode(
@@ -523,19 +537,26 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           height: 40,
                           child: _buildUserLocationMarker(),
                         ),
-                      if (_pickup != null && _pickup!.address != 'Current Location')
+                      if (_pickup != null &&
+                          _pickup!.address != 'Current Location')
                         Marker(
                           point: LatLng(_pickup!.lat, _pickup!.lng),
                           width: 30,
                           height: 30,
-                          child: _buildPinMarker(const Color(0xFF5B7760), isPickup: true),
+                          child: _buildPinMarker(
+                            const Color(0xFF5B7760),
+                            isPickup: true,
+                          ),
                         ),
                       if (_destination != null)
                         Marker(
                           point: LatLng(_destination!.lat, _destination!.lng),
                           width: 30,
                           height: 30,
-                          child: _buildPinMarker(const Color(0xFF2F3A32), isPickup: false),
+                          child: _buildPinMarker(
+                            const Color(0xFF2F3A32),
+                            isPickup: false,
+                          ),
                         ),
                     ],
                   ),
@@ -547,34 +568,51 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     ),
                 ],
               ),
-            
+
             SafeArea(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
                 child: Column(
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(24),
                             boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
                             ],
                           ),
                           child: Text(
-                            _firstName.isNotEmpty ? 'Hello, $_firstName' : 'Welcome',
-                            style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: const Color(0xFF2F3A32)),
+                            _firstName.isNotEmpty
+                                ? 'Hello, $_firstName'
+                                : 'Welcome',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF2F3A32),
+                            ),
                           ),
                         ),
                         Container(
                           width: 12,
                           height: 12,
                           decoration: BoxDecoration(
-                            color: rideProvider.isConnected ? const Color(0xFF6E8B74) : const Color(0xFFC65A5A),
+                            color: rideProvider.isConnected
+                                ? const Color(0xFF6E8B74)
+                                : const Color(0xFFC65A5A),
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 2),
                           ),
@@ -589,7 +627,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
-                            BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 10)),
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.08),
+                              blurRadius: 20,
+                              offset: const Offset(0, 10),
+                            ),
                           ],
                         ),
                         child: Column(
@@ -662,9 +704,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildRidePanel(ThemeData theme) {
-    final classes = models.VehicleClass.values;
     final rideProvider = Provider.of<RideProvider>(context);
-    final searching = _requesting && rideProvider.status == models.TripStatus.REQUESTED;
+    final searching =
+        _requesting && rideProvider.status == models.TripStatus.REQUESTED;
 
     return Positioned(
       bottom: 0,
@@ -674,7 +716,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 24, offset: const Offset(0, -8))],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.12),
+              blurRadius: 24,
+              offset: const Offset(0, -8),
+            ),
+          ],
         ),
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         child: Column(
@@ -685,11 +733,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 Expanded(
                   child: Text(
                     searching ? 'Finding your driver…' : 'Choose your ride',
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF2F3A32)),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF2F3A32),
+                    ),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close, size: 20, color: Color(0xFF2F3A32)),
+                  icon: const Icon(
+                    Icons.close,
+                    size: 20,
+                    color: Color(0xFF2F3A32),
+                  ),
                   onPressed: _closePanel,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -707,16 +762,29 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 padding: EdgeInsets.symmetric(vertical: 28),
                 child: Column(
                   children: [
-                    SizedBox(width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFF5B7760))),
+                    SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: Color(0xFF5B7760),
+                      ),
+                    ),
                     SizedBox(height: 16),
-                    Text('Matching you with nearby drivers…', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF2F3A32))),
+                    Text(
+                      'Matching you with nearby drivers…',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF2F3A32),
+                      ),
+                    ),
                   ],
                 ),
               )
             else
               Column(
                 children: [
-                  ...classes.map((c) => _buildRideCard(c, theme)).toList(),
+                  _buildRideCard(theme),
                   const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
@@ -726,11 +794,17 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF2F3A32),
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
-                      child: Text(
-                        'Confirm NetRide ${_selectedClass.toString().split('.').last}',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.5),
+                      child: const Text(
+                        'Confirm Standard Ride',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ),
                       ),
                     ),
                   ),
@@ -742,76 +816,91 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildRideCard(models.VehicleClass c, ThemeData theme) {
-    final est = _estimates[c] ?? {'maxFare': 0.0, 'savingLikelihood': 0};
-    final isSelected = _selectedClass == c;
-    final name = c.toString().split('.').last;
-    final IconData icon = c == models.VehicleClass.ELITE
-        ? Icons.stars_rounded
-        : c == models.VehicleClass.PRESTIGE
-            ? Icons.workspace_premium_rounded
-            : Icons.directions_car_filled_outlined;
-    final price = (est['maxFare'] as num?)?.toDouble() ?? 0.0;
-    final saving = (est['savingLikelihood'] as num?)?.toInt() ?? 0;
+  Widget _buildRideCard(ThemeData theme) {
+    final price = _estimateFare;
 
-    return GestureDetector(
-      onTap: () => setState(() => _selectedClass = c),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF5B7760).withOpacity(0.08) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected ? const Color(0xFF5B7760) : const Color(0xFFD8D2CA),
-            width: isSelected ? 2 : 1,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF5B7760).withOpacity(0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF5B7760), width: 2),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: const Color(0xFF5B7760),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.directions_car_filled_outlined,
+              color: Colors.white,
+              size: 24,
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFF5B7760) : const Color(0xFF5B7760).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: isSelected ? Colors.white : const Color(0xFF5B7760), size: 24),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'NetRide $name',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Color(0xFF2F3A32)),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    saving > 0 ? 'You\'re $saving% likely to pay less' : 'Based on nearby drivers',
-                    style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Max', style: TextStyle(fontSize: 10, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
                 Text(
-                  '\$${price.toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF2F3A32), letterSpacing: -0.5),
+                  'Standard Ride',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    color: Color(0xFF2F3A32),
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Every vehicle, one reliable fare',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'Est.',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey.shade500,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                price > 0 ? '\$${price.toStringAsFixed(2)}' : '—',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF2F3A32),
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildSearchField({required VoidCallback onTap, required String text, required IconData icon, required Color iconColor, required bool isFirst}) {
+  Widget _buildSearchField({
+    required VoidCallback onTap,
+    required String text,
+    required IconData icon,
+    required Color iconColor,
+    required bool isFirst,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -823,7 +912,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             Expanded(
               child: Text(
                 text,
-                style: TextStyle(fontSize: 15, fontWeight: isFirst ? FontWeight.w500 : FontWeight.w600, color: const Color(0xFF2F3A32).withOpacity(text == 'Where to?' ? 0.4 : 1.0)),
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: isFirst ? FontWeight.w500 : FontWeight.w600,
+                  color: const Color(
+                    0xFF2F3A32,
+                  ).withOpacity(text == 'Where to?' ? 0.4 : 1.0),
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -835,11 +930,22 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   Widget _buildUserLocationMarker() {
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFF5B7760).withOpacity(0.2), shape: BoxShape.circle),
+      decoration: BoxDecoration(
+        color: const Color(0xFF5B7760).withOpacity(0.2),
+        shape: BoxShape.circle,
+      ),
       child: Center(
         child: Container(
-          width: 14, height: 14,
-          decoration: BoxDecoration(color: const Color(0xFF5B7760), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2), boxShadow: [BoxShadow(blurRadius: 8, color: Colors.black.withOpacity(0.2))]),
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: const Color(0xFF5B7760),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: [
+              BoxShadow(blurRadius: 8, color: Colors.black.withOpacity(0.2)),
+            ],
+          ),
         ),
       ),
     );
@@ -850,7 +956,17 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       alignment: Alignment.center,
       children: [
         Icon(Icons.location_on, color: color, size: 30),
-        Positioned(top: 6, child: Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle))),
+        Positioned(
+          top: 6,
+          child: Container(
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
       ],
     );
   }

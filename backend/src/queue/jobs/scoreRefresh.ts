@@ -27,8 +27,6 @@ export async function handleScoreRefresh() {
           is_dangerous: driver.is_dangerous ? '1' : '0',
           is_flagged: driver.is_flagged ? '1' : '0',
           last_cancellation_at: driver.last_cancellation_at?.toISOString() || '',
-          price_per_mile: String(driver.price_per_mile || '2.00'),
-          active_class: driver.active_class || 'CORE',
           cached_at: new Date().toISOString(),
         });
         pipeline.expire(key, env.DRIVER_SCORE_CACHE_TTL_S);

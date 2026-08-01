@@ -14,6 +14,7 @@
 import { Server } from 'socket.io';
 import { redis } from '../config/redis';
 import { GeospatialService, RouteResponse } from '../modules/geospatial/geospatial.service';
+import { RouteStoreService } from './route-store.service';
 
 export type NavigationLeg = 'pickup' | 'destination';
 
@@ -21,6 +22,12 @@ const ROUTE_TTL_SECONDS = 30 * 60;
 
 export interface CachedRoutePayload extends RouteResponse {
   cachedAt: string;
+  /** [lng,lat] coordinate array — mirrors `geometry` for clients that
+   *  parse a flat polyline key. Additive, never breaks existing fields. */
+  polyline?: Array<[number, number]>;
+  /** Static duration alias — additive. */
+  duration?: number;
+  trafficDurationSeconds?: number | null;
 }
 
 export class NavigationService {
@@ -31,7 +38,8 @@ export class NavigationService {
    *   - rerouteRequested (forced refresh)
    *
    * Returns the route payload so the socket handler can pass it to the
-   * driver and rider rooms in the same emit.
+   * driver and rider rooms in the same emit. The result is persisted to
+   * the ride_routes store as well, so a Redis flush never loses the leg.
    */
   static async cacheRouteLeg(
     tripId: string,
@@ -40,8 +48,37 @@ export class NavigationService {
     end: [number, number]
   ): Promise<CachedRoutePayload> {
     const route = await GeospatialService.getRoute(start, end);
-    const payload: CachedRoutePayload = { ...route, cachedAt: new Date().toISOString() };
+    const payload: CachedRoutePayload = {
+      ...route,
+      polyline: route.geometry?.coordinates ?? [],
+      duration: route.osrm_duration,
+      trafficDurationSeconds: null,
+      cachedAt: new Date().toISOString(),
+    };
     await redis.set(this.cacheKey(tripId, leg), JSON.stringify(payload), 'EX', ROUTE_TTL_SECONDS);
+
+    // Persist the authoritative leg so the rider-generated / previously
+    // computed route survives Redis restarts and cache evictions.
+    try {
+      await RouteStoreService.saveRideRoute({
+        rideId: tripId,
+        leg,
+        origin: [start[0], start[1]],
+        destination: [end[0], end[1]],
+        distanceMeters: route.distance,
+        durationSeconds: route.osrm_duration,
+        trafficDurationSeconds: null,
+        etaSeconds: route.eta,
+        geometry: route.geometry,
+        steps: route.steps ?? [],
+        engine: route.engine,
+        cacheHit: route.cache_hit === true,
+      });
+    } catch (err: any) {
+      // Best-effort: the Redis leg cache remains the hot-path source.
+      console.error(`[NAV] ride_routes persist failed: ${err.message}`);
+    }
+
     return payload;
   }
 
@@ -53,10 +90,37 @@ export class NavigationService {
   static async getCachedRouteLeg(tripId: string, leg: NavigationLeg): Promise<CachedRoutePayload | null> {
     try {
       const raw = await redis.get(this.cacheKey(tripId, leg));
-      return raw ? JSON.parse(raw) : null;
+      if (raw) return JSON.parse(raw);
     } catch {
-      return null;
+      // fall through to the DB-backed store
     }
+
+    // Redis miss (flush, eviction, restart) — the ride_routes table is
+    // the durable copy. Wire the stored row into the same payload shape.
+    try {
+      const stored = await RouteStoreService.getRideRoute(tripId, leg);
+      if (stored) {
+        return {
+          distance: stored.distanceMeters,
+          osrm_duration: stored.durationSeconds,
+          duration: stored.durationSeconds,
+          eta: stored.etaSeconds,
+          geometry: stored.geometry,
+          polyline: stored.geometry.coordinates,
+          steps: stored.steps,
+          speedLimitsByRoad: {},
+          cache_hit: stored.cacheHit,
+          model_multiplier: 1.0,
+          engine: stored.engine,
+          trafficDurationSeconds: stored.trafficDurationSeconds,
+          cachedAt: stored.createdAt,
+        };
+      }
+    } catch {
+      // No durable copy either.
+    }
+
+    return null;
   }
 
   static async clearTrip(tripId: string): Promise<void> {
@@ -85,7 +149,7 @@ export class NavigationService {
     route: CachedRoutePayload
   ): void {
     io.to(`driver:${driverId}`).emit('navigationStarted', { tripId, leg, route });
-    io.to(`rider:${riderId}`).emit('navigationStarted', { tripId, leg });
+    io.to(`rider:${riderId}`).emit('navigationStarted', { tripId, leg, route });
   }
 
   /**
@@ -100,13 +164,13 @@ export class NavigationService {
     route: CachedRoutePayload
   ): void {
     io.to(`driver:${driverId}`).emit('navigationLegAdvanced', { tripId, leg: 'destination', route });
-    io.to(`rider:${riderId}`).emit('navigationLegAdvanced', { tripId });
+    io.to(`rider:${riderId}`).emit('navigationLegAdvanced', { tripId, leg: 'destination', route });
   }
 
   /**
-   * Emit `navigationRouteUpdated` after a reroute. Only the driver needs
-   * the new polyline + steps; the rider only needs a "driver rerouting"
-   * toast so they know why ETA just shifted.
+   * Emit `navigationRouteUpdated` after a reroute. Both the driver and
+   * the rider receive the new polyline + steps so the rider map renders
+   * the same authoritative route (single source of truth).
    */
   static emitRouteUpdated(
     io: Server,
@@ -117,7 +181,7 @@ export class NavigationService {
     route: CachedRoutePayload
   ): void {
     io.to(`driver:${driverId}`).emit('navigationRouteUpdated', { tripId, leg, route });
-    io.to(`rider:${riderId}`).emit('navigationRerouteRequested', { tripId, leg });
+    io.to(`rider:${riderId}`).emit('navigationRerouteRequested', { tripId, leg, route });
   }
 
   static emitEnded(

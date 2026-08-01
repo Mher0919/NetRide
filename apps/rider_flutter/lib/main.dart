@@ -4,7 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/ride_provider.dart';
 import 'services/communication_service.dart';
 import 'screens/map_screen.dart';
-import 'screens/ride_request_screen.dart';
 import 'screens/trip_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
@@ -239,9 +238,6 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
                 break;
               case '/':
                 page = const MainWrapper();
-                break;
-              case '/ride_request':
-                page = const RideRequestScreen();
                 break;
               case '/trip':
                 page = const TripScreen();

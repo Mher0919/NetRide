@@ -1,27 +1,23 @@
 import { LocationsService } from '../modules/location/locations.service';
 import { prisma, primaryPrisma } from './prisma.service';
-import { VehicleClass } from '../types';
-import { redis } from '../config/redis';
 import { mgetScoreFactors, refreshFromDb } from './driverScoreCache';
 import { env } from '../config/env';
-import { getEligibleRideTypes, rideTypeLabel } from './vehicleEligibility.service';
 
 export interface ScoredDriver {
   id: string;
   score: number;
   distance: number;
   rating: number;
-  activeClass: VehicleClass;
-  pricePerMile?: number;
 }
 
 export class DispatchService {
   /**
-   * Finds the best drivers for a ride request using a weighted scoring algorithm.
+   * Finds the best drivers for a ride request using a weighted scoring
+   * algorithm. Every online, active driver is a candidate — there is no
+   * vehicle-class or ride-preference filter.
    */
   static async getWeightedDrivers(
-    pickup: { lat: number, lng: number }, 
-    requestedClass: VehicleClass,
+    pickup: { lat: number, lng: number },
     maxRadiusKm: number = 10,
     riderId?: string // Added riderId for favorites priority
   ): Promise<ScoredDriver[]> {
@@ -31,14 +27,6 @@ export class DispatchService {
     if (nearby.length === 0) return [];
 
     const driverIds = nearby.map((d: any) => d.id);
-
-    // 1b. Respect DRIVER PREFERENCES. A driver only receives a ride request
-    //     for a ride type they have ENABLED (among those they are eligible
-    //     for). Drivers with no preference rows at all are treated as
-    //     opted-in to all eligible types (backward compatibility).
-    const allowedByPreference = await this.getDriversAcceptingClass(driverIds, requestedClass);
-    const eligibleDriverIds = driverIds.filter((id) => allowedByPreference.has(id));
-    if (eligibleDriverIds.length === 0) return [];
 
     // 2. Fetch driver operational details from DB or cache
     interface DriverData {
@@ -51,8 +39,6 @@ export class DispatchService {
       total_rides: number;
       is_dangerous: boolean;
       is_flagged: boolean;
-      price_per_mile: number | null;
-      active_class: string;
     }
 
     let drivers: DriverData[];
@@ -60,9 +46,8 @@ export class DispatchService {
     if (env.LEGACY_DB_SCORE) {
       const dbDrivers = await primaryPrisma.driver.findMany({
         where: {
-          user_id: { in: eligibleDriverIds },
+          user_id: { in: driverIds },
           is_active: true,
-          active_class: { in: this.getEligibleActiveClasses(requestedClass) },
         } as any,
         include: {
           user: { select: { rating: true, rating_count: true } },
@@ -78,13 +63,11 @@ export class DispatchService {
         total_rides: d.total_rides || 0,
         is_dangerous: d.is_dangerous || false,
         is_flagged: d.is_flagged || false,
-        price_per_mile: d.price_per_mile ? Number(d.price_per_mile) : null,
-        active_class: d.active_class || 'CORE',
       }));
     } else {
-      const cachedFactors = await mgetScoreFactors(eligibleDriverIds);
+      const cachedFactors = await mgetScoreFactors(driverIds);
       drivers = [];
-      for (const id of eligibleDriverIds) {
+      for (const id of driverIds) {
         let factors = cachedFactors.get(id);
         if (!factors) {
           try {
@@ -98,16 +81,12 @@ export class DispatchService {
               is_dangerous: f.is_dangerous,
               is_flagged: f.is_flagged,
               last_cancellation_at: f.last_cancellation_at,
-              price_per_mile: f.price_per_mile,
-              active_class: f.active_class,
               cached_at: f.cached_at,
             };
           } catch {
             continue;
           }
         }
-        const eligibleActiveClasses = this.getEligibleActiveClasses(requestedClass).map(c => c.toString());
-        if (!eligibleActiveClasses.includes(factors.active_class)) continue;
         drivers.push({
           user_id: id,
           rating: factors.rating,
@@ -118,8 +97,6 @@ export class DispatchService {
           total_rides: factors.total_rides,
           is_dangerous: factors.is_dangerous,
           is_flagged: factors.is_flagged,
-          price_per_mile: factors.price_per_mile,
-          active_class: factors.active_class,
         });
       }
     }
@@ -200,114 +177,10 @@ export class DispatchService {
         score,
         distance,
         rating,
-        activeClass: driver.active_class as VehicleClass,
-        pricePerMile: driver.price_per_mile || undefined,
       };
     });
 
-    // 4. Sort by score descending, with lowest price as tie-breaker for equally close drivers with same rating
-    return scoredDrivers.sort((a, b) => {
-      const distanceDiff = Math.abs(a.distance - b.distance);
-      const ratingDiff = Math.abs(a.rating - b.rating);
-
-      // If "equally close" (distance diff < 100 meters / 0.1 km) and "same exact rating"
-      if (distanceDiff < 0.1 && ratingDiff < 0.01) {
-        const priceA = a.pricePerMile || 2.0;
-        const priceB = b.pricePerMile || 2.0;
-        if (Math.abs(priceA - priceB) > 0.01) {
-          return priceA - priceB; // lowest price first (ascending)
-        }
-        return Math.random() - 0.5; // choose randomly
-      }
-
-      return b.score - a.score;
-    });
-  }
-
-  /**
-   * Returns a list of active classes that can fulfill a specific ride request class.
-   * Delegates to the centralized eligibility engine (single source of truth).
-   */
-  private static getEligibleActiveClasses(requested: VehicleClass): VehicleClass[] {
-    return getEligibleRideTypes(requested);
-  }
-
-  /**
-   * Demand-based Recommendations
-   */
-  static async getRecommendationsForDriver(driverId: string) {
-    const driver: any = await prisma.driver.findUnique({
-      where: { user_id: driverId },
-      include: { 
-        vehicles: {
-          include: { vehicle: true }
-        }
-      }
-    });
-
-    if (!driver || !driver.vehicles[0]) return null;
-
-    const vehicleClass = driver.vehicles[0].vehicle?.service_class as VehicleClass || VehicleClass.CORE;    
-    
-    const potentialClasses = this.getPotentialClasses(vehicleClass);
-    if (potentialClasses.length <= 1) return null;
-
-    const stats = await Promise.all(potentialClasses.map(async (cls) => {
-      const demandCount = await redis.get(`demand:count:${cls}`) || '0';
-      const supplyCount = await redis.get(`supply:count:${cls}`) || '1';
-      return {
-        class: cls,
-        ratio: parseInt(demandCount) / parseInt(supplyCount)
-      };
-    }));
-
-    const best = stats.sort((a, b) => b.ratio - a.ratio)[0];
-
-    if (best.ratio > 1.2 && (best.class as any) !== driver.active_class) {
-      return {
-        recommended_class: best.class,
-        reason: `High demand for ${this.getFriendlyClassName(best.class as any)} in your area right now.`
-      };
-    }
-
-    return null;
-  }
-
-  private static getPotentialClasses(vehicleClass: VehicleClass): VehicleClass[] {
-    return getEligibleRideTypes(vehicleClass);
-  }
-
-  /**
-   * Returns the set of driver ids (from `candidateIds`) that should receive a
-   * ride of `requestedClass`, honoring their saved preferences. A driver is
-   * included if they have an enabled preference row for the requested class,
-   * OR if they have no preference rows at all (legacy / not-yet-configured
-   * drivers default to receiving all eligible ride types).
-   */
-  private static async getDriversAcceptingClass(
-    candidateIds: string[],
-    requestedClass: VehicleClass,
-  ): Promise<Set<string>> {
-    if (candidateIds.length === 0) return new Set();
-    const { prisma } = await import('./prisma.service');
-    const rows = await (prisma as any).driverRidePreference.findMany({
-      where: { driver_id: { in: candidateIds }, ride_type: requestedClass },
-      select: { driver_id: true, enabled: true },
-    });
-    const enabledIds = new Set<string>();
-    const seen = new Set<string>();
-    for (const r of rows) {
-      seen.add(r.driver_id);
-      if (r.enabled) enabledIds.add(r.driver_id);
-    }
-    // Drivers with no preference rows at all -> treat as opted-in.
-    for (const id of candidateIds) {
-      if (!seen.has(id)) enabledIds.add(id);
-    }
-    return enabledIds;
-  }
-
-  private static getFriendlyClassName(cls: VehicleClass): string {
-    return rideTypeLabel(cls);
+    // 4. Sort by score descending
+    return scoredDrivers.sort((a, b) => b.score - a.score);
   }
 }
