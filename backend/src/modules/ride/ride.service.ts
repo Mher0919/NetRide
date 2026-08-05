@@ -18,6 +18,7 @@ import { areBothTestUsers } from '../../utils/testUser';
 import { matchQueue } from '../../queue/queue';
 import { matchJobsTotal, dispatchAcceptOutcomeTotal } from '../../observability/metrics';
 import { traceAsync, getCurrentTraceId } from '../../utils/tracing';
+import { RewardEngine } from '../../services/reward-engine.service';
 
 export class RideService {
   static async rateRide(data: {
@@ -118,7 +119,8 @@ export class RideService {
     destination: Location & { address: string },
     scheduledAt?: Date,
     isScheduled: boolean = false,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    rewards: { promoCode?: string; applyCredits?: boolean } = {}
   ): Promise<Trip> {
     return traceAsync('RideService.requestRide', async () => {
       const traceId = getCurrentTraceId();
@@ -153,46 +155,110 @@ export class RideService {
       const distanceKm = route ? (route.distance / 1000) : 10.0;
       const etaSeconds = route ? route.eta : 600;
 
-      // Use a transactional insert for safety
-      const res = await pool.query(
-        `INSERT INTO rides (
-          rider_id, status, pickup_lat, pickup_lng, pickup_address,
-          destination_lat, destination_lng, destination_address,
-          requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
-          distance_meters, duration_seconds, idempotency_key
-        )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-         RETURNING *`,
-        [
-          riderId,
-          TripStatus.REQUESTED,
-          pickup.lat,
-          pickup.lng,
-          pickup.address,
-          destination.lat,
-          destination.lng,
-          destination.address,
-          'CORE',
-          snapshotRating,
-          scheduledAt || null,
-          isScheduled,
-          route ? Math.round(route.distance) : null,
-          etaSeconds,
-          idempotencyKey || null
-        ]
-      );
+      const hasRewards = !!(rewards.promoCode && String(rewards.promoCode).trim()) || rewards.applyCredits === true;
 
-      const trip = await RideRepository.findById(res.rows[0].id);
+      let tripId: string;
+      if (hasRewards) {
+        // Rewards path: ride INSERT + price snapshot + promo + credits all
+        // commit atomically. A failed promo/credits application aborts the
+        // entire request so the rider can fix the code and re-request.
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const res = await client.query(
+            `INSERT INTO rides (
+              rider_id, status, pickup_lat, pickup_lng, pickup_address,
+              destination_lat, destination_lng, destination_address,
+              requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
+              distance_meters, duration_seconds, idempotency_key
+            )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+             RETURNING id`,
+            [
+              riderId,
+              TripStatus.REQUESTED,
+              pickup.lat,
+              pickup.lng,
+              pickup.address,
+              destination.lat,
+              destination.lng,
+              destination.address,
+              'CORE',
+              snapshotRating,
+              scheduledAt || null,
+              isScheduled,
+              route ? Math.round(route.distance) : null,
+              etaSeconds,
+              idempotencyKey || null
+            ]
+          );
+          tripId = res.rows[0].id;
+
+          const breakdown = await createPriceSnapshot(tripId, {
+            distanceMeters: route ? route.distance : distanceKm * 1000,
+            durationSeconds: etaSeconds,
+          }, client);
+
+          await RewardEngine.applyToRideRequest(client, {
+            riderId,
+            rideId: tripId,
+            fareCents: Math.round(breakdown.totalFare * 100),
+            promoCode: rewards.promoCode,
+            applyCredits: rewards.applyCredits,
+          });
+
+          await client.query('COMMIT');
+        } catch (err) {
+          try { await client.query('ROLLBACK'); } catch { /* noop */ }
+          throw err;
+        } finally {
+          client.release();
+        }
+      } else {
+        const res = await pool.query(
+          `INSERT INTO rides (
+            rider_id, status, pickup_lat, pickup_lng, pickup_address,
+            destination_lat, destination_lng, destination_address,
+            requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
+            distance_meters, duration_seconds, idempotency_key
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+           RETURNING *`,
+          [
+            riderId,
+            TripStatus.REQUESTED,
+            pickup.lat,
+            pickup.lng,
+            pickup.address,
+            destination.lat,
+            destination.lng,
+            destination.address,
+            'CORE',
+            snapshotRating,
+            scheduledAt || null,
+            isScheduled,
+            route ? Math.round(route.distance) : null,
+            etaSeconds,
+            idempotencyKey || null
+          ]
+        );
+        tripId = res.rows[0].id;
+      }
+
+      const trip = await RideRepository.findById(tripId);
       if (!trip) throw new Error('Failed to create trip record');
 
-      // Calculate the platform price and persist it as the ride's price
-      // snapshot. The fare quoted here is the fare charged at accept time.
-      const fareStart = Date.now();
-      const breakdown = await createPriceSnapshot(trip.id, {
-        distanceMeters: route ? route.distance : distanceKm * 1000,
-        durationSeconds: etaSeconds,
-      });
-      console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms (total=$${breakdown.totalFare})`);
+      if (!hasRewards) {
+        // Calculate the platform price and persist it as the ride's price
+        // snapshot. The fare quoted here is the fare charged at accept time.
+        // (The rewards path already snapshotted inside its transaction.)
+        const fareStart = Date.now();
+        const breakdown = await createPriceSnapshot(trip.id, {
+          distanceMeters: route ? route.distance : distanceKm * 1000,
+          durationSeconds: etaSeconds,
+        });
+        console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms (total=$${breakdown.totalFare})`);
+      }
 
       if (route) {
         (trip as any).route_geometry = route.geometry;
@@ -235,6 +301,10 @@ export class RideService {
           matchJobsTotal.inc({ outcome: 'enqueued' });
         }
       }
+
+      // Rewards bookkeeping (non-blocking): referral state machine progress.
+      RewardEngine.onRideRequested({ id: trip.id, rider_id: riderId, driver_id: null, fare_amount: null, status: 'REQUESTED' })
+        .catch((err) => console.error(`[RIDE] ⚠️ onRideRequested failed: ${err.message}`));
 
       return trip;
     });
@@ -504,6 +574,17 @@ export class RideService {
           `[RIDE] ⚠️ Wallet credit failed (non-blocking) for trip ${tripId}: ${err.message}`
         );
       }
+
+      // Rewards ecosystem: finalize promo usage + partner commission and
+      // grant any referral rewards. Non-blocking — must never block the
+      // trip end. Fully idempotent (unique guards on every table).
+      RewardEngine.onRideCompleted({
+        id: tripId,
+        rider_id: updatedTrip.rider_id,
+        driver_id: updatedTrip.driver_id,
+        fare_amount: (updatedTrip as any).fare_amount ?? null,
+        status: 'COMPLETED',
+      }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCompleted failed: ${err.message}`));
     }
 
     io.to(`rider:${updatedTrip.rider_id}`).emit('tripUpdate', updatedTrip);
@@ -545,6 +626,16 @@ export class RideService {
     }
 
     const updatedTrip = await RideRepository.updateStatus(tripId, 'CANCELLED' as any, extra);
+
+    // Rewards ecosystem: void promo usage + refund applied credits.
+    // Non-blocking and idempotent (refunds carry unique ledger keys).
+    RewardEngine.onRideCancelled({
+      id: tripId,
+      rider_id: trip.rider_id,
+      driver_id: trip.driver_id ?? null,
+      fare_amount: (trip as any).fare_amount ?? null,
+      status: 'CANCELLED',
+    }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCancelled failed: ${err.message}`));
 
     // Safety + navigation teardown on cancel. finalizeTrip is a no-op
     // if the trip had no violations, so it's safe to call on every

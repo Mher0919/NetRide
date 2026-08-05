@@ -15,6 +15,9 @@ import '../utils/file_url.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
 import 'settings_screen.dart';
+import 'credits_screen.dart';
+import 'referral_screen.dart';
+import 'qr_scanner_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -488,6 +491,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => SettingsScreen(hasPassword: _hasPassword)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'Wallet & Rewards',
+                children: [
+                  _buildMenuTile(
+                    icon: Icons.account_balance_wallet_outlined,
+                    title: 'Ride Credits',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const CreditsScreen()),
+                    ),
+                  ),
+                  const Divider(height: 32),
+                  _buildMenuTile(
+                    icon: Icons.card_giftcard_rounded,
+                    title: 'Refer & Earn',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const ReferralScreen()),
+                    ),
+                  ),
+                  const Divider(height: 32),
+                  _buildMenuTile(
+                    icon: Icons.qr_code_scanner_rounded,
+                    title: 'Scan a Referral QR',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const QrScannerScreen()),
                     ),
                   ),
                 ],

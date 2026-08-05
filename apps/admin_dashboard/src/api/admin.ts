@@ -214,3 +214,149 @@ export const getFlaggedRatings = async (params: { page?: number; limit?: number 
   const response = await api.get('/admin/ratings/flagged', { params });
   return response.data as { ratings: any[]; total: number; page: number; totalPages: number };
 };
+
+// ----- Partners ------------------------------------------------------------
+
+export const listPartners = async (params: { search?: string; status?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/partners', { params });
+  return response.data as { partners: any[] };
+};
+
+export const createPartner = async (data: Record<string, unknown>) => {
+  const response = await api.post('/admin/partners', data);
+  return response.data;
+};
+
+export const getPartner = async (id: string) => {
+  const response = await api.get(`/admin/partners/${id}`);
+  return response.data;
+};
+
+export const updatePartner = async (id: string, data: Record<string, unknown>) => {
+  const response = await api.patch(`/admin/partners/${id}`, data);
+  return response.data;
+};
+
+export const setPartnerStatus = async (id: string, status: string) => {
+  const response = await api.post(`/admin/partners/${id}/status/${status}`);
+  return response.data;
+};
+
+export const getPartnerCommissions = async (id: string, params: { status?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get(`/admin/partners/${id}/commissions`, { params });
+  return response.data as { commissions: any[] };
+};
+
+export const markCommissionPaid = async (commissionId: string, reference: string) => {
+  const response = await api.post(`/admin/partners/commissions/${commissionId}/mark-paid`, { reference });
+  return response.data;
+};
+
+export const exportPartners = async () => {
+  const response = await api.get('/admin/partners/export', { responseType: 'blob' });
+  return response.data as Blob;
+};
+
+export const exportPartnerRides = async (id: string) => {
+  const response = await api.get(`/admin/partners/${id}/rides/export`, { responseType: 'blob' });
+  return response.data as Blob;
+};
+
+// ----- Promo codes ---------------------------------------------------------
+
+export const listPromos = async (params: { search?: string; partnerId?: string; active?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/promos', { params });
+  return response.data as { promos: any[] };
+};
+
+export const getPromo = async (id: string) => {
+  const response = await api.get(`/admin/promos/${id}`);
+  return response.data as { promo: any; usage: any[] };
+};
+
+export const createPromo = async (data: Record<string, unknown>) => {
+  const response = await api.post('/admin/promos', data);
+  return response.data;
+};
+
+export const updatePromo = async (id: string, data: Record<string, unknown>) => {
+  const response = await api.patch(`/admin/promos/${id}`, data);
+  return response.data;
+};
+
+export const deletePromo = async (id: string) => {
+  const response = await api.delete(`/admin/promos/${id}`);
+  return response.data;
+};
+
+export const setPromoActive = async (id: string, active: boolean) => {
+  const response = await api.post(`/admin/promos/${id}/${active ? 'activate' : 'deactivate'}`);
+  return response.data;
+};
+
+export const clonePromo = async (id: string) => {
+  const response = await api.post(`/admin/promos/${id}/clone`);
+  return response.data;
+};
+
+// ----- Referrals -----------------------------------------------------------
+
+export const getReferralStats = async () => {
+  const response = await api.get('/admin/referrals/stats');
+  return response.data;
+};
+
+export const listReferrals = async (params: { status?: string; search?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/referrals', { params });
+  return response.data as { relationships: any[] };
+};
+
+export const listReferralAbuse = async () => {
+  const response = await api.get('/admin/referrals/abuse');
+  return response.data as { flags: any[] };
+};
+
+// ----- Ride credits --------------------------------------------------------
+
+export const listCreditAccounts = async (params: { search?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/credits', { params });
+  return response.data as { accounts: any[] };
+};
+
+export const grantCredits = async (userId: string, amountCents: number, reason: string) => {
+  const response = await api.post('/admin/credits/grant', { user_id: userId, amount_cents: amountCents, reason });
+  return response.data;
+};
+
+export const listCreditTransactions = async (params: { userId?: string; type?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/credits/transactions', { params });
+  return response.data as { transactions: any[] };
+};
+
+export const exportCreditTransactions = async () => {
+  const response = await api.get('/admin/credits/transactions/export', { responseType: 'blob' });
+  return response.data as Blob;
+};
+
+// ----- Ledgers -------------------------------------------------------------
+
+export const getCommissionLedger = async (params: { status?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/ledger/commissions', { params });
+  return response.data as { commissions: any[] };
+};
+
+export const getRewardLedger = async (params: { limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/ledger/rewards', { params });
+  return response.data as { transactions: any[] };
+};
+
+export const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};

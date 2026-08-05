@@ -293,24 +293,137 @@ export async function pushRideAccepted(
 }
 
 /**
- * Send a "driver arrived at pickup" push notification (rider side).
+ * Send a "new ride offer" push notification (driver side).
  */
-export async function pushDriverArrived(
-  riderId: string,
-  driverName: string,
-  tripId: string
+export async function pushRideOffer(
+  driverId: string,
+  tripId: string,
+  fare: string
 ): Promise<boolean> {
-  return sendPush(riderId, 'rider', {
-    title: 'Your driver has arrived',
-    body: `${driverName} is waiting at the pickup location`,
+  return sendPush(driverId, 'driver', {
+    title: 'New ride request',
+    body: `A new ride is available for $${fare}`,
     data: {
-      type: 'driver_arrived',
+      type: 'ride_offer',
       tripId,
-      driverName,
+      fare,
     },
     priority: 'high',
     channelId: 'ride',
-    sound: 'driver_arrived.wav',
+    sound: 'ride_offer.wav',
+  });
+}
+
+// ============================================
+// 037: Credits / promo / referral notifications
+// ============================================
+
+/** Ride credits were added to the rider's balance. */
+export async function pushCreditsEarned(
+  riderId: string,
+  amountCents: number,
+  reason: string
+): Promise<boolean> {
+  return sendPush(riderId, 'rider', {
+    title: 'Ride credits added',
+    body: `You earned $${(amountCents / 100).toFixed(2)} in ride credits — ${reason}`,
+    data: {
+      type: 'credits_earned',
+      amountCents: String(amountCents),
+      reason,
+    },
+    channelId: 'credits',
+  });
+}
+
+/** Credits were deducted for a ride. */
+export async function pushCreditsApplied(
+  riderId: string,
+  amountCents: number,
+  rideId: string
+): Promise<boolean> {
+  return sendPush(riderId, 'rider', {
+    title: 'Ride credits applied',
+    body: `$${(amountCents / 100).toFixed(2)} of ride credits were applied to your ride`,
+    data: {
+      type: 'credits_applied',
+      amountCents: String(amountCents),
+      rideId,
+    },
+    channelId: 'credits',
+  });
+}
+
+/** A promo code was accepted on a ride. */
+export async function pushPromoAccepted(
+  riderId: string,
+  code: string,
+  discountCents: number
+): Promise<boolean> {
+  return sendPush(riderId, 'rider', {
+    title: 'Promo applied',
+    body: `${code} saved you $${(discountCents / 100).toFixed(2)} on this ride`,
+    data: {
+      type: 'promo_accepted',
+      code,
+      discountCents: String(discountCents),
+    },
+    channelId: 'promo',
+  });
+}
+
+/** A promo code was rejected during booking. */
+export async function pushPromoRejected(
+  riderId: string,
+  code: string,
+  reason: string
+): Promise<boolean> {
+  return sendPush(riderId, 'rider', {
+    title: 'Promo not applied',
+    body: `${code}: ${reason}`,
+    data: {
+      type: 'promo_rejected',
+      code,
+      reason,
+    },
+    channelId: 'promo',
+  });
+}
+
+/** A friend scanned the rider's QR — referral relationship created. */
+export async function pushReferralLinked(
+  riderId: string,
+  friendName: string | null
+): Promise<boolean> {
+  return sendPush(riderId, 'rider', {
+    title: 'You have a new referral!',
+    body: `${friendName ?? 'A friend'} joined with your referral code. You'll earn $5 when they complete their first ride.`,
+    data: {
+      type: 'referral_linked',
+    },
+    channelId: 'referral',
+  });
+}
+
+/** $5 referral reward granted (either side). */
+export async function pushReferralRewardGranted(
+  userId: string,
+  amountCents: number,
+  side: 'referrer' | 'referred'
+): Promise<boolean> {
+  const body =
+    side === 'referrer'
+      ? `A friend completed their first ride — you earned $${(amountCents / 100).toFixed(2)} in ride credits!`
+      : `Welcome to NetRide! You earned $${(amountCents / 100).toFixed(2)} in ride credits for your first ride.`;
+  return sendPush(userId, 'rider', {
+    title: 'Referral reward earned',
+    body,
+    data: {
+      type: 'referral_reward',
+      amountCents: String(amountCents),
+      side,
+    },
+    channelId: 'referral',
   });
 }
 
@@ -331,30 +444,6 @@ export async function pushRideCompleted(
       fare,
     },
     channelId: 'ride',
-  });
-}
-
-/**
- * Send a "new ride offer" push notification (driver side).
- */
-export async function pushRideOffer(
-  driverId: string,
-  fare: string,
-  distance: string,
-  tripId: string
-): Promise<boolean> {
-  return sendPush(driverId, 'driver', {
-    title: 'New ride request',
-    body: `Fare $${fare} • ${distance} away`,
-    data: {
-      type: 'ride_offer',
-      tripId,
-      fare,
-      distance,
-    },
-    priority: 'high',
-    channelId: 'ride_offer',
-    sound: 'incoming_request.mp3',
   });
 }
 

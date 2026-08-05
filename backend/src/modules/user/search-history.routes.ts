@@ -207,7 +207,7 @@ router.get('/search-history/routes', authMiddleware, async (req, res) => {
  * POST /api/user/search-history/routes
  * Body: { originLat, originLon, destLat, destLon, originName, destName, distanceMeters, durationSeconds, trafficDurationSeconds?, polyline, vehicleClass? }
  * Saves a route to user's history for caching. `vehicleClass` is optional
- * (NetRide operates a single Standard Ride; retained for legacy payloads).
+ * (NetRide operates a single NetRide Premium; retained for legacy payloads).
  */
 router.post('/search-history/routes', authMiddleware, async (req, res) => {
   try {

@@ -103,6 +103,15 @@ const envSchema = z.object({
   FCM_SERVICE_ACCOUNT_PATH: z.string().optional(),
   // Alternatively, paste the JSON directly (base64-encoded for safety).
   FCM_SERVICE_ACCOUNT_B64: z.string().optional(),
+
+  // ---- Referral system ----------------------------------------------------
+  // Secret used to sign referral QR payloads. MUST be stable across
+  // restarts or every outstanding QR becomes invalid.
+  REFERRAL_QR_SECRET: z.string().default('netride-referral-dev-secret'),
+  // Per-referral reward in cents (both sides, $5.00 default).
+  REFERRAL_REWARD_CENTS: z.union([z.string(), z.number()]).transform(Number).default(500),
+  // Lifetime of a referral QR payload before the app must refresh it.
+  REFERRAL_QR_TTL_DAYS: z.union([z.string(), z.number()]).transform(Number).default(365),
 });
 
 const parsed = envSchema.safeParse(process.env);

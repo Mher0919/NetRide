@@ -65,7 +65,7 @@ class _TripScreenState extends State<TripScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _SavingsArrivalDialog(trip: trip),
+      builder: (context) => _ArrivalSummaryDialog(trip: trip),
     );
   }
 
@@ -348,64 +348,18 @@ class _TripScreenState extends State<TripScreen> {
   }
 }
 
-class _SavingsArrivalDialog extends StatefulWidget {
+class _ArrivalSummaryDialog extends StatefulWidget {
   final models.Trip trip;
-  const _SavingsArrivalDialog({required this.trip});
+  const _ArrivalSummaryDialog({required this.trip});
 
   @override
-  State<_SavingsArrivalDialog> createState() => _SavingsArrivalDialogState();
+  State<_ArrivalSummaryDialog> createState() => _ArrivalSummaryDialogState();
 }
 
-class _SavingsArrivalDialogState extends State<_SavingsArrivalDialog> with TickerProviderStateMixin {
-  late AnimationController _strikeThroughController;
-  late AnimationController _fadeController;
-  late Animation<double> _strikeThroughProgress;
-  late Animation<double> _fadeProgress;
-
-  @override
-  void initState() {
-    super.initState();
-    _strikeThroughController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    );
-
-    _strikeThroughProgress = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _strikeThroughController, curve: Curves.easeInOut),
-    );
-    _fadeProgress = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _fadeController, curve: Curves.easeOutBack),
-    );
-
-    Future.delayed(const Duration(milliseconds: 600), () {
-      if (mounted) {
-        _strikeThroughController.forward();
-      }
-    });
-
-    Future.delayed(const Duration(milliseconds: 1100), () {
-      if (mounted) {
-        _fadeController.forward();
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _strikeThroughController.dispose();
-    _fadeController.dispose();
-    super.dispose();
-  }
-
+class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
   @override
   Widget build(BuildContext context) {
-    final maxFare = widget.trip.initialMaxFare ?? 0.0;
     final finalFare = widget.trip.fareAmount ?? 0.0;
-    final savings = maxFare - finalFare;
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
@@ -425,98 +379,10 @@ class _SavingsArrivalDialogState extends State<_SavingsArrivalDialog> with Ticke
             style: TextStyle(fontSize: 13, color: Colors.grey, height: 1.5),
           ),
           const SizedBox(height: 24),
-          if (savings > 0) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF5B7760).withOpacity(0.05),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF5B7760).withOpacity(0.1)),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'Estimated Max: ',
-                        style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500),
-                      ),
-                      AnimatedBuilder(
-                        animation: _strikeThroughProgress,
-                        builder: (context, child) {
-                          return CustomPaint(
-                            foregroundPainter: _StrikeThroughPainter(_strikeThroughProgress.value),
-                            child: Text(
-                              '\$${maxFare.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  FadeTransition(
-                    opacity: _fadeProgress,
-                    child: ScaleTransition(
-                      scale: _fadeProgress,
-                      child: Column(
-                        children: [
-                          const Text(
-                            'Actual Charged',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF5B7760), letterSpacing: 1),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '\$${finalFare.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontSize: 36,
-                              fontWeight: FontWeight.w900,
-                              color: Color(0xFF2F3A32),
-                              letterSpacing: -1,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF5B7760),
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF5B7760).withOpacity(0.3),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: Text(
-                              'Congrats! You saved \$${savings.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ] else ...[
-            Text(
-              '\$${finalFare.toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 38, fontWeight: FontWeight.w900, color: Color(0xFF2F3A32)),
-            ),
-          ],
+          Text(
+            '\$${finalFare.toStringAsFixed(2)}',
+            style: const TextStyle(fontSize: 38, fontWeight: FontWeight.w900, color: Color(0xFF2F3A32)),
+          ),
           const SizedBox(height: 16),
         ],
       ),
@@ -550,32 +416,6 @@ class _SavingsArrivalDialogState extends State<_SavingsArrivalDialog> with Ticke
         ),
       ],
     );
-  }
-}
-
-class _StrikeThroughPainter extends CustomPainter {
-  final double progress;
-  _StrikeThroughPainter(this.progress);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (progress == 0.0) return;
-    final paint = Paint()
-      ..color = const Color(0xFFC65A5A)
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round;
-
-    double endX = size.width * progress;
-    canvas.drawLine(
-      Offset(-2, size.height / 2 + 1),
-      Offset(endX + 2, size.height / 2 - 1),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _StrikeThroughPainter oldDelegate) {
-    return oldDelegate.progress != progress;
   }
 }
 

@@ -228,6 +228,8 @@ class RideProvider with ChangeNotifier {
     DateTime? scheduledAt,
     bool favoritePriority = false,
     String? idempotencyKey,
+    String? promoCode,
+    bool applyCredits = false,
   }) {
     debugPrint('[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}');
     if (_socket == null) {
@@ -238,6 +240,7 @@ class RideProvider with ChangeNotifier {
     
     // Generate idempotency key if not provided (for retries)
     final key = idempotencyKey ?? const Uuid().v4();
+    final cleanedPromo = promoCode?.trim();
     
     _socket?.emit('requestRide', {
       'pickup': pickup.toJson(),
@@ -246,6 +249,8 @@ class RideProvider with ChangeNotifier {
       'scheduledAt': scheduledAt?.toIso8601String(),
       'favoritePriority': favoritePriority,
       'idempotencyKey': key,
+      if (cleanedPromo != null && cleanedPromo.isNotEmpty) 'promoCode': cleanedPromo.toUpperCase(),
+      'applyCredits': applyCredits,
     });
     
     if (!isScheduled) {

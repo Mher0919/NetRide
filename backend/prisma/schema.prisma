@@ -97,10 +97,10 @@ model User {
   blocked_reason             String?
   verification_feedback_seen Boolean? @default(false)
 
-  onboarding_step     Int?
-  phone_verified      Boolean? @default(false)
-  headshot_uploaded   Boolean? @default(false)
-  fcm_token           String?
+  onboarding_step   Int?
+  phone_verified    Boolean? @default(false)
+  headshot_uploaded Boolean? @default(false)
+  fcm_token         String?
 
   created_at DateTime? @default(now()) @db.Timestamptz(6)
   updated_at DateTime? @default(now()) @db.Timestamptz(6)
@@ -118,6 +118,13 @@ model User {
   wallet           DriverWallet?          @relation("DriverWallet")
   payouts          Payout[]               @relation("DriverPayouts")
   ride_preferences DriverRidePreference[] @relation("DriverRidePreferences")
+
+  ride_credit_account   RideCreditAccount?     @relation("RideCreditAccount")
+  credit_transactions   CreditTransaction[]    @relation("CreditTransactions")
+  referral_code         ReferralCode?          @relation("ReferralCodeOwner")
+  referrals_as_referrer ReferralRelationship[] @relation("ReferrerLinks")
+  referred_as_user      ReferralRelationship?  @relation("ReferredUser")
+  audit_events_actor    AuditEvent[]           @relation("AuditEventActor")
 
   @@map("users")
 }
@@ -187,9 +194,9 @@ model Vehicle {
 }
 
 model DriverVehicle {
-  id                      String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  driver_id               String?      @db.Uuid
-  vehicle_id              String?      @db.Uuid
+  id                      String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  driver_id               String?  @db.Uuid
+  vehicle_id              String?  @db.Uuid
   license_plate_number    String
   license_plate_photo_url String?
   car_photo_urls          String[]
@@ -203,10 +210,10 @@ model DriverVehicle {
 
   // --- Vehicle classification (derived, not user-selected) ---
   // Verified vehicle class computed by the centralized eligibility engine.
-  service_class           VehicleClass? @default(CORE)
+  service_class VehicleClass? @default(CORE)
   // Verified attributes used to derive service_class.
-  seats                   Int?
-  is_luxury               Boolean?     @default(false)
+  seats         Int?
+  is_luxury     Boolean?      @default(false)
 
   inspection_photo_url   String?
   inspection_expiry_date DateTime?         @db.Timestamptz(6)
@@ -226,11 +233,11 @@ model DriverVehicle {
 // vehicle's eligibility (which is derived) and of the driver's currently
 // selected active_class.
 model DriverRidePreference {
-  id         String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  driver_id  String      @db.Uuid
+  id         String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  driver_id  String       @db.Uuid
   ride_type  VehicleClass
-  enabled    Boolean     @default(true)
-  updated_at DateTime?   @default(now()) @db.Timestamptz(6)
+  enabled    Boolean      @default(true)
+  updated_at DateTime?    @default(now()) @db.Timestamptz(6)
 
   driver User @relation("DriverRidePreferences", fields: [driver_id], references: [id], onDelete: Cascade)
 
@@ -289,13 +296,26 @@ model Ride {
   estimated_distance_meters  Int?
   estimated_duration_seconds Int?
 
+  // --- 037: Promo + credits applied to this ride (fare_amount stays GROSS) ---
+  promo_id              String?   @db.Uuid
+  promo_code            String?
+  promo_discount_cents  BigInt?   @default(0)
+  credits_applied_cents BigInt?   @default(0)
+  final_payment_cents   BigInt?   @default(0)
+  credits_refunded_at   DateTime? @db.Timestamptz(6)
+
   created_at DateTime? @default(now()) @db.Timestamptz(6)
 
-  rider   User?    @relation("RiderRides", fields: [rider_id], references: [id])
-  driver  User?    @relation("DriverRides", fields: [driver_id], references: [id])
-  rating  Rating?
-  payouts Payout[] @relation("RidePayouts")
+  rider          User?              @relation("RiderRides", fields: [rider_id], references: [id])
+  driver         User?              @relation("DriverRides", fields: [driver_id], references: [id])
+  rating         Rating?
+  payouts        Payout[]           @relation("RidePayouts")
   price_snapshot RidePriceSnapshot?
+
+  promo        PromoCode?          @relation(fields: [promo_id], references: [id], onDelete: SetNull)
+  promo_usages PromoUsage[]        @relation("RidePromoUsages")
+  credit_tx    CreditTransaction[] @relation("CreditTxRide")
+  commission   PartnerCommission?  @relation("CommissionRide")
 
   @@index([status, created_at(sort: Desc)])
   @@index([rider_id, created_at(sort: Desc)])
@@ -307,6 +327,32 @@ model Ride {
 // Platform pricing (035): config singleton + per-ride price snapshots.
 // The quoted fare at request time is the fare charged at accept time.
 // ---------------------------------------------------------------------------
+
+/// 036: Named pricing profiles. The engine is profile-agnostic — each ride
+/// category (code) is a row here, with PREMIUM currently live. Legacy
+/// singleton retained alongside for historical snapshot compatibility.
+model PricingProfile {
+  code                  String   @id
+  label                 String
+  base_fare             Decimal  @default(3.50) @db.Decimal(10, 2)
+  per_km_rate           Decimal  @default(1.50) @db.Decimal(10, 2)
+  per_minute_rate       Decimal  @default(0.35) @db.Decimal(10, 2)
+  minimum_fare          Decimal  @default(7.00) @db.Decimal(10, 2)
+  booking_fee           Decimal  @default(1.50) @db.Decimal(10, 2)
+  service_fee_rate      Decimal  @default(0.10) @db.Decimal(5, 4)
+  tax_rate              Decimal  @default(0.0875) @db.Decimal(5, 4)
+  max_demand_multiplier Decimal  @default(2.00) @db.Decimal(4, 2)
+  peak_time_multiplier  Decimal  @default(1.25) @db.Decimal(4, 2)
+  off_peak_multiplier   Decimal  @default(0.95) @db.Decimal(4, 2)
+  weather_multiplier    Decimal  @default(1.00) @db.Decimal(4, 2)
+  location_multiplier   Decimal  @default(1.00) @db.Decimal(4, 2)
+  fleet_multiplier      Decimal  @default(1.00) @db.Decimal(4, 2)
+  active                Boolean  @default(true)
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("pricing_profiles")
+}
 
 model PricingConfiguration {
   id                    Int      @id @default(1)
@@ -342,15 +388,15 @@ model RidePriceSnapshot {
 }
 
 model Rating {
-  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  ride_id     String    @unique @db.Uuid
-  rater_id    String    @db.Uuid
-  target_id   String    @db.Uuid
-  target_role UserRole
-  rating      Int
-  review_text String?
-  flagged_for_review Boolean? @default(false)
-  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  id                 String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ride_id            String    @unique @db.Uuid
+  rater_id           String    @db.Uuid
+  target_id          String    @db.Uuid
+  target_role        UserRole
+  rating             Int
+  review_text        String?
+  flagged_for_review Boolean?  @default(false)
+  created_at         DateTime? @default(now()) @db.Timestamptz(6)
 
   ride Ride @relation(fields: [ride_id], references: [id], onDelete: Cascade)
 
@@ -490,4 +536,196 @@ model Payout {
   @@index([driver_id, status, requested_at(sort: Desc)])
   @@index([status, requested_at(sort: Desc)])
   @@map("payouts")
+}
+
+// ---------------------------------------------------------------------------
+// 037: Partner + promo + referral + ride credits ecosystem
+// ---------------------------------------------------------------------------
+
+model Partner {
+  id                      String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                    String
+  business_type           String
+  address                 String?
+  contact_name            String?
+  contact_phone           String?
+  contact_email           String?
+  commission_rate         Decimal  @default(0.10) @db.Decimal(5, 4)
+  status                  String   @default("ACTIVE")
+  lifetime_earnings_cents BigInt   @default(0)
+  pending_earnings_cents  BigInt   @default(0)
+  paid_earnings_cents     BigInt   @default(0)
+  total_referred_rides    BigInt   @default(0)
+  notes                   String?
+  created_at              DateTime @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime @default(now()) @db.Timestamptz(6)
+
+  promos      PromoCode[]
+  commissions PartnerCommission[]
+
+  @@index([status])
+  @@map("partners")
+}
+
+model PromoCode {
+  id                   String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  code                 String    @unique
+  partner_id           String?   @db.Uuid
+  discount_type        String
+  discount_value       Decimal   @db.Decimal(10, 2)
+  max_uses             Int       @default(0)
+  times_used           Int       @default(0)
+  expires_at           DateTime? @db.Timestamptz(6)
+  active               Boolean   @default(true)
+  min_ride_fare_cents  BigInt    @default(0)
+  max_discount_cents   BigInt    @default(0)
+  single_use_per_rider Boolean   @default(true)
+  usage_rule           String    @default("STANDARD")
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime  @default(now()) @db.Timestamptz(6)
+
+  partner     Partner?            @relation(fields: [partner_id], references: [id], onDelete: SetNull)
+  usages      PromoUsage[]
+  commissions PartnerCommission[]
+  rides       Ride[]
+
+  @@index([partner_id])
+  @@map("promo_codes")
+}
+
+model PromoUsage {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  promo_id         String    @db.Uuid
+  ride_id          String    @db.Uuid
+  rider_id         String    @db.Uuid
+  discount_cents   BigInt
+  rider_paid_cents BigInt    @default(0)
+  status           String    @default("APPLIED")
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  completed_at     DateTime? @db.Timestamptz(6)
+
+  promo PromoCode @relation(fields: [promo_id], references: [id], onDelete: Cascade)
+  ride  Ride      @relation("RidePromoUsages", fields: [ride_id], references: [id], onDelete: Cascade)
+
+  @@index([promo_id, status])
+  @@index([rider_id, created_at(sort: Desc)])
+  @@map("promo_usage")
+}
+
+model RideCreditAccount {
+  user_id               String   @id @db.Uuid
+  balance_cents         BigInt   @default(0)
+  lifetime_earned_cents BigInt   @default(0)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation("RideCreditAccount", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("ride_credit_accounts")
+}
+
+model CreditTransaction {
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id             String   @db.Uuid
+  amount_cents        BigInt
+  type                String
+  reference_type      String?
+  reference_id        String?  @db.Uuid
+  ride_id             String?  @db.Uuid
+  description         String?
+  balance_after_cents BigInt
+  idempotency_key     String?  @unique
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  user User  @relation("CreditTransactions", fields: [user_id], references: [id], onDelete: Cascade)
+  ride Ride? @relation("CreditTxRide", fields: [ride_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([type])
+  @@map("credit_transactions")
+}
+
+model PartnerCommission {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  partner_id       String    @db.Uuid
+  ride_id          String    @unique @db.Uuid
+  promo_id         String?   @db.Uuid
+  promo_code       String
+  ride_price_cents BigInt
+  commission_rate  Decimal   @db.Decimal(5, 4)
+  commission_cents BigInt
+  status           String    @default("PENDING")
+  paid_at          DateTime? @db.Timestamptz(6)
+  paid_reference   String?
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+
+  partner Partner    @relation(fields: [partner_id], references: [id], onDelete: Cascade)
+  ride    Ride       @relation("CommissionRide", fields: [ride_id], references: [id], onDelete: Cascade)
+  promo   PromoCode? @relation(fields: [promo_id], references: [id], onDelete: SetNull)
+
+  @@index([partner_id, status])
+  @@index([created_at(sort: Desc)])
+  @@map("partner_commissions")
+}
+
+model ReferralCode {
+  user_id    String   @id @db.Uuid
+  code       String   @unique
+  qr_payload String
+  issued_at  DateTime @default(now()) @db.Timestamptz(6)
+  expires_at DateTime @db.Timestamptz(6)
+
+  user User @relation("ReferralCodeOwner", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([code])
+  @@map("referral_codes")
+}
+
+model ReferralRelationship {
+  id                      String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  referrer_id             String    @db.Uuid
+  referred_user_id        String    @unique @db.Uuid
+  status                  String    @default("LINKED")
+  scanned_at              DateTime  @default(now()) @db.Timestamptz(6)
+  first_ride_id           String?   @db.Uuid
+  first_ride_completed_at DateTime? @db.Timestamptz(6)
+  reward_granted_at       DateTime? @db.Timestamptz(6)
+  created_at              DateTime  @default(now()) @db.Timestamptz(6)
+
+  referrer User @relation("ReferrerLinks", fields: [referrer_id], references: [id], onDelete: Cascade)
+  referred User @relation("ReferredUser", fields: [referred_user_id], references: [id], onDelete: Cascade)
+
+  @@index([referrer_id, created_at(sort: Desc)])
+  @@map("referral_relationships")
+}
+
+model ReferralReward {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  relationship_id  String   @unique @db.Uuid
+  referrer_id      String   @db.Uuid
+  referred_user_id String   @db.Uuid
+  ride_id          String   @db.Uuid
+  amount_cents     BigInt   @default(500)
+  referrer_tx_id   String?  @db.Uuid
+  referred_tx_id   String?  @db.Uuid
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([referrer_id, created_at(sort: Desc)])
+  @@map("referral_rewards")
+}
+
+model AuditEvent {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  actor_id    String?  @db.Uuid
+  actor_role  String?
+  action      String
+  entity_type String
+  entity_id   String?
+  details     Json     @default("{}")
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  actor User? @relation("AuditEventActor", fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@index([entity_type, entity_id])
+  @@index([created_at(sort: Desc)])
+  @@map("audit_events")
 }

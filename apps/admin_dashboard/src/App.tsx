@@ -20,6 +20,10 @@ import ProfileChangeDetail from './pages/ProfileChangeDetail';
 import PayoutCards from './pages/PayoutCards';
 import Payouts from './pages/Payouts';
 import FlaggedRatings from './pages/FlaggedRatings';
+import Partners from './pages/Partners';
+import Promos from './pages/Promos';
+import Referrals from './pages/Referrals';
+import Credits from './pages/Credits';
 import NotFound from './pages/NotFound';
 import UserTable from './components/UserTable';
 import MainLayout from './components/MainLayout';
@@ -73,6 +77,10 @@ const App: React.FC = () => {
               <Route path="payout-cards" element={<PayoutCards />} />
               <Route path="payouts" element={<Payouts />} />
               <Route path="ratings/flagged" element={<FlaggedRatings />} />
+              <Route path="partners" element={<Partners />} />
+              <Route path="promos" element={<Promos />} />
+              <Route path="referrals" element={<Referrals />} />
+              <Route path="credits" element={<Credits />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

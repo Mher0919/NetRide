@@ -29,6 +29,10 @@ import SpeedingIcon from '@mui/icons-material/Speed';
 import ProfileIcon from '@mui/icons-material/Badge';
 import CardIcon from '@mui/icons-material/CreditCard';
 import WalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import HandshakeIcon from '@mui/icons-material/Handshake';
+import TagIcon from '@mui/icons-material/LocalOffer';
+import ShareIcon from '@mui/icons-material/Share';
+import StarsIcon from '@mui/icons-material/Stars';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getDangerousDrivers, listProfileChanges, listPayoutCards, listPayouts, getPendingDocumentReviewsCount } from '../api/admin';
@@ -101,6 +105,10 @@ const MainLayout: React.FC = () => {
     { text: 'Payout Cards', icon: <CardIcon />, path: '/payout-cards', badge: payoutCardCount },
     { text: 'Payouts', icon: <WalletIcon />, path: '/payouts', badge: payoutCount },
     { text: 'Flagged Reviews', icon: <SpeedingIcon />, path: '/ratings/flagged' },
+    { text: 'Partners', icon: <HandshakeIcon />, path: '/partners' },
+    { text: 'Promo Codes', icon: <TagIcon />, path: '/promos' },
+    { text: 'Referrals', icon: <ShareIcon />, path: '/referrals' },
+    { text: 'Ride Credits', icon: <StarsIcon />, path: '/credits' },
     { text: 'Audit Logs', icon: <HistoryIcon />, path: '/logs' },
   ];
 

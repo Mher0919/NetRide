@@ -2,19 +2,19 @@
 //
 // VEHICLE ELIGIBILITY ENGINE — SINGLE RIDE TYPE
 // ---------------------------------------------
-// NetRide operates a single platform ride type ("Standard Ride"). Every
+// NetRide operates a single platform ride type ("NetRide Premium"). Every
 // approved vehicle is eligible; there are no tiers, no class selection, and
 // no driver ride-type preferences.
 //
 // The `VehicleClass` enum is retained for database compatibility and future
 // expansion (ELITE / PRESTIGE / XL / LUXURY can be re-added later) but only
-// CORE (Standard Ride) is exposed to production code. Nothing else in the
+// CORE (NetRide Premium) is exposed to production code. Nothing else in the
 // codebase hardcodes tier rules.
 
 import { VehicleClass } from '../types';
 
 /**
- * Ordered, low-to-high list of active ride types. Only the Standard Ride
+ * Ordered, low-to-high list of active ride types. Only NetRide Premium
  * (CORE) is live. Future ride categories are added here — no other code
  * needs to change.
  */
@@ -22,13 +22,13 @@ export const RIDE_TYPE_ORDER: VehicleClass[] = [VehicleClass.CORE];
 
 /** UI-facing display label for each ride type. */
 export const RIDE_TYPE_LABELS: Record<VehicleClass, string> = {
-  [VehicleClass.CORE]: 'Standard Ride',
-  [VehicleClass.ELITE]: 'Standard Ride',
-  [VehicleClass.PRESTIGE]: 'Standard Ride',
+  [VehicleClass.CORE]: 'NetRide Premium',
+  [VehicleClass.ELITE]: 'NetRide Premium',
+  [VehicleClass.PRESTIGE]: 'NetRide Premium',
 };
 
 export function rideTypeLabel(cls: VehicleClass | string): string {
-  return RIDE_TYPE_LABELS[cls as VehicleClass] ?? 'Standard Ride';
+  return RIDE_TYPE_LABELS[cls as VehicleClass] ?? 'NetRide Premium';
 }
 
 /** Canonical set of all supported ride types. */
@@ -62,7 +62,7 @@ export interface EligibilityResult {
 
 /**
  * Computes the vehicle class from VERIFIED attributes. Every vehicle is
- * classified as CORE (Standard Ride) — all vehicles are eligible.
+ * classified as CORE (NetRide Premium) — all vehicles are eligible.
  */
 export function computeVehicleClass(attrs: VehicleAttributes): EligibilityResult {
   return {
@@ -72,7 +72,7 @@ export function computeVehicleClass(attrs: VehicleAttributes): EligibilityResult
       {
         rule: 'standard_ride',
         passed: true,
-        detail: 'All approved vehicles are eligible for the Standard Ride',
+        detail: 'All approved vehicles are eligible for NetRide Premium',
       },
     ],
   };
@@ -80,7 +80,7 @@ export function computeVehicleClass(attrs: VehicleAttributes): EligibilityResult
 
 /**
  * Given a vehicle CLASS, returns every ride type it is eligible to serve.
- * Only the Standard Ride is live, so every vehicle resolves to [CORE].
+ * Only NetRide Premium is live, so every vehicle resolves to [CORE].
  */
 export function getEligibleRideTypes(vehicleClass: VehicleClass | string): VehicleClass[] {
   return [VehicleClass.CORE];
@@ -93,7 +93,7 @@ export function getClassesThatCanServe(requested: VehicleClass | string): Vehicl
 
 /**
  * Validates that a driver's class is eligible for a ride type. Every
- * approved vehicle can serve the Standard Ride.
+ * approved vehicle can serve NetRide Premium.
  */
 export function isClassEligibleForVehicle(
   vehicleClass: VehicleClass | string,

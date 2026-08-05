@@ -5,14 +5,12 @@ import '../theme/app_theme.dart';
 class TripCompletedDialog extends StatefulWidget {
   final double fareAmount;
   final double tipAmount;
-  final double? initialMaxFare;
   final bool isDriver;
 
   const TripCompletedDialog({
     super.key,
     required this.fareAmount,
     this.tipAmount = 0.0,
-    this.initialMaxFare,
     required this.isDriver,
   });
 
@@ -50,11 +48,6 @@ class _TripCompletedDialogState extends State<TripCompletedDialog> {
     } else {
       subtitle = "Final fare: \$${widget.fareAmount.toStringAsFixed(2)}";
     }
-
-    final showSavings = !widget.isDriver && 
-        widget.initialMaxFare != null && 
-        widget.initialMaxFare! > widget.fareAmount;
-    final savingsAmount = showSavings ? (widget.initialMaxFare! - widget.fareAmount) : 0.0;
 
     return PopScope(
       canPop: false,
@@ -121,36 +114,6 @@ class _TripCompletedDialogState extends State<TripCompletedDialog> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (showSavings) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.successGreen.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppTheme.successGreen.withOpacity(0.3)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.savings_outlined,
-                              color: AppTheme.primaryBrandGreen,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              "You saved \$${savingsAmount.toStringAsFixed(2)}!",
-                              style: const TextStyle(
-                                color: AppTheme.primaryBrandGreen,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
                     const SizedBox(height: 28),
                     SizedBox(
                       width: double.infinity,

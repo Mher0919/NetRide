@@ -33,6 +33,10 @@ import geospatialRoutes from './modules/geospatial/geospatial.routes';
 import navigationRoutes from './modules/navigation/navigation.routes';
 import routingRoutes from './modules/routing/routing.routes';
 import adminRoutes from './modules/admin/admin.routes';
+import adminRewardsRoutes from './modules/admin/admin-rewards.routes';
+import creditsRoutes from './modules/credits/credits.routes';
+import promoRoutes from './modules/promo/promo.routes';
+import referralRoutes from './modules/referral/referral.routes';
 import routingApi from './routing/api/routing-api';
 import pushRoutes from './modules/push/push.routes';
 import placesRoutes from './modules/places/places.routes';
@@ -167,6 +171,10 @@ app.use('/api/navigation', navigationRoutes);
 app.use('/api/routing', routingRoutes);
 app.use('/api/routing', routingApi);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminRewardsRoutes);
+app.use('/api/credits', creditsRoutes);
+app.use('/api/promo', promoRoutes);
+app.use('/api/referral', referralRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/places', placesRoutes);
@@ -526,6 +534,16 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ Ride route store schema (034) applied');
+    }
+
+    // Partner + promo + referral + ride credits ecosystem (037)
+    const hasPartners = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'partners'");
+    if (hasPartners.rowCount === 0) {
+      console.log('⚡ Applying partner/promo/referral/credits schema (037)...');
+      const schemaPath = path.join(__dirname, '../migrations/037_partner_promo_referral_credits.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Partner/promo/referral/credits schema (037) applied');
     }
 
     console.log('🚀 All migrations completed');

@@ -125,6 +125,30 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     user: { max: 30, windowMs: MINUTE },
     ip: { max: 60, windowMs: MINUTE },
   },
+
+  // Rewards ecosystem — strict anti-abuse limits
+  'POST /api/referral/scan': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 30, windowMs: HOUR },
+  },
+  'POST /api/promo/validate': {
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 120, windowMs: MINUTE },
+  },
+  'GET /api/credits': {
+    user: { max: 60, windowMs: MINUTE },
+  },
+  'GET /api/referral': {
+    user: { max: 60, windowMs: MINUTE },
+  },
+  'POST /api/admin/partners': {
+    user: { max: 30, windowMs: MINUTE },
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'POST /api/admin/credits/grant': {
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 120, windowMs: MINUTE },
+  },
 };
 
 export const DEFAULT_USER_LIMIT: RateLimitRule = { max: 100, windowMs: MINUTE };

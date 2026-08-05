@@ -20,9 +20,9 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 async function main() {
-  // 1. Config from the seeded singleton row.
-  const config = await pricingService.getConfig(true);
-  check('getConfig loads seeded singleton from DB', config.base_fare === 3.5 && config.per_km_rate === 1.5 && config.booking_fee === 1.5 && config.tax_rate === 0.0875, `base=${config.base_fare}`);
+  // 1. Config from the seeded PREMIUM pricing profile row.
+  const config = await pricingService.getConfig('PREMIUM', true);
+  check('getConfig loads seeded PREMIUM profile from DB', config.code === 'PREMIUM' && config.base_fare === 3.5 && config.per_km_rate === 1.5 && config.booking_fee === 1.5 && config.tax_rate === 0.0875, `code=${config.code} base=${config.base_fare}`);
 
   // 2. Market conditions from Redis + DB counters.
   const market = await computeMarketConditions();

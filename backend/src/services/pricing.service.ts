@@ -7,26 +7,35 @@
 // pricing has been removed — the platform owns pricing end to end.
 //
 // Design goals:
-//  - Config-driven:  all rates live in the `pricing_configurations` table
-//                    (singleton row, id = 1) with a short in-memory cache.
-//  - Deterministic:  identical inputs always yield identical outputs.
-//  - Explainable:    every multiplier carries a human-readable reason.
-//  - Fast:           the routing hot path never touches the DB or Redis —
-//                    config + market conditions are cached in memory and
-//                    refreshed by a periodic job.
-//  - Snapshot-able:  every ride persists a price snapshot (distance, ETA,
-//                    multiplier breakdown, config, final fare) so the fare
-//                    quoted at request time is the fare charged at accept
-//                    time — booking, payout, and payment all agree.
+//  - Profile-driven:  every rate lives in a named `pricing_profiles` row
+//                     (code = ride category, currently only PREMIUM).
+//                     Profiles are configuration, never code — adding a new
+//                     ride category (STANDARD / BLACK / XL / LUXURY) is an
+//                     INSERT plus a label; the engine does not change.
+//  - Deterministic:   identical inputs always yield identical outputs.
+//  - Explainable:     every multiplier carries a human-readable reason.
+//  - Fast:            the routing hot path never touches the DB or Redis —
+//                     config + market conditions are cached in memory and
+//                     refreshed by a periodic job.
+//  - Independent:     fares are derived solely from NetRide's own profiles.
+//                     No competitor pricing is consulted anywhere.
+//  - Snapshot-able:   every ride persists a price snapshot (distance, ETA,
+//                     multiplier breakdown, profile, final fare) so the fare
+//                     quoted at request time is the fare charged at accept
+//                     time — booking, payout, and payment all agree.
 
 import { pool } from '../config/database';
 import { redis, DRIVER_LOCATIONS_KEY } from '../config/redis';
 
 // ---------------------------------------------------------------------------
-// 1. CONFIG
+// 1. PRICING PROFILES
 // ---------------------------------------------------------------------------
 
 export interface PricingConfig {
+  /** Stable ride-category code (e.g. 'PREMIUM'). */
+  code: string;
+  /** UI-facing category label (e.g. 'NetRide Premium'). */
+  label: string;
   /** Flat fare per ride (USD). */
   base_fare: number;
   /** Rate per kilometer (USD). */
@@ -47,10 +56,21 @@ export interface PricingConfig {
   peak_time_multiplier: number;
   /** Time-of-day multiplier off-peak (<= 1.0). */
   off_peak_multiplier: number;
+  /** Profile-level weather multiplier (1.0 = weather has no effect). */
+  weather_multiplier: number;
+  /** Profile-level pickup-area multiplier (1.0 = uniform pricing). */
+  location_multiplier: number;
+  /** Profile-level fleet multiplier (1.0 = standard fleet). */
+  fleet_multiplier: number;
 }
 
-/** Fallback used when the DB row is missing/unreachable. */
+/**
+ * Fallback profile used when the DB row is missing/unreachable. This is the
+ * live PREMIUM profile — the only ride category currently exposed.
+ */
 export const DEFAULT_PRICING_CONFIG: PricingConfig = {
+  code: 'PREMIUM',
+  label: 'NetRide Premium',
   base_fare: 3.50,
   per_km_rate: 1.50,
   per_minute_rate: 0.35,
@@ -61,11 +81,13 @@ export const DEFAULT_PRICING_CONFIG: PricingConfig = {
   max_demand_multiplier: 2.00,
   peak_time_multiplier: 1.25,
   off_peak_multiplier: 0.95,
+  weather_multiplier: 1.00,
+  location_multiplier: 1.00,
+  fleet_multiplier: 1.00,
 };
 
 const CONFIG_CACHE_TTL_MS = 60_000;
-let cachedConfig: PricingConfig = DEFAULT_PRICING_CONFIG;
-let cachedConfigAt = 0;
+const cachedConfigs = new Map<string, { config: PricingConfig; at: number }>();
 
 function normalizeConfig(raw: any): PricingConfig {
   const num = (v: any, d: number) => {
@@ -73,6 +95,8 @@ function normalizeConfig(raw: any): PricingConfig {
     return Number.isFinite(n) ? n : d;
   };
   return {
+    code: (raw.code ?? DEFAULT_PRICING_CONFIG.code).toString().toUpperCase(),
+    label: (raw.label ?? DEFAULT_PRICING_CONFIG.label).toString(),
     base_fare: num(raw.base_fare, DEFAULT_PRICING_CONFIG.base_fare),
     per_km_rate: num(raw.per_km_rate, DEFAULT_PRICING_CONFIG.per_km_rate),
     per_minute_rate: num(raw.per_minute_rate, DEFAULT_PRICING_CONFIG.per_minute_rate),
@@ -83,27 +107,63 @@ function normalizeConfig(raw: any): PricingConfig {
     max_demand_multiplier: num(raw.max_demand_multiplier, DEFAULT_PRICING_CONFIG.max_demand_multiplier),
     peak_time_multiplier: num(raw.peak_time_multiplier, DEFAULT_PRICING_CONFIG.peak_time_multiplier),
     off_peak_multiplier: num(raw.off_peak_multiplier, DEFAULT_PRICING_CONFIG.off_peak_multiplier),
+    weather_multiplier: num(raw.weather_multiplier, DEFAULT_PRICING_CONFIG.weather_multiplier),
+    location_multiplier: num(raw.location_multiplier, DEFAULT_PRICING_CONFIG.location_multiplier),
+    fleet_multiplier: num(raw.fleet_multiplier, DEFAULT_PRICING_CONFIG.fleet_multiplier),
   };
 }
 
 /**
- * Refreshes the in-memory config from the DB. Never throws — falls back to
+ * Refreshes the in-memory profile from the DB. Never throws — falls back to
  * defaults on any failure so the hot path can never be blocked.
+ *
+ * @param profileCode ride-category code (defaults to the live PREMIUM profile)
+ * @param force       bypass the 60s in-memory cache
  */
-export async function getConfig(force = false): Promise<PricingConfig> {
-  if (!force && Date.now() - cachedConfigAt < CONFIG_CACHE_TTL_MS) {
-    return cachedConfig;
+export async function getConfig(profileCode = 'PREMIUM', force = false): Promise<PricingConfig> {
+  const key = profileCode.toUpperCase();
+  const entry = cachedConfigs.get(key);
+  if (!force && entry && Date.now() - entry.at < CONFIG_CACHE_TTL_MS) {
+    return entry.config;
   }
   try {
-    const res = await pool.query('SELECT * FROM pricing_configurations WHERE id = 1');
+    const res = await pool.query(
+      'SELECT * FROM pricing_profiles WHERE code = $1 AND active = TRUE',
+      [key],
+    );
     if (res.rows.length > 0) {
-      cachedConfig = normalizeConfig(res.rows[0]);
-      cachedConfigAt = Date.now();
+      cachedConfigs.set(key, { config: normalizeConfig(res.rows[0]), at: Date.now() });
     }
   } catch (err: any) {
-    console.warn(`[PRICING] ⚠️ Config load failed (using defaults): ${err.message}`);
+    console.warn(`[PRICING] ⚠️ Profile load failed for ${key} (using defaults): ${err.message}`);
   }
-  return cachedConfig;
+  const fallback = cachedConfigs.get(key);
+  if (fallback) return fallback.config;
+  return { ...DEFAULT_PRICING_CONFIG, code: key };
+}
+
+/**
+ * Lists every active profile — used by admin surfaces. The engine stays
+ * profile-agnostic; adding a ride category never touches pricing logic.
+ */
+export async function getProfiles(): Promise<PricingConfig[]> {
+  try {
+    const res = await pool.query(
+      'SELECT * FROM pricing_profiles WHERE active = TRUE ORDER BY code',
+    );
+    return res.rows.map(normalizeConfig);
+  } catch (err: any) {
+    console.warn(`[PRICING] ⚠️ Profile listing failed: ${err.message}`);
+    return [{ ...DEFAULT_PRICING_CONFIG }];
+  }
+}
+
+/**
+ * The currently cached live profile (PREMIUM) — used by the synchronous hot
+ * path (estimates) and the market refresher. Never throws.
+ */
+function currentConfig(): PricingConfig {
+  return cachedConfigs.get('PREMIUM')?.config ?? DEFAULT_PRICING_CONFIG;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +252,7 @@ export async function computeMarketConditions(now: Date = new Date()): Promise<M
   const timeDemand = Math.min(1, morning + evening);
 
   // Apply the configured bounds (defaults: peak ×1.25, off-peak ×0.95).
-  const config = cachedConfig;
+  const config = currentConfig();
   const timeMultiplier = round2(clamp(
     1 + (timeDemand - 0.4) * 1.0,
     config.off_peak_multiplier,
@@ -229,7 +289,7 @@ export function getMarket(): MarketConditions {
  */
 export async function refreshMarketConditions(): Promise<MarketConditions> {
   try {
-    await getConfig(true);
+    await getConfig('PREMIUM', true);
   } catch { /* config refresh is best-effort */ }
   const market = await computeMarketConditions();
   currentMarket = market;
@@ -265,6 +325,9 @@ export interface FareInput {
 export interface MultiplierBreakdown {
   demandMultiplier: number;
   timeMultiplier: number;
+  fleetMultiplier: number;
+  weatherMultiplier: number;
+  locationMultiplier: number;
   totalMultiplier: number;
   reasons: string[];
 }
@@ -274,7 +337,7 @@ export interface FareBreakdown {
   distanceFare: number;
   timeFare: number;
   bookingFee: number;
-  /** Combined demand × time multiplier (surge). */
+  /** Combined demand × time × fleet × weather × location multiplier. */
   surgeMultiplier: number;
   serviceFee: number;
   taxes: number;
@@ -290,17 +353,35 @@ export interface FareBreakdown {
  */
 export function computeFare(
   input: FareInput,
-  config: PricingConfig = cachedConfig,
+  config: PricingConfig = currentConfig(),
   market: MarketConditions = currentMarket,
 ): FareBreakdown {
   const distanceKm = input.distanceMeters / 1000;
   const durationMinutes = input.durationSeconds / 60;
 
-  const totalMultiplier = clamp(
+  // Multiplier pipeline. Demand × time come from live market conditions;
+  // fleet, weather, and location come from the profile configuration. Every
+  // factor is non-negative and clamped to the profile's surge ceiling.
+  const demandTime = clamp(
     market.demandMultiplier * market.timeMultiplier,
     0.85,
     config.max_demand_multiplier,
   );
+  const fleetMultiplier = clamp(Math.max(0, config.fleet_multiplier), 0.85, config.max_demand_multiplier);
+  const weatherMultiplier = clamp(Math.max(0, config.weather_multiplier), 0.85, config.max_demand_multiplier);
+  const locationMultiplier = clamp(Math.max(0, config.location_multiplier), 0.85, config.max_demand_multiplier);
+  const totalMultiplier = round2(demandTime * fleetMultiplier * weatherMultiplier * locationMultiplier);
+
+  const reasons = [...market.reasons];
+  if (fleetMultiplier !== 1) {
+    reasons.push(`Fleet multiplier (${config.label}) → ×${fleetMultiplier.toFixed(2)}`);
+  }
+  if (weatherMultiplier !== 1) {
+    reasons.push(`Weather multiplier (${config.label}) → ×${weatherMultiplier.toFixed(2)}`);
+  }
+  if (locationMultiplier !== 1) {
+    reasons.push(`Pickup-area multiplier (${config.label}) → ×${locationMultiplier.toFixed(2)}`);
+  }
 
   const baseFare = config.base_fare;
   const distanceFare = distanceKm * config.per_km_rate;
@@ -319,7 +400,7 @@ export function computeFare(
     distanceFare: round2(distanceFare),
     timeFare: round2(timeFare),
     bookingFee: round2(bookingFee),
-    surgeMultiplier: round2(totalMultiplier),
+    surgeMultiplier: totalMultiplier,
     serviceFee: round2(serviceFee),
     taxes: round2(taxes),
     totalFare,
@@ -327,18 +408,21 @@ export function computeFare(
     multiplierBreakdown: {
       demandMultiplier: market.demandMultiplier,
       timeMultiplier: market.timeMultiplier,
-      totalMultiplier: round2(totalMultiplier),
-      reasons: market.reasons,
+      fleetMultiplier: round2(fleetMultiplier),
+      weatherMultiplier: round2(weatherMultiplier),
+      locationMultiplier: round2(locationMultiplier),
+      totalMultiplier,
+      reasons,
     },
   };
 }
 
 /**
  * Estimate entry point for the routing hot path — synchronous, in-memory,
- * never touches the DB/Redis.
+ * never touches the DB/Redis. Always prices the live PREMIUM profile.
  */
 export function computeEstimate(input: FareInput): FareBreakdown {
-  return computeFare(input, cachedConfig, currentMarket);
+  return computeFare(input, currentConfig(), currentMarket);
 }
 
 // ---------------------------------------------------------------------------
@@ -358,19 +442,24 @@ export interface PriceSnapshot {
 /**
  * Computes a fare with a fresh config and persists it as the ride's price
  * snapshot. Returns the breakdown so callers can store/emit the total.
+ *
+ * `client` (optional) runs the persist inside the caller's transaction so
+ * the snapshot commits atomically with the ride row + rewards.
  */
 export async function createPriceSnapshot(
   rideId: string,
   input: FareInput,
+  client?: any,
 ): Promise<FareBreakdown> {
-  const config = await getConfig(true);
+  const config = await getConfig('PREMIUM', true);
   const breakdown = computeFare(input, config, currentMarket);
 
   const distanceKm = round2(input.distanceMeters / 1000);
   const durationMinutes = round2(input.durationSeconds / 60);
 
   try {
-    await pool.query(
+    const db = client ?? pool;
+    await db.query(
       `INSERT INTO ride_price_snapshots
          (ride_id, distance_km, duration_minutes, multiplier_breakdown, config, final_fare)
        VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)

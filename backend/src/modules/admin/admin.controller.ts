@@ -128,7 +128,7 @@ export class AdminController {
 
   /**
    * Admin view of a driver's ride eligibility. NetRide operates a single
-   * Standard Ride — every approved vehicle is eligible.
+   * NetRide Premium — every approved vehicle is eligible.
    */
   static async getDriverRidePreferences(req: AuthRequest, res: Response) {
     const { id } = req.params;

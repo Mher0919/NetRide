@@ -31,6 +31,8 @@ dependencies:
   cached_network_image: ^3.4.1
   audioplayers: ^6.1.0
   confetti: ^0.8.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.1.1
 
 dev_dependencies:
   flutter_test:

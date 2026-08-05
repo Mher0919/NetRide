@@ -15,6 +15,8 @@ import '../services/route_cache_service.dart';
 import '../services/eta_cache_service.dart';
 import '../services/search_history_service.dart';
 import '../models/search_result.dart';
+import '../models/reward_models.dart';
+import '../services/rewards_service.dart';
 import 'address_search_delegate.dart';
 import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
@@ -47,7 +49,17 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _loadingEstimates = false;
   bool _requesting = false;
   double _estimateFare = 0.0;
+  double _estimateDurationSeconds = 0.0;
   bool _hasNavigatedToTrip = false;
+
+  // Rewards options at checkout (promo code + ride credits).
+  final TextEditingController _promoCodeController = TextEditingController();
+  bool _applyCredits = true;
+  int? _creditBalanceCents;
+  bool _creditBalanceLoaded = false;
+  PromoPreview? _promoPreview;
+  bool _promoChecking = false;
+  bool _promoApplied = false;
 
   @override
   void initState() {
@@ -114,6 +126,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   void dispose() {
     _positionSubscription?.cancel();
     _geohashTimer?.cancel();
+    _promoCodeController.dispose();
     super.dispose();
   }
 
@@ -406,6 +419,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     double backendFareTotal = 0.0,
     required String engine,
   }) {
+    _estimateDurationSeconds = durationSeconds;
     _estimateFare = backendFareTotal > 0
         ? backendFareTotal
         : _computeFare(
@@ -420,7 +434,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     Provider.of<RideProvider>(
       context,
       listen: false,
-    ).requestRide(_pickup!, _destination!);
+    ).requestRide(
+      _pickup!,
+      _destination!,
+      promoCode: _promoApplied ? _promoCodeController.text : null,
+      applyCredits: _applyCredits,
+    );
   }
 
   void _closePanel() {
@@ -434,6 +453,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _routePoints = [];
       _shouldFollowUser = true;
       _hasNavigatedToTrip = false;
+      _promoCodeController.clear();
+      _promoPreview = null;
+      _promoApplied = false;
     });
   }
 
@@ -785,6 +807,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               Column(
                 children: [
                   _buildRideCard(theme),
+                  _buildRewardsPanel(theme),
                   const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
@@ -799,7 +822,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         ),
                       ),
                       child: const Text(
-                        'Confirm Standard Ride',
+                        'Confirm NetRide Premium',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
@@ -816,8 +839,146 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
+  /// Lazy-loads the rider's credit balance once per session.
+  Future<void> _loadRewardsOptions() async {
+    if (_creditBalanceLoaded) return;
+    try {
+      final account = await RewardsService.getCredits();
+      if (!mounted) return;
+      setState(() {
+        _creditBalanceCents = account.balanceCents;
+        _creditBalanceLoaded = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _creditBalanceLoaded = true);
+    }
+  }
+
+  Future<void> _validatePromo() async {
+    final code = _promoCodeController.text.trim();
+    if (code.isEmpty) return;
+    setState(() {
+      _promoChecking = true;
+      _promoPreview = null;
+    });
+    try {
+      final preview = await RewardsService.validatePromo(
+        code,
+        distanceMeters: null,
+        durationSeconds: null,
+      );
+      if (!mounted) return;
+      setState(() {
+        _promoPreview = preview;
+        _promoChecking = false;
+        _promoApplied = preview.valid;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _promoChecking = false;
+        _promoApplied = false;
+      });
+    }
+  }
+
+  /// Compact promo + credits options shown at checkout.
+  Widget _buildRewardsPanel(ThemeData theme) {
+    if (!_creditBalanceLoaded) _loadRewardsOptions();
+
+    final balanceCents = _creditBalanceCents ?? 0;
+    final balanceLabel = balanceCents > 0 ? formatCents(balanceCents) : null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFD8D2CA)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.local_offer_outlined, size: 18, color: Color(0xFF5B7760)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _promoCodeController,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    hintText: 'Promo code',
+                    isDense: true,
+                    border: InputBorder.none,
+                  ),
+                  style: const TextStyle(fontSize: 14, color: Color(0xFF2F3A32)),
+                  onSubmitted: (_) => _validatePromo(),
+                ),
+              ),
+              if (_promoChecking)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5B7760)),
+                )
+              else if (_promoApplied)
+                const Icon(Icons.check_circle_rounded, color: Color(0xFF6E8B74), size: 20)
+              else
+                TextButton(
+                  onPressed: _validatePromo,
+                  child: const Text('Apply'),
+                ),
+            ],
+          ),
+          if (_promoPreview != null && _promoCodeController.text.trim().isNotEmpty) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _promoPreview!.valid
+                      ? '${_promoPreview!.discountLabel ?? 'Discount'} applied'
+                      : _promoPreview!.reason ?? 'Promo not available',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _promoPreview!.valid ? const Color(0xFF6E8B74) : const Color(0xFFC65A5A),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const Divider(height: 1),
+          Row(
+            children: [
+              const Icon(Icons.account_balance_wallet_outlined, size: 18, color: Color(0xFF5B7760)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  balanceLabel != null
+                      ? 'Use ride credits ($balanceLabel available)'
+                      : 'Use ride credits',
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF2F3A32)),
+                ),
+              ),
+              Switch(
+                value: _applyCredits,
+                activeTrackColor: const Color(0xFF5B7760),
+                onChanged: (v) => setState(() => _applyCredits = v),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRideCard(ThemeData theme) {
     final price = _estimateFare;
+    final etaMinutes = (_estimateDurationSeconds / 60).round().clamp(1, 99);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -837,9 +998,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
-              Icons.directions_car_filled_outlined,
+              Icons.airport_shuttle_outlined,
               color: Colors.white,
-              size: 24,
+              size: 26,
             ),
           ),
           const SizedBox(width: 14),
@@ -848,7 +1009,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Standard Ride',
+                  'NetRide Premium',
                   style: TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: 15,
@@ -857,11 +1018,20 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 ),
                 SizedBox(height: 2),
                 Text(
-                  'Every vehicle, one reliable fare',
+                  'Premium SUV or executive vehicle',
                   style: TextStyle(
                     fontSize: 11.5,
                     color: Colors.grey,
                     fontWeight: FontWeight.w500,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Professional driver · Upfront fare',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF5B7760),
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -871,7 +1041,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                'Est.',
+                'Est. · ~$etaMinutes min',
                 style: TextStyle(
                   fontSize: 10,
                   color: Colors.grey.shade500,

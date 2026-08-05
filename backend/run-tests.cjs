@@ -12,6 +12,7 @@ require('ts-node').register({
   compilerOptions: { module: 'commonjs', esModuleInterop: true },
 });
 require('./src/modules/routing/__tests__/routing.unit.test.ts');
+require('./src/modules/rewards/__tests__/rewards.unit.test.ts');
 
 // ioredis keeps the event loop alive while retrying a dead host; force a
 // clean exit once the test run finishes.

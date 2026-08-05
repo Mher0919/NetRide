@@ -47,6 +47,34 @@ test('computeFare applies the combined demand × time multiplier', () => {
   assert.ok(Math.abs(peak.surgeMultiplier - 1.875) < 0.01, `surge=${peak.surgeMultiplier}`);
 });
 
+test('computeFare applies profile fleet/weather/location multipliers', () => {
+  const config = {
+    ...DEFAULT_PRICING_CONFIG,
+    fleet_multiplier: 1.10,
+    weather_multiplier: 1.05,
+    location_multiplier: 1.02,
+  };
+  const fare = computeFare({ distanceMeters: 5000, durationSeconds: 600 }, config, NEUTRAL_MARKET);
+  // 1.0 × 1.10 × 1.05 × 1.02 = 1.1781 → 1.18
+  assert.ok(Math.abs(fare.surgeMultiplier - 1.18) < 0.01, `surge=${fare.surgeMultiplier}`);
+  assert.equal(fare.multiplierBreakdown.fleetMultiplier, 1.10);
+  assert.equal(fare.multiplierBreakdown.weatherMultiplier, 1.05);
+  assert.equal(fare.multiplierBreakdown.locationMultiplier, 1.02);
+});
+
+test('computeFare explains profile multipliers in reasons when active', () => {
+  const config = {
+    ...DEFAULT_PRICING_CONFIG,
+    fleet_multiplier: 1.10,
+    weather_multiplier: 1.00,
+    location_multiplier: 1.00,
+  };
+  const fare = computeFare({ distanceMeters: 3000, durationSeconds: 300 }, config, NEUTRAL_MARKET);
+  const allReasons = fare.multiplierBreakdown.reasons.join(' ');
+  assert.ok(allReasons.includes('Fleet multiplier'), allReasons);
+  assert.ok(!allReasons.includes('Weather multiplier'), allReasons);
+});
+
 test('computeFare clamps the multiplier to max_demand_multiplier', () => {
   const extreme = {
     ...PEAK_MARKET,
