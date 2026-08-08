@@ -142,6 +142,67 @@ class CreditTransaction {
   }
 }
 
+class WalletAccount {
+  final String userId;
+  final int balanceCents;
+  final int lifetimeDepositedCents;
+  final int lifetimeSpentCents;
+
+  const WalletAccount({
+    required this.userId,
+    required this.balanceCents,
+    required this.lifetimeDepositedCents,
+    required this.lifetimeSpentCents,
+  });
+
+  factory WalletAccount.fromJson(Map<String, dynamic> json) {
+    return WalletAccount(
+      userId: json['user_id'] as String? ?? '',
+      balanceCents: json['balance_cents'] as int? ?? 0,
+      lifetimeDepositedCents: json['lifetime_deposited_cents'] as int? ?? 0,
+      lifetimeSpentCents: json['lifetime_spent_cents'] as int? ?? 0,
+    );
+  }
+}
+
+class WalletTransaction {
+  final String id;
+  final int amountCents;
+  final String type;
+  final String? referenceType;
+  final String? referenceId;
+  final String? rideId;
+  final String? description;
+  final int balanceAfterCents;
+  final DateTime createdAt;
+
+  const WalletTransaction({
+    required this.id,
+    required this.amountCents,
+    required this.type,
+    this.referenceType,
+    this.referenceId,
+    this.rideId,
+    this.description,
+    required this.balanceAfterCents,
+    required this.createdAt,
+  });
+
+  factory WalletTransaction.fromJson(Map<String, dynamic> json) {
+    return WalletTransaction(
+      id: json['id'] as String? ?? '',
+      amountCents: json['amount_cents'] as int? ?? 0,
+      type: json['type'] as String? ?? '',
+      referenceType: json['reference_type'] as String?,
+      referenceId: json['reference_id'] as String?,
+      rideId: json['ride_id'] as String?,
+      description: json['description'] as String?,
+      balanceAfterCents: json['balance_after_cents'] as int? ?? 0,
+      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ?? DateTime.now(),
+    );
+  }
+}
+
 class PromoPreview {
   final bool valid;
   final String? code;

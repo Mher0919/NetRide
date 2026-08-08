@@ -155,68 +155,16 @@ export class RideService {
       const distanceKm = route ? (route.distance / 1000) : 10.0;
       const etaSeconds = route ? route.eta : 600;
 
-      const hasRewards = !!(rewards.promoCode && String(rewards.promoCode).trim()) || rewards.applyCredits === true;
-
+      // Every ride request runs through one transactional path: ride INSERT
+      // + price snapshot + promo/credits/wallet all commit atomically. A
+      // failed promo/credits application aborts the entire request so the
+      // rider can fix the code and re-request. The wallet is the default
+      // payment method — it is charged the fare remaining after discounts.
+      const client = await pool.connect();
       let tripId: string;
-      if (hasRewards) {
-        // Rewards path: ride INSERT + price snapshot + promo + credits all
-        // commit atomically. A failed promo/credits application aborts the
-        // entire request so the rider can fix the code and re-request.
-        const client = await pool.connect();
-        try {
-          await client.query('BEGIN');
-          const res = await client.query(
-            `INSERT INTO rides (
-              rider_id, status, pickup_lat, pickup_lng, pickup_address,
-              destination_lat, destination_lng, destination_address,
-              requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
-              distance_meters, duration_seconds, idempotency_key
-            )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-             RETURNING id`,
-            [
-              riderId,
-              TripStatus.REQUESTED,
-              pickup.lat,
-              pickup.lng,
-              pickup.address,
-              destination.lat,
-              destination.lng,
-              destination.address,
-              'CORE',
-              snapshotRating,
-              scheduledAt || null,
-              isScheduled,
-              route ? Math.round(route.distance) : null,
-              etaSeconds,
-              idempotencyKey || null
-            ]
-          );
-          tripId = res.rows[0].id;
-
-          const breakdown = await createPriceSnapshot(tripId, {
-            distanceMeters: route ? route.distance : distanceKm * 1000,
-            durationSeconds: etaSeconds,
-          }, client);
-
-          await RewardEngine.applyToRideRequest(client, {
-            riderId,
-            rideId: tripId,
-            fareCents: Math.round(breakdown.totalFare * 100),
-            promoCode: rewards.promoCode,
-            applyCredits: rewards.applyCredits,
-            creditUseCents: rewards.creditUseCents,
-          });
-
-          await client.query('COMMIT');
-        } catch (err) {
-          try { await client.query('ROLLBACK'); } catch { /* noop */ }
-          throw err;
-        } finally {
-          client.release();
-        }
-      } else {
-        const res = await pool.query(
+      try {
+        await client.query('BEGIN');
+        const res = await client.query(
           `INSERT INTO rides (
             rider_id, status, pickup_lat, pickup_lng, pickup_address,
             destination_lat, destination_lng, destination_address,
@@ -224,7 +172,7 @@ export class RideService {
             distance_meters, duration_seconds, idempotency_key
           )
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-           RETURNING *`,
+           RETURNING id`,
           [
             riderId,
             TripStatus.REQUESTED,
@@ -244,22 +192,31 @@ export class RideService {
           ]
         );
         tripId = res.rows[0].id;
+
+        const breakdown = await createPriceSnapshot(tripId, {
+          distanceMeters: route ? route.distance : distanceKm * 1000,
+          durationSeconds: etaSeconds,
+        }, client);
+
+        await RewardEngine.applyToRideRequest(client, {
+          riderId,
+          rideId: tripId,
+          fareCents: Math.round(breakdown.totalFare * 100),
+          promoCode: rewards.promoCode,
+          applyCredits: rewards.applyCredits,
+          creditUseCents: rewards.creditUseCents,
+        });
+
+        await client.query('COMMIT');
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch { /* noop */ }
+        throw err;
+      } finally {
+        client.release();
       }
 
       const trip = await RideRepository.findById(tripId);
       if (!trip) throw new Error('Failed to create trip record');
-
-      if (!hasRewards) {
-        // Calculate the platform price and persist it as the ride's price
-        // snapshot. The fare quoted here is the fare charged at accept time.
-        // (The rewards path already snapshotted inside its transaction.)
-        const fareStart = Date.now();
-        const breakdown = await createPriceSnapshot(trip.id, {
-          distanceMeters: route ? route.distance : distanceKm * 1000,
-          durationSeconds: etaSeconds,
-        });
-        console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms (total=$${breakdown.totalFare})`);
-      }
 
       if (route) {
         (trip as any).route_geometry = route.geometry;

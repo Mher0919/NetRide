@@ -354,6 +354,24 @@ export async function pushCreditsApplied(
   });
 }
 
+/** The rider wallet was charged for a ride. */
+export async function pushWalletCharged(
+  riderId: string,
+  amountCents: number,
+  rideId: string
+): Promise<boolean> {
+  return sendPush(riderId, 'rider', {
+    title: 'Wallet payment',
+    body: `$${(amountCents / 100).toFixed(2)} was paid from your wallet`,
+    data: {
+      type: 'wallet_charged',
+      amountCents: String(amountCents),
+      rideId,
+    },
+    channelId: 'wallet',
+  });
+}
+
 /** A promo code was accepted on a ride. */
 export async function pushPromoAccepted(
   riderId: string,

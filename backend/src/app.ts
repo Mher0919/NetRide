@@ -37,6 +37,7 @@ import adminRewardsRoutes from './modules/admin/admin-rewards.routes';
 import creditsRoutes from './modules/credits/credits.routes';
 import promoRoutes from './modules/promo/promo.routes';
 import referralRoutes from './modules/referral/referral.routes';
+import walletRoutes from './modules/wallet/wallet.routes';
 import routingApi from './routing/api/routing-api';
 import pushRoutes from './modules/push/push.routes';
 import placesRoutes from './modules/places/places.routes';
@@ -175,6 +176,7 @@ app.use('/api/admin', adminRewardsRoutes);
 app.use('/api/credits', creditsRoutes);
 app.use('/api/promo', promoRoutes);
 app.use('/api/referral', referralRoutes);
+app.use('/api/wallet', walletRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/places', placesRoutes);
@@ -554,6 +556,16 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ Referral onboarding/device schema (038) applied');
+    }
+
+    // Rider wallet — default fare payment method (039)
+    const hasWallets = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'rider_wallets'");
+    if (hasWallets.rowCount === 0) {
+      console.log('⚡ Applying rider wallet schema (039)...');
+      const schemaPath = path.join(__dirname, '../migrations/039_rider_wallet.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Rider wallet schema (039) applied');
     }
 
     console.log('🚀 All migrations completed');

@@ -18,6 +18,7 @@ import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
 import 'settings_screen.dart';
 import 'credits_screen.dart';
+import 'wallet_screen.dart';
 import 'referral_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -512,6 +513,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const Divider(height: 32),
                   _buildMenuTile(
+                    icon: Icons.wallet_rounded,
+                    title: 'Wallet & transactions',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const WalletScreen()),
+                    ),
+                  ),
+                  const Divider(height: 32),
+                  _buildMenuTile(
                     icon: Icons.card_giftcard_rounded,
                     title: 'Invite friends — earn \$5',
                     onTap: () => Navigator.push(
@@ -660,79 +670,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// Unified balance card: Ride Credits is the rider's balance in this
-  /// product (a separate cash wallet does not exist for riders yet). The
-  /// backend credit ledger is the single source of truth.
+  /// Two balances shown together: the rider wallet (default fare payment
+  /// method) and ride credits (a discount on top, earned via referrals).
   Widget _buildBalanceCard() {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF2F3A32), Color(0xFF46584B)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return Column(
+      children: [
+        // Wallet card.
+        _BalanceCard<WalletAccount>(
+          icon: Icons.wallet_rounded,
+          gradientColors: const [Color(0xFF2F3A32), Color(0xFF46584B)],
+          future: RewardsService.getWallet(),
+          balanceText: (a) => formatCents(a.balanceCents),
+          metaText: (a) => '\$${a.lifetimeDepositedCents / 100} added all-time',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const WalletScreen()),
+          ),
         ),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: FutureBuilder<CreditAccount>(
-        future: RewardsService.getCredits(),
-        builder: (context, snapshot) {
-          final account = snapshot.data;
-          final balance = account?.balanceCents ?? 0;
-          final lifetime = account?.lifetimeEarnedCents ?? 0;
-          return Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.account_balance_wallet_rounded,
-                  color: Color(0xFFE8D9B5),
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Your balance',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFD8D2CA),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      snapshot.connectionState == ConnectionState.waiting && account == null
-                          ? '\$ —'
-                          : formatCents(balance),
-                      style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        height: 1.1,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Ride credits · \$${(lifetime / 100).toStringAsFixed(0)} earned all-time',
-                      style: const TextStyle(fontSize: 11, color: Color(0xFFD8D2CA)),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: Color(0xFFD8D2CA)),
-            ],
-          );
-        },
-      ),
+        const SizedBox(height: 14),
+        // Ride credits card.
+        _BalanceCard<CreditAccount>(
+          icon: Icons.account_balance_wallet_outlined,
+          gradientColors: const [Color(0xFF5B7760), Color(0xFF2F3A32)],
+          future: RewardsService.getCredits(),
+          balanceText: (a) => formatCents(a.balanceCents),
+          metaText: (a) => '\$${(a.lifetimeEarnedCents / 100).toStringAsFixed(0)} earned all-time',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const CreditsScreen()),
+          ),
+        ),
+      ],
     );
   }
 
@@ -849,6 +815,97 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(width: 8),
             Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.2)),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Generic tappable balance card (used for the wallet and ride-credits cards
+/// on the profile screen). The two account types only share `balanceCents`,
+/// so the row is parameterized with a type lambda instead of a shared base.
+class _BalanceCard<T> extends StatelessWidget {
+  final IconData icon;
+  final List<Color> gradientColors;
+  final Future<T> future;
+  final String Function(T) balanceText;
+  final String Function(T) metaText;
+  final VoidCallback onTap;
+
+  const _BalanceCard({
+    required this.icon,
+    required this.gradientColors,
+    required this.future,
+    required this.balanceText,
+    required this.metaText,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: gradientColors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: FutureBuilder<T>(
+          future: future,
+          builder: (context, snapshot) {
+            final account = snapshot.data;
+            final loading = snapshot.connectionState == ConnectionState.waiting && account == null;
+            return Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: const Color(0xFFE8D9B5), size: 22),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Your balance',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFD8D2CA),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        loading ? '\$ —' : account == null ? '' : balanceText(account),
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          height: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        loading ? '' : account == null ? '' : metaText(account),
+                        style: const TextStyle(fontSize: 11, color: Color(0xFFD8D2CA)),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: Color(0xFFD8D2CA)),
+              ],
+            );
+          },
         ),
       ),
     );

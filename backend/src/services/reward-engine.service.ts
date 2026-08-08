@@ -14,8 +14,9 @@
 import { pool } from '../config/database';
 import { applyPromoToRide, finalizePromoForCompletedRide, voidPromoForCancelledRide } from '../modules/promo/promo.service';
 import { CreditsService } from '../modules/credits/credits.service';
+import { WalletService } from '../modules/wallet/wallet.service';
 import { ReferralService } from '../modules/referral/referral.service';
-import { pushPromoAccepted, pushCreditsApplied } from './push-notification.service';
+import { pushPromoAccepted, pushCreditsApplied, pushWalletCharged } from './push-notification.service';
 
 export interface RideEvent {
   id: string;
@@ -27,9 +28,13 @@ export interface RideEvent {
 
 export class RewardEngine {
   /**
-   * Applies promo + credits to a ride at request time. Runs INSIDE the
-   * caller's transaction (client) so ride row + promo usage + credit
-   * ledger commit atomically.
+   * Applies promo + credits + wallet payment to a ride at request time.
+   * Runs INSIDE the caller's transaction (client) so ride row + promo usage
+   * + credit ledger + wallet ledger commit atomically.
+   *
+   * Payment order (server-authoritative): fare → promo discount → credits
+   * discount → wallet pays the rest (up to balance). The client never sends
+   * amounts — it only signals intent (promo code, credit amount hint).
    *
    * Returns the applied amounts, or throws a user-safe error when the
    * promo is invalid — the ride request fails so the rider can fix the
@@ -45,7 +50,7 @@ export class RewardEngine {
       applyCredits?: boolean;
       creditUseCents?: number;
     },
-  ): Promise<{ discountCents: number; creditsAppliedCents: number; finalPaymentCents: number }> {
+  ): Promise<{ discountCents: number; creditsAppliedCents: number; walletPaymentCents: number; finalPaymentCents: number }> {
     const { riderId, rideId, fareCents } = args;
     const promoCode = String(args.promoCode ?? '').trim().toUpperCase();
 
@@ -62,18 +67,27 @@ export class RewardEngine {
           capCents: args.creditUseCents,
         })
       : { appliedCents: 0, balanceCents: 0 };
-    const finalPaymentCents = Math.max(0, remaining - credits.appliedCents);
+    const dueAfterCredits = Math.max(0, remaining - credits.appliedCents);
+
+    // The wallet is the default payment method: it covers the remaining
+    // amount up to the available balance.
+    const wallet = await WalletService.chargeForRide(riderId, rideId, dueAfterCredits, {
+      client,
+    });
+    const finalPaymentCents = wallet.finalCents;
 
     await client.query(
       `UPDATE rides
        SET promo_id = $1, promo_code = $2, promo_discount_cents = $3,
-           credits_applied_cents = $4, final_payment_cents = $5
-       WHERE id = $6`,
+           credits_applied_cents = $4, wallet_payment_cents = $5,
+           final_payment_cents = $6
+       WHERE id = $7`,
       [
         promoApplied?.promo.id ?? null,
         promoApplied?.promo.code ?? null,
         discountCents,
         credits.appliedCents,
+        wallet.walletChargeCents,
         finalPaymentCents,
         rideId,
       ],
@@ -86,8 +100,16 @@ export class RewardEngine {
     if (credits.appliedCents > 0) {
       pushCreditsApplied(riderId, credits.appliedCents, rideId).catch(() => undefined);
     }
+    if (wallet.walletChargeCents > 0) {
+      pushWalletCharged(riderId, wallet.walletChargeCents, rideId).catch(() => undefined);
+    }
 
-    return { discountCents, creditsAppliedCents: credits.appliedCents, finalPaymentCents };
+    return {
+      discountCents,
+      creditsAppliedCents: credits.appliedCents,
+      walletPaymentCents: wallet.walletChargeCents,
+      finalPaymentCents,
+    };
   }
 
   /**
@@ -122,7 +144,8 @@ export class RewardEngine {
 
   /**
    * Called when a ride CANCELLED. Voids promo usage and refunds applied
-   * credits. Idempotent — refunds carry their own ledger keys.
+   * credits + the wallet payment. Idempotent — refunds carry their own
+   * ledger keys and rides gate re-refunds on refunded_at timestamps.
    */
   static async onRideCancelled(ride: RideEvent): Promise<void> {
     try {
@@ -141,6 +164,18 @@ export class RewardEngine {
       }
     } catch (err: any) {
       console.warn(`[REWARD] ⚠️ credits refund failed: ${err.message}`);
+    }
+    try {
+      const res = await pool.query(
+        `SELECT wallet_payment_cents FROM rides WHERE id = $1 AND wallet_refunded_at IS NULL AND wallet_payment_cents > 0`,
+        [ride.id],
+      );
+      if (res.rows.length > 0) {
+        await WalletService.refundRide(ride.rider_id, ride.id);
+        await pool.query(`UPDATE rides SET wallet_refunded_at = NOW() WHERE id = $1`, [ride.id]);
+      }
+    } catch (err: any) {
+      console.warn(`[REWARD] ⚠️ wallet refund failed: ${err.message}`);
     }
   }
 }

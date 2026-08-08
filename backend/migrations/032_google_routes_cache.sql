@@ -29,13 +29,11 @@ CREATE INDEX IF NOT EXISTS idx_route_cache_od
 
 -- Index for expiry sweeps
 CREATE INDEX IF NOT EXISTS idx_route_cache_expires
-  ON route_cache (expires_at)
-  WHERE expires_at < NOW();
+  ON route_cache (expires_at);
 
 -- Index for popularity-based cache eviction
 CREATE INDEX IF NOT EXISTS idx_route_cache_popularity
-  ON route_cache (access_count DESC)
-  WHERE expires_at > NOW();
+  ON route_cache (access_count DESC);
 
 -- Table for ETA cache (short TTL, traffic-aware)
 CREATE TABLE IF NOT EXISTS eta_cache (
@@ -56,8 +54,7 @@ CREATE INDEX IF NOT EXISTS idx_eta_cache_od
   ON eta_cache (origin_hex, dest_hex, is_traffic_aware);
 
 CREATE INDEX IF NOT EXISTS idx_eta_cache_expires
-  ON eta_cache (expires_at)
-  WHERE expires_at < NOW();
+  ON eta_cache (expires_at);
 
 -- Periodic cleanup function for expired cache entries
 CREATE OR REPLACE FUNCTION cleanup_route_caches()

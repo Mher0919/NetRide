@@ -121,6 +121,8 @@ model User {
 
   ride_credit_account   RideCreditAccount?     @relation("RideCreditAccount")
   credit_transactions   CreditTransaction[]    @relation("CreditTransactions")
+  rider_wallet          RiderWallet?           @relation("RiderWallet")
+  wallet_transactions   WalletTransaction[]    @relation("WalletTransactions")
   referral_code         ReferralCode?          @relation("ReferralCodeOwner")
   referrals_as_referrer ReferralRelationship[] @relation("ReferrerLinks")
   referred_as_user      ReferralRelationship?  @relation("ReferredUser")
@@ -308,6 +310,10 @@ model Ride {
   final_payment_cents   BigInt?   @default(0)
   credits_refunded_at   DateTime? @db.Timestamptz(6)
 
+  // --- 039: Rider wallet payment for this ride ---
+  wallet_payment_cents BigInt?   @default(0)
+  wallet_refunded_at   DateTime? @db.Timestamptz(6)
+
   created_at DateTime? @default(now()) @db.Timestamptz(6)
 
   rider          User?              @relation("RiderRides", fields: [rider_id], references: [id])
@@ -319,6 +325,7 @@ model Ride {
   promo        PromoCode?          @relation(fields: [promo_id], references: [id], onDelete: SetNull)
   promo_usages PromoUsage[]        @relation("RidePromoUsages")
   credit_tx    CreditTransaction[] @relation("CreditTxRide")
+  wallet_tx    WalletTransaction[] @relation("WalletTxRide")
   commission   PartnerCommission?  @relation("CommissionRide")
 
   @@index([status, created_at(sort: Desc)])
@@ -646,6 +653,39 @@ model CreditTransaction {
   @@index([user_id, created_at(sort: Desc)])
   @@index([type])
   @@map("credit_transactions")
+}
+
+model RiderWallet {
+  user_id                 String   @id @db.Uuid
+  balance_cents           BigInt   @default(0)
+  lifetime_deposited_cents BigInt  @default(0)
+  lifetime_spent_cents    BigInt   @default(0)
+  updated_at              DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation("RiderWallet", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("rider_wallets")
+}
+
+model WalletTransaction {
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id             String   @db.Uuid
+  amount_cents        BigInt
+  type                String
+  reference_type      String?
+  reference_id        String?  @db.Uuid
+  ride_id             String?  @db.Uuid
+  description         String?
+  balance_after_cents BigInt
+  idempotency_key     String?  @unique
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  user User  @relation("WalletTransactions", fields: [user_id], references: [id], onDelete: Cascade)
+  ride Ride? @relation("WalletTxRide", fields: [ride_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([type])
+  @@map("wallet_transactions")
 }
 
 model PartnerCommission {

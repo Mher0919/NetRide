@@ -89,6 +89,7 @@ AS $$
       p.subcategory,
       p.lat,
       p.lon,
+      p.popularity,
       ST_Distance(
         p.location,
         ST_SetSRID(ST_MakePoint(user_lon, user_lat), 4326)::geography
@@ -121,11 +122,11 @@ AS $$
     c.text_score,
     ROUND(
       (0.6 * GREATEST(c.text_score, CASE WHEN c.name ILIKE query_text THEN 0.8 ELSE 0.0 END)::DOUBLE PRECISION
-       + 0.4 * GREATEST(0.0, 1.0 - c.distance_miles / 50.0))::DOUBLE PRECISION,
+       + 0.4 * GREATEST(0.0, 1.0 - c.distance_miles / 50.0))::NUMERIC,
       4
     ) AS combined_score
   FROM candidates c
-  ORDER BY combined_score DESC, c.distance_miles ASC, c.popularity DESC
+  ORDER BY c.id, combined_score DESC, c.distance_miles ASC, c.popularity DESC
   LIMIT result_limit;
 $$;
 

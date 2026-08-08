@@ -32,8 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_ride_routes_ride
   ON ride_routes (ride_id);
 
 CREATE INDEX IF NOT EXISTS idx_ride_routes_expires
-  ON ride_routes (expires_at)
-  WHERE expires_at < NOW();
+  ON ride_routes (expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_ride_routes_od_h3
   ON ride_routes (origin_h3, dest_h3);

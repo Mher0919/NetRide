@@ -23,6 +23,7 @@ import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/luxury_car.dart';
 import '../components/animated_price.dart';
+import 'wallet_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -55,11 +56,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   double _estimateDurationSeconds = 0.0;
   bool _hasNavigatedToTrip = false;
 
-  // Rewards options at checkout (promo code + ride credits).
+  // Rewards options at checkout (promo code + ride credits + wallet).
   final TextEditingController _promoCodeController = TextEditingController();
   bool _applyCredits = true;
   int? _creditBalanceCents;
   bool _creditBalanceLoaded = false;
+  int? _walletBalanceCents;
+  bool _walletLoaded = false;
   PromoPreview? _promoPreview;
   bool _promoChecking = false;
   bool _promoApplied = false;
@@ -110,6 +113,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _fetchProfile();
     _startGeohashUpdates();
     _loadRecentSearches();
+    _loadRewardsOptions();
   }
 
   Future<void> _loadRecentSearches() async {
@@ -577,8 +581,20 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     return math.min(balance, math.min(afterPromo, requested));
   }
 
+  /// The wallet is the default payment method: it pays the fare remaining
+  /// after promo + credits, up to the available balance. (Display-only —
+  /// the backend authoritatively charges min(due, balance).)
+  int get _walletChargeCents {
+    final afterPromo = math.max(0, _fareCents - _promoDiscountCents);
+    final afterCredits = math.max(0, afterPromo - _creditsToUseCents);
+    final walletBalance = math.max(0, _walletBalanceCents ?? 0);
+    return math.min(afterCredits, walletBalance);
+  }
+
+  /// What the rider owes after the wallet charge. Mirrors the backend's
+  /// final_payment_cents: fare − promo − credits − wallet.
   int get _finalCents => math.max(
-      0, _fareCents - _promoDiscountCents - _creditsToUseCents);
+      0, _fareCents - _promoDiscountCents - _creditsToUseCents - _walletChargeCents);
 
   int get _totalSavedCents => _promoDiscountCents + _creditsToUseCents;
 
@@ -618,6 +634,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _creditAmountError = null;
     });
     _animateSheetTo(0);
+  }
+
+  void _openWalletScreen() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const WalletScreen(),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -1317,21 +1342,38 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  /// Lazy-loads the rider's credit balance once per session.
+  /// Loads the rider's credit balance AND wallet balance once per session.
+  /// Called from initState (not from build) so drag/rebuild frames never
+  /// trigger a network fetch.
   Future<void> _loadRewardsOptions() async {
-    if (_creditBalanceLoaded) return;
+    if (_creditBalanceLoaded && _walletLoaded) return;
     try {
-      final account = await RewardsService.getCredits();
+      final results = await Future.wait([
+        RewardsService.getCredits().then((a) => ('credits', a)),
+        RewardsService.getWallet().then((w) => ('wallet', w)),
+      ]);
       if (!mounted) return;
       setState(() {
-        _creditBalanceCents = account.balanceCents;
-        _creditBalanceLoaded = true;
-        // Default the manual amount to the full balance ("All").
-        _creditUseCents ??= account.balanceCents > 0 ? account.balanceCents : null;
+        for (final r in results) {
+          if (r.$1 == 'credits') {
+            final account = r.$2 as CreditAccount;
+            _creditBalanceCents = account.balanceCents;
+            _creditUseCents ??= account.balanceCents > 0 ? account.balanceCents : null;
+            _creditBalanceLoaded = true;
+          } else {
+            final wallet = r.$2 as WalletAccount;
+            _walletBalanceCents = wallet.balanceCents;
+            _walletLoaded = true;
+          }
+        }
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _creditBalanceLoaded = true);
+      // Mark loaded so we don't retry forever on auth/network errors.
+      setState(() {
+        _creditBalanceLoaded = true;
+        _walletLoaded = true;
+      });
     }
   }
 
@@ -1419,10 +1461,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  /// Compact promo + credits options shown at checkout.
+  /// Compact promo + credits + wallet options shown at checkout.
   Widget _buildRewardsPanel(ThemeData theme) {
-    if (!_creditBalanceLoaded) _loadRewardsOptions();
-
     final balanceCents = _creditBalanceCents ?? 0;
     final balanceLabel = balanceCents > 0 ? formatCents(balanceCents) : null;
     final requested = _creditUseCents ?? balanceCents;
@@ -1489,6 +1529,30 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
           ],
+          const Divider(height: 1),
+          // Wallet balance — the default fare payment method.
+          Row(
+            children: [
+              const Icon(Icons.wallet_rounded, size: 18, color: Color(0xFF5B7760)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _walletLoaded
+                      ? 'Wallet balance: ${formatCents(_walletBalanceCents ?? 0)}'
+                      : 'Loading wallet…',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF2F3A32),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _openWalletScreen,
+                child: const Text('View', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
           const Divider(height: 1),
           Row(
             children: [
@@ -1650,13 +1714,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  /// Part 3 — the single ride class card: 3D-style luxury car visual,
-  /// class details, ETA, and the shared animated price-reduction (identical
-  /// component for promo and credits so both flows look the same).
+  /// Part 3 — the single ride class card: premium luxury-SUV visual,
+  /// class details, ETA, and the animated price breakdown (fare → promo
+  /// → credits → wallet → what the rider pays).
   Widget _buildRideCard(ThemeData theme) {
     final fareCents = _fareCents;
     final finalCents = _finalCents;
     final savedCents = _totalSavedCents;
+    final walletCents = _walletChargeCents;
     final etaMinutes = (_estimateDurationSeconds / 60).round().clamp(1, 99);
 
     return Container(
@@ -1672,7 +1737,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         children: [
           Row(
             children: [
-              const LuxuryCarVisual(width: 84, height: 44),
+              RepaintBoundary(
+                child: const LuxuryCarVisual(width: 96, height: 50),
+              ),
               const SizedBox(width: 12),
               const Expanded(
                 child: Column(
@@ -1751,6 +1818,79 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               child: SavedBadge(cents: savedCents),
             ),
           ],
+          // Price breakdown: discounts + wallet payment, then the rider's
+          // final out-of-pocket total. Only shown when something is applied
+          // so the card stays quiet for a plain ride.
+          if (savedCents > 0 || walletCents > 0) ...[
+            const SizedBox(height: 10),
+            _priceBreakdownRow(
+              label: _promoDiscountCents > 0
+                  ? 'Promo ${_promoCodeController.text.trim().toUpperCase()}'
+                  : 'Promo',
+              amount: -_promoDiscountCents,
+              color: const Color(0xFF5B7760),
+            ),
+            _priceBreakdownRow(
+              label: 'Ride credits',
+              amount: -_creditsToUseCents,
+              color: const Color(0xFF5B7760),
+            ),
+            _priceBreakdownRow(
+              label: _walletLoaded
+                  ? 'Wallet payment'
+                  : 'Wallet',
+              amount: -walletCents,
+              isBold: true,
+              color: const Color(0xFF2F3A32),
+            ),
+            const SizedBox(height: 8),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            _priceBreakdownRow(
+              label: 'You pay',
+              amount: finalCents,
+              isBold: true,
+              priceStyle: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF2F3A32),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _priceBreakdownRow({
+    required String label,
+    required int amount,
+    bool isBold = false,
+    Color? color,
+    TextStyle? priceStyle,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
+              color: color ?? Colors.grey.shade700,
+            ),
+          ),
+          Text(
+            amount == 0 ? '' : formatCents(amount),
+            style: priceStyle ??
+                TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
+                  color: const Color(0xFF2F3A32),
+                ),
+          ),
         ],
       ),
     );

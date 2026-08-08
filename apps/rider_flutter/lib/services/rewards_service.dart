@@ -110,6 +110,26 @@ class RewardsService {
     return CreditAccount.fromJson(res.data as Map<String, dynamic>);
   }
 
+  /// Rider wallet balance (the default payment method for ride fares).
+  static Future<WalletAccount> getWallet() async {
+    final res = await ApiService.dio.get('wallet');
+    return WalletAccount.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  static Future<List<WalletTransaction>> getWalletTransactions({
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final res = await ApiService.dio.get('wallet/transactions', queryParameters: {
+      'limit': limit,
+      'offset': offset,
+    });
+    final raw = (res.data as Map<String, dynamic>)['transactions'] as List? ?? [];
+    return raw
+        .map((e) => WalletTransaction.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   static Future<List<CreditTransaction>> getCreditTransactions({
     int limit = 50,
     int offset = 0,
