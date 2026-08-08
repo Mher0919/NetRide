@@ -43,6 +43,7 @@ export class RewardEngine {
       fareCents: number;
       promoCode?: string | null;
       applyCredits?: boolean;
+      creditUseCents?: number;
     },
   ): Promise<{ discountCents: number; creditsAppliedCents: number; finalPaymentCents: number }> {
     const { riderId, rideId, fareCents } = args;
@@ -56,7 +57,10 @@ export class RewardEngine {
     const discountCents = promoApplied?.discountCents ?? 0;
     const remaining = Math.max(0, fareCents - discountCents);
     const credits = args.applyCredits
-      ? await CreditsService.applyToRide(riderId, rideId, remaining, { client })
+      ? await CreditsService.applyToRide(riderId, rideId, remaining, {
+          client,
+          capCents: args.creditUseCents,
+        })
       : { appliedCents: 0, balanceCents: 0 };
     const finalPaymentCents = Math.max(0, remaining - credits.appliedCents);
 

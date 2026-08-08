@@ -52,10 +52,10 @@ flutter:
     - .env
     - assets/images/logo.png
     - assets/images/logo-noBackground.png
-    - assets/sounds/countdown_tick.mp3
-    - assets/sounds/incoming_request.mp3
-    - assets/sounds/online.mp3
-    - assets/sounds/offline.mp3
+    - assets/sounds/countdown_tick.wav
+    - assets/sounds/incoming_request.wav
+    - assets/sounds/online.wav
+    - assets/sounds/offline.wav
     - assets/sounds/order_accepted.mp3
     - assets/sounds/order_cancelled.mp3
     - assets/sounds/trip_completed.mp3

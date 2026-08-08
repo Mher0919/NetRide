@@ -72,10 +72,12 @@ export const RequestRideSchema = z.object({
   scheduledAt: z.string().datetime().optional(),
   favoritePriority: z.boolean().optional(),
   idempotencyKey: z.string().uuid().optional(),
-  // Rewards ecosystem: promo code + "apply ride credits" opt-in. Validity
-  // is ALWAYS re-checked by the backend — these are just client hints.
+  // Rewards ecosystem: promo code + "apply ride credits" opt-in + an optional
+  // rider-chosen credit amount (cents). Validity is ALWAYS re-checked by the
+  // backend — these are just client hints.
   promoCode: z.string().trim().min(2).max(32).optional(),
   applyCredits: z.boolean().optional(),
+  creditUseCents: z.number().int().min(1).optional(),
 });
 
 export const RiderDestinationChangedSchema = z.object({

@@ -1,21 +1,30 @@
 # Sound assets — driver_flutter
 
-These MP3s are placeholders (0 bytes). Replace each with a real, licensed
-audio file before shipping.
+Sound effects backed by bundled audio via `audioplayers` (AssetSource).
+The four primary driver cues are **original synthesized WAVs** (generated
+in-repo with a small PowerShell script — no third-party recordings):
 
 | File                  | Purpose                                         | Approx length |
 | --------------------- | ----------------------------------------------- | ------------- |
-| countdown_tick.mp3    | Loop tick during 15s accept window              | <500ms        |
-| incoming_request.mp3  | Alias for countdown_tick (one-shot variant)     | <500ms        |
-| online.mp3            | Played when driver toggles status to online     | <1s           |
-| offline.mp3           | Played when driver toggles status to offline    | <1s           |
-| order_accepted.mp3    | Played when driver taps ACCEPT                  | <1s           |
-| order_cancelled.mp3   | Played when driver declines / cancels           | <1s           |
-| trip_completed.mp3    | Played when driver completes a trip              | <2s           |
-| tip_received.mp3      | Played when a tipReceived socket event fires    | <1s           |
+| countdown_tick.wav    | Short tick blip during the accept window        | ~60ms         |
+| incoming_request.wav  | Three-note attention chime for a new request    | ~0.6s         |
+| online.wav            | Rising two-note chime when driver goes online   | ~0.44s        |
+| offline.wav           | Descending two-note chime when driver goes offline | ~0.44s     |
+| order_accepted.mp3    | Played when driver taps ACCEPT (placeholder)    | <1s           |
+| order_cancelled.mp3   | Played when driver declines / cancels (placeholder) | <1s       |
+| trip_completed.mp3    | Played when driver completes a trip (placeholder) | <2s         |
+| tip_received.mp3      | Played when a tipReceived socket event fires (placeholder) | <1s  |
+
+## Generation
+
+The WAVs were synthesized from sine tones (original, no copyrighted
+audio) — the script used is in the session temp dir
+(`opencode/gen_sounds.ps1`). To regenerate, rerun that script; keep the
+same sample rate (44.1 kHz mono PCM) and amplitude envelope so the
+effects stay short and subtle.
 
 ## Licensing
 
-All audio must be original work or CC0 / permissive-licensed. The
-audioplayers package plays these from the bundled asset bundle; empty
-files will fail silently (try/catch in SoundService).
+All audio is original work. The remaining `.mp3` files are still 0-byte
+placeholders and must be replaced with real, licensed audio before
+shipping; empty files fail silently (try/catch in SoundService).

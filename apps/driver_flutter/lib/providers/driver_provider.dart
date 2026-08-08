@@ -449,6 +449,12 @@ class DriverProvider with ChangeNotifier {
         _status = models.DriverStatus.onTrip;
         notifyListeners();
       } else if (trip.status == models.TripStatus.COMPLETED || trip.status == models.TripStatus.CANCELLED) {
+        // If the current incoming offer is the one being cancelled (e.g.
+        // it expired, the rider cancelled, or another driver accepted),
+        // clear it so the request card closes and sounds stop.
+        if (_incomingRequest?.id == trip.id) {
+          _incomingRequest = null;
+        }
         _currentTrip = null;
         _status = models.DriverStatus.online;
         notifyListeners();

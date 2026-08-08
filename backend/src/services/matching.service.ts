@@ -92,7 +92,7 @@ export const matchingService = {
 
     console.log(`[DISPATCH] Offering trip ${tripId} to driver ${driverId} (Score: ${drivers[index].score.toFixed(2)}) - Price: $${calculatedPrice}, Dist: ${distanceKm.toFixed(2)}km`);
     
-    io.to(`driver:${driverId}`).emit('newTripRequest', {
+      io.to(`driver:${driverId}`).emit('newTripRequest', {
       ...trip,
       is_scheduled: (trip as any).is_scheduled,
       scheduled_at: (trip as any).scheduled_at,
@@ -102,6 +102,7 @@ export const matchingService = {
       route_geometry: tripRoute ? tripRoute.geometry : null,
       driver_to_pickup_eta: driverToPickupRoute ? driverToPickupRoute.eta : null,
       driver_to_pickup_distance: driverToPickupRoute ? driverToPickupRoute.distance : null,
+      expires_at: new Date(Date.now() + env.DRIVER_ACCEPT_TIMEOUT_MS).toISOString(),
     });
 
     await redis.setex(

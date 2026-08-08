@@ -72,6 +72,7 @@ export async function handleDispatchOffer(io: Server) {
         route_geometry: tripRoute ? tripRoute.geometry : null,
         driver_to_pickup_eta: driverToPickupRoute ? driverToPickupRoute.eta : null,
         driver_to_pickup_distance: driverToPickupRoute ? driverToPickupRoute.distance : null,
+        expires_at: new Date(Date.now() + env.DRIVER_ACCEPT_TIMEOUT_MS).toISOString(),
       });
 
       console.log(`[DISPATCH] ✅ Sent newTripRequest to driver:${driverId} for trip ${tripId} (price=$${calculatedPrice})`);

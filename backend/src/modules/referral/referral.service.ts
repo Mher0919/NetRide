@@ -70,6 +70,7 @@ export type ReferralErrorCode =
   | 'SELF_REFERRAL'
   | 'ALREADY_USED'
   | 'LOOP_NOT_ALLOWED'
+  | 'REFERRALS_CLOSED'
   | 'MISSING_INPUT';
 
 export class ReferralError extends Error {
@@ -316,6 +317,21 @@ export class ReferralService {
       throw new ReferralError('SELF_REFERRAL', 'This referral code cannot be used with your account.');
     }
 
+    // ---- 3b. Skipped onboarding is permanent — a declined rider can never
+    // accept a referral later, exactly like a rider who already accepted. ---
+    const scannerState = await pool.query(
+      `SELECT referral_onboarding_state FROM users WHERE id = $1`,
+      [scannerId],
+    );
+    if (scannerState.rows[0]?.referral_onboarding_state === 'SKIPPED') {
+      await AuditEventsService.record({
+        actorId: scannerId, actorRole: 'RIDER',
+        action: 'REFERRAL_REJECTED', entityType: 'REFERRAL_RELATIONSHIP',
+        details: { reason: 'ONBOARDING_SKIPPED', source, referrer_id: referrerId },
+      });
+      throw new ReferralError('REFERRALS_CLOSED', 'Referrals are closed for this account.');
+    }
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -470,6 +486,33 @@ export class ReferralService {
     if (rel.rows.length > 0) state = 'USED';
     else if (user.rows[0]?.referral_onboarding_state === 'SKIPPED') state = 'SKIPPED';
     else state = 'ELIGIBLE';
+
+    // A rider who has already completed a ride is by definition NOT a
+    // first-time user. The referral offer is tied to the FIRST completed
+    // ride, so onboarding is auto-closed for them — otherwise the gate
+    // would keep showing the referral screen to riders who are long past
+    // their first ride (legacy accounts created before this feature).
+    // Self-healing + idempotent: once closed it stays closed.
+    if (state === 'ELIGIBLE') {
+      const completed = await pool.query(
+        `SELECT 1 FROM rides WHERE rider_id = $1 AND status = 'COMPLETED' LIMIT 1`,
+        [userId],
+      );
+      if (completed.rows.length > 0) {
+        await pool.query(
+          `UPDATE users SET referral_onboarding_state = 'SKIPPED', updated_at = NOW() WHERE id = $1`,
+          [userId],
+        );
+        await AuditEventsService.record({
+          actorId: userId,
+          actorRole: 'RIDER',
+          action: 'REFERRAL_CLOSED',
+          entityType: 'REFERRAL_RELATIONSHIP',
+          details: { reason: 'COMPLETED_RIDE_BEFORE_DECISION' },
+        });
+        state = 'SKIPPED';
+      }
+    }
 
     const risk = device?.deviceId
       ? await DeviceRiskService.registerDevice(userId, device)

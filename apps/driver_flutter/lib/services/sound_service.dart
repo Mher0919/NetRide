@@ -23,10 +23,10 @@ enum SoundEffect {
 }
 
 const Map<SoundEffect, String> _kSoundAssetMap = {
-  SoundEffect.countdownTick: 'sounds/countdown_tick.mp3',
-  SoundEffect.incomingRequest: 'sounds/incoming_request.mp3',
-  SoundEffect.online: 'sounds/online.mp3',
-  SoundEffect.offline: 'sounds/offline.mp3',
+  SoundEffect.countdownTick: 'sounds/countdown_tick.wav',
+  SoundEffect.incomingRequest: 'sounds/incoming_request.wav',
+  SoundEffect.online: 'sounds/online.wav',
+  SoundEffect.offline: 'sounds/offline.wav',
   SoundEffect.orderAccepted: 'sounds/order_accepted.mp3',
   SoundEffect.orderCancelled: 'sounds/order_cancelled.mp3',
   SoundEffect.tipReceived: 'sounds/tip_received.mp3',

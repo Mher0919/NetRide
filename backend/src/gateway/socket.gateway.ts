@@ -696,7 +696,7 @@ export function setupSocketGateway(io: Server) {
         } catch (err) {}
       });
 
-      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean }) => {
+      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean; creditUseCents?: number }) => {
         const validated = validate(RequestRideSchema, data, socket, 'requestRide');
         if (!validated.success || !validated.data) return;
         
@@ -709,7 +709,7 @@ export function setupSocketGateway(io: Server) {
             undefined,
             false,
             data.idempotencyKey,
-            { promoCode: data.promoCode, applyCredits: data.applyCredits }
+            { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents }
           );
           socket.emit('tripUpdate', trip);
         } catch (err: any) {

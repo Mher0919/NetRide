@@ -77,6 +77,7 @@ export interface Trip {
   distance_km?: number;
   duration_minutes?: number;
   fare_amount?: number;
+  tip_amount?: number;
   initial_max_fare?: number;
   saving_likelihood?: number;
   trajectory?: any;

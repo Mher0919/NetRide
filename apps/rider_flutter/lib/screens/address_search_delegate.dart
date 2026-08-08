@@ -13,7 +13,8 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
   bool _loadedHistory = false;
   Future<void>? _historyFuture;
 
-  AddressSearchDelegate({this.userLat, this.userLon}) {
+  AddressSearchDelegate({this.userLat, this.userLon, String? searchFieldLabel})
+      : super(searchFieldLabel: searchFieldLabel) {
     _controller.updateLocation(userLat, userLon);
   }
 

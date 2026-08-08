@@ -95,6 +95,7 @@ class Trip {
   final Location pickup;
   final Location destination;
   final double? fareAmount;
+  final double? tipAmount;
   final double? initialMaxFare;
   final int? savingLikelihood;
   final RiderInfo? riderInfo;
@@ -108,6 +109,8 @@ class Trip {
   final double? driverToPickupEta;
   final double? driverToPickupDistance;
   final double? driverPricePerMile;
+  final DateTime? expiresAt;
+  final DateTime? requestedAt;
 
   Trip({
     required this.id,
@@ -117,6 +120,7 @@ class Trip {
     required this.pickup,
     required this.destination,
     this.fareAmount,
+    this.tipAmount,
     this.initialMaxFare,
     this.savingLikelihood,
     this.riderInfo,
@@ -128,6 +132,8 @@ class Trip {
     this.driverToPickupEta,
     this.driverToPickupDistance,
     this.driverPricePerMile,
+    this.expiresAt,
+    this.requestedAt,
   });
 
   bool get isTestTrip => isTestTripFor(riderInfo?.email, driverInfo?.email);
@@ -144,6 +150,7 @@ class Trip {
       pickup: Location.fromJson(json['pickup']),
       destination: Location.fromJson(json['destination']),
       fareAmount: (json['fare_amount'] as num?)?.toDouble(),
+      tipAmount: (json['tip_amount'] as num?)?.toDouble(),
       initialMaxFare: (json['initial_max_fare'] as num?)?.toDouble(),
       savingLikelihood: (json['saving_likelihood'] as num?)?.toInt(),
       riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
@@ -155,6 +162,8 @@ class Trip {
       driverToPickupEta: (json['driver_to_pickup_eta'] as num?)?.toDouble(),
       driverToPickupDistance: (json['driver_to_pickup_distance'] as num?)?.toDouble(),
       driverPricePerMile: (json['driver_price_per_mile'] as num?)?.toDouble(),
+      expiresAt: json['expires_at'] != null ? DateTime.tryParse(json['expires_at'].toString()) : null,
+      requestedAt: json['requested_at'] != null ? DateTime.tryParse(json['requested_at'].toString()) : null,
     );
   }
 }

@@ -230,6 +230,7 @@ class RideProvider with ChangeNotifier {
     String? idempotencyKey,
     String? promoCode,
     bool applyCredits = false,
+    int? creditUseCents,
   }) {
     debugPrint('[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}');
     if (_socket == null) {
@@ -251,6 +252,7 @@ class RideProvider with ChangeNotifier {
       'idempotencyKey': key,
       if (cleanedPromo != null && cleanedPromo.isNotEmpty) 'promoCode': cleanedPromo.toUpperCase(),
       'applyCredits': applyCredits,
+      if (creditUseCents != null && creditUseCents > 0) 'creditUseCents': creditUseCents,
     });
     
     if (!isScheduled) {

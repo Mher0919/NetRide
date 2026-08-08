@@ -277,18 +277,21 @@ class _ReferralOnboardingScreenState extends State<ReferralOnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text('Welcome'),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: const Text('Welcome'),
+          automaticallyImplyLeading: false,
+        ),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -345,6 +348,7 @@ class _ReferralOnboardingScreenState extends State<ReferralOnboardingScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

@@ -28,6 +28,7 @@ const RequestRideSchema = z.object({
   idempotencyKey: z.string().uuid().optional(),
   promoCode: z.string().trim().min(2).max(32).optional(),
   applyCredits: z.boolean().optional(),
+  creditUseCents: z.number().int().min(1).optional(),
 });
 
 const EstimateRideSchema = z.object({
@@ -67,7 +68,7 @@ export class RideController {
         validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined,
         validatedData.isScheduled,
         validatedData.idempotencyKey,
-        { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits }
+        { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents }
       );
       res.status(201).json(trip);
     } catch (error: any) {

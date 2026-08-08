@@ -10,6 +10,7 @@
 
 import { pool } from '../../config/database';
 import { io } from '../../app';
+import { computeCreditApplication, roundCents } from './credits-cap';
 
 export type CreditTxType =
   | 'REFERRAL_REWARD'
@@ -31,8 +32,6 @@ export interface CreditResult {
   transaction_id: string;
   applied: boolean;
 }
-
-const roundCents = (n: number) => Math.round(n);
 
 function emitBalanceChange(userId: string, balanceCents: number, deltaCents: number, type: string) {
   try {
@@ -193,21 +192,27 @@ export class CreditsService {
     }
   }
 
-  /**
-   * Applies credits to a ride: debits min(balance, maxCents) and records the
-   * ledger entry. Returns how many cents were actually applied (0 if none).
-   * Must run inside the caller's transaction context when a `client` is
-   * provided so the ride row + ledger stay consistent.
-   */
-  static async applyToRide(
+/**
+ * Applies credits to a ride: debits min(balance, maxCents, capCents) and
+ * records the ledger entry. `capCents` lets the rider choose a partial
+ * amount instead of the whole balance. Returns how many cents were
+ * actually applied (0 if none). Must run inside the caller's transaction
+ * context when a `client` is provided so the ride row + ledger stay
+ * consistent.
+ */
+static async applyToRide(
     riderId: string,
     rideId: string,
     maxCents: number,
-    opts: { client?: any } = {},
+    opts: { client?: any; capCents?: number } = {},
   ): Promise<{ appliedCents: number; balanceCents: number }> {
     const useClient = opts.client ?? pool;
     const acc = await this.getAccount(riderId);
-    const applied = Math.min(acc.balance_cents, Math.max(0, roundCents(maxCents)));
+    const applied = computeCreditApplication(
+      acc.balance_cents,
+      maxCents,
+      opts.capCents,
+    );
     if (applied <= 0) {
       return { appliedCents: 0, balanceCents: acc.balance_cents };
     }

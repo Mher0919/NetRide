@@ -46,6 +46,8 @@ String friendlyReferralError(DioException e) {
       return 'This referral code has expired.';
     case 'CODE_NOT_FOUND':
       return 'We could not find that referral code. Please check the code and try again.';
+    case 'REFERRALS_CLOSED':
+      return 'Referrals are closed for this account. This is a one-time choice and can\'t be changed later.';
     case 'REFERRER_UNAVAILABLE':
       return 'This referral account is unavailable.';
     case 'INVALID_LINK':

@@ -120,7 +120,7 @@ export class RideService {
     scheduledAt?: Date,
     isScheduled: boolean = false,
     idempotencyKey?: string,
-    rewards: { promoCode?: string; applyCredits?: boolean } = {}
+    rewards: { promoCode?: string; applyCredits?: boolean; creditUseCents?: number } = {}
   ): Promise<Trip> {
     return traceAsync('RideService.requestRide', async () => {
       const traceId = getCurrentTraceId();
@@ -205,6 +205,7 @@ export class RideService {
             fareCents: Math.round(breakdown.totalFare * 100),
             promoCode: rewards.promoCode,
             applyCredits: rewards.applyCredits,
+            creditUseCents: rewards.creditUseCents,
           });
 
           await client.query('COMMIT');
