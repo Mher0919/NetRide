@@ -546,6 +546,16 @@ async function runMigrations() {
       console.log('✅ Partner/promo/referral/credits schema (037) applied');
     }
 
+    // Referral onboarding + device fraud signals (038)
+    const hasUserDevices = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'user_devices'");
+    if (hasUserDevices.rowCount === 0) {
+      console.log('⚡ Applying referral onboarding/device schema (038)...');
+      const schemaPath = path.join(__dirname, '../migrations/038_referral_onboarding_device.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Referral onboarding/device schema (038) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);

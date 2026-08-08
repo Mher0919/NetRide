@@ -126,6 +126,10 @@ model User {
   referred_as_user      ReferralRelationship?  @relation("ReferredUser")
   audit_events_actor    AuditEvent[]           @relation("AuditEventActor")
 
+  referral_onboarding_state String?
+  device_risk_state         String   @default("NORMAL")
+  devices                   UserDevice[]
+
   @@map("users")
 }
 
@@ -728,4 +732,21 @@ model AuditEvent {
   @@index([entity_type, entity_id])
   @@index([created_at(sort: Desc)])
   @@map("audit_events")
+}
+
+model UserDevice {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id      String   @db.Uuid
+  device_id    String
+  platform     String?
+  device_model String?
+  app_version  String?
+  first_seen_at DateTime @default(now()) @db.Timestamptz(6)
+  last_seen_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, device_id])
+  @@index([device_id])
+  @@map("user_devices")
 }

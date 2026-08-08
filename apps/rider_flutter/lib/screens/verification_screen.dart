@@ -42,7 +42,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
           context,
           '/splash',
           (route) => false,
-          arguments: {'targetRoute': '/'},
+          arguments: {'targetRoute': '/post-auth'},
         );
       }
     } catch (e) {

@@ -61,6 +61,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _promoChecking = false;
   bool _promoApplied = false;
 
+  // Explore: recent searches shown under the destination card. The backend
+  // search-history store is the single source of truth (same one the
+  // address-search delegate reads inside the search screen).
+  List<SearchResult> _recentSearches = [];
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +73,27 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _initLiveLocation();
     _fetchProfile();
     _startGeohashUpdates();
+    _loadRecentSearches();
+  }
+
+  Future<void> _loadRecentSearches() async {
+    final recent = await SearchHistoryService.instance.fetch();
+    if (!mounted) return;
+    setState(() => _recentSearches = recent.take(6).toList());
+  }
+
+  /// Tapping a recent search sets it straight as the destination (same
+  /// source of truth, no duplicated repository).
+  Future<void> _applyRecentSearch(SearchResult result) async {
+    setState(() {
+      _destination = models.Location(
+        lat: result.lat,
+        lng: result.lon,
+        address: result.displayName,
+      );
+      _shouldFollowUser = false;
+    });
+    _updateRoute();
   }
 
   Future<void> _initCacheServices() async {
@@ -244,6 +270,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         }
       });
       _updateRoute();
+      // The search screen saved this pick; keep Explore's recent list fresh.
+      _loadRecentSearches();
     }
   }
 
@@ -481,205 +509,195 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         onRetry: _initLiveLocation,
         successWidget: Stack(
           children: [
-            if (_smoothedPosition != null)
-              FlutterMap(
-                mapController: _mapController,
-                options: MapOptions(
-                  initialCenter: _smoothedPosition!,
-                  initialZoom: 15.0,
-                  minZoom: 12,
-                  maxZoom: 18,
-                  onMapReady: () {
-                    setState(() => _isMapReady = true);
-                  },
-                  onPositionChanged: (pos, hasGesture) {
-                    if (hasGesture) {
-                      setState(() => _shouldFollowUser = false);
-                    }
-                  },
-                ),
-                children: [
-                  TileLayer(
-                    urlTemplate:
-                        'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-                    subdomains: const ['a', 'b', 'c', 'd'],
-                    userAgentPackageName: 'com.NetRide.rider',
-                    tileBuilder: (context, tileWidget, tile) {
-                      return ColorFiltered(
-                        colorFilter: const ColorFilter.matrix(<double>[
-                          0.937,
-                          0,
-                          0,
-                          0,
-                          0,
-                          0,
-                          0.922,
-                          0,
-                          0,
-                          0,
-                          0,
-                          0,
-                          0.902,
-                          0,
-                          0,
-                          0,
-                          0,
-                          0,
-                          1,
-                          0,
-                        ]),
-                        child: ColorFiltered(
-                          colorFilter: ColorFilter.mode(
-                            const Color(0xFFEEEBE6).withOpacity(0.3),
-                            BlendMode.multiply,
-                          ),
-                          child: tileWidget,
+            Column(
+              children: [
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Text(
+                                _firstName.isNotEmpty
+                                    ? 'Hello, $_firstName'
+                                    : 'Welcome',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF2F3A32),
+                                ),
+                              ),
+                            ),
+                            Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: rideProvider.isConnected
+                                    ? const Color(0xFF6E8B74)
+                                    : const Color(0xFFC65A5A),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
+                            ),
+                          ],
                         ),
-                      );
-                    },
-                  ),
-                  if (_routePoints.isNotEmpty)
-                    PolylineLayer(
-                      polylines: [
-                        Polyline<Object>(
-                          points: _routePoints,
-                          color: const Color(0xFF5B7760),
-                          strokeWidth: 4.0,
-                          borderColor: Colors.white,
-                          borderStrokeWidth: 1.0,
+                        const SizedBox(height: 14),
+                        _buildExploreLocationCard(theme),
+                        const SizedBox(height: 10),
+                        Hero(
+                          tag: 'search_container',
+                          child: _buildWhereToCard(theme),
                         ),
+                        if (_recentSearches.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          _buildRecentSearches(theme),
+                        ],
                       ],
                     ),
-                  MarkerLayer(
-                    markers: [
-                      if (_smoothedPosition != null)
-                        Marker(
-                          point: _smoothedPosition!,
-                          width: 40,
-                          height: 40,
-                          child: _buildUserLocationMarker(),
-                        ),
-                      if (_pickup != null &&
-                          _pickup!.address != 'Current Location')
-                        Marker(
-                          point: LatLng(_pickup!.lat, _pickup!.lng),
-                          width: 30,
-                          height: 30,
-                          child: _buildPinMarker(
-                            const Color(0xFF5B7760),
-                            isPickup: true,
-                          ),
-                        ),
-                      if (_destination != null)
-                        Marker(
-                          point: LatLng(_destination!.lat, _destination!.lng),
-                          width: 30,
-                          height: 30,
-                          child: _buildPinMarker(
-                            const Color(0xFF2F3A32),
-                            isPickup: false,
-                          ),
-                        ),
-                    ],
                   ),
-                  for (var entry in rideProvider.nearbyDrivers.entries)
-                    SmoothDriverMarker(
-                      driverId: entry.key,
-                      position: LatLng(entry.value.lat, entry.value.lng),
-                      heading: 0,
-                    ),
-                ],
-              ),
-
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
                 ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
+                if (_smoothedPosition != null)
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(24),
+                      ),
+                      child: FlutterMap(
+                        mapController: _mapController,
+                        options: MapOptions(
+                          initialCenter: _smoothedPosition!,
+                          initialZoom: 15.0,
+                          minZoom: 12,
+                          maxZoom: 18,
+                          onMapReady: () {
+                            setState(() => _isMapReady = true);
+                          },
+                          onPositionChanged: (pos, hasGesture) {
+                            if (hasGesture) {
+                              setState(() => _shouldFollowUser = false);
+                            }
+                          },
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                            subdomains: const ['a', 'b', 'c', 'd'],
+                            userAgentPackageName: 'com.NetRide.rider',
+                            tileBuilder: (context, tileWidget, tile) {
+                              return ColorFiltered(
+                                colorFilter: const ColorFilter.matrix(<double>[
+                                  0.937,
+                                  0,
+                                  0,
+                                  0,
+                                  0,
+                                  0,
+                                  0.922,
+                                  0,
+                                  0,
+                                  0,
+                                  0,
+                                  0,
+                                  0.902,
+                                  0,
+                                  0,
+                                  0,
+                                  0,
+                                  0,
+                                  1,
+                                  0,
+                                ]),
+                                child: ColorFiltered(
+                                  colorFilter: ColorFilter.mode(
+                                    const Color(0xFFEEEBE6).withOpacity(0.3),
+                                    BlendMode.multiply,
+                                  ),
+                                  child: tileWidget,
+                                ),
+                              );
+                            },
                           ),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(24),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
+                          if (_routePoints.isNotEmpty)
+                            PolylineLayer(
+                              polylines: [
+                                Polyline<Object>(
+                                  points: _routePoints,
+                                  color: const Color(0xFF5B7760),
+                                  strokeWidth: 4.0,
+                                  borderColor: Colors.white,
+                                  borderStrokeWidth: 1.0,
+                                ),
+                              ],
+                            ),
+                          MarkerLayer(
+                            markers: [
+                              if (_smoothedPosition != null)
+                                Marker(
+                                  point: _smoothedPosition!,
+                                  width: 40,
+                                  height: 40,
+                                  child: _buildUserLocationMarker(),
+                                ),
+                              if (_pickup != null &&
+                                  _pickup!.address != 'Current Location')
+                                Marker(
+                                  point: LatLng(_pickup!.lat, _pickup!.lng),
+                                  width: 30,
+                                  height: 30,
+                                  child: _buildPinMarker(
+                                    const Color(0xFF5B7760),
+                                    isPickup: true,
+                                  ),
+                                ),
+                              if (_destination != null)
+                                Marker(
+                                  point:
+                                      LatLng(_destination!.lat, _destination!.lng),
+                                  width: 30,
+                                  height: 30,
+                                  child: _buildPinMarker(
+                                    const Color(0xFF2F3A32),
+                                    isPickup: false,
+                                  ),
+                                ),
                             ],
                           ),
-                          child: Text(
-                            _firstName.isNotEmpty
-                                ? 'Hello, $_firstName'
-                                : 'Welcome',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF2F3A32),
+                          for (var entry in rideProvider.nearbyDrivers.entries)
+                            SmoothDriverMarker(
+                              driverId: entry.key,
+                              position:
+                                  LatLng(entry.value.lat, entry.value.lng),
+                              heading: 0,
                             ),
-                          ),
-                        ),
-                        Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            color: rideProvider.isConnected
-                                ? const Color(0xFF6E8B74)
-                                : const Color(0xFFC65A5A),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Hero(
-                      tag: 'search_container',
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.08),
-                              blurRadius: 20,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          children: [
-                            _buildSearchField(
-                              onTap: () => _openSearch(true),
-                              text: _pickup?.address ?? 'Current Location',
-                              icon: Icons.circle,
-                              iconColor: const Color(0xFF5B7760),
-                              isFirst: true,
-                            ),
-                            const Divider(height: 1, indent: 50, endIndent: 20),
-                            _buildSearchField(
-                              onTap: () => _openSearch(false),
-                              text: _destination?.address ?? 'Where to?',
-                              icon: Icons.square,
-                              iconColor: const Color(0xFF2F3A32),
-                              isFirst: false,
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-              ),
+                  )
+                else
+                  const Expanded(child: SizedBox()),
+              ],
             ),
 
             Positioned(
@@ -1095,6 +1113,176 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           ],
         ),
       ),
+    );
+  }
+
+  /// Explore: current-location card. Tapping lets the rider pick a custom
+  /// pickup point; the GPS position remains the default.
+  Widget _buildExploreLocationCard(ThemeData theme) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: () => _openSearch(true),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5B7760).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.my_location_rounded,
+                  color: Color(0xFF5B7760),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Current location',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                        color: const Color(0xFF2F3A32).withOpacity(0.5),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _pickup?.address ?? 'Use GPS',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF2F3A32),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFF2F3A32),
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Explore: the "Where to?" card — single destination search entry point.
+  Widget _buildWhereToCard(ThemeData theme) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: _buildSearchField(
+        onTap: () => _openSearch(false),
+        text: _destination?.address ?? 'Where to?',
+        icon: Icons.square,
+        iconColor: const Color(0xFF2F3A32),
+        isFirst: false,
+      ),
+    );
+  }
+
+  /// Explore: recent destination searches, straight from the single backend
+  /// search-history store (same source the search screen reads).
+  Widget _buildRecentSearches(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Recent',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF2F3A32).withOpacity(0.7),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final result in _recentSearches)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Material(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      onTap: () => _applyRecentSearch(result),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0xFFD8D2CA)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.history_rounded,
+                              size: 16,
+                              color: Color(0xFF5B7760),
+                            ),
+                            const SizedBox(width: 8),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 160),
+                              child: Text(
+                                result.displayName,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF2F3A32),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

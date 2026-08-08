@@ -1,14 +1,21 @@
 // lib/screens/qr_scanner_screen.dart
 //
 // Scans a friend's referral QR (signed payload) and links the relationship
-// via POST /api/referral/scan. All fraud checks run server-side.
+// via POST /api/referral/scan. All fraud checks run server-side. In
+// onboarding mode the screen pops with the result instead of showing its
+// own success dialog, so the onboarding flow can continue.
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/rewards_service.dart';
 
 class QrScannerScreen extends StatefulWidget {
-  const QrScannerScreen({super.key});
+  const QrScannerScreen({super.key, this.onboarding = false});
+
+  /// When true, the screen is part of first-time referral onboarding and
+  /// pops with { relationship_id, status, referrer_name } on success.
+  final bool onboarding;
 
   @override
   State<QrScannerScreen> createState() => _QrScannerScreenState();
@@ -37,6 +44,10 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     try {
       final result = await RewardsService.scanReferral(payload: payload);
       if (!mounted) return;
+      if (widget.onboarding) {
+        Navigator.pop(context, result);
+        return;
+      }
       await _showResultDialog(
         success: true,
         title: 'Referral linked!',
@@ -44,23 +55,21 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             ? 'You\'re now connected to ${result['referrer_name']}. Both of you earn \$5 in ride credits after your first completed ride.'
             : 'You\'re now linked. Both of you earn \$5 in ride credits after your first completed ride.',
       );
-    } catch (e) {
+    } on DioException catch (e) {
       if (!mounted) return;
       await _showResultDialog(
         success: false,
         title: 'Could not link referral',
-        message: _friendlyError(e),
+        message: friendlyReferralError(e),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      await _showResultDialog(
+        success: false,
+        title: 'Could not link referral',
+        message: 'That QR code is not a valid NetRide referral. Please try again.',
       );
     }
-  }
-
-  String _friendlyError(Object e) {
-    final s = e.toString();
-    if (s.contains('own referral')) return 'You cannot use your own referral code.';
-    if (s.contains('already linked')) return 'You have already linked a referral code.';
-    if (s.contains('expired')) return 'This referral code has expired.';
-    if (s.contains('not exist')) return 'This referral code does not exist.';
-    return 'That QR code is not a valid NetRide referral.';
   }
 
   Future<void> _showResultDialog({

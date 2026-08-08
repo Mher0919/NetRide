@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Navigator.pushReplacementNamed(
                 context,
                 '/splash',
-                arguments: {'targetRoute': '/'}
+                arguments: {'targetRoute': '/post-auth'}
               );
             }
           } catch (e) {
@@ -142,7 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
           Navigator.pushReplacementNamed(
             context,
             '/splash',
-            arguments: {'targetRoute': '/'}
+            arguments: {'targetRoute': '/post-auth'}
           );
         }
       }

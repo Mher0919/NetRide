@@ -13,6 +13,8 @@ import 'screens/reset_password_screen.dart';
 import 'screens/main_wrapper.dart';
 import 'screens/splash_screen.dart';
 import 'screens/blocked_account_screen.dart';
+import 'screens/post_auth_gate.dart';
+import 'screens/referral_onboarding_screen.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'services/user_service.dart';
@@ -90,6 +92,8 @@ void main() async {
   if (token != null) {
     // Determine the correct startup destination from authoritative backend
     // state. Never assume onboarding is complete based on local token alone.
+    // '/post-auth' re-checks (blocked status + referral eligibility) with the
+    // backend right after the splash animation.
     try {
       final profile = await UserService.getProfile();
       if (profile['verification_status'] == 'BLOCKED') {
@@ -97,7 +101,7 @@ void main() async {
         kInitialIsBlocked = true;
         kInitialTargetRoute = '/blocked';
       } else {
-        kInitialTargetRoute = '/';
+        kInitialTargetRoute = '/post-auth';
       }
     } catch (_) {
       // Backend unreachable — but we have a valid JWT. The user already
@@ -235,6 +239,12 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
                 break;
               case '/onboarding':
                 page = const OnboardingScreen();
+                break;
+              case '/post-auth':
+                page = const PostAuthGate();
+                break;
+              case '/referral-onboarding':
+                page = const ReferralOnboardingScreen();
                 break;
               case '/':
                 page = const MainWrapper();

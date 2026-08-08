@@ -131,6 +131,14 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     user: { max: 10, windowMs: HOUR },
     ip: { max: 30, windowMs: HOUR },
   },
+  'POST /api/referral/skip': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 30, windowMs: HOUR },
+  },
+  'GET /api/referral/onboarding-status': {
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 120, windowMs: MINUTE },
+  },
   'POST /api/promo/validate': {
     user: { max: 60, windowMs: MINUTE },
     ip: { max: 120, windowMs: MINUTE },

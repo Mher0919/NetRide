@@ -14,10 +14,11 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../utils/file_url.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
+import '../models/reward_models.dart';
+import '../services/rewards_service.dart';
 import 'settings_screen.dart';
 import 'credits_screen.dart';
 import 'referral_screen.dart';
-import 'qr_scanner_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -497,11 +498,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 24),
               _buildSectionCard(
-                title: 'Wallet & Rewards',
+                title: 'Your Balance',
                 children: [
+                  _buildBalanceCard(),
+                  const Divider(height: 32),
                   _buildMenuTile(
-                    icon: Icons.account_balance_wallet_outlined,
-                    title: 'Ride Credits',
+                    icon: Icons.receipt_long_outlined,
+                    title: 'Credits & transactions',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const CreditsScreen()),
@@ -510,19 +513,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const Divider(height: 32),
                   _buildMenuTile(
                     icon: Icons.card_giftcard_rounded,
-                    title: 'Refer & Earn',
+                    title: 'Invite friends — earn \$5',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const ReferralScreen()),
-                    ),
-                  ),
-                  const Divider(height: 32),
-                  _buildMenuTile(
-                    icon: Icons.qr_code_scanner_rounded,
-                    title: 'Scan a Referral QR',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const QrScannerScreen()),
                     ),
                   ),
                 ],
@@ -662,6 +656,82 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  /// Unified balance card: Ride Credits is the rider's balance in this
+  /// product (a separate cash wallet does not exist for riders yet). The
+  /// backend credit ledger is the single source of truth.
+  Widget _buildBalanceCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2F3A32), Color(0xFF46584B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: FutureBuilder<CreditAccount>(
+        future: RewardsService.getCredits(),
+        builder: (context, snapshot) {
+          final account = snapshot.data;
+          final balance = account?.balanceCents ?? 0;
+          final lifetime = account?.lifetimeEarnedCents ?? 0;
+          return Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.account_balance_wallet_rounded,
+                  color: Color(0xFFE8D9B5),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Your balance',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFD8D2CA),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      snapshot.connectionState == ConnectionState.waiting && account == null
+                          ? '\$ —'
+                          : formatCents(balance),
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Ride credits · \$${(lifetime / 100).toStringAsFixed(0)} earned all-time',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFFD8D2CA)),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Color(0xFFD8D2CA)),
+            ],
+          );
+        },
       ),
     );
   }

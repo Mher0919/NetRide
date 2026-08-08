@@ -39,6 +39,7 @@ import {
 } from '../../services/qr-signature.service';
 import { CreditsService } from '../credits/credits.service';
 import { AuditEventsService } from '../../services/audit-events.service';
+import { DeviceRiskService, DeviceFingerprintInput } from '../../services/device-risk.service';
 import {
   pushReferralLinked,
   pushReferralRewardGranted,
@@ -53,6 +54,30 @@ export const REFERRAL_STATES = [
 ] as const;
 
 export type ReferralStatus = (typeof REFERRAL_STATES)[number];
+
+/**
+ * Structured, user-safe error codes. The controller maps these to stable
+ * HTTP responses ({ error, code }) so clients never rely on English message
+ * matching — the Flutter app translates codes to friendly copy.
+ */
+export type ReferralErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'INVALID_LINK'
+  | 'CODE_NOT_FOUND'
+  | 'CODE_EXPIRED'
+  | 'OWNER_MISMATCH'
+  | 'REFERRER_UNAVAILABLE'
+  | 'SELF_REFERRAL'
+  | 'ALREADY_USED'
+  | 'LOOP_NOT_ALLOWED'
+  | 'MISSING_INPUT';
+
+export class ReferralError extends Error {
+  constructor(public code: ReferralErrorCode, message: string) {
+    super(message);
+    this.name = 'ReferralError';
+  }
+}
 
 export interface ReferralInfo {
   code: string;
@@ -197,38 +222,71 @@ export class ReferralService {
   }
 
   /**
-   * Processes a referral scan. `input` is either the signed QR payload or a
-   * referral URL. All fraud guards live here; nothing is trusted from the
-   * client.
+   * Processes a referral scan. `input` is the signed QR payload, a referral
+   * URL, or a raw manual code. All fraud guards live here; nothing is trusted
+   * from the client. On success the rider is permanently linked AND their
+   * referral_onboarding_state is set to 'USED' (one referral per rider, ever).
    */
   static async scanReferral(
     scannerId: string,
-    input: { payload?: string; url?: string },
+    input: { payload?: string; url?: string; code?: string; device?: DeviceFingerprintInput },
   ): Promise<{ relationship_id: string; status: ReferralStatus; referrer_name: string | null }> {
-    // ---- 1. Resolve the referrer from the signed payload / URL ------------
+    // ---- 1. Resolve the referrer from payload / URL / manual code ---------
     let referrerUserId: string;
     let code: string;
+    let source: 'qr' | 'link' | 'code' = 'qr';
 
     if (input.payload) {
       const verified = verifyReferralPayload(input.payload);
-      if (!verified.ok) throw new Error(verified.reason);
+      if (!verified.ok) throw new ReferralError('INVALID_PAYLOAD', verified.reason);
       referrerUserId = verified.payload.userId;
       code = verified.payload.code;
     } else if (input.url) {
       const m = String(input.url).match(/\/r\/([A-Z2-9]+)$/i);
-      if (!m) throw new Error('Invalid referral link');
+      if (!m) throw new ReferralError('INVALID_LINK', 'Invalid referral link');
       code = m[1].toUpperCase();
       const codeRow = await pool.query(
         `SELECT user_id, expires_at FROM referral_codes WHERE code = $1`,
         [code],
       );
-      if (codeRow.rows.length === 0) throw new Error('This referral code does not exist');
+      if (codeRow.rows.length === 0) {
+        await AuditEventsService.record({
+          actorId: scannerId, actorRole: 'RIDER',
+          action: 'REFERRAL_REJECTED', entityType: 'REFERRAL_RELATIONSHIP',
+          details: { reason: 'CODE_NOT_FOUND', source },
+        });
+        throw new ReferralError('CODE_NOT_FOUND', 'This referral code does not exist');
+      }
       if (new Date(codeRow.rows[0].expires_at).getTime() < Date.now()) {
-        throw new Error('This referral code has expired');
+        throw new ReferralError('CODE_EXPIRED', 'This referral code has expired');
       }
       referrerUserId = codeRow.rows[0].user_id;
+      source = 'link';
+    } else if (input.code) {
+      const normalized = String(input.code).trim().toUpperCase();
+      if (!/^[A-Z2-9]{10}$/.test(normalized)) {
+        throw new ReferralError('INVALID_LINK', 'That referral code does not look valid. Please check the code and try again.');
+      }
+      code = normalized;
+      const codeRow = await pool.query(
+        `SELECT user_id, expires_at FROM referral_codes WHERE code = $1`,
+        [code],
+      );
+      if (codeRow.rows.length === 0) {
+        await AuditEventsService.record({
+          actorId: scannerId, actorRole: 'RIDER',
+          action: 'REFERRAL_REJECTED', entityType: 'REFERRAL_RELATIONSHIP',
+          details: { reason: 'CODE_NOT_FOUND', source: 'code' },
+        });
+        throw new ReferralError('CODE_NOT_FOUND', 'We could not find that referral code. Please check the code and try again.');
+      }
+      if (new Date(codeRow.rows[0].expires_at).getTime() < Date.now()) {
+        throw new ReferralError('CODE_EXPIRED', 'This referral code has expired.');
+      }
+      referrerUserId = codeRow.rows[0].user_id;
+      source = 'code';
     } else {
-      throw new Error('Missing referral payload');
+      throw new ReferralError('MISSING_INPUT', 'Missing referral payload');
     }
 
     // ---- 2. Ownership binding: payload user must own the code -------------
@@ -239,18 +297,23 @@ export class ReferralService {
        WHERE rc.code = $1`,
       [code],
     );
-    if (owner.rows.length === 0) throw new Error('This referral code does not exist');
+    if (owner.rows.length === 0) throw new ReferralError('CODE_NOT_FOUND', 'This referral code does not exist');
     if (owner.rows[0].user_id !== referrerUserId) {
-      throw new Error('Invalid referral payload');
+      throw new ReferralError('OWNER_MISMATCH', 'Invalid referral payload');
     }
-    if (!owner.rows[0].is_active) throw new Error('This referral account is unavailable');
+    if (!owner.rows[0].is_active) throw new ReferralError('REFERRER_UNAVAILABLE', 'This referral account is unavailable');
 
     const referrerId = owner.rows[0].user_id;
     const referrerName = owner.rows[0].full_name;
 
     // ---- 3. Self referral is impossible --------------------------------
     if (referrerId === scannerId) {
-      throw new Error('You cannot use your own referral code');
+      await AuditEventsService.record({
+        actorId: scannerId, actorRole: 'RIDER',
+        action: 'SELF_REFERRAL_ATTEMPT', entityType: 'REFERRAL_RELATIONSHIP',
+        details: { source, referrer_id: referrerId },
+      });
+      throw new ReferralError('SELF_REFERRAL', 'This referral code cannot be used with your account.');
     }
 
     const client = await pool.connect();
@@ -264,7 +327,12 @@ export class ReferralService {
       );
       if (already.rows.length > 0) {
         await client.query('ROLLBACK');
-        throw new Error('You have already linked a referral code and cannot link another');
+        await AuditEventsService.record({
+          actorId: scannerId, actorRole: 'RIDER',
+          action: 'REFERRAL_ALREADY_USED', entityType: 'REFERRAL_RELATIONSHIP',
+          details: { source, existing_relationship_id: already.rows[0].id },
+        });
+        throw new ReferralError('ALREADY_USED', 'You have already used a referral code on this account.');
       }
 
       // ---- 5. Loop prevention (belt & braces — impossible by schema) ----
@@ -275,7 +343,7 @@ export class ReferralService {
       );
       if (loop.rows.length > 0) {
         await client.query('ROLLBACK');
-        throw new Error('Referral loops are not allowed');
+        throw new ReferralError('LOOP_NOT_ALLOWED', 'Referral loops are not allowed');
       }
 
       // ---- 6. Create the relationship (QR_SCANNED → LINKED) -------------
@@ -288,13 +356,27 @@ export class ReferralService {
       );
       if (created.rows.length === 0) {
         await client.query('ROLLBACK');
-        throw new Error('You have already linked a referral code and cannot link another');
+        await AuditEventsService.record({
+          actorId: scannerId, actorRole: 'RIDER',
+          action: 'REFERRAL_ALREADY_USED', entityType: 'REFERRAL_RELATIONSHIP',
+          details: { source },
+        });
+        throw new ReferralError('ALREADY_USED', 'You have already used a referral code on this account.');
       }
       const relationshipId = created.rows[0].id;
+
+      // Close onboarding permanently for this rider.
+      await client.query(
+        `UPDATE users SET referral_onboarding_state = 'USED', updated_at = NOW() WHERE id = $1`,
+        [scannerId],
+      );
 
       await client.query('COMMIT');
 
       // ---- 7. Notify + audit (post-commit, best-effort) -----------------
+      if (input.device?.deviceId) {
+        await DeviceRiskService.registerDevice(scannerId, input.device).catch(() => undefined);
+      }
       emitReferralEvent(scannerId, 'referralStatusChanged', {
         relationship_id: relationshipId,
         status: 'LINKED',
@@ -309,10 +391,20 @@ export class ReferralService {
         console.warn(`[REFERRAL] ⚠️ push failed: ${err.message}`),
       );
       await AuditEventsService.record({
-        action: 'REFERRAL_LINKED',
+        actorId: scannerId,
+        actorRole: 'RIDER',
+        action: source === 'qr' ? 'REFERRAL_QR_SCANNED' : 'REFERRAL_CODE_ENTERED',
         entityType: 'REFERRAL_RELATIONSHIP',
         entityId: relationshipId,
-        details: { referrer_id: referrerId, referred_user_id: scannerId },
+        details: { referrer_id: referrerId, source },
+      });
+      await AuditEventsService.record({
+        actorId: scannerId,
+        actorRole: 'RIDER',
+        action: 'REFERRAL_ACCEPTED',
+        entityType: 'REFERRAL_RELATIONSHIP',
+        entityId: relationshipId,
+        details: { referrer_id: referrerId, referred_user_id: scannerId, source },
       });
 
       return { relationship_id: relationshipId, status: 'LINKED', referrer_name: referrerName };
@@ -330,15 +422,85 @@ export class ReferralService {
    */
   static async markFirstRideRequested(riderId: string): Promise<void> {
     try {
-      await pool.query(
+      const res = await pool.query(
         `UPDATE referral_relationships
          SET status = 'FIRST_RIDE_PENDING'
-         WHERE referred_user_id = $1 AND status IN ('LINKED', 'FIRST_RIDE_PENDING')`,
+         WHERE referred_user_id = $1 AND status IN ('LINKED', 'FIRST_RIDE_PENDING')
+         RETURNING id`,
         [riderId],
       );
+      if (res.rows.length > 0) {
+        await AuditEventsService.record({
+          actorId: riderId,
+          actorRole: 'RIDER',
+          action: 'REFERRAL_REWARD_PENDING',
+          entityType: 'REFERRAL_RELATIONSHIP',
+          entityId: res.rows[0].id,
+          details: { rider_id: riderId },
+        });
+      }
     } catch (err: any) {
       console.warn(`[REFERRAL] ⚠️ markFirstRideRequested failed: ${err.message}`);
     }
+  }
+
+  /**
+   * First-time onboarding gate. The backend is the ONLY authority on whether
+   * a rider can still accept a referral:
+   *   - a linked relationship  → USED   (already accepted, forever)
+   *   - referral_onboarding_state = 'SKIPPED' → SKIPPED (declined, forever)
+   *   - otherwise              → ELIGIBLE
+   * Also registers the rider's install id (device fingerprint) and computes
+   * their device risk state — used at reward time, never to block onboarding.
+   */
+  static async getOnboardingStatus(
+    userId: string,
+    device?: DeviceFingerprintInput,
+  ): Promise<{ eligible: boolean; state: 'ELIGIBLE' | 'SKIPPED' | 'USED'; device_risk: string }> {
+    const user = await pool.query(
+      `SELECT referral_onboarding_state, device_risk_state FROM users WHERE id = $1`,
+      [userId],
+    );
+    const rel = await pool.query(
+      `SELECT id FROM referral_relationships WHERE referred_user_id = $1`,
+      [userId],
+    );
+
+    let state: 'ELIGIBLE' | 'SKIPPED' | 'USED';
+    if (rel.rows.length > 0) state = 'USED';
+    else if (user.rows[0]?.referral_onboarding_state === 'SKIPPED') state = 'SKIPPED';
+    else state = 'ELIGIBLE';
+
+    const risk = device?.deviceId
+      ? await DeviceRiskService.registerDevice(userId, device)
+      : (user.rows[0]?.device_risk_state ?? 'NORMAL');
+
+    return { eligible: state === 'ELIGIBLE', state, device_risk: risk };
+  }
+
+  /**
+   * Permanently closes the rider's referral onboarding (skip). One referral
+   * per rider, forever — skipping is final, exactly like accepting. Safe to
+   * call repeatedly; idempotent and never throws.
+   */
+  static async skipOnboarding(userId: string): Promise<{ state: 'SKIPPED' | 'USED' }> {
+    const rel = await pool.query(
+      `SELECT id FROM referral_relationships WHERE referred_user_id = $1`,
+      [userId],
+    );
+    const finalState = rel.rows.length > 0 ? 'USED' : 'SKIPPED';
+    await pool.query(
+      `UPDATE users SET referral_onboarding_state = $2, updated_at = NOW() WHERE id = $1`,
+      [userId, finalState],
+    );
+    await AuditEventsService.record({
+      actorId: userId,
+      actorRole: 'RIDER',
+      action: 'REFERRAL_SKIPPED',
+      entityType: 'REFERRAL_RELATIONSHIP',
+      details: { user_id: userId },
+    });
+    return { state: finalState };
   }
 
   /**
@@ -373,13 +535,45 @@ export class ReferralService {
       }
 
       // Fraud guard: this must be the rider's FIRST completed ride.
-      const prior = await client.query(
+      const prior = await pool.query(
         `SELECT COUNT(*)::int AS n FROM rides
          WHERE rider_id = $1 AND status = 'COMPLETED' AND id <> $2`,
         [ride.rider_id, ride.id],
       );
       if (Number(prior.rows[0].n) > 0) {
         await client.query('COMMIT');
+        return false;
+      }
+
+      // Fraud guard: device-risk gate. BLOCKED installs are never rewarded;
+      // REVIEW installs are rewarded but flagged in the audit trail. This is
+      // the ONLY money-minting path, so the UI can never bypass the policy.
+      const riderRisk = await client.query(
+        `SELECT device_risk_state FROM users WHERE id = $1`,
+        [ride.rider_id],
+      );
+      const riskState = riderRisk.rows[0]?.device_risk_state ?? 'NORMAL';
+      if (riskState === 'BLOCKED') {
+        await client.query(
+          `UPDATE referral_relationships SET status = 'FIRST_RIDE_COMPLETED',
+            first_ride_id = $1, first_ride_completed_at = NOW()
+           WHERE id = $2`,
+          [ride.id, rel.id],
+        );
+        await client.query('COMMIT');
+        await AuditEventsService.record({
+          actorId: ride.rider_id,
+          actorRole: 'RIDER',
+          action: 'REFERRAL_REWARD_REJECTED',
+          entityType: 'REFERRAL_RELATIONSHIP',
+          entityId: rel.id,
+          details: {
+            reason: 'DEVICE_RISK_BLOCKED',
+            ride_id: ride.id,
+            risk_state: riskState,
+            amount_cents: rewardCents,
+          },
+        });
         return false;
       }
 
@@ -490,6 +684,7 @@ export class ReferralService {
           referrer_id: rel.referrer_id,
           referred_user_id: ride.rider_id,
           amount_cents: rewardCents,
+          risk_state: riskState,
         },
       });
     } catch (err: any) {

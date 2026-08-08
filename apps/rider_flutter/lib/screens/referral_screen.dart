@@ -10,7 +10,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
-import 'qr_scanner_screen.dart';
 
 class ReferralScreen extends StatefulWidget {
   const ReferralScreen({super.key});
@@ -93,16 +92,41 @@ class _ReferralScreenState extends State<ReferralScreen> {
             ),
             child: Column(
               children: [
-                Text(
-                  'Share your code — you both get \$5 in ride credits',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF2F3A32),
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      '\$5',
+                      style: TextStyle(
+                        fontSize: 44,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF5B7760),
+                        height: 1.0,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Invite friends — earn \$5 in ride credits',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF2F3A32),
+                            ),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            'Share your code with friends. When they complete their first ride, you both earn \$5.',
+                            style: TextStyle(fontSize: 12.5, color: Color(0xFF2F3A32)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 if (info.qrPayload.isNotEmpty)
                   QrImageView(
                     data: info.qrPayload,
@@ -196,24 +220,6 @@ class _ReferralScreenState extends State<ReferralScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const QrScannerScreen()),
-              ),
-              icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
-              label: const Text('Scan a friend\'s QR'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2F3A32),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ),
           const SizedBox(height: 28),
           Text(
             'Referral activity',
@@ -228,7 +234,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Text(
-                'No referrals yet. Share your QR and earn \$5 when a friend completes their first ride.',
+                'No referrals yet. Share your code and earn \$5 when a friend completes their first ride.',
                 style: TextStyle(fontSize: 14, color: Color(0xFF2F3A32)),
               ),
             )
@@ -307,14 +313,16 @@ class _ReferralScreenState extends State<ReferralScreen> {
     final date = h.scannedAt;
     final dateStr = date != null ? DateFormat('MMM d, y').format(date) : '';
     switch (h.status) {
+      case 'QR_SCANNED':
+        return 'Invited $dateStr';
       case 'LINKED':
-        return 'Joined $dateStr — pending first ride';
+        return 'Joined $dateStr — waiting on first ride';
       case 'FIRST_RIDE_PENDING':
         return 'First ride in progress';
       case 'FIRST_RIDE_COMPLETED':
         return 'First ride completed — reward coming';
       case 'REWARD_GRANTED':
-        return 'Rewarded ${formatCents(h.amountCents)}';
+        return '\$5 earned ${date != null && h.rewardGrantedAt != null ? DateFormat('MMM d, y').format(h.rewardGrantedAt!) : ''}'.trim();
       default:
         return dateStr;
     }
@@ -322,10 +330,12 @@ class _ReferralScreenState extends State<ReferralScreen> {
 
   Widget _statusChip(String status) {
     final (label, color) = switch (status) {
-      'REWARD_GRANTED' => ('Earned', const Color(0xFF6E8B74)),
+      'REWARD_GRANTED' => ('\$5 earned', const Color(0xFF6E8B74)),
       'FIRST_RIDE_COMPLETED' => ('Completed', const Color(0xFF6E8B74)),
-      'FIRST_RIDE_PENDING' => ('In progress', const Color(0xFFC79A4A)),
-      _ => ('Linked', const Color(0xFF5B7760)),
+      'FIRST_RIDE_PENDING' => ('First ride pending', const Color(0xFFC79A4A)),
+      'LINKED' => ('Joined', const Color(0xFF5B7760)),
+      'QR_SCANNED' => ('Invited', const Color(0xFF5B7760)),
+      _ => ('Invited', const Color(0xFF5B7760)),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
