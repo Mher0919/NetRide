@@ -850,30 +850,36 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                 ),
 
                 // ── Offline dashboard (fades out when online) ───────────
-                AnimatedOpacity(
-                  opacity: isOnline ? 0 : 1,
-                  duration: const Duration(milliseconds: 320),
+                // Positioned.fill ensures this never affects the Stack's
+                // size (non-positioned children otherwise participate in
+                // Stack sizing under loose fit). The map child below with
+                // isOnline → bottom:0 then reliably fills the full body.
+                Positioned.fill(
                   child: IgnorePointer(
                     ignoring: isOnline,
-                    child: SafeArea(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(20, 12, 20, mapCardH + 28),
-                        child: RefreshIndicator(
-                          color: const Color(0xFF5B7760),
-                          onRefresh: _handleRefresh,
-                          child: SingleChildScrollView(
-                            physics: const AlwaysScrollableScrollPhysics(
-                              parent: ClampingScrollPhysics(),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _buildOfflineHeader(driverProvider, isOnline),
-                                const SizedBox(height: 10),
-                                _buildStatusCards(driverProvider),
-                                const SizedBox(height: 10),
-                                _buildWeeklyEarningsCard(),
-                              ],
+                    child: AnimatedOpacity(
+                      opacity: isOnline ? 0 : 1,
+                      duration: const Duration(milliseconds: 320),
+                      child: SafeArea(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(20, 12, 20, mapCardH + 28),
+                          child: RefreshIndicator(
+                            color: const Color(0xFF5B7760),
+                            onRefresh: _handleRefresh,
+                            child: SingleChildScrollView(
+                              physics: const AlwaysScrollableScrollPhysics(
+                                parent: ClampingScrollPhysics(),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  _buildOfflineHeader(driverProvider, isOnline),
+                                  const SizedBox(height: 10),
+                                  _buildStatusCards(driverProvider),
+                                  const SizedBox(height: 10),
+                                  _buildWeeklyEarningsCard(),
+                                ],
+                              ),
                             ),
                           ),
                         ),
