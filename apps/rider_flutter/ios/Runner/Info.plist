@@ -31,6 +31,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>NetRide uses the camera to take photos of your profile and ID documents.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NetRide accesses your photo library so you can upload profile photos and documents.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

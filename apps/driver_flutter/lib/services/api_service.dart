@@ -20,12 +20,12 @@ class ApiService {
   static bool _initialized = false;
   static Dio? _dio;
 
-  /// Canonical base URL. We deliberately use the dotenv value WITHOUT a
-  /// trailing slash so callers can use path-only routes (`auth/oauth`)
-  /// without producing `//` in the final URL.
+  /// Canonical base URL, always ending in a trailing slash so relative
+  /// paths resolve against `/api/` (matching the rider app). Callers should
+  /// use leading-slash paths (`/auth/oauth`); both forms join correctly.
   static String get baseUrl {
     final env = dotenv.env['API_BASE_URL'] ?? 'https://netride.onrender.com';
-    return '$env/api';
+    return '$env/api/';
   }
 
   /// WebSocket base URL derived from [baseUrl] by stripping everything from
@@ -147,7 +147,7 @@ class ApiService {
     required int rating,
     String? reviewText,
   }) async {
-    return await dio.post('ride/rate', data: {
+    return await dio.post('/ride/rate', data: {
       'ride_id': rideId,
       'rating': rating,
       'review_text': reviewText,

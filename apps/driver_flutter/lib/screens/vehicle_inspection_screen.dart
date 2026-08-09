@@ -1,14 +1,14 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../utils/file_url.dart';
+import '../utils/pick_image.dart';
 
 class VehicleInspectionScreen extends StatefulWidget {
   const VehicleInspectionScreen({super.key});
@@ -34,12 +34,12 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
   bool _submitSuccess = false;
   static const int _maxImages = 3;
 
-  static const Color _cream = Color(0xFF315646);
-  static const Color _sage = Color(0xFFD0CFBA);
-  static const Color _terracotta = Color(0xFFE07373);
-  static const Color _darkForest = Color(0xFFD0CFBA);
+  static const Color _cream = Color(0xFFF7F4EF);
+  static const Color _sage = Color(0xFF5B7760);
+  static const Color _terracotta = Color(0xFFC65A5A);
+  static const Color _darkForest = Color(0xFF2F3A32);
 
-  // California ZIP codes span roughly 90000â€“96199.
+  // California ZIP codes span roughly 90000–96199.
   static bool isCaliforniaZip(String value) {
     final stripped = value.replaceAll(RegExp(r'\s+'), '');
     if (!RegExp(r'^\d{5}$').hasMatch(stripped)) return false;
@@ -77,7 +77,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
         setState(
           () => _inlineError =
               'NetRide inspections are currently only available in California.\n'
-              'Please enter a California ZIP code (90000â€“96199).',
+              'Please enter a California ZIP code (90000–96199).',
         );
       } else {
         setState(() => _inlineError = null);
@@ -97,7 +97,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
       setState(
         () => _searchError =
             'This ZIP code is not a California ZIP code. '
-            'NetRide vehicle inspections are currently only available in California (90000â€“96199).',
+            'NetRide vehicle inspections are currently only available in California (90000–96199).',
       );
       return;
     }
@@ -154,7 +154,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
       await launchUrl(googleUri, mode: LaunchMode.externalApplication);
       return;
     }
-    // Fallback to geo: URI (opens default map app â€” Apple Maps on iOS)
+    // Fallback to geo: URI (opens default map app — Apple Maps on iOS)
     final geoUrl = 'geo:$lat,$lon?q=$lat,$lon(${Uri.encodeComponent(name)})';
     final geoUri = Uri.parse(geoUrl);
     if (await canLaunchUrl(geoUri)) {
@@ -172,15 +172,11 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
   }
 
   /// Upload a single image to Supabase and add the URL to local state.
-  /// Does NOT submit for review â€” that requires an explicit Submit action.
+  /// Does NOT submit for review — that requires an explicit Submit action.
   Future<void> _pickImage() async {
     if (_uploadedUrls.length >= _maxImages) return;
 
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-    );
+    final pickedFile = await pickImageWithSource(context, imageQuality: 70);
     if (pickedFile == null) return;
 
     setState(() => _isUploading = true);
@@ -268,7 +264,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF294C3A),
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -473,7 +469,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                 onPressed: _isLoading ? null : _searchLocations,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _sage,
-                  foregroundColor: const Color(0xFF294C3A),
+                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -485,7 +481,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                         height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Color(0xFF294C3A),
+                          color: Colors.white,
                         ),
                       )
                     : Text(
@@ -877,7 +873,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
           const SizedBox(height: 8),
           Text(
             'Upload clear photos of your completed vehicle inspection certificate. '
-            'Images are saved securely â€” you must press Submit to send them for review.',
+            'Images are saved securely — you must press Submit to send them for review.',
             style: GoogleFonts.inter(
               color: _darkForest.withOpacity(0.6),
               fontSize: 13,
@@ -974,7 +970,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Color(0xFF294C3A),
+                        color: Colors.white,
                       ),
                     )
                   : const Icon(Icons.send_rounded, size: 20),
@@ -987,7 +983,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _sage,
-                foregroundColor: const Color(0xFF294C3A),
+                foregroundColor: Colors.white,
                 disabledBackgroundColor: _darkForest.withOpacity(0.12),
                 disabledForegroundColor: _darkForest.withOpacity(0.35),
                 padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1055,7 +1051,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                 ),
               ),
             ),
-            // Remove button (X) â€” top-right corner
+            // Remove button (X) — top-right corner
             Positioned(
               top: 4,
               right: 4,

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../services/error_handler.dart';
@@ -67,12 +67,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF294C3A),
+      backgroundColor: const Color(0xFFEEEBE6),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF294C3A),
+        backgroundColor: const Color(0xFFEEEBE6),
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Color(0xFFD0CFBA), size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -96,7 +96,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 'Enter the 6-digit code sent to\n${widget.email}',
                 style: GoogleFonts.poppins(
                   fontSize: 16,
-                  color: Color(0xFF9BAE9E),
+                  color: Colors.grey[600],
                 ),
               ),
               const SizedBox(height: 48),
@@ -111,8 +111,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _verify,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFD0CFBA),
-                    foregroundColor: const Color(0xFF294C3A),
+                    backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -122,7 +122,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                       ? const SizedBox(
                           height: 24,
                           width: 24,
-                          child: CircularProgressIndicator(color: Color(0xFF294C3A), strokeWidth: 2),
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                         )
                       : Text(
                           'Verify',
@@ -145,7 +145,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                   child: Text(
                     "Didn't receive code? Resend",
                     style: GoogleFonts.poppins(
-                      color: Color(0xFFD0CFBA),
+                      color: Colors.blue[700],
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -169,16 +169,16 @@ class _VerificationScreenState extends State<VerificationScreen> {
         textAlign: TextAlign.center,
         textAlignVertical: TextAlignVertical.center,
         maxLength: 1,
-        cursorColor: const Color(0xFFD0CFBA),
+        cursorColor: Colors.black,
         style: const TextStyle(
           fontSize: 24,
           fontWeight: FontWeight.bold,
-          color: Color(0xFFD0CFBA),
+          color: Colors.black,
         ),
         decoration: InputDecoration(
           counterText: "",
           filled: true,
-          fillColor: const Color(0xFF315646),
+          fillColor: Colors.grey.shade50,
           contentPadding: EdgeInsets.zero,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
@@ -187,7 +187,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(
-              color: Color(0xFFD0CFBA),
+              color: Colors.black,
               width: 1.5,
             ),
           ),

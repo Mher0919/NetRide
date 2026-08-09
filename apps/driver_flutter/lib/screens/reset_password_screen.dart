@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../services/error_handler.dart';
@@ -103,17 +103,17 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF294C3A),
-      appBar: AppBar(backgroundColor: const Color(0xFF294C3A), elevation: 0, leading: const BackButton(color: Color(0xFFD0CFBA))),
+      backgroundColor: const Color(0xFFEEEBE6),
+      appBar: AppBar(backgroundColor: const Color(0xFFEEEBE6), elevation: 0, leading: const BackButton(color: Colors.black)),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Reset Password', style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold, color: const Color(0xFFD0CFBA))),
+              Text('Reset Password', style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text('Enter your new password below.', style: GoogleFonts.poppins(color: const Color(0xFF9BAE9E))),
+              Text('Enter your new password below.', style: GoogleFonts.poppins(color: Colors.grey)),
               const SizedBox(height: 32),
               if (widget.token == null)
                 Padding(
@@ -145,7 +145,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                   labelText: 'Confirm New Password',
                   border: const OutlineInputBorder(),
                   filled: !_allCheckpointsMet,
-                  fillColor: _allCheckpointsMet ? null : const Color(0xFF294C3A),
+                  fillColor: _allCheckpointsMet ? null : Colors.grey[200],
                 ),
               ),
               const SizedBox(height: 32),
@@ -156,8 +156,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                   onPressed: (_isLoading || !_allCheckpointsMet || _passwordController.text != _confirmPasswordController.text)
                       ? null
                       : _handleReset,
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD0CFBA), foregroundColor: const Color(0xFF294C3A)),
-                  child: _isLoading ? const CircularProgressIndicator(color: Color(0xFF294C3A)) : const Text('Reset Password'),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+                  child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : const Text('Reset Password'),
                 ),
               ),
             ],
@@ -189,7 +189,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       children: [
         Icon(
           isMet ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-          color: isMet ? const Color(0xFF7FAE8C) : Colors.grey[500],
+          color: isMet ? Colors.green : Colors.grey[400],
           size: 16,
         ),
         const SizedBox(width: 8),
@@ -197,7 +197,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           text,
           style: GoogleFonts.poppins(
             fontSize: 12,
-            color: isMet ? const Color(0xFF7FAE8C) : Colors.grey[500],
+            color: isMet ? Colors.green[700] : Colors.grey[500],
             fontWeight: isMet ? FontWeight.w500 : FontWeight.normal,
           ),
         ),

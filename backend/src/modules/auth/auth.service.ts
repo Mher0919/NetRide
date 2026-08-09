@@ -255,16 +255,27 @@ export class AuthService {
         [driverPhone, userId]
       );
       riderPhoneVerified = true;
+    } else if (!driverVerified && riderPhoneVerified && user.phone_number) {
+      // Dual-role user who verified their phone on the RIDER profile but never
+      // triggered the driver-side phone flow (the driver app skips step 2 when
+      // progress reports phone_verified from the users row). Backfill the
+      // drivers row so the driver profile is treated as onboarding-complete
+      // instead of bouncing the app back to onboarding forever.
+      await pool.query(
+        `UPDATE drivers SET phone_number = $1, phone_verified = true WHERE user_id = $2`,
+        [user.phone_number, userId]
+      );
     }
 
     const riderOnboardingComplete = riderPhoneVerified;
 
     const driverExists = !!driver;
     const driverPhoneVerified = driverVerified || riderPhoneVerified;
-    // The rider-facing endpoint only needs to report completion for the
-    // active app profile; driver step gating is enforced elsewhere. We mark
-    // the driver profile complete when a verified driver row exists.
-    const driverOnboardingComplete = driverExists && driverVerified;
+    // A dual-role user who verified the phone on the rider profile (users row)
+    // but never on the driver profile must still be considered complete once
+    // the driver onboarding steps are done — otherwise the driver app bounces
+    // between MainWrapper and the onboarding screen indefinitely.
+    const driverOnboardingComplete = driverExists && driverPhoneVerified;
 
     const roles: string[] = ['RIDER'];
     if (driverExists) roles.push('DRIVER');

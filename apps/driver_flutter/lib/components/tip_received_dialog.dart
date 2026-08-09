@@ -122,7 +122,7 @@ class TipReceivedDialog extends StatelessWidget {
             const Text(
               "Thank you for providing great service!",
               style: TextStyle(
-                color: Color(0xFF9BAE9E),
+                color: Colors.grey,
                 fontSize: 14,
               ),
             ),
@@ -132,7 +132,7 @@ class TipReceivedDialog extends StatelessWidget {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryBrandGreen,
-                  foregroundColor: Color(0xFF294C3A),
+                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),

@@ -1,7 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 import 'dart:math' as math;
@@ -12,6 +11,7 @@ import '../services/auth_service.dart';
 import '../services/error_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../utils/file_url.dart';
+import '../utils/pick_image.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
@@ -120,8 +120,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _changeProfilePicture() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final pickedFile = await pickImageWithSource(context);
     if (pickedFile != null) {
       setState(() => _isSaving = true);
       try {
@@ -194,8 +193,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     if (proceedFront != true) return;
-    final picker = ImagePicker();
-    final frontImage = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+    final frontImage = await pickImageWithSource(context, imageQuality: 70);
     if (frontImage == null) return;
 
     if (!mounted) return;
@@ -244,7 +242,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     if (proceedBack != true) return;
-    final backImage = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+    final backImage = await pickImageWithSource(context, imageQuality: 70);
     if (backImage == null) return;
 
     if (!mounted) return;

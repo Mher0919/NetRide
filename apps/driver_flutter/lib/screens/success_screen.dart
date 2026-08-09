@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class SuccessScreen extends StatelessWidget {
@@ -7,14 +7,14 @@ class SuccessScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF294C3A),
+      backgroundColor: const Color(0xFFEEEBE6),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.check_circle_outline_rounded, size: 100, color: Color(0xFF7FAE8C)),
+              const Icon(Icons.check_circle_outline_rounded, size: 100, color: Colors.green),
               const SizedBox(height: 24),
               Text(
                 'Application Submitted!',
@@ -24,7 +24,7 @@ class SuccessScreen extends StatelessWidget {
               Text(
                 'Our team will review your documents. This usually takes 1-3 business days.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(fontSize: 16, color: const Color(0xFF9BAE9E)),
+                style: GoogleFonts.poppins(fontSize: 16, color: Colors.grey[600]),
               ),
               const SizedBox(height: 48),
               SizedBox(
@@ -33,8 +33,8 @@ class SuccessScreen extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: () => Navigator.pushReplacementNamed(context, '/'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFD0CFBA),
-                    foregroundColor: const Color(0xFF294C3A),
+                    backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   child: const Text('Back to Home'),

@@ -178,7 +178,7 @@ class AuthService {
     String? appRole,
   }) async {
     try {
-      final response = await ApiService.dio.post('auth/login-password', data: {
+      final response = await ApiService.dio.post('/auth/login-password', data: {
         'email': email,
         'password': password,
         if (appRole != null) 'app_role': appRole,
@@ -368,7 +368,7 @@ class AuthService {
   static Future<List<String>> getVehicleMakes(int year) async {
     try {
       final response = await ApiService.dio.get(
-        'driver/vehicle-models/makes',
+        '/driver/vehicle-models/makes',
         queryParameters: {'year': year},
       );
       return List<String>.from(response.data);
@@ -380,7 +380,7 @@ class AuthService {
   static Future<List<String>> getVehicleModels(String make, int year) async {
     try {
       final response = await ApiService.dio.get(
-        'driver/vehicle-models/models',
+        '/driver/vehicle-models/models',
         queryParameters: {'make': make, 'year': year},
       );
       return List<String>.from(response.data);

@@ -46,7 +46,7 @@ class DriverStatusCard extends StatelessWidget {
 
       case DriverStatusKind.backgroundApproved:
         return _build(
-          color: AppTheme.successGreen,
+          color: AppTheme.primaryBrandGreen,
           icon: Icons.check_circle_outline_rounded,
           title: 'Background check approved!',
           message: 'You are now authorized to drive.',
@@ -66,7 +66,7 @@ class DriverStatusCard extends StatelessWidget {
 
       case DriverStatusKind.readyToDrive:
         return _build(
-          color: AppTheme.successGreen,
+          color: AppTheme.primaryBrandGreen,
           icon: Icons.local_taxi_rounded,
           title: 'You can now drive!',
           message: 'Flip the switch below to start accepting ride requests.',
@@ -85,7 +85,7 @@ class DriverStatusCard extends StatelessWidget {
 
       case DriverStatusKind.profileChangeApproved:
         return _build(
-          color: AppTheme.successGreen,
+          color: AppTheme.primaryBrandGreen,
           icon: Icons.check_circle_outline_rounded,
           title: 'Changes approved — you\'re cleared to drive!',
           message:

@@ -50,14 +50,14 @@ class BottomSheetCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
       decoration: BoxDecoration(
-        color: AppTheme.lightCardBackground,
+        color: Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(
           top: BorderSide(color: AppTheme.softBorderColor.withOpacity(0.6)),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.35),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 16,
             offset: const Offset(0, -4),
           ),
@@ -136,9 +136,7 @@ class BottomSheetCard extends StatelessWidget {
                 backgroundColor: actionEnabled
                     ? AppTheme.primaryBrandGreen
                     : AppTheme.softBorderColor,
-                foregroundColor: actionEnabled
-                    ? const Color(0xFF294C3A)
-                    : AppTheme.secondaryDarkText,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 18),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),

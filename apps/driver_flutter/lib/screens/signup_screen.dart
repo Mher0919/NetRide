@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../services/error_handler.dart';
@@ -117,12 +117,12 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF294C3A),
+      backgroundColor: const Color(0xFFEEEBE6),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF294C3A),
+        backgroundColor: const Color(0xFFEEEBE6),
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Color(0xFFD0CFBA), size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -139,7 +139,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   child: Hero(
                     tag: 'auth_icon',
                     child: Image.asset(
-                      'assets/images/logo.png',
+                      'assets/images/regular-logo.png',
                       width: 120,
                       height: 120,
                       fit: BoxFit.contain,
@@ -160,7 +160,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   'Sign up now to start earning.',
                   style: GoogleFonts.poppins(
                     fontSize: 16,
-                    color: Color(0xFF9BAE9E),
+                    color: Colors.grey[600],
                   ),
                 ),
                 const SizedBox(height: 32),
@@ -217,8 +217,8 @@ class _SignupScreenState extends State<SignupScreen> {
                         ? null
                         : _handleSignup,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFD0CFBA),
-                      foregroundColor: const Color(0xFF294C3A),
+                      backgroundColor: Colors.black,
+                      foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -228,7 +228,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         ? const SizedBox(
                             height: 24,
                             width: 24,
-                            child: CircularProgressIndicator(color: Color(0xFF294C3A), strokeWidth: 2),
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                           )
                         : Text(
                             'Sign Up',
@@ -271,7 +271,7 @@ class _SignupScreenState extends State<SignupScreen> {
       children: [
         Icon(
           isMet ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-          color: isMet ? const Color(0xFF7FAE8C) : Colors.grey[500],
+          color: isMet ? Colors.green : Colors.grey[400],
           size: 16,
         ),
         const SizedBox(width: 8),
@@ -279,7 +279,7 @@ class _SignupScreenState extends State<SignupScreen> {
           text,
           style: GoogleFonts.poppins(
             fontSize: 12,
-            color: isMet ? const Color(0xFF7FAE8C) : Colors.grey[500],
+            color: isMet ? Colors.green[700] : Colors.grey[500],
             fontWeight: isMet ? FontWeight.w500 : FontWeight.normal,
           ),
         ),
@@ -306,7 +306,7 @@ class _SignupScreenState extends State<SignupScreen> {
           style: GoogleFonts.poppins(
             fontSize: 14,
             fontWeight: FontWeight.w500,
-            color: isFieldEnabled ? Color(0xFFD0CFBA) : Color(0xFF9BAE9E).withOpacity(0.6),
+            color: isFieldEnabled ? Colors.grey[700] : Colors.grey[400],
           ),
         ),
         const SizedBox(height: 8),
@@ -315,23 +315,22 @@ class _SignupScreenState extends State<SignupScreen> {
           keyboardType: keyboardType,
           obscureText: obscureText,
           validator: validator,
-          cursorColor: const Color(0xFFD0CFBA),
+          cursorColor: Colors.black,
           enabled: enabled,
-          style: GoogleFonts.poppins(color: const Color(0xFFD0CFBA), fontSize: 15),
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: isFieldEnabled ? Color(0xFF9BAE9E) : Color(0xFF9BAE9E).withOpacity(0.5), size: 22),
+            prefixIcon: Icon(icon, color: isFieldEnabled ? Colors.grey[400] : Colors.grey[300], size: 22),
             suffixIcon: suffixIcon,
             hintText: 'Enter your $label',
-            hintStyle: GoogleFonts.poppins(color: Color(0xFF9BAE9E), fontSize: 15),
+            hintStyle: GoogleFonts.poppins(color: Colors.grey[400], fontSize: 15),
             filled: true,
-            fillColor: isFieldEnabled ? const Color(0xFF315646) : const Color(0xFF294C3A),
+            fillColor: isFieldEnabled ? Colors.grey[50] : Colors.grey[200],
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFD0CFBA), width: 1.5),
+              borderSide: const BorderSide(color: Colors.black, width: 1.5),
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),

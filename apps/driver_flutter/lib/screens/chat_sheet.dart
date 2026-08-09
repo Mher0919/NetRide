@@ -119,7 +119,7 @@ class _ChatSheetState extends State<ChatSheet> {
               shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
-            child: const Icon(Icons.person_rounded, color: Color(0xFF294C3A), size: 20),
+            child: const Icon(Icons.person_rounded, color: Colors.white, size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -243,7 +243,7 @@ class _ChatSheetState extends State<ChatSheet> {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
       decoration: const BoxDecoration(
-        color: Color(0xFF315646),
+        color: Colors.white,
         border: Border(top: BorderSide(color: AppTheme.softBorderColor)),
       ),
       child: Row(
@@ -280,7 +280,7 @@ class _ChatSheetState extends State<ChatSheet> {
               onTap: _handleSend,
               child: const Padding(
                 padding: EdgeInsets.all(12),
-                child: Icon(Icons.send_rounded, color: Color(0xFF294C3A), size: 20),
+                child: Icon(Icons.send_rounded, color: Colors.white, size: 20),
               ),
             ),
           ),

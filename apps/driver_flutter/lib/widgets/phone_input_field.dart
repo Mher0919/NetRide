@@ -86,9 +86,9 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
           height: 56, // match the text field height for alignment
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: Color(0xFF315646),
+            color: Colors.grey.shade50,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Color(0xFF3D5F4D)),
+            border: Border.all(color: Colors.grey.shade300),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<CountryDialCode>(
@@ -108,7 +108,7 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
                             style: GoogleFonts.poppins(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFFD0CFBA),
+                              color: Colors.black,
                             ),
                           ),
                         ],
@@ -150,14 +150,14 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
                       hintText: '(555) 123-4567',
                       counterText: '',
                       filled: true,
-                      fillColor: Color(0xFF315646),
+                      fillColor: Colors.grey.shade50,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFFD0CFBA), width: 1.5),
+                        borderSide: const BorderSide(color: Colors.black, width: 1.5),
                       ),
                       errorBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),

@@ -1,11 +1,11 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
+import '../utils/pick_image.dart';
 import '../utils/file_url.dart';
 
 class DocumentResubmissionScreen extends StatefulWidget {
@@ -36,10 +36,10 @@ class _DocumentResubmissionScreenState
     'id_photo_back_url': 'ID Card (Back)',
   };
 
-  static const Color _cream = Color(0xFF315646);
-  static const Color _sage = Color(0xFFD0CFBA);
-  static const Color _terracotta = Color(0xFFE07373);
-  static const Color _darkForest = Color(0xFFD0CFBA);
+  static const Color _cream = Color(0xFFF7F4EF);
+  static const Color _sage = Color(0xFF5B7760);
+  static const Color _terracotta = Color(0xFFC65A5A);
+  static const Color _darkForest = Color(0xFF2F3A32);
 
   @override
   void initState() {
@@ -77,11 +77,7 @@ class _DocumentResubmissionScreenState
   }
 
   Future<void> _pickAndUpload(String docType) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-    );
+    final pickedFile = await pickImageWithSource(context, imageQuality: 70);
     if (pickedFile == null) return;
 
     setState(() => _isUploading = true);
@@ -192,7 +188,7 @@ class _DocumentResubmissionScreenState
                 const SizedBox(height: 8),
                 Text(
                   'Your documents have been sent to the admin team for review.',
-                  style: const TextStyle(color: Color(0xFF9BAE9E)),
+                  style: const TextStyle(color: Color(0xFF6B6B6B)),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -203,7 +199,7 @@ class _DocumentResubmissionScreenState
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF294C3A),
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -238,7 +234,7 @@ class _DocumentResubmissionScreenState
                         const SizedBox(height: 8),
                         const Text(
                           'All your documents are in order.',
-                          style: TextStyle(color: Color(0xFF9BAE9E)),
+                          style: TextStyle(color: Color(0xFF6B6B6B)),
                         ),
                       ],
                     ),
@@ -279,7 +275,7 @@ class _DocumentResubmissionScreenState
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: _cream,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: urls.isEmpty
@@ -315,7 +311,7 @@ class _DocumentResubmissionScreenState
                     horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: urls.isEmpty
-                      ? const Color(0xFF4B2E2E)
+                      ? const Color(0xFFFCE9E9)
                       : _sage.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -348,7 +344,7 @@ class _DocumentResubmissionScreenState
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF9BAE9E),
+                      color: Color(0xFF6B6B6B),
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -561,7 +557,7 @@ class _DocumentResubmissionScreenState
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: Color(0xFF294C3A),
+                      color: Colors.white,
                     ),
                   )
                 : const Icon(Icons.send_rounded, size: 20),
@@ -576,7 +572,7 @@ class _DocumentResubmissionScreenState
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: _sage,
-              foregroundColor: const Color(0xFF294C3A),
+              foregroundColor: Colors.white,
               disabledBackgroundColor:
                   _darkForest.withOpacity(0.12),
               disabledForegroundColor:

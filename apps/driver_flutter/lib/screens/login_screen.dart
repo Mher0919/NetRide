@@ -238,10 +238,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       height: 260,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Color(0xFFD0CFBA).withOpacity(0.12),
+                        color: Colors.white.withOpacity(0.5),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
+                            color: Colors.black.withOpacity(0.05),
                             blurRadius: 30,
                             offset: const Offset(0, 10),
                           ),
@@ -317,7 +317,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               label: 'Continue with Google',
                               onPressed: () => _handleOAuth('google'),
                               backgroundColor: Colors.white,
-                              textColor: const Color(0xFF294C3A),
+                              textColor: theme.colorScheme.onSurface,
                               hasBorder: true,
                             ),
                             const SizedBox(height: 12),
@@ -325,9 +325,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               icon: Icons.apple_rounded,
                               label: 'Continue with Apple',
                               onPressed: () => _handleOAuth('apple'),
-                              backgroundColor: const Color(0xFF294C3A),
-                              textColor: const Color(0xFFD0CFBA),
-                              hasBorder: true,
+                              backgroundColor: theme.colorScheme.onSurface,
+                              textColor: Colors.white,
                             ),
                             const SizedBox(height: 12),
                             _OAuthButton(

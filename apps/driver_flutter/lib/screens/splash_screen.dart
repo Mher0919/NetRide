@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 class SplashScreen extends StatefulWidget {
   final String targetRoute;
@@ -63,7 +63,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF294C3A),
+      backgroundColor: const Color(0xFFEEEBE6),
       body: Stack(
         children: [
           Center(
@@ -104,7 +104,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFFD0CFBA),
+                      color: Color(0xFF2F3A32),
                       letterSpacing: 4,
                     ),
                   ),
@@ -114,7 +114,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFFD0CFBA),
+                      color: Color(0xFF5B7760),
                       letterSpacing: 2,
                     ),
                   ),

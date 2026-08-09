@@ -19,7 +19,7 @@ class VerificationBanner extends StatelessWidget {
     // Note: status is background_check_status from driver_profile
     if (status == 'PENDING') {
       return _buildBanner(
-        color: const Color(0xFFE0B04F),
+        color: const Color(0xFFF9A825),
         icon: Icons.hourglass_empty_rounded,
         message: 'We\'re reviewing your documents. You\'ll be able to drive once it\'s approved.',
       );
@@ -27,7 +27,7 @@ class VerificationBanner extends StatelessWidget {
 
     if (status == 'APPROVED') {
       return _buildBanner(
-        color: const Color(0xFF7FAE8C),
+        color: const Color(0xFF2E7D32),
         icon: Icons.check_circle_outline_rounded,
         message: 'Background check approved! You are now authorized to drive.',
         isDismissible: true,
@@ -36,7 +36,7 @@ class VerificationBanner extends StatelessWidget {
 
     if (status == 'REJECTED') {
       return _buildBanner(
-        color: const Color(0xFFE07373),
+        color: const Color(0xFFC62828),
         icon: Icons.error_outline_rounded,
         message: 'Application rejected. Please review administrative feedback.',
         actionLabel: 'SEE WHY',

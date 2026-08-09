@@ -38,7 +38,7 @@ class _LanePictogram extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = lane.valid ? AppTheme.primaryBrandGreen : AppTheme.primaryBrandGreen;
+    final color = lane.valid ? AppTheme.primaryBrandGreen : Colors.white;
     final opacity = lane.valid ? 1.0 : 0.3;
     return Container(
       width: 38,

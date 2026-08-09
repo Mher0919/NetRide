@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -56,7 +56,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     _loadWeeklyEarnings();
   }
 
-  // â”€â”€ Earnings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Earnings ──────────────────────────────────────────────────────
 
   /// Pulls the driver's completed rides from the history API and rolls up
   /// fares + tips for the trailing 7 days ("This Week").
@@ -79,7 +79,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           tips += t.tipAmount ?? 0;
           rides++;
         } catch (_) {
-          // Skip malformed history rows â€” never let a UI summary crash.
+          // Skip malformed history rows — never let a UI summary crash.
         }
       }
       if (mounted) {
@@ -96,7 +96,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     }
   }
 
-  // â”€â”€ Profile / compliance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Profile / compliance ──────────────────────────────────────────
 
   Future<void> _fetchProfile() async {
     try {
@@ -125,7 +125,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       try {
         await provider.refreshProfile();
       } catch (_) {
-        // Refresh failures are non-fatal â€” the gate stays in its last
+        // Refresh failures are non-fatal — the gate stays in its last
         // known state. The next socket-driven review will reconcile.
       }
     } catch (e) {
@@ -164,11 +164,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Administrative feedback on your background check:', style: TextStyle(fontSize: 13, color: Color(0xFF9BAE9E))),
+            const Text('Administrative feedback on your background check:', style: TextStyle(fontSize: 13, color: Colors.grey)),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Color(0xFFE07373).withOpacity(0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: Color(0xFFE07373).withOpacity(0.2))),
+              decoration: BoxDecoration(color: Colors.red.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.withOpacity(0.1))),
               child: Text(
                 reason ?? 'No specific reason provided. Please contact support.',
                 style: const TextStyle(fontWeight: FontWeight.w600, height: 1.5),
@@ -183,7 +183,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
               Navigator.pop(context);
               // Navigation to onboarding for document re-upload
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD0CFBA), foregroundColor: const Color(0xFF294C3A)),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
             child: const Text('RE-UPLOAD DOCUMENTS'),
           ),
         ],
@@ -218,7 +218,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF315646),
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -235,7 +235,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF3D5F4D),
+                      color: const Color(0xFFE0E0E0),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -250,13 +250,13 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                   since == null
                       ? 'Our team is reviewing the changes below. You can\'t drive until they\'re approved.'
                       : 'Submitted ${_formatRelative(since)}. We\'ll email you once it\'s reviewed.',
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF9BAE9E), height: 1.4),
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF6B6B6B), height: 1.4),
                 ),
                 const SizedBox(height: 16),
                 if (summary.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('No fields to display.', style: TextStyle(color: Color(0xFF9BAE9E))),
+                    child: Text('No fields to display.', style: TextStyle(color: Color(0xFF6B6B6B))),
                   )
                 else
                   ...summary.entries.map((e) => Padding(
@@ -268,7 +268,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                               height: 8,
                               margin: const EdgeInsets.only(right: 10, top: 6),
                               decoration: const BoxDecoration(
-                                color: Color(0xFFE07373),
+                                color: Color(0xFFC65A5A),
                                 shape: BoxShape.circle,
                               ),
                             ),
@@ -280,7 +280,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                             ),
                             const Text(
                               'updated',
-                              style: TextStyle(fontSize: 12, color: Color(0xFF9BAE9E), fontWeight: FontWeight.w600),
+                              style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), fontWeight: FontWeight.w600),
                             ),
                           ],
                         ),
@@ -357,7 +357,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       );
     }
 
-    // 3. Document action required â€” single card for all doc types
+    // 3. Document action required — single card for all doc types
     final hasDocAction = provider.documentRequirements.any(
       (r) => r['status'] == 'resubmission_required' && r['document_type'] != 'inspection_photo_url',
     );
@@ -430,8 +430,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
             child: ElevatedButton(
               onPressed: () => Navigator.pop(ctx, 'take_photo'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFD0CFBA),
-                foregroundColor: const Color(0xFF294C3A),
+                backgroundColor: const Color(0xFF5B7760),
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -527,7 +527,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         try {
           _mapController.move(LatLng(position.latitude, position.longitude), 15.0);
         } catch (_) {
-          // flutter_map internal state not ready yet â€” safe to ignore
+          // flutter_map internal state not ready yet — safe to ignore
         }
       }
     });
@@ -540,7 +540,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     });
   }
 
-  // â”€â”€ Online / offline transitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Online / offline transitions ──────────────────────────────────
 
   Future<void> _goOnline(DriverProvider provider) async {
     if (_isTogglingOnline) return;
@@ -558,7 +558,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           _showPendingChangeDetails();
           return;
         }
-        // Headshot or document requirements â€” route
+        // Headshot or document requirements — route
         // the user into the capture screen or documents.
         if (cs == DriverComplianceStatus.headshotActionRequired) {
           _showHeadshotModal(reason: 'headshot');
@@ -604,7 +604,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     setState(() => _isTogglingOnline = false);
   }
 
-  // â”€â”€ Map helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Map helpers ───────────────────────────────────────────────────
 
   List<LatLng> _routePointsFromGeometry(Map<String, dynamic>? geometry) {
     final points = <LatLng>[];
@@ -634,7 +634,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           ]),
           child: ColorFiltered(
             colorFilter: ColorFilter.mode(
-              const Color(0xFF294C3A).withOpacity(0.3),
+              const Color(0xFFEEEBE6).withOpacity(0.3),
               BlendMode.multiply,
             ),
             child: tileWidget,
@@ -645,7 +645,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   }
 
   Widget _buildUserLocationMarker(bool isOnline) {
-    final color = isOnline ? const Color(0xFFD0CFBA) : Colors.grey;
+    final color = isOnline ? const Color(0xFF5B7760) : Colors.grey;
     return Container(
       decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
       child: Center(
@@ -664,7 +664,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: const Color(0xFFE07373), behavior: SnackBarBehavior.floating),
+      SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -745,7 +745,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
             return Stack(
               children: [
-                // â”€â”€ Contained map card â‡„ full-screen map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // ── Contained map card ⇄ full-screen map ────────────────
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 500),
                   curve: Curves.easeInOutCubic,
@@ -789,7 +789,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                               Polyline(
                                 points: mapRoutePoints,
                                 strokeWidth: 6.0,
-                                color: const Color(0xFFD0CFBA),
+                                color: const Color(0xFF5B7760),
                               ),
                             ],
                           ),
@@ -809,7 +809,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                                 height: 40,
                                 child: Container(
                                   decoration: const BoxDecoration(
-                                    color: Color(0xFFD0CFBA),
+                                    color: Color(0xFF5B7760),
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Icon(Icons.location_on, color: Colors.white, size: 20),
@@ -821,7 +821,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                                 height: 40,
                                 child: Container(
                                   decoration: const BoxDecoration(
-                                    color: Color(0xFFD0CFBA),
+                                    color: Color(0xFF2F3A32),
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Icon(Icons.flag, color: Colors.white, size: 20),
@@ -835,7 +835,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                   ),
                 ),
 
-                // â”€â”€ Offline dashboard (fades out when online) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // ── Offline dashboard (fades out when online) ───────────
                 AnimatedOpacity(
                   opacity: isOnline ? 0 : 1,
                   duration: const Duration(milliseconds: 320),
@@ -862,7 +862,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                   ),
                 ),
 
-                // â”€â”€ Online top status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // ── Online top status ───────────────────────────────────
                 Positioned(
                   top: 0, left: 0, right: 0,
                   child: SafeArea(
@@ -888,7 +888,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                   ),
                 ),
 
-                // â”€â”€ GO ONLINE / GO OFFLINE circular control â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // ── GO ONLINE / GO OFFLINE circular control ────────────
                 if (!hasRequest)
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 500),
@@ -905,7 +905,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     ),
                   ),
 
-                // â”€â”€ Locate-me FAB (only when user pans away) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // ── Locate-me FAB (only when user pans away) ───────────
                 if (!_shouldFollowUser && !hasRequest)
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 500),
@@ -915,8 +915,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     child: FloatingActionButton(
                       heroTag: null,
                       mini: true,
-                      backgroundColor: const Color(0xFF315646),
-                      foregroundColor: const Color(0xFFD0CFBA),
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF2F3A32),
                       elevation: 4,
                       shape: const CircleBorder(),
                       onPressed: () {
@@ -931,7 +931,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     ),
                   ),
 
-                // â”€â”€ Incoming ride request card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // ── Incoming ride request card ─────────────────────────
                 if (incomingRequest != null)
                   Positioned(
                     bottom: 24,
@@ -950,24 +950,24 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     );
   }
 
-  // â”€â”€ Offline dashboard widgets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Offline dashboard widgets ─────────────────────────────────────
 
   Widget _buildOfflineHeader(DriverProvider provider, bool isOnline) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       decoration: BoxDecoration(
-        color: const Color(0xFF315646),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 16, offset: const Offset(0, 6)),
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 16, offset: const Offset(0, 6)),
         ],
       ),
       child: Row(
         children: [
           const CircleAvatar(
             radius: 20,
-            backgroundColor: Color(0xFF315646),
-            child: Icon(Icons.person, color: Color(0xFFD0CFBA), size: 20),
+            backgroundColor: Color(0xFFF7F4EF),
+            child: Icon(Icons.person, color: Color(0xFF5B7760), size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -977,13 +977,13 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
               children: [
                 Text(
                   _firstName.isNotEmpty ? 'Hello, $_firstName' : 'Welcome back',
-                  style: const TextStyle(color: Color(0xFFD0CFBA), fontSize: 16, fontWeight: FontWeight.w700),
+                  style: const TextStyle(color: Color(0xFF2F3A32), fontSize: 16, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   isOnline ? 'You\'re online' : 'You\'re offline',
                   style: TextStyle(
-                    color: isOnline ? const Color(0xFFD0CFBA) : const Color(0xFFD0CFBA).withOpacity(0.45),
+                    color: isOnline ? const Color(0xFF5B7760) : const Color(0xFF2F3A32).withOpacity(0.45),
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -994,13 +994,13 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: isOnline ? const Color(0xFFD0CFBA) : const Color(0xFF315646),
+              color: isOnline ? const Color(0xFF5B7760) : const Color(0xFFF7F4EF),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
               isOnline ? 'ONLINE' : 'OFFLINE',
               style: TextStyle(
-                color: isOnline ? const Color(0xFF294C3A) : const Color(0xFFD0CFBA).withOpacity(0.5),
+                color: isOnline ? Colors.white : const Color(0xFF2F3A32).withOpacity(0.5),
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 1.2,
@@ -1016,10 +1016,10 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       decoration: BoxDecoration(
-        color: const Color(0xFF315646),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 16, offset: const Offset(0, 6)),
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 16, offset: const Offset(0, 6)),
         ],
       ),
       child: Column(
@@ -1031,7 +1031,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
               fontSize: 10,
               fontWeight: FontWeight.w800,
               letterSpacing: 1.4,
-              color: Color(0xFFD0CFBA),
+              color: Color(0xFF5B7760),
             ),
           ),
           const SizedBox(height: 4),
@@ -1040,12 +1040,12 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
             children: [
               Text(
                 _earningsLoading
-                    ? 'â€”'
+                    ? '—'
                     : '\$${_weeklyFare.toStringAsFixed(2)}',
                 style: const TextStyle(
                   fontSize: 30,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFFD0CFBA),
+                  color: Color(0xFF2F3A32),
                   height: 1.1,
                 ),
               ),
@@ -1053,25 +1053,25 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
               if (_weeklyRides > 0)
                 Text(
                   '$_weeklyRides ride${_weeklyRides == 1 ? '' : 's'}',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFFD0CFBA).withOpacity(0.55)),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF2F3A32).withOpacity(0.55)),
                 ),
             ],
           ),
           const SizedBox(height: 10),
-          Container(height: 1, color: const Color(0xFF3D5F4D).withOpacity(0.6)),
+          Container(height: 1, color: const Color(0xFFD8D2CA).withOpacity(0.6)),
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.card_giftcard_rounded, size: 16, color: Color(0xFFE0B04F)),
+              const Icon(Icons.card_giftcard_rounded, size: 16, color: Color(0xFFC79A4A)),
               const SizedBox(width: 8),
               Text(
                 'Tips',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFFD0CFBA).withOpacity(0.6)),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF2F3A32).withOpacity(0.6)),
               ),
               const Spacer(),
               Text(
-                _earningsLoading ? 'â€”' : '\$${_weeklyTips.toStringAsFixed(2)}',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFD0CFBA)),
+                _earningsLoading ? '—' : '\$${_weeklyTips.toStringAsFixed(2)}',
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
               ),
             ],
           ),
@@ -1080,31 +1080,31 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     );
   }
 
-  // â”€â”€ Online mode widgets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Online mode widgets ───────────────────────────────────────────
 
   Widget _buildOnlineStatusBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF315646),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 8)),
+          BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 8)),
         ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _PulsingDot(color: const Color(0xFFD0CFBA)),
+          _PulsingDot(color: const Color(0xFF5B7760)),
           const SizedBox(width: 10),
           const Text(
             'You\'re Online',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFD0CFBA)),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
           ),
           const SizedBox(width: 10),
           Text(
             _firstName.isNotEmpty ? '$_firstName is available' : 'Available',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFFD0CFBA).withOpacity(0.45)),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF2F3A32).withOpacity(0.45)),
           ),
         ],
       ),
@@ -1115,18 +1115,18 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFD0CFBA),
+        color: const Color(0xFF5B7760),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(color: const Color(0xFFD0CFBA).withOpacity(0.35), blurRadius: 15, offset: const Offset(0, 8)),
+          BoxShadow(color: const Color(0xFF5B7760).withOpacity(0.35), blurRadius: 15, offset: const Offset(0, 8)),
         ],
       ),
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF294C3A))),
+          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
           SizedBox(width: 12),
-          Text('SEARCHING FOR RIDES', style: TextStyle(color: Color(0xFF294C3A), fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
+          Text('SEARCHING FOR RIDES', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
         ],
       ),
     );
@@ -1146,11 +1146,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           width: 76,
           height: 76,
           decoration: BoxDecoration(
-            color: const Color(0xFFD0CFBA),
+            color: const Color(0xFF5B7760),
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFD0CFBA).withOpacity(0.4),
+                color: const Color(0xFF5B7760).withOpacity(0.4),
                 blurRadius: 18,
                 offset: const Offset(0, 8),
               ),
@@ -1159,18 +1159,18 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           child: _isTogglingOnline
               ? const Padding(
                   padding: EdgeInsets.all(24),
-                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Color(0xFF294C3A)),
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
                 )
               : const Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.power_settings_new_rounded, size: 20, color: Color(0xFF294C3A)),
+                    Icon(Icons.power_settings_new_rounded, size: 20, color: Colors.white),
                     SizedBox(height: 2),
                     Text(
                       'GO\nONLINE',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Color(0xFF294C3A),
+                        color: Colors.white,
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.8,
@@ -1197,23 +1197,23 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           width: 76,
           height: 76,
           decoration: BoxDecoration(
-            color: const Color(0xFF315646),
+            color: Colors.white,
             shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFF3D5F4D), width: 1.5),
+            border: Border.all(color: const Color(0xFFD8D2CA), width: 1.5),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 16, offset: const Offset(0, 8)),
+              BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 16, offset: const Offset(0, 8)),
             ],
           ),
           child: const Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.pause_rounded, size: 20, color: Color(0xFFD0CFBA)),
+              Icon(Icons.pause_rounded, size: 20, color: Color(0xFF2F3A32)),
               SizedBox(height: 2),
               Text(
                 'GO\nOFFLINE',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Color(0xFFD0CFBA),
+                  color: Color(0xFF2F3A32),
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.8,
@@ -1277,8 +1277,8 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
     with SingleTickerProviderStateMixin {
   static const Duration kFallbackWindow = Duration(seconds: 15);
   // Sage-family colors matching the rest of the app's palette.
-  static const Color kAcceptFill = Color(0xFFD0CFBA); // primary sage
-  static const Color kAcceptTrack = Color(0xFF3D5F4D); // desaturated light sage
+  static const Color kAcceptFill = Color(0xFF5B7760); // primary sage
+  static const Color kAcceptTrack = Color(0xFFC9D6CC); // desaturated light sage
 
   /// Backend-authoritative deadline. The backend emits `expires_at` with
   /// the offer; the client only renders the remaining time. A fallback
@@ -1381,7 +1381,7 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
   // ---- Formatters ------------------------------------------------------------
 
   String _formatEta(double? seconds) {
-    if (seconds == null) return 'â€”';
+    if (seconds == null) return '—';
     final s = seconds.round();
     if (s < 60) return '$s sec';
     final m = (s / 60).round();
@@ -1389,7 +1389,7 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
   }
 
   String _formatDistanceMeters(double? meters) {
-    if (meters == null) return 'â€”';
+    if (meters == null) return '—';
     final mi = meters / 1609.34;
     return '${mi.toStringAsFixed(1)} mi';
   }
@@ -1441,11 +1441,11 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
       decoration: BoxDecoration(
-        color: const Color(0xFF315646),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.35),
+            color: Colors.black.withOpacity(0.12),
             blurRadius: 30,
             offset: const Offset(0, 10),
           ),
@@ -1464,7 +1464,7 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
-                  color: _expired ? const Color(0xFFE07373) : const Color(0xFFD0CFBA),
+                  color: _expired ? const Color(0xFFC65A5A) : const Color(0xFF5B7760),
                   letterSpacing: 1.5,
                 ),
               ),
@@ -1473,7 +1473,7 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
                 style: const TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFFD0CFBA),
+                  color: Color(0xFF2F3A32),
                 ),
               ),
             ],
@@ -1498,13 +1498,13 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
                   children: [
                     _buildAddressRow(
                       Icons.circle,
-                      const Color(0xFFD0CFBA),
+                      const Color(0xFF5B7760),
                       req.pickup.address ?? 'Pickup',
                     ),
                     const SizedBox(height: 10),
                     _buildAddressRow(
                       Icons.square,
-                      const Color(0xFFD0CFBA),
+                      const Color(0xFF2F3A32),
                       req.destination.address ?? 'Destination',
                     ),
                   ],
@@ -1537,7 +1537,7 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
                 Expanded(
                   child: _InfoChip(
                     icon: Icons.star_rounded,
-                    iconColor: const Color(0xFFE0B04F),
+                    iconColor: const Color(0xFFC79A4A),
                     label: 'RIDER',
                     value: rider.rating.toStringAsFixed(1),
                   ),
@@ -1553,18 +1553,18 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
-                color: const Color(0xFFE07373).withOpacity(0.08),
+                color: const Color(0xFFC65A5A).withOpacity(0.08),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.hourglass_disabled_rounded, size: 18, color: Color(0xFFE07373)),
+                  Icon(Icons.hourglass_disabled_rounded, size: 18, color: Color(0xFFC65A5A)),
                   SizedBox(width: 10),
                   Text(
                     'Request Expired',
                     style: TextStyle(
-                      color: Color(0xFFE07373),
+                      color: Color(0xFFC65A5A),
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
                       letterSpacing: 0.5,
@@ -1604,7 +1604,7 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
-              color: Color(0xFFD0CFBA),
+              color: Color(0xFF2F3A32),
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -1615,7 +1615,7 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
   }
 }
 
-/// Square decline button â€” static, independent of the timer.
+/// Square decline button — static, independent of the timer.
 class _DeclineButton extends StatelessWidget {
   final VoidCallback onTap;
   const _DeclineButton({required this.onTap});
@@ -1629,17 +1629,17 @@ class _DeclineButton extends StatelessWidget {
         width: 56,
         height: 56,
         decoration: BoxDecoration(
-          color: const Color(0xFF315646),
+          color: const Color(0xFFF7F4EF),
           shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFF3D5F4D)),
+          border: Border.all(color: const Color(0xFFD8D2CA)),
         ),
-        child: const Icon(Icons.close, color: Color(0xFFD0CFBA), size: 26),
+        child: const Icon(Icons.close, color: Color(0xFF2F3A32), size: 26),
       ),
     );
   }
 }
 
-/// Shrinking green Accept bar with rightâ†’left countdown wipe
+/// Shrinking green Accept bar with right→left countdown wipe
 /// and centered remaining-seconds label. The duration is derived from the
 /// backend-authoritative deadline, so the wipe tracks server time.
 class _AcceptCountdownBar extends StatelessWidget {
@@ -1661,7 +1661,7 @@ class _AcceptCountdownBar extends StatelessWidget {
         child: AnimatedBuilder(
           animation: controller,
           builder: (context, _) {
-            final progress = controller.value; // 0 â†’ 1
+            final progress = controller.value; // 0 → 1
             final remaining = (controller.duration!.inMilliseconds *
                     (1 - progress))
                 .ceil();
@@ -1672,7 +1672,7 @@ class _AcceptCountdownBar extends StatelessWidget {
             return Stack(
               alignment: Alignment.center,
               children: [
-                // Base pill (full button) â€” the "empty" sage track.
+                // Base pill (full button) — the "empty" sage track.
                 Container(
                   decoration: BoxDecoration(
                     color: _IncomingRequestCardState.kAcceptTrack,
@@ -1701,8 +1701,8 @@ class _AcceptCountdownBar extends StatelessWidget {
                       'ACCEPT',
                       style: TextStyle(
                         color: filled
-                            ? const Color(0xFF294C3A)
-                            : const Color(0xFFD0CFBA),
+                            ? Colors.white
+                            : const Color(0xFF2F3A32),
                         fontWeight: FontWeight.w800,
                         fontSize: 16,
                         letterSpacing: 1.2,
@@ -1714,8 +1714,8 @@ class _AcceptCountdownBar extends StatelessWidget {
                           horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         color: filled
-                            ? const Color(0xFF294C3A)
-                            : const Color(0xFF315646),
+                            ? Colors.white.withOpacity(0.85)
+                            : const Color(0xFFF7F4EF),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -1725,8 +1725,8 @@ class _AcceptCountdownBar extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                           fontSize: 12,
                           color: filled
-                              ? const Color(0xFFD0CFBA)
-                              : const Color(0xFFD0CFBA),
+                              ? const Color(0xFF2F3A32)
+                              : const Color(0xFF5B7760),
                         ),
                       ),
                     ),
@@ -1751,7 +1751,7 @@ class _InfoChip extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
-    this.iconColor = const Color(0xFFD0CFBA),
+    this.iconColor = const Color(0xFF5B7760),
   });
 
   @override
@@ -1759,7 +1759,7 @@ class _InfoChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF315646),
+        color: const Color(0xFFF7F4EF),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -1773,7 +1773,7 @@ class _InfoChip extends StatelessWidget {
             style: const TextStyle(
               fontSize: 9,
               fontWeight: FontWeight.w800,
-              color: Color(0xFFD0CFBA),
+              color: Color(0xFF5B7760),
               letterSpacing: 1,
             ),
           ),
@@ -1783,7 +1783,7 @@ class _InfoChip extends StatelessWidget {
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: Color(0xFFD0CFBA),
+              color: Color(0xFF2F3A32),
             ),
           ),
         ],
@@ -1815,7 +1815,7 @@ class _RouteThumbnail extends StatelessWidget {
         width: 110,
         height: 86,
         decoration: BoxDecoration(
-          color: const Color(0xFF294C3A),
+          color: const Color(0xFFEEEBE6),
           borderRadius: BorderRadius.circular(14),
         ),
         child: FlutterMap(
@@ -1850,7 +1850,7 @@ class _RouteThumbnail extends StatelessWidget {
                   Polyline(
                     points: routePoints,
                     strokeWidth: 4.0,
-                    color: const Color(0xFFD0CFBA),
+                    color: const Color(0xFF5B7760),
                   ),
                 ],
               ),
@@ -1862,7 +1862,7 @@ class _RouteThumbnail extends StatelessWidget {
                   height: 16,
                   child: Container(
                     decoration: const BoxDecoration(
-                      color: Color(0xFFD0CFBA),
+                      color: Color(0xFF5B7760),
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -1873,7 +1873,7 @@ class _RouteThumbnail extends StatelessWidget {
                   height: 14,
                   child: Container(
                     decoration: const BoxDecoration(
-                      color: Color(0xFFD0CFBA),
+                      color: Color(0xFF2F3A32),
                       shape: BoxShape.circle,
                     ),
                   ),
