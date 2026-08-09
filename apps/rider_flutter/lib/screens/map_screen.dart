@@ -21,7 +21,6 @@ import '../services/rewards_service.dart';
 import 'address_search_delegate.dart';
 import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
-import '../components/luxury_car.dart';
 import '../components/animated_price.dart';
 import 'wallet_screen.dart';
 
@@ -56,13 +55,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   double _estimateDurationSeconds = 0.0;
   bool _hasNavigatedToTrip = false;
 
-  // Rewards options at checkout (promo code + ride credits + wallet).
+  // Rewards options at checkout (promo code + ride credits + payment).
   final TextEditingController _promoCodeController = TextEditingController();
-  bool _applyCredits = true;
+  bool _applyCredits = false;
   int? _creditBalanceCents;
   bool _creditBalanceLoaded = false;
-  int? _walletBalanceCents;
-  bool _walletLoaded = false;
   PromoPreview? _promoPreview;
   bool _promoChecking = false;
   bool _promoApplied = false;
@@ -72,7 +69,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   // at min(balance, remaining fare, requested) so the server stays truth.
   int? _creditUseCents;
   final TextEditingController _customCreditController = TextEditingController();
-  bool _customCreditMode = false;
   String? _creditAmountError;
 
   // Part 2 — map expansion states:
@@ -577,24 +573,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     if (!_applyCredits) return 0;
     final balance = math.max(0, _creditBalanceCents ?? 0);
     final afterPromo = math.max(0, _fareCents - _promoDiscountCents);
-    final requested = math.max(0, _creditUseCents ?? balance);
+    final requested = math.max(0, _creditUseCents ?? 0);
+    if (requested == 0) return 0;
     return math.min(balance, math.min(afterPromo, requested));
   }
 
-  /// The wallet is the default payment method: it pays the fare remaining
-  /// after promo + credits, up to the available balance. (Display-only —
-  /// the backend authoritatively charges min(due, balance).)
-  int get _walletChargeCents {
-    final afterPromo = math.max(0, _fareCents - _promoDiscountCents);
-    final afterCredits = math.max(0, afterPromo - _creditsToUseCents);
-    final walletBalance = math.max(0, _walletBalanceCents ?? 0);
-    return math.min(afterCredits, walletBalance);
-  }
-
-  /// What the rider owes after the wallet charge. Mirrors the backend's
-  /// final_payment_cents: fare − promo − credits − wallet.
+  /// What the rider owes: fare − promo − credits.
   int get _finalCents => math.max(
-      0, _fareCents - _promoDiscountCents - _creditsToUseCents - _walletChargeCents);
+      0, _fareCents - _promoDiscountCents - _creditsToUseCents);
 
   int get _totalSavedCents => _promoDiscountCents + _creditsToUseCents;
 
@@ -629,9 +615,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _promoCodeController.clear();
       _promoPreview = null;
       _promoApplied = false;
+      _applyCredits = false;
       _creditUseCents = null;
-      _customCreditMode = false;
       _creditAmountError = null;
+      _customCreditController.clear();
     });
     _animateSheetTo(0);
   }
@@ -1184,7 +1171,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const LuxuryCarVisual(width: 68, height: 36),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.asset(
+                  'assets/images/car-logo.png',
+                  width: 68,
+                  height: 36,
+                  fit: BoxFit.contain,
+                ),
+              ),
               const SizedBox(width: 10),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1228,10 +1223,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  /// Expanded state: full ride-selection UI.
+  /// Expanded state: full ride-selection UI with scrollable content and
+  /// a fixed confirm button pinned to the bottom (never overflows).
   Widget _buildSheetBody(ThemeData theme, {required bool searching}) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
     return Column(
-      mainAxisSize: MainAxisSize.min,
       children: [
         const SizedBox(height: 10),
         Container(
@@ -1300,79 +1297,69 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
           )
         else
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Column(
+                children: [
+                  _buildRideCard(theme),
+                  const SizedBox(height: 10),
+                  _buildRewardsPanel(theme),
+                  SizedBox(height: 14 + bottomInset),
+                ],
+              ),
+            ),
+          ),
+        if (!_loadingEstimates && !searching)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: [
-                _buildRideCard(theme),
-                _buildRewardsPanel(theme),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: ElevatedButton(
-                    onPressed: _confirmRide,
-                    style: ElevatedButton.styleFrom(
-                      // Green CTA when ride credits are being used.
-                      backgroundColor: _creditsToUseCents > 0
-                          ? const Color(0xFF4CAF50)
-                          : const Color(0xFF2F3A32),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: Text(
-                      _creditsToUseCents > 0
-                          ? 'Confirm with ride credits'
-                          : 'Confirm NetRide Premium',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 18 + bottomInset),
+            child: SizedBox(
+              width: double.infinity,
+              height: 54,
+              child: ElevatedButton(
+                onPressed: _confirmRide,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _creditsToUseCents > 0
+                      ? const Color(0xFF4CAF50)
+                      : const Color(0xFF2F3A32),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
-                const SizedBox(height: 18),
-              ],
+                child: Text(
+                  _creditsToUseCents > 0
+                      ? 'Confirm with ride credits'
+                      : 'Confirm NetRide Premium',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
             ),
           ),
       ],
     );
   }
 
-  /// Loads the rider's credit balance AND wallet balance once per session.
+  /// Loads the rider's credit balance once per session.
   /// Called from initState (not from build) so drag/rebuild frames never
   /// trigger a network fetch.
   Future<void> _loadRewardsOptions() async {
-    if (_creditBalanceLoaded && _walletLoaded) return;
+    if (_creditBalanceLoaded) return;
     try {
-      final results = await Future.wait([
-        RewardsService.getCredits().then((a) => ('credits', a)),
-        RewardsService.getWallet().then((w) => ('wallet', w)),
-      ]);
+      final account = await RewardsService.getCredits();
       if (!mounted) return;
       setState(() {
-        for (final r in results) {
-          if (r.$1 == 'credits') {
-            final account = r.$2 as CreditAccount;
-            _creditBalanceCents = account.balanceCents;
-            _creditUseCents ??= account.balanceCents > 0 ? account.balanceCents : null;
-            _creditBalanceLoaded = true;
-          } else {
-            final wallet = r.$2 as WalletAccount;
-            _walletBalanceCents = wallet.balanceCents;
-            _walletLoaded = true;
-          }
-        }
+        _creditBalanceCents = account.balanceCents;
+        _creditBalanceLoaded = true;
       });
     } catch (_) {
       if (!mounted) return;
-      // Mark loaded so we don't retry forever on auth/network errors.
       setState(() {
         _creditBalanceLoaded = true;
-        _walletLoaded = true;
       });
     }
   }
@@ -1405,72 +1392,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
   }
 
-  /// Part 3 — validates a custom credits amount (in dollars) and selects it.
-  /// The backend still caps the debit; this only sets the rider's intent.
-  void _submitCustomCreditAmount(String raw) {
-    final balance = _creditBalanceCents ?? 0;
-    final dollars =
-        double.tryParse(raw.trim().replaceAll(RegExp(r'[^0-9.]'), ''));
-    final cents = dollars == null ? null : (dollars * 100).round();
-    if (cents == null || cents < 100 || cents > balance) {
-      setState(() {
-        _creditAmountError = balance > 0
-            ? 'Enter an amount between \$1.00 and ${formatCents(balance)}'
-            : 'No credits available';
-      });
-      return;
-    }
-    setState(() {
-      _creditUseCents = cents;
-      _customCreditMode = false;
-      _creditAmountError = null;
-      _customCreditController.clear();
-    });
-  }
-
-  Widget _creditChip({
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF5B7760) : Colors.white,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: selected
-                ? const Color(0xFF5B7760)
-                : const Color(0xFFD8D2CA),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w700,
-            color: selected
-                ? Colors.white
-                : const Color(0xFF2F3A32),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Compact promo + credits + wallet options shown at checkout.
+  /// Compact promo + credits + payment options shown at checkout.
+  /// Ride credits default OFF; turning ON reveals a precise amount input.
   Widget _buildRewardsPanel(ThemeData theme) {
     final balanceCents = _creditBalanceCents ?? 0;
-    final balanceLabel = balanceCents > 0 ? formatCents(balanceCents) : null;
-    final requested = _creditUseCents ?? balanceCents;
-    final applied = _creditsToUseCents;
+    final hasCredits = balanceCents > 0;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -1478,42 +1406,46 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       ),
       child: Column(
         children: [
-          Row(
-            children: [
-              const Icon(Icons.local_offer_outlined, size: 18, color: Color(0xFF5B7760)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: _promoCodeController,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    hintText: 'Promo code',
-                    isDense: true,
-                    border: InputBorder.none,
+          // --- Promo Code ---
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.local_offer_outlined, size: 18, color: Color(0xFF5B7760)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _promoCodeController,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      hintText: 'Promo code',
+                      isDense: true,
+                      border: InputBorder.none,
+                    ),
+                    style: const TextStyle(fontSize: 14, color: Color(0xFF2F3A32)),
+                    onSubmitted: (_) => _validatePromo(),
                   ),
-                  style: const TextStyle(fontSize: 14, color: Color(0xFF2F3A32)),
-                  onSubmitted: (_) => _validatePromo(),
                 ),
-              ),
-              if (_promoChecking)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5B7760)),
-                )
-              else if (_promoApplied)
-                const Icon(Icons.check_circle_rounded, color: Color(0xFF6E8B74), size: 20)
-              else
-                TextButton(
-                  onPressed: _validatePromo,
-                  child: const Text('Apply'),
-                ),
-            ],
+                if (_promoChecking)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5B7760)),
+                  )
+                else if (_promoApplied)
+                  const Icon(Icons.check_circle_rounded, color: Color(0xFF6E8B74), size: 20)
+                else
+                  TextButton(
+                    onPressed: _validatePromo,
+                    child: const Text('Apply'),
+                  ),
+              ],
+            ),
           ),
           if (_promoPreview != null && _promoCodeController.text.trim().isNotEmpty) ...[
-            const Divider(height: 1),
+            const Divider(height: 1, indent: 14, endIndent: 14),
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -1529,199 +1461,331 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
           ],
-          const Divider(height: 1),
-          // Wallet balance — the default fare payment method.
-          Row(
-            children: [
-              const Icon(Icons.wallet_rounded, size: 18, color: Color(0xFF5B7760)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _walletLoaded
-                      ? 'Wallet balance: ${formatCents(_walletBalanceCents ?? 0)}'
-                      : 'Loading wallet…',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF2F3A32),
+          const Divider(height: 1, indent: 14, endIndent: 14),
+          // --- Payment Method (no dollar balance) ---
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.credit_card_rounded, size: 18, color: Color(0xFF5B7760)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Payment Method',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF2F3A32),
+                    ),
                   ),
                 ),
-              ),
-              TextButton(
-                onPressed: _openWalletScreen,
-                child: const Text('View', style: TextStyle(fontSize: 12)),
-              ),
-            ],
-          ),
-          const Divider(height: 1),
-          Row(
-            children: [
-              const Icon(Icons.account_balance_wallet_outlined, size: 18, color: Color(0xFF5B7760)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  balanceLabel != null
-                      ? 'Use ride credits ($balanceLabel available)'
-                      : 'Use ride credits',
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF2F3A32)),
-                ),
-              ),
-              Switch(
-                value: _applyCredits,
-                activeTrackColor: const Color(0xFF5B7760),
-                onChanged: (v) => setState(() => _applyCredits = v),
-              ),
-            ],
-          ),
-          // Part 3 — validated manual amount selector (visible only when
-          // the rider opts in and has a balance).
-          if (_applyCredits && balanceCents > 0) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _creditChip(
-                  label: 'All',
-                  selected: !_customCreditMode && requested == balanceCents,
-                  onTap: () => setState(() {
-                    _customCreditMode = false;
-                    _creditUseCents = balanceCents;
-                    _creditAmountError = null;
-                  }),
-                ),
-                const SizedBox(width: 6),
-                _creditChip(
-                  label: '\$5',
-                  selected: !_customCreditMode && requested == 500,
-                  onTap: () => setState(() {
-                    _customCreditMode = false;
-                    _creditUseCents = 500;
-                    _creditAmountError = null;
-                  }),
-                ),
-                const SizedBox(width: 6),
-                _creditChip(
-                  label: '\$10',
-                  selected: !_customCreditMode && requested == 1000,
-                  onTap: () => setState(() {
-                    _customCreditMode = false;
-                    _creditUseCents = 1000;
-                    _creditAmountError = null;
-                  }),
-                ),
-                const SizedBox(width: 6),
-                _creditChip(
-                  label: '\$20',
-                  selected: !_customCreditMode && requested == 2000,
-                  onTap: () => setState(() {
-                    _customCreditMode = false;
-                    _creditUseCents = 2000;
-                    _creditAmountError = null;
-                  }),
-                ),
-                const SizedBox(width: 6),
-                _creditChip(
-                  label: 'Custom',
-                  selected: _customCreditMode,
-                  onTap: () => setState(() {
-                    _customCreditMode = true;
-                    _creditAmountError = null;
-                  }),
+                TextButton(
+                  onPressed: _openWalletScreen,
+                  child: const Text('Manage', style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),
-            if (_customCreditMode) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _customCreditController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
+          ),
+          const Divider(height: 1, indent: 14, endIndent: 14),
+          // --- Ride Credits (OFF by default) ---
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.account_balance_wallet_outlined, size: 18, color: Color(0xFF5B7760)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Use Ride Credits',
+                        style: TextStyle(fontSize: 13, color: Color(0xFF2F3A32)),
                       ),
-                      decoration: InputDecoration(
-                        hintText: 'Amount in dollars (e.g. 7.50)',
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                            color: Color(0xFFD8D2CA),
+                      if (hasCredits)
+                        Text(
+                          formatCents(balanceCents),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF5B7760).withOpacity(0.7),
                           ),
                         ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                            color: Color(0xFFD8D2CA),
-                          ),
-                        ),
-                      ),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF2F3A32),
-                      ),
-                      onSubmitted: _submitCustomCreditAmount,
-                    ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () =>
-                        _submitCustomCreditAmount(_customCreditController.text),
-                    child: const Text('Use'),
+                ),
+                Switch(
+                  value: _applyCredits,
+                  activeTrackColor: const Color(0xFF5B7760),
+                  onChanged: hasCredits
+                      ? (v) {
+                          setState(() {
+                            _applyCredits = v;
+                            if (!v) {
+                              _creditUseCents = null;
+                              _creditAmountError = null;
+                              _customCreditController.clear();
+                            }
+                          });
+                        }
+                      : null,
+                ),
+              ],
+            ),
+          ),
+          // --- Expanded credit amount input (when toggled ON) ---
+          if (_applyCredits && hasCredits) ...[
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              alignment: Alignment.topCenter,
+              child: Column(
+                children: [
+                  const Divider(height: 1, indent: 14, endIndent: 14),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Available',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                            Text(
+                              formatCents(balanceCents),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF2F3A32),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Amount to use',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _customCreditController,
+                                keyboardType: const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                decoration: InputDecoration(
+                                  prefixText: '\$ ',
+                                  hintText: '0.00',
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFFD8D2CA),
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFFD8D2CA),
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF5B7760),
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF2F3A32),
+                                ),
+                                onChanged: _onCreditAmountChanged,
+                              ),
+                            ),
+                            if (_creditUseCents != null && _creditUseCents! > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: TextButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      _creditUseCents = null;
+                                      _creditAmountError = null;
+                                      _customCreditController.clear();
+                                    });
+                                  },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: const Color(0xFFC65A5A),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    minimumSize: Size.zero,
+                                  ),
+                                  child: const Text('Clear', style: TextStyle(fontSize: 12)),
+                                ),
+                              ),
+                          ],
+                        ),
+                        if (_creditAmountError != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            _creditAmountError!,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFC65A5A),
+                            ),
+                          ),
+                        ],
+                        if (_creditUseCents != null && _creditUseCents! > 0 && _creditAmountError == null) ...[
+                          const SizedBox(height: 8),
+                          const Divider(height: 1),
+                          const SizedBox(height: 8),
+                          _creditBreakdownRow(
+                            label: 'Original Fare',
+                            amount: _fareCents,
+                            positive: true,
+                          ),
+                          if (_promoDiscountCents > 0)
+                            _creditBreakdownRow(
+                              label: 'Promo discount',
+                              amount: -_promoDiscountCents,
+                              positive: false,
+                            ),
+                          _creditBreakdownRow(
+                            label: 'Ride Credit',
+                            amount: -_creditsToUseCents,
+                            positive: false,
+                          ),
+                          const SizedBox(height: 4),
+                          _creditBreakdownRow(
+                            label: 'Final Fare',
+                            amount: _finalCents,
+                            positive: true,
+                            bold: true,
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),
-            ],
-            if (_creditAmountError != null) ...[
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  _creditAmountError!,
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFFC65A5A),
-                  ),
-                ),
-              ),
-            ],
-            if (_creditAmountError == null &&
-                _creditUseCents != null &&
-                _creditUseCents! > 0 &&
-                applied > 0 &&
-                applied < _creditUseCents!) ...[
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '${formatCents(applied)} of ${formatCents(_creditUseCents!)} '
-                  'will be applied to this ride',
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF5B7760),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ],
         ],
       ),
     );
   }
 
-  /// Part 3 — the single ride class card: premium luxury-SUV visual,
-  /// class details, ETA, and the animated price breakdown (fare → promo
-  /// → credits → wallet → what the rider pays).
+  Widget _creditBreakdownRow({
+    required String label,
+    required int amount,
+    required bool positive,
+    bool bold = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+              color: Colors.grey.shade700,
+            ),
+          ),
+          Text(
+            positive ? formatCents(amount) : '-${formatCents(-amount)}',
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+              color: bold
+                  ? const Color(0xFF2F3A32)
+                  : positive
+                      ? const Color(0xFF2F3A32)
+                      : const Color(0xFF5B7760),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _onCreditAmountChanged(String raw) {
+    final balance = _creditBalanceCents ?? 0;
+    final afterPromo = math.max(0, _fareCents - _promoDiscountCents);
+
+    if (raw.isEmpty || raw == '.') {
+      setState(() {
+        _creditUseCents = null;
+        _creditAmountError = null;
+      });
+      return;
+    }
+
+    final sanitized = raw.replaceAll(RegExp(r'[^0-9.]'), '');
+    final dotCount = '.'.allMatches(sanitized).length;
+    if (dotCount > 1) return;
+
+    final dollars = double.tryParse(sanitized);
+    if (dollars == null) return;
+
+    final cents = (dollars * 100).round();
+
+    if (cents <= 0) {
+      setState(() {
+        _creditUseCents = null;
+        _creditAmountError = null;
+      });
+      return;
+    }
+
+    if (cents > balance) {
+      setState(() {
+        _creditUseCents = null;
+        _creditAmountError = 'You can use up to ${formatCents(balance)} in ride credits.';
+      });
+      return;
+    }
+
+    if (cents > afterPromo) {
+      setState(() {
+        _creditUseCents = null;
+        _creditAmountError = "Ride credits can't exceed the current fare.";
+      });
+      return;
+    }
+
+    setState(() {
+      _creditUseCents = cents;
+      _creditAmountError = null;
+    });
+  }
+
+  /// The single ride class card: premium SUV visual, class details, ETA,
+  /// and the animated price breakdown (fare → promo → credits → final).
   Widget _buildRideCard(ThemeData theme) {
     final fareCents = _fareCents;
     final finalCents = _finalCents;
     final savedCents = _totalSavedCents;
-    final walletCents = _walletChargeCents;
     final etaMinutes = (_estimateDurationSeconds / 60).round().clamp(1, 99);
 
     return Container(
@@ -1737,8 +1801,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         children: [
           Row(
             children: [
-              RepaintBoundary(
-                child: const LuxuryCarVisual(width: 96, height: 50),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/images/car-logo.png',
+                  width: 96,
+                  height: 50,
+                  fit: BoxFit.contain,
+                ),
               ),
               const SizedBox(width: 12),
               const Expanded(
@@ -1818,10 +1888,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               child: SavedBadge(cents: savedCents),
             ),
           ],
-          // Price breakdown: discounts + wallet payment, then the rider's
-          // final out-of-pocket total. Only shown when something is applied
-          // so the card stays quiet for a plain ride.
-          if (savedCents > 0 || walletCents > 0) ...[
+          // Price breakdown: discounts then final total. Only shown when
+          // something is applied so the card stays quiet for a plain ride.
+          if (savedCents > 0) ...[
             const SizedBox(height: 10),
             _priceBreakdownRow(
               label: _promoDiscountCents > 0
@@ -1834,14 +1903,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               label: 'Ride credits',
               amount: -_creditsToUseCents,
               color: const Color(0xFF5B7760),
-            ),
-            _priceBreakdownRow(
-              label: _walletLoaded
-                  ? 'Wallet payment'
-                  : 'Wallet',
-              amount: -walletCents,
-              isBold: true,
-              color: const Color(0xFF2F3A32),
             ),
             const SizedBox(height: 8),
             const Divider(height: 1),

@@ -1,9 +1,8 @@
 // lib/screens/wallet_screen.dart
 //
-// Rider wallet — balance + full transaction ledger.
-// The wallet is the default payment method for ride fares; it is funded
-// through admin grants (and test-mode seeding) since the product has no
-// payment provider.
+// Payment Method screen — the rider's payment instrument, NOT a dollar
+// balance. The internal wallet serves as the default payment method;
+// its transaction history is preserved for accounting transparency.
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -63,7 +62,7 @@ class _WalletScreenState extends State<WalletScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          'Wallet',
+          'Payment Method',
           style: theme.textTheme.headlineMedium?.copyWith(fontSize: 24),
         ),
       ),
@@ -77,44 +76,63 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Widget _buildContent() {
-    final account = _account!;
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF5B7760), Color(0xFF2F3A32)],
+                colors: [Color(0xFF2F3A32), Color(0xFF46584B)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                const Text(
-                  'Available balance',
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  formatCents(account.balanceCents),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.credit_card_rounded,
+                    color: Color(0xFFE8D9B5),
+                    size: 24,
                   ),
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  'Your wallet pays automatically at the end of your ride — after promos and ride credits are applied.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.8),
-                    fontSize: 12,
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Default Payment Method',
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Saved payment method',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Your payment method is charged automatically after promos and ride credits are applied.',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -122,7 +140,7 @@ class _WalletScreenState extends State<WalletScreen> {
           ),
           const SizedBox(height: 24),
           Text(
-            'Transaction history',
+            'Payment history',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -202,7 +220,9 @@ class _WalletScreenState extends State<WalletScreen> {
             ),
           ),
           Text(
-            formatCents(t.amountCents),
+            t.amountCents >= 0
+                ? formatCents(t.amountCents)
+                : '-${formatCents(-t.amountCents)}',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
@@ -219,7 +239,7 @@ class _WalletScreenState extends State<WalletScreen> {
   String _title(WalletTransaction t) {
     switch (t.type) {
       case 'ADMIN_GRANT':
-        return 'Added to wallet';
+        return 'Added to account';
       case 'RIDE_PAYMENT':
         return 'Paid for ride';
       case 'RIDE_REFUND':

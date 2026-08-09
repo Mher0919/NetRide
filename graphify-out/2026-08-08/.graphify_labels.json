@@ -306,5 +306,11 @@
   "304": ".submitProfileChange",
   "305": "WeeklyPayoutsService",
   "306": ".getDocumentRequirements",
-  "307": "ReferralInfo?"
+  "307": "ReferralInfo?",
+  "308": "smoke-platform-pricing.ts",
+  "309": "SingleTickerProviderStateMixin",
+  "310": ".forgotPassword",
+  "311": "RouteValidatorService",
+  "312": "build",
+  "313": "ReplaceVehicleScreen"
 }
