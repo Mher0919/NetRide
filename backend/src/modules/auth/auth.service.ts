@@ -173,6 +173,17 @@ export class AuthService {
       }
     }
 
+    // Email OTP verification for every non-admin password login. The 6-digit
+    // code is sent to the user's email; the app exchanges it via
+    // /auth/verify-otp, which then issues the session token.
+    if (user.role !== UserRole.ADMIN) {
+      await OTPService.generateOTP(user.email);
+      return {
+        otp_required: true,
+        message: 'Verification code sent to email',
+      };
+    }
+
     // Check password expiration (90 days)
     const expirationDays = 90;
     const passwordChangedAt = user.password_changed_at ? new Date(user.password_changed_at) : new Date(0);

@@ -60,6 +60,30 @@ class _VerificationScreenState extends State<VerificationScreen> {
     }
   }
 
+  Future<void> _resendCode() async {
+    setState(() => _isLoading = true);
+    try {
+      await AuthService.requestOTP(widget.email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Code resent to your email')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        final message = ErrorHandler.friendly(
+          e,
+          fallback: 'We couldn\'t resend the code. Please try again.',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -132,12 +156,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
               const SizedBox(height: 24),
               Center(
                 child: TextButton(
-                  onPressed: () {
-                    AuthService.requestOTP(widget.email);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Code resent')),
-                    );
-                  },
+                  onPressed: _isLoading ? null : _resendCode,
                   child: Text(
                     "Didn't receive code? Resend",
                     style: GoogleFonts.poppins(
