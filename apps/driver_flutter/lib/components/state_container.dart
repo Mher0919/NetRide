@@ -36,12 +36,12 @@ class StateContainer extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(color: Colors.black),
+          CircularProgressIndicator(color: Color(0xFFD0CFBA)),
           SizedBox(height: 24),
           Text(
             'Preparing your dashboard...',
             style: TextStyle(
-              color: Colors.black,
+              color: Color(0xFFD0CFBA),
               fontWeight: FontWeight.w600,
               fontSize: 14,
             ),
@@ -67,38 +67,38 @@ class StateContainer extends StatelessWidget {
               child: const Icon(Icons.warning_amber_rounded, size: 48, color: Colors.red),
             ),
             const SizedBox(height: 24),
-            Text(
-              'Connection Issue',
-              style: GoogleFonts.poppins(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: Colors.black,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              errorMessage ?? 'We could not synchronize your data. Please check your connection and try again.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: Colors.grey[700],
-              ),
-            ),
-            const SizedBox(height: 32),
-            if (onRetry != null)
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: onRetry,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: const Text('RETRY SYNC'),
+              Text(
+                'Connection Issue',
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFD0CFBA),
                 ),
               ),
+              const SizedBox(height: 8),
+              Text(
+                errorMessage ?? 'We could not synchronize your data. Please check your connection and try again.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: Color(0xFF9BAE9E),
+                ),
+              ),
+              const SizedBox(height: 32),
+              if (onRetry != null)
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: onRetry,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD0CFBA),
+                      foregroundColor: const Color(0xFF294C3A),
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('RETRY SYNC'),
+                  ),
+                ),
           ],
         ),
       ),

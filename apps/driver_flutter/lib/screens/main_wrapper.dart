@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -120,8 +120,8 @@ class _MainWrapperState extends State<MainWrapper> {
           ),
         ],
         currentIndex: _selectedIndex,
-        selectedItemColor: const Color(0xFF5B7760),
-        unselectedItemColor: const Color(0xFF2F3A32).withOpacity(0.4),
+        selectedItemColor: const Color(0xFFD0CFBA),
+        unselectedItemColor: const Color(0xFFD0CFBA).withOpacity(0.4),
         showUnselectedLabels: true,
         type: BottomNavigationBarType.fixed,
         onTap: _onItemTapped,

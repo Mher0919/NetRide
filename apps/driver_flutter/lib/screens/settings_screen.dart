@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../services/sound_service.dart';
@@ -85,9 +85,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         setDialogState(() => isSendingVerification = false);
                       }
                     },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD0CFBA), foregroundColor: const Color(0xFF294C3A)),
               child: isSendingVerification
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF294C3A)))
                   : const Text('Send Verification'),
             ),
           ],
@@ -112,7 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Settings'),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: const Color(0xFF2F3A32),
+        foregroundColor: const Color(0xFFD0CFBA),
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -155,7 +155,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.delete_forever_rounded,
                 title: 'Delete Account',
                 onTap: () => _navigateToAccountAction(true),
-                textColor: const Color(0xFFC65A5A),
+                textColor: const Color(0xFFE07373),
               ),
             ],
           ),
@@ -175,7 +175,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF2F3A32),
+              color: Color(0xFFD0CFBA),
               letterSpacing: 0.5,
             ),
           ),
@@ -183,9 +183,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: const Color(0xFF315646),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color(0xFFD8D2CA)),
+            border: Border.all(color: const Color(0xFF3D5F4D)),
           ),
           child: Column(
             children: children,
@@ -209,12 +209,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         opacity: enabled ? 1.0 : 0.4,
         child: Row(
           children: [
-            Icon(icon, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.4)),
+            Icon(icon, size: 20, color: (textColor ?? const Color(0xFFD0CFBA)).withOpacity(0.4)),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
                 title,
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF2F3A32)),
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFFD0CFBA)),
               ),
             ),
             const Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey),
@@ -238,7 +238,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       behavior: HitTestBehavior.opaque,
       child: Row(
         children: [
-          Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.6)),
+          Icon(icon, size: 20, color: const Color(0xFFD0CFBA).withOpacity(0.6)),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -249,7 +249,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF2F3A32),
+                    color: Color(0xFFD0CFBA),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -257,7 +257,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle,
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF6B6B6B),
+                    color: Color(0xFF9BAE9E),
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -267,7 +267,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: const Color(0xFF5B7760),
+            activeColor: const Color(0xFFD0CFBA),
           ),
         ],
       ),
@@ -335,7 +335,7 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
         title: Text('$actionName Account'),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: const Color(0xFF2F3A32),
+        foregroundColor: const Color(0xFFD0CFBA),
       ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -345,7 +345,7 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
             Icon(
               widget.isDeletion ? Icons.warning_amber_rounded : Icons.info_outline_rounded,
               size: 64,
-              color: widget.isDeletion ? const Color(0xFFC65A5A) : const Color(0xFFC79A4A),
+              color: widget.isDeletion ? const Color(0xFFE07373) : const Color(0xFFE0B04F),
             ),
             const SizedBox(height: 24),
             Text(
@@ -359,7 +359,7 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
                   widget.isDeletion
                       ? 'When you delete your account, all your data, including profile information, trip history, and preferences, will be permanently removed from the app. This action cannot be undone.'
                       : 'When you deactivate your account, your profile will be hidden and you won\'t be able to use the app until you sign back in. Your data will be preserved, and signing back in will immediately reactivate your account.',
-                  style: GoogleFonts.poppins(fontSize: 16, color: Colors.black87, height: 1.5),
+                  style: GoogleFonts.poppins(fontSize: 16, color: const Color(0xFFD0CFBA), height: 1.5),
                 ),
               ),
             ),
@@ -369,7 +369,7 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
                 Checkbox(
                   value: _understands,
                   onChanged: (val) => setState(() => _understands = val ?? false),
-                  activeColor: const Color(0xFF5B7760),
+                  activeColor: const Color(0xFFD0CFBA),
                 ),
                 Expanded(
                   child: Text(
@@ -385,8 +385,8 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
               child: ElevatedButton(
                 onPressed: _understands && !_isLoading ? _handleAction : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: widget.isDeletion ? const Color(0xFFC65A5A) : const Color(0xFF5B7760),
-                  foregroundColor: Colors.white,
+                  backgroundColor: widget.isDeletion ? const Color(0xFFE07373) : const Color(0xFFD0CFBA),
+                  foregroundColor: widget.isDeletion ? Colors.white : const Color(0xFF294C3A),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),

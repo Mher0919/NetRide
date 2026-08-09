@@ -1,4 +1,4 @@
-import 'package:dio/dio.dart';
+﻿import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -175,7 +175,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _hasDocumentActionRequired =
             reqs.any((r) => (r as Map)['status'] == 'resubmission_required');
       } catch (e) {
-        debugPrint('[PROFILE] ❌ Doc req fetch error: $e');
+        debugPrint('[PROFILE] âŒ Doc req fetch error: $e');
       }
     } catch (e) {
       if (e is DioException && e.response?.statusCode == 404) {
@@ -187,9 +187,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      debugPrint('[PROFILE] ❌ _fetchProfile error: $e');
+      debugPrint('[PROFILE] âŒ _fetchProfile error: $e');
       if (e is FormatException) {
-        debugPrint('[PROFILE]   ⚠️ FormatException details: ${e.message}');
+        debugPrint('[PROFILE]   âš ï¸ FormatException details: ${e.message}');
       }
 
       setState(() {
@@ -294,7 +294,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Profile picture submitted for admin review.'),
-            backgroundColor: Color(0xFF5B7760),
+            backgroundColor: Color(0xFF294C3A),
           ),
         );
       }
@@ -323,17 +323,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
       final code = e.response?.statusCode;
       if (code == 429) return 'Too many requests. Please wait and try again later.';
-      if (code == 413) return 'Image is too large — please choose a smaller one.';
+      if (code == 413) return 'Image is too large â€” please choose a smaller one.';
     }
     final s = e.toString().toLowerCase();
     if (s.contains('429') || s.contains('too many') || s.contains('rate limit')) {
       return 'Too many requests. Please wait and try again later.';
     }
     if (s.contains('413') || s.contains('too large')) {
-      return 'Image is too large — please choose a smaller one.';
+      return 'Image is too large â€” please choose a smaller one.';
     }
     if (s.contains('network') || s.contains('timeout') || s.contains('socket')) {
-      return 'Network error — please check your connection and try again.';
+      return 'Network error â€” please check your connection and try again.';
     }
     return 'Failed to upload image. Please try again.';
   }
@@ -372,7 +372,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.badge_outlined, size: 80, color: Colors.blue),
+            const Icon(Icons.badge_outlined, size: 80, color: Color(0xFFD0CFBA)),
             const SizedBox(height: 16),
             Text('Please select a clear picture of the FRONT of your Driver\'s License.', textAlign: TextAlign.center, style: GoogleFonts.poppins()),
           ],
@@ -381,7 +381,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD0CFBA), foregroundColor: const Color(0xFF294C3A)),
             child: const Text('Select Front Photo'),
           ),
         ],
@@ -417,9 +417,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ? Transform(
                           alignment: Alignment.center,
                           transform: Matrix4.identity()..rotateY(math.pi),
-                          child: const Icon(Icons.contact_page_outlined, size: 80, color: Colors.blue),
+                          child: const Icon(Icons.contact_page_outlined, size: 80, color: Color(0xFFD0CFBA)),
                         )
-                      : const Icon(Icons.badge_outlined, size: 80, color: Colors.blue),
+                      : const Icon(Icons.badge_outlined, size: 80, color: Color(0xFFD0CFBA)),
                 );
               },
             ),
@@ -431,7 +431,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD0CFBA), foregroundColor: const Color(0xFF294C3A)),
             child: const Text('Select Back Photo'),
           ),
         ],
@@ -450,7 +450,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_upload_outlined, size: 80, color: Colors.green),
+            const Icon(Icons.cloud_upload_outlined, size: 80, color: Color(0xFF7FAE8C)),
             const SizedBox(height: 16),
             Text('Are you sure you want to submit these photos for license and age verification?', textAlign: TextAlign.center, style: GoogleFonts.poppins()),
           ],
@@ -459,7 +459,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD0CFBA), foregroundColor: const Color(0xFF294C3A)),
             child: const Text('Submit Now'),
           ),
         ],
@@ -570,8 +570,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           }
                         : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      foregroundColor: Colors.white,
+                      backgroundColor: const Color(0xFFD0CFBA),
+                      foregroundColor: const Color(0xFF294C3A),
                     ),
                     child: const Text('Send Code'),
                   )
@@ -591,8 +591,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Phone number updated successfully.'),
-                              backgroundColor: Color(0xFF5B7760),
+              content: Text('Phone number updated successfully.'),
+              backgroundColor: Color(0xFF294C3A),
                             ),
                           );
                           _fetchProfile();
@@ -610,8 +610,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       }
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF5B7760),
-                      foregroundColor: Colors.white,
+                      backgroundColor: const Color(0xFFD0CFBA),
+                      foregroundColor: const Color(0xFF294C3A),
                     ),
                     child: const Text('Verify & Update'),
                   ),
@@ -677,9 +677,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       if (mounted) setState(() => _isSendingEmailLink = false);
                     }
                   },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD0CFBA), foregroundColor: const Color(0xFF294C3A)),
             child: _isSendingEmailLink
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF294C3A)))
                 : const Text('Send Link'),
           ),
         ],
@@ -714,7 +714,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // Detect locally-unsaved changes for direct-edit fields.
       // Fields that have already been submitted for admin review
-      // (_pendingSubmittedValues) are skipped entirely — they are
+      // (_pendingSubmittedValues) are skipped entirely â€” they are
       // tracked separately and must not be re-submitted here.
       void checkField(String key, dynamic current) {
         if (_pendingSubmittedValues.containsKey(key)) return;
@@ -745,7 +745,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // CASE 2 / CASE 4: Only direct fields changed (possibly alongside
       // a pending reviewed change, which is being ignored above).
-      // Save via PATCH — no admin approval needed, no conflict.
+      // Save via PATCH â€” no admin approval needed, no conflict.
       await UserService.updateProfile(directChanges);
       setState(() {
         _isSaving = false;
@@ -755,7 +755,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Profile updated successfully.'),
-            backgroundColor: Color(0xFF5B7760),
+            backgroundColor: Color(0xFF294C3A),
           ),
         );
         _fetchProfile();
@@ -767,7 +767,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(msg),
-            backgroundColor: const Color(0xFFC65A5A),
+            backgroundColor: const Color(0xFFE07373),
           ),
         );
       }
@@ -794,7 +794,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           maxLines: 3,
           maxLength: 500,
           decoration: const InputDecoration(
-            hintText: 'Tell the admin why you need this change…',
+            hintText: 'Tell the admin why you need this changeâ€¦',
             border: OutlineInputBorder(),
           ),
         ),
@@ -810,8 +810,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Navigator.pop(ctx, text);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF5B7760),
-              foregroundColor: Colors.white,
+              backgroundColor: const Color(0xFFD0CFBA),
+              foregroundColor: const Color(0xFF294C3A),
             ),
             child: const Text('Submit'),
           ),
@@ -924,7 +924,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Padding(
                   padding: const EdgeInsets.only(right: 4.0),
                   child: IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Color(0xFFC65A5A)),
+                    icon: const Icon(Icons.close_rounded, color: Color(0xFFE07373)),
                     onPressed: () {
                       setState(() => _isEditing = false);
                       _fetchProfile();
@@ -934,7 +934,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Padding(
                 padding: const EdgeInsets.only(right: 12.0),
                 child: IconButton(
-                  icon: Icon(_isEditing ? Icons.check_circle : Icons.edit_outlined, color: const Color(0xFF5B7760)),
+                  icon: Icon(_isEditing ? Icons.check_circle : Icons.edit_outlined, color: const Color(0xFFD0CFBA)),
                   onPressed: () {
                     if (_isEditing) {
                       _saveProfile();
@@ -957,7 +957,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_hasPendingChange) _buildPendingChangeBanner(),
-              // Document-action banner removed — handled by availability_screen
+              // Document-action banner removed â€” handled by availability_screen
               _buildProfileHeader(theme),
               const SizedBox(height: 32),
               _buildSectionCard(
@@ -1007,10 +1007,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Container(
                             width: 48, height: 48,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF7F4EF),
+                              color: const Color(0xFF315646),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.directions_car_rounded, color: Color(0xFF5B7760), size: 26),
+                            child: const Icon(Icons.directions_car_rounded, color: Color(0xFFD0CFBA), size: 26),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
@@ -1019,12 +1019,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               children: [
                                 Text(
                                   '${_activeVehicle!['year']} ${_activeVehicle!['make']} ${_activeVehicle!['model']}',
-                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFFD0CFBA)),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   '${_activeVehicle!['color']}${_activeVehicle!['interior_color'] != null ? ' / ${_activeVehicle!['interior_color']} Int' : ''}',
-                                  style: TextStyle(fontSize: 12, color: const Color(0xFF2F3A32).withOpacity(0.4)),
+                                  style: TextStyle(fontSize: 12, color: const Color(0xFFD0CFBA).withOpacity(0.4)),
                                 ),
                               ],
                             ),
@@ -1082,7 +1082,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     icon: Icons.logout_rounded,
                     title: 'Sign Out',
                     onTap: _handleLogout,
-                    textColor: const Color(0xFFC65A5A),
+                    textColor: const Color(0xFFE07373),
                   ),
                 ],
               ),
@@ -1103,7 +1103,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFD8D2CA), width: 1),
+                  border: Border.all(color: const Color(0xFF3D5F4D), width: 1),
                 ),
                 child: _profileImageUrl != null
                     ? ClipOval(
@@ -1112,7 +1112,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           width: 100,
                           height: 100,
                           fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => const Icon(Icons.person, size: 48, color: Color(0xFF5B7760)),
+                          errorWidget: (_, __, ___) => const Icon(Icons.person, size: 48, color: Color(0xFFD0CFBA)),
                           placeholder: (_, __) => const SizedBox(
                             width: 100, height: 100,
                             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -1121,8 +1121,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       )
                     : const CircleAvatar(
                         radius: 50,
-                        backgroundColor: Color(0xFFF7F4EF),
-                        child: Icon(Icons.person, size: 48, color: Color(0xFF5B7760)),
+                        backgroundColor: Color(0xFF315646),
+                        child: Icon(Icons.person, size: 48, color: Color(0xFFD0CFBA)),
                       ),
               ),
               if (_isEditing)
@@ -1134,10 +1134,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: const BoxDecoration(
-                        color: Color(0xFF5B7760),
+                        color: Color(0xFFD0CFBA),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                      child: const Icon(Icons.camera_alt, size: 16, color: Color(0xFF294C3A)),
                     ),
                   ),
                 ),
@@ -1148,7 +1148,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFC79A4A),
+                      color: const Color(0xFFE0B04F),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Text(
@@ -1168,16 +1168,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.star_rounded, color: Color(0xFFC79A4A), size: 20),
+              const Icon(Icons.star_rounded, color: Color(0xFFE0B04F), size: 20),
               const SizedBox(width: 4),
               Text(
                 _rating.toStringAsFixed(1),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFFD0CFBA)),
               ),
               const SizedBox(width: 4),
               Text(
                 '($_totalRides rides)',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF2F3A32).withOpacity(0.4)),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFFD0CFBA).withOpacity(0.4)),
               ),
             ],
           ),
@@ -1194,7 +1194,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: _isVerified ? const Color(0xFF6E8B74).withOpacity(0.1) : const Color(0xFFC65A5A).withOpacity(0.1),
+                color: _isVerified ? const Color(0xFF7FAE8C).withOpacity(0.1) : const Color(0xFFE07373).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -1203,7 +1203,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Icon(
                     _isVerified ? Icons.verified_user : Icons.error_outline_rounded,
                     size: 14,
-                    color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                    color: _isVerified ? const Color(0xFFD0CFBA) : const Color(0xFFE07373),
                   ),
                   const SizedBox(width: 6),
                   Text(
@@ -1212,7 +1212,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.5,
-                      color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                      color: _isVerified ? const Color(0xFFD0CFBA) : const Color(0xFFE07373),
                     ),
                   ),
                 ],
@@ -1224,7 +1224,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: const EdgeInsets.only(top: 8.0),
               child: Text(
                 'Age should be verified to become verified.',
-                style: TextStyle(fontSize: 10, color: const Color(0xFFC65A5A), fontWeight: FontWeight.w500),
+                style: TextStyle(fontSize: 10, color: const Color(0xFFE07373), fontWeight: FontWeight.w500),
               ),
             ),
         ],
@@ -1243,7 +1243,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF2F3A32),
+              color: Color(0xFFD0CFBA),
               letterSpacing: 0.5,
             ),
           ),
@@ -1251,9 +1251,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: const Color(0xFF315646),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color(0xFFD8D2CA)),
+            border: Border.all(color: const Color(0xFF3D5F4D)),
           ),
           child: Column(
             children: children,
@@ -1273,7 +1273,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }) {
     return Row(
       children: [
-        Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.4)),
+        Icon(icon, size: 20, color: const Color(0xFFD0CFBA).withOpacity(0.4)),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -1283,7 +1283,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label,
                 style: TextStyle(
                   fontSize: 12,
-                  color: const Color(0xFF2F3A32).withOpacity(0.4),
+                  color: const Color(0xFFD0CFBA).withOpacity(0.4),
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -1292,7 +1292,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ? TextField(
                       controller: controller,
                       keyboardType: keyboardType,
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFFD0CFBA)),
                       decoration: const InputDecoration(
                         isDense: true,
                         contentPadding: EdgeInsets.zero,
@@ -1304,7 +1304,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     )
                   : Text(
                       controller.text.isEmpty ? 'Not set' : controller.text,
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF2F3A32)),
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFFD0CFBA)),
                     ),
             ],
           ),
@@ -1312,7 +1312,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (onAction != null)
           GestureDetector(
             onTap: onAction,
-            child: const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF5B7760)),
+            child: const Icon(Icons.edit_outlined, size: 16, color: Color(0xFFD0CFBA)),
           ),
       ],
     );
@@ -1333,17 +1333,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         opacity: enabled ? 1.0 : 0.4,
         child: Row(
           children: [
-            Icon(icon, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.4)),
+            Icon(icon, size: 20, color: (textColor ?? const Color(0xFFD0CFBA)).withOpacity(0.4)),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
                 title,
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF2F3A32)),
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFFD0CFBA)),
               ),
             ),
             if (trailing != null) trailing,
             const SizedBox(width: 8),
-            Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.2)),
+            Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFFD0CFBA)).withOpacity(0.2)),
           ],
         ),
       ),
@@ -1359,14 +1359,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFCE9E9),
+        color: const Color(0xFF4B2E2E),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFEFCFCF)),
+        border: Border.all(color: const Color(0xFF8A4A4A)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.pending_actions_rounded, color: Color(0xFFC65A5A), size: 22),
+          const Icon(Icons.pending_actions_rounded, color: Color(0xFFE07373), size: 22),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1375,15 +1375,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Text(
                   'Profile change under review',
                   style: TextStyle(
-                    color: Color(0xFF7A2A2A),
+                    color: Color(0xFFE07373),
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
                 SizedBox(height: 2),
                 Text(
-                  'An admin is reviewing your recent edit. You can keep editing — new submissions queue after the current one is reviewed.',
-                  style: TextStyle(color: Color(0xFF7A2A2A), fontSize: 12, height: 1.35),
+                  'An admin is reviewing your recent edit. You can keep editing â€” new submissions queue after the current one is reviewed.',
+                  style: TextStyle(color: Color(0xFFE07373), fontSize: 12, height: 1.35),
                 ),
               ],
             ),
@@ -1430,11 +1430,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('Available balance',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), fontWeight: FontWeight.w600)),
+                          style: TextStyle(fontSize: 12, color: Color(0xFF9BAE9E), fontWeight: FontWeight.w600)),
                       const SizedBox(height: 4),
                       Text(balance,
                           style: const TextStyle(
-                              fontSize: 28, fontWeight: FontWeight.w800, color: Color(0xFF2F3A32))),
+                              fontSize: 28, fontWeight: FontWeight.w800, color: Color(0xFFD0CFBA))),
                     ],
                   ),
                 ),
@@ -1442,11 +1442,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     const Text('Lifetime',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), fontWeight: FontWeight.w600)),
+                        style: TextStyle(fontSize: 12, color: Color(0xFF9BAE9E), fontWeight: FontWeight.w600)),
                     const SizedBox(height: 4),
                     Text(lifetime,
                         style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32))),
+                            fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFFD0CFBA))),
                   ],
                 ),
               ],
@@ -1455,7 +1455,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _buildProfileRow(
               icon: Icons.credit_card_rounded,
               title: cardLast4 != null && cardLast4.isNotEmpty
-                  ? 'Payout card · $cardBrand •••• $cardLast4'
+                  ? 'Payout card Â· $cardBrand â€¢â€¢â€¢â€¢ $cardLast4'
                   : 'No payout card',
               trailing: cardLast4 != null
                   ? TextButton(
@@ -1479,7 +1479,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             if (payouts.isNotEmpty) ...[
               const Divider(height: 32),
               const Text('Recent payouts',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), fontWeight: FontWeight.w600)),
+                  style: TextStyle(fontSize: 12, color: Color(0xFF9BAE9E), fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               ...payouts.map((p) {
                 final cents = ((p as Map)['net_cents'] as num?)?.toInt() ?? 0;
@@ -1503,13 +1503,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: status == 'PAID' ? const Color(0xFFE5F0EB) : const Color(0xFFFCE9E9),
+                          color: status == 'PAID' ? const Color(0xFF2E4A3C) : const Color(0xFF4B2E2E),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Icon(
                           isAuto ? Icons.event_repeat_rounded : Icons.payments_rounded,
                           size: 16,
-                          color: status == 'PAID' ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                          color: status == 'PAID' ? const Color(0xFFD0CFBA) : const Color(0xFFE07373),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -1519,7 +1519,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           children: [
                             Text(isAuto ? 'Weekly auto-payout' : 'On-demand payout',
                                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                            Text(when, style: const TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                            Text(when, style: const TextStyle(fontSize: 11, color: Color(0xFF9BAE9E))),
                           ],
                         ),
                       ),
@@ -1529,7 +1529,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                          color: status == 'PAID' ? const Color(0xFFE5F0EB) : const Color(0xFFFCE9E9),
+                          color: status == 'PAID' ? const Color(0xFF2E4A3C) : const Color(0xFF4B2E2E),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -1537,7 +1537,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w800,
-                            color: status == 'PAID' ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                            color: status == 'PAID' ? const Color(0xFFD0CFBA) : const Color(0xFFE07373),
                           ),
                         ),
                       ),
@@ -1589,7 +1589,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     const Text(
                       'Your card is only used to receive payouts. We never store the full card number or security code.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), height: 1.35),
+                      style: TextStyle(fontSize: 12, color: Color(0xFF9BAE9E), height: 1.35),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -1689,8 +1689,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Navigator.pop(ctx);
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Card submitted — awaiting admin approval.'),
-                                backgroundColor: Color(0xFF5B7760),
+                                content: Text('Card submitted â€” awaiting admin approval.'),
+                                backgroundColor: Color(0xFF294C3A),
                               ),
                             );
                             setState(() {});
@@ -1699,7 +1699,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           final msg = _friendlyError(e.toString());
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
+                              SnackBar(content: Text(msg), backgroundColor: const Color(0xFFE07373)),
                             );
                           }
                         } finally {
@@ -1707,11 +1707,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         }
                       },
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7760),
+                  backgroundColor: const Color(0xFFD0CFBA),
+                  foregroundColor: const Color(0xFF294C3A),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 child: _isSubmittingCard
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF294C3A)))
                     : const Text('Submit for review'),
               ),
             ],
@@ -1750,7 +1751,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Available: ${NumberFormat.simpleCurrency(name: 'USD').format(balanceCents / 100)}',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF6B6B6B))),
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF9BAE9E))),
                 const SizedBox(height: 12),
                 TextField(
                   controller: amount,
@@ -1766,7 +1767,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF6F7F4),
+                    color: const Color(0xFF315646),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
@@ -1774,14 +1775,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       _kv('Amount', NumberFormat.simpleCurrency(name: 'USD').format(rawCents / 100)),
                       const SizedBox(height: 4),
                       _kv('On-demand fee (5%)', '- ${NumberFormat.simpleCurrency(name: 'USD').format(feeCents / 100)}',
-                          color: const Color(0xFFC65A5A)),
+                          color: const Color(0xFFE07373)),
                       const Divider(height: 18),
                       _kv('You\'ll receive', NumberFormat.simpleCurrency(name: 'USD').format(netCents / 100),
                           bold: true),
                       const SizedBox(height: 6),
                       const Text(
                         'Tip: weekly auto-payouts on Mondays have no fee.',
-                        style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B)),
+                        style: TextStyle(fontSize: 11, color: Color(0xFF9BAE9E)),
                       ),
                     ],
                   ),
@@ -1802,7 +1803,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('Payout requested. An admin will process it shortly.'),
-                                backgroundColor: Color(0xFF5B7760),
+                                backgroundColor: Color(0xFF294C3A),
                               ),
                             );
                             setState(() {});
@@ -1811,7 +1812,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           final msg = _friendlyError(e.toString());
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
+                              SnackBar(content: Text(msg), backgroundColor: const Color(0xFFE07373)),
                             );
                           }
                         } finally {
@@ -1819,11 +1820,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         }
                       },
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7760),
+                  backgroundColor: const Color(0xFFD0CFBA),
+                  foregroundColor: const Color(0xFF294C3A),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 child: _isRequestingPayout
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF294C3A)))
                     : const Text('Request payout'),
               ),
             ],
@@ -1837,9 +1839,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(k, style: TextStyle(fontSize: 13, color: color ?? const Color(0xFF2F3A32), fontWeight: bold ? FontWeight.w800 : FontWeight.w500)),
+        Text(k, style: TextStyle(fontSize: 13, color: color ?? const Color(0xFFD0CFBA), fontWeight: bold ? FontWeight.w800 : FontWeight.w500)),
         Text(v,
-            style: TextStyle(fontSize: 13, color: color ?? const Color(0xFF2F3A32), fontWeight: bold ? FontWeight.w800 : FontWeight.w700)),
+            style: TextStyle(fontSize: 13, color: color ?? const Color(0xFFD0CFBA), fontWeight: bold ? FontWeight.w800 : FontWeight.w700)),
       ],
     );
   }
@@ -1871,7 +1873,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }) {
     return Row(
       children: [
-        Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.6)),
+        Icon(icon, size: 20, color: const Color(0xFFD0CFBA).withOpacity(0.6)),
         const SizedBox(width: 12),
         Expanded(child: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
         if (trailing != null) trailing,

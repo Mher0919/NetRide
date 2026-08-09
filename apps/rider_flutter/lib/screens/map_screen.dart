@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
@@ -71,6 +72,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final TextEditingController _customCreditController = TextEditingController();
   String? _creditAmountError;
 
+  // Zero-balance feedback: tapping the disabled Ride Credits toggle shakes
+  // the row and flashes a red "no credits" hint (pulse).
+  late final AnimationController _creditsShakeController;
+  bool _creditsZeroFeedback = false;
+  Timer? _creditsZeroTimer;
+
   // Part 2 — map expansion states:
   //   A. mini map (explore mode, gestures off, tap to expand)
   //   B. full-screen map (back arrow top-left, gestures on)
@@ -103,6 +110,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _sheetController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
+    );
+    _creditsShakeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
     );
     _initCacheServices();
     _initLiveLocation();
@@ -189,7 +200,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _positionSubscription?.cancel();
     _geohashTimer?.cancel();
     _cameraFitTimer?.cancel();
+    _creditsZeroTimer?.cancel();
     _sheetController.dispose();
+    _creditsShakeController.dispose();
     _promoCodeController.dispose();
     _customCreditController.dispose();
     super.dispose();
@@ -599,9 +612,20 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  void _closePanel() {
-    if (_requesting) {
-      Provider.of<RideProvider>(context, listen: false).cancelRide();
+  Future<void> _closePanel({bool cancelIfRequesting = true}) async {
+    if (cancelIfRequesting && _requesting) {
+      final error = await Provider.of<RideProvider>(context, listen: false)
+          .cancelRide();
+      if (!mounted) return;
+      if (error != null) {
+        // Keep the sheet open so the rider can retry; surface why.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error)),
+        );
+        setState(() => _requesting = false);
+        _animateSheetTo(1);
+        return;
+      }
     }
     _cameraFitTimer?.cancel();
     setState(() {
@@ -618,9 +642,60 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _applyCredits = false;
       _creditUseCents = null;
       _creditAmountError = null;
+      _creditsZeroFeedback = false;
       _customCreditController.clear();
     });
     _animateSheetTo(0);
+  }
+
+  /// Cancel Ride button (searching state): confirm, then cancel via the
+  /// provider; only close the sheet once the backend confirms.
+  Future<void> _requestCancel() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Cancel Ride?', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: const Text('Are you sure you want to cancel this ride request?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No, Keep'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final error = await Provider.of<RideProvider>(context, listen: false)
+        .cancelRide();
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error)),
+      );
+      return;
+    }
+    await _closePanel(cancelIfRequesting: false);
+  }
+
+  /// Ride Credits toggle with a zero balance: shake + red pulse so the
+  /// rider understands why the switch is inert.
+  void _triggerZeroCreditsFeedback() {
+    _creditsZeroTimer?.cancel();
+    setState(() {
+      _creditsZeroFeedback = true;
+    });
+    _creditsShakeController.forward(from: 0);
+    _creditsZeroTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) {
+        setState(() => _creditsZeroFeedback = false);
+      }
+    });
   }
 
   void _openWalletScreen() {
@@ -1227,6 +1302,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   /// a fixed confirm button pinned to the bottom (never overflows).
   Widget _buildSheetBody(ThemeData theme, {required bool searching}) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final cancelling = Provider.of<RideProvider>(context).cancelling;
 
     return Column(
       children: [
@@ -1253,16 +1329,29 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-              IconButton(
-                icon: const Icon(
-                  Icons.close,
-                  size: 20,
-                  color: Color(0xFF2F3A32),
+              if (cancelling)
+                const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFF5B7760),
+                    ),
+                  ),
+                )
+              else
+                IconButton(
+                  icon: const Icon(
+                    Icons.close,
+                    size: 20,
+                    color: Color(0xFF2F3A32),
+                  ),
+                  onPressed: _closePanel,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
-                onPressed: _closePanel,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
             ],
           ),
         ),
@@ -1273,11 +1362,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             child: CircularProgressIndicator(color: Color(0xFF5B7760)),
           )
         else if (searching)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 28),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
             child: Column(
               children: [
-                SizedBox(
+                const SizedBox(
                   width: 36,
                   height: 36,
                   child: CircularProgressIndicator(
@@ -1285,14 +1374,46 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     color: Color(0xFF5B7760),
                   ),
                 ),
-                SizedBox(height: 16),
-                Text(
+                const SizedBox(height: 16),
+                const Text(
                   'Matching you with nearby drivers…',
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF2F3A32),
                   ),
                 ),
+                const SizedBox(height: 24),
+                if (cancelling)
+                  const Text(
+                    'Cancelling ride request…',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: Color(0xFFC65A5A),
+                    ),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: _requestCancel,
+                    icon: const Icon(Icons.close, size: 18, color: Color(0xFFC65A5A)),
+                    label: const Text(
+                      'Cancel Ride',
+                      style: TextStyle(
+                        color: Color(0xFFC65A5A),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0xFFE5B9B9)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 22,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
               ],
             ),
           )
@@ -1417,6 +1538,20 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   child: TextField(
                     controller: _promoCodeController,
                     textCapitalization: TextCapitalization.characters,
+                    // Uppercase the code while typing (not just the mobile
+                    // keyboard) so the Apply/preview and backend lookup are
+                    // always consistent.
+                    inputFormatters: [
+                      TextInputFormatter.withFunction((oldValue, newValue) {
+                        final upper = newValue.text.toUpperCase();
+                        if (upper == newValue.text) return newValue;
+                        return TextEditingValue(
+                          text: upper,
+                          selection: newValue.selection,
+                          composing: TextRange.empty,
+                        );
+                      }),
+                    ],
                     decoration: const InputDecoration(
                       hintText: 'Promo code',
                       isDense: true,
@@ -1487,52 +1622,98 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
           ),
           const Divider(height: 1, indent: 14, endIndent: 14),
-          // --- Ride Credits (OFF by default) ---
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                const Icon(Icons.account_balance_wallet_outlined, size: 18, color: Color(0xFF5B7760)),
-                const SizedBox(width: 8),
-                Expanded(
+          // --- Ride Credits (OFF by default; balance always visible) ---
+          AnimatedBuilder(
+            animation: _creditsShakeController,
+            builder: (context, _) {
+              final t = _creditsShakeController.value;
+              final shake = hasCredits
+                  ? 0.0
+                  : math.sin(t * math.pi * 6) * 5 * (1 - t);
+              return Transform.translate(
+                offset: Offset(shake, 0),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
-                        'Use Ride Credits',
-                        style: TextStyle(fontSize: 13, color: Color(0xFF2F3A32)),
+                      Row(
+                        children: [
+                          Icon(
+                            _creditsZeroFeedback
+                                ? Icons.error_outline_rounded
+                                : Icons.account_balance_wallet_outlined,
+                            size: 18,
+                            color: _creditsZeroFeedback
+                                ? const Color(0xFFC65A5A)
+                                : const Color(0xFF5B7760),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'Use Ride Credits',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF2F3A32),
+                                  ),
+                                ),
+                                Text(
+                                  formatCents(balanceCents),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _creditsZeroFeedback
+                                        ? const Color(0xFFC65A5A)
+                                        : (hasCredits
+                                            ? const Color(0xFF5B7760)
+                                                .withOpacity(0.7)
+                                            : Colors.grey.shade500),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch(
+                            value: _applyCredits,
+                            activeTrackColor: const Color(0xFF5B7760),
+                            onChanged: hasCredits
+                                ? (v) {
+                                    setState(() {
+                                      _applyCredits = v;
+                                      if (!v) {
+                                        _creditUseCents = null;
+                                        _creditAmountError = null;
+                                        _customCreditController.clear();
+                                      }
+                                    });
+                                  }
+                                : (_) => _triggerZeroCreditsFeedback(),
+                          ),
+                        ],
                       ),
-                      if (hasCredits)
-                        Text(
-                          formatCents(balanceCents),
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFF5B7760).withOpacity(0.7),
+                      if (_creditsZeroFeedback) ...[
+                        const SizedBox(height: 6),
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'No ride credits available',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFC65A5A),
+                            ),
                           ),
                         ),
+                      ],
                     ],
                   ),
                 ),
-                Switch(
-                  value: _applyCredits,
-                  activeTrackColor: const Color(0xFF5B7760),
-                  onChanged: hasCredits
-                      ? (v) {
-                          setState(() {
-                            _applyCredits = v;
-                            if (!v) {
-                              _creditUseCents = null;
-                              _creditAmountError = null;
-                              _customCreditController.clear();
-                            }
-                          });
-                        }
-                      : null,
-                ),
-              ],
-            ),
+              );
+            },
           ),
           // --- Expanded credit amount input (when toggled ON) ---
           if (_applyCredits && hasCredits) ...[
@@ -1805,8 +1986,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 borderRadius: BorderRadius.circular(8),
                 child: Image.asset(
                   'assets/images/car-logo.png',
-                  width: 96,
-                  height: 50,
+                  width: 149,
+                  height: 95,
                   fit: BoxFit.contain,
                 ),
               ),

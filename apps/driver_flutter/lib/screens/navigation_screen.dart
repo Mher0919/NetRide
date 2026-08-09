@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -272,7 +272,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
               builder: (context, muted, _) {
                 return Container(
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: const Color(0xFF315646),
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
@@ -291,7 +291,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
                         },
                         icon: Icon(
                           muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                          color: const Color(0xFF2F3A32),
+                          color: const Color(0xFFD0CFBA),
                         ),
                       ),
                       Container(
@@ -419,7 +419,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
         ),
         child: const Icon(
           Icons.navigation,
-          color: Colors.white,
+          color: Color(0xFF294C3A),
           size: 18,
         ),
       ),
@@ -429,7 +429,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
   Widget _buildDestinationMarker() {
     return const Icon(
       Icons.location_on,
-      color: Color(0xFFC65A5A),
+      color: Color(0xFFE07373),
       size: 30,
     );
   }

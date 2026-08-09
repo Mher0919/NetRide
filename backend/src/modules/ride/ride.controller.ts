@@ -2,7 +2,7 @@
 import { Response } from 'express';
 import { RideService } from './ride.service';
 import { z } from 'zod';
-import { TripStatus } from '../../types';
+import { TripStatus, UserRole } from '../../types';
 import { prisma } from '../../services/prisma.service';
 
 import { computeEstimate } from '../../services/pricing.service';
@@ -23,7 +23,7 @@ const RequestRideSchema = z.object({
     lng: z.number(),
     address: z.string(),
   }),
-  scheduledAt: z.string().datetime().optional(),
+  scheduledAt: z.string().datetime().nullish(),
   isScheduled: z.boolean().optional(),
   idempotencyKey: z.string().uuid().optional(),
   promoCode: z.string().trim().min(2).max(32).optional(),
@@ -189,6 +189,33 @@ export class RideController {
     } catch (error: any) {
       console.error(`[RIDE] ❌ Delete history error: ${error.message}`);
       res.status(500).json({ error: 'Failed to delete activity record.' });
+    }
+  }
+
+  /**
+   * Idempotent cancel of the rider's current request, by rider identity —
+   * no tripId needed. The Flutter client calls this when the rider hits the
+   * top-right X / Cancel Ride during "searching", where a race can leave the
+   * client without a tripId yet (the socket tripUpdate round-trip). Always
+   * returns 200 when there is nothing active to cancel.
+   */
+  static async cancelCurrentRide(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const trip = await RideService.getCurrentRide(userId, UserRole.RIDER);
+      if (!trip) {
+        return res.json({ cancelled: false, tripId: null });
+      }
+      if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
+        return res.status(409).json({ error: 'This ride is already in progress and cannot be cancelled.' });
+      }
+      await RideService.cancelTrip(trip.id, userId);
+      res.json({ cancelled: true, tripId: trip.id });
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Cancel current ride error: ${error.message}`);
+      res.status(400).json({ error: 'Unable to cancel the ride. Please try again.' });
     }
   }
 

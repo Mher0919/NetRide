@@ -69,7 +69,7 @@ export const RequestRideSchema = z.object({
   pickup: LocationWithAddressSchema,
   destination: LocationWithAddressSchema,
   isScheduled: z.boolean().optional(),
-  scheduledAt: z.string().datetime().optional(),
+  scheduledAt: z.string().datetime().nullish(),
   favoritePriority: z.boolean().optional(),
   idempotencyKey: z.string().uuid().optional(),
   // Rewards ecosystem: promo code + "apply ride credits" opt-in + an optional

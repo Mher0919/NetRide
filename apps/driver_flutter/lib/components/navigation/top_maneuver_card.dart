@@ -28,11 +28,11 @@ class TopManeuverCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: AppTheme.secondaryDarkText,
+        color: AppTheme.primaryBackground,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.secondaryDarkText.withOpacity(0.18),
+            color: Colors.black.withOpacity(0.4),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),

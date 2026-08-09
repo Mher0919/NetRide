@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -355,7 +355,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Make — searchable with custom entry
+              // Make â€” searchable with custom entry
               _buildSearchableField(
                 label: 'Make',
                 controller: _makeSearchController,
@@ -385,7 +385,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Model — searchable with custom entry
+              // Model â€” searchable with custom entry
               _buildSearchableField(
                 label: 'Model',
                 controller: _modelSearchController,
@@ -410,7 +410,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Color — searchable dropdown with common colors + custom
+              // Color â€” searchable dropdown with common colors + custom
               _buildColorField(),
               const SizedBox(height: 12),
 
@@ -453,13 +453,13 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
               ElevatedButton(
                 onPressed: _isSubmitting ? null : _submit,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7760),
-                  foregroundColor: Colors.white,
+                  backgroundColor: const Color(0xFFD0CFBA),
+                  foregroundColor: const Color(0xFF294C3A),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
                 child: _isSubmitting
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF294C3A)))
                     : Text('Submit for Review', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700)),
               ),
             ],
@@ -490,7 +490,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFF5B7760)),
+              border: Border.all(color: const Color(0xFFD0CFBA)),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Row(
@@ -526,9 +526,9 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
             Container(
               constraints: const BoxConstraints(maxHeight: 200),
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
+                border: Border.all(color: const Color(0xFF3D5F4D)),
                 borderRadius: BorderRadius.circular(4),
-                color: Colors.white,
+                color: const Color(0xFF315646),
               ),
               child: loading
                   ? const Center(child: Padding(
@@ -569,7 +569,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFF5B7760)),
+              border: Border.all(color: const Color(0xFFD0CFBA)),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Row(
@@ -606,9 +606,9 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
             Container(
               constraints: const BoxConstraints(maxHeight: 200),
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
+                border: Border.all(color: const Color(0xFF3D5F4D)),
                 borderRadius: BorderRadius.circular(4),
-                color: Colors.white,
+                color: const Color(0xFF315646),
               ),
               child: ListView(
                 shrinkWrap: true,
@@ -681,8 +681,8 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
         height: 100,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFD8D2CA)),
-          color: file != null ? Colors.black.withOpacity(0.03) : null,
+          border: Border.all(color: const Color(0xFF3D5F4D)),
+          color: file != null ? const Color(0xFF294C3A) : null,
         ),
         child: file != null
             ? ClipRRect(
@@ -710,9 +710,9 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.camera_alt, color: Color(0xFF5B7760)),
+                    const Icon(Icons.camera_alt, color: Color(0xFFD0CFBA)),
                     const SizedBox(width: 8),
-                    Text(label, style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF5B7760))),
+                    Text(label, style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFD0CFBA))),
                   ],
                 ),
               ),

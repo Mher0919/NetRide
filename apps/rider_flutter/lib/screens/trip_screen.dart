@@ -82,10 +82,18 @@ class _TripScreenState extends State<TripScreen> {
             child: const Text('No, Keep'),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
-              rideProvider.cancelRide();
-              if (mounted) Navigator.pop(context);
+              final error = await rideProvider.cancelRide();
+              if (error != null) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(error)),
+                  );
+                }
+              } else if (context.mounted) {
+                Navigator.pop(context);
+              }
             },
             child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
           ),

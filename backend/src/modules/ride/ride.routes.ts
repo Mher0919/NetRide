@@ -13,6 +13,7 @@ router.post('/request', authMiddleware, riderMiddleware, RideController.requestR
 router.post('/estimate', authMiddleware, riderMiddleware, RideController.estimateRide);
 router.post('/accept', authMiddleware, driverMiddleware, RideController.acceptTrip);
 router.post('/rate', authMiddleware, RideController.rateRide);
+router.post('/cancel', authMiddleware, riderMiddleware, RideController.cancelCurrentRide);
 router.get('/history', authMiddleware, RideController.getHistory);
 router.delete('/history/:id', authMiddleware, RideController.deleteHistory);
 

@@ -6,7 +6,9 @@ import {
   Chip, 
   IconButton,
   TextField,
-  InputAdornment
+  InputAdornment,
+  FormControlLabel,
+  Switch
 } from '@mui/material';
 import { 
   DataGrid, 
@@ -36,6 +38,7 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
     pageSize: 10,
   });
   const [search, setSearch] = useState('');
+  const [showTest, setShowTest] = useState(false);
   const navigate = useNavigate();
 
   const fetchUsers = async () => {
@@ -46,7 +49,8 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
           role,
           search,
           page: paginationModel.page + 1,
-          limit: paginationModel.pageSize
+          limit: paginationModel.pageSize,
+          includeTest: showTest ? 'true' : 'false'
         }
       });
       setUsers(response.data.users);
@@ -60,7 +64,7 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
 
   useEffect(() => {
     fetchUsers();
-  }, [role, paginationModel, search]);
+  }, [role, paginationModel, search, showTest]);
 
   const columns: GridColDef[] = [
     { field: 'full_name', headerName: 'Name', flex: 1, minWidth: 150 },
@@ -138,25 +142,37 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
 
   return (
     <Box sx={{ maxWidth: 1600, mx: 'auto' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5, flexWrap: 'wrap', gap: 2 }}>
         <Typography variant="h4" sx={{ fontWeight: 800 }}>{title}</Typography>
-        <TextField
-          size="small"
-          placeholder="Search identity or email..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          {...({
-            InputProps: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
-                </InputAdornment>
-              ),
-              sx: { borderRadius: '12px', bgcolor: 'white', px: 1 }
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={showTest}
+                onChange={(e) => { setShowTest(e.target.checked); setPaginationModel((m) => ({ ...m, page: 0 })); }}
+              />
             }
-          } as any)}
-          sx={{ width: 350 }}
-        />
+            label={<Typography variant="body2" color="text.secondary">Show test users</Typography>}
+          />
+          <TextField
+            size="small"
+            placeholder="Search identity or email..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            {...({
+              InputProps: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                  </InputAdornment>
+                ),
+                sx: { borderRadius: '12px', bgcolor: 'white', px: 1 }
+              }
+            } as any)}
+            sx={{ width: 350 }}
+          />
+        </Box>
       </Box>
 
       <Paper sx={{ height: 750, width: '100%', border: 'none', overflow: 'hidden' }}>

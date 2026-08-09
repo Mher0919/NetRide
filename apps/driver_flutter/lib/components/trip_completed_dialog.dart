@@ -97,7 +97,7 @@ class _TripCompletedDialogState extends State<TripCompletedDialog> {
                         child: Icon(
                           Icons.check_rounded,
                           size: 60,
-                          color: Colors.white,
+                          color: Color(0xFF294C3A),
                         ),
                       ),
                     ),
@@ -157,7 +157,7 @@ class _TripCompletedDialogState extends State<TripCompletedDialog> {
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.primaryBrandGreen,
-                          foregroundColor: Colors.white,
+                          foregroundColor: Color(0xFF294C3A),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
                           ),

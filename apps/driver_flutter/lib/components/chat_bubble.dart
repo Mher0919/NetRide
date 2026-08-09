@@ -26,7 +26,7 @@ class ChatBubble extends StatelessWidget {
     final bg = isMine
         ? AppTheme.primaryBrandGreen
         : AppTheme.lightCardBackground;
-    final fg = isMine ? Colors.white : AppTheme.secondaryDarkText;
+    final fg = isMine ? const Color(0xFF294C3A) : AppTheme.secondaryDarkText;
     final align = isMine ? Alignment.centerRight : Alignment.centerLeft;
     final radius = isMine
         ? const BorderRadius.only(

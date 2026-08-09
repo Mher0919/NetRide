@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,6 +18,7 @@ class RideProvider with ChangeNotifier {
   Trip? _currentTrip;
   List<ChatMessage> _messages = [];
   final Map<String, Location> _nearbyDrivers = {};
+  bool _cancelling = false;
 
   /// Authoritative route pushed by the backend (navigationStarted /
   /// navigationRerouteRequested). Rendering this — instead of calling
@@ -44,6 +46,7 @@ class RideProvider with ChangeNotifier {
   bool get navigationCacheHit => _navigationCacheHit;
   double? get driverEtaSeconds => _driverEtaSeconds;
   int? get driverRemainingMeters => _driverRemainingMeters;
+  bool get cancelling => _cancelling;
 
   /// Exposed so the CommunicationService can hook into the same socket
   /// the rest of the ride flow uses. Returns null if the socket hasn't
@@ -102,6 +105,14 @@ class RideProvider with ChangeNotifier {
     _socket!.on('tripUpdate', (data) {
       final oldStatus = _status;
       final trip = Trip.fromJson(data);
+      // After an intentional reset (e.g. the rider cancelled), late
+      // tripUpdates for the old trip must NOT resurrect stale state —
+      // the server's CANCELLED broadcast arrives after our REST cancel.
+      if (_status == TripStatus.IDLE &&
+          (trip.status == TripStatus.REQUESTED || trip.status == TripStatus.CANCELLED)) {
+        debugPrint('[RIDE] Ignoring stale ${trip.status} tripUpdate while IDLE (trip ${trip.id})');
+        return;
+      }
       _currentTrip = trip;
       _status = trip.status;
       _tripId = trip.id;
@@ -247,7 +258,7 @@ class RideProvider with ChangeNotifier {
       'pickup': pickup.toJson(),
       'destination': destination.toJson(),
       'isScheduled': isScheduled,
-      'scheduledAt': scheduledAt?.toIso8601String(),
+      if (scheduledAt != null) 'scheduledAt': scheduledAt!.toIso8601String(),
       'favoritePriority': favoritePriority,
       'idempotencyKey': key,
       if (cleanedPromo != null && cleanedPromo.isNotEmpty) 'promoCode': cleanedPromo.toUpperCase(),
@@ -266,11 +277,45 @@ class RideProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void cancelRide() {
-    if (_tripId != null) {
-      _socket?.emit('cancelTrip', _tripId);
+  /// Cancels the rider's current request/trip and only resets local state
+  /// after the backend confirms. Returns null on success, or a friendly
+  /// message when the cancel could not be completed (state is kept intact
+  /// so the UI can retry / stay consistent).
+  ///
+  /// Two paths are used for reliability:
+  ///   1. socket `cancelTrip` (fast path when a tripId is already known),
+  ///   2. REST `POST /ride/cancel` (idempotent, no tripId needed) — this
+  ///      closes the race where the rider hits X before the tripUpdate
+  ///      round-trip arrives and the client has no tripId yet.
+  Future<String?> cancelRide() async {
+    if (_cancelling) return null;
+    _cancelling = true;
+    notifyListeners();
+    try {
+      if (_tripId != null) {
+        debugPrint('[RIDE] Cancelling trip $_tripId via socket + REST');
+        _socket?.emit('cancelTrip', _tripId);
+      }
+      final response = await ApiService.dio.post('/ride/cancel');
+      final data = response.data;
+      final cancelled = data is Map && data['cancelled'] == true;
+      debugPrint('[RIDE] Cancel REST ok cancelled=$cancelled');
+      reset();
+      return null;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 409) {
+        debugPrint('[RIDE] Cancel refused (409): ride in progress');
+        return 'This ride is already in progress and cannot be cancelled.';
+      }
+      debugPrint('[RIDE] Cancel failed: ${e.response?.statusCode ?? e.type} ${e.message}');
+      return 'We couldn\'t cancel the ride right now. Please try again.';
+    } catch (e) {
+      debugPrint('[RIDE] Cancel failed: $e');
+      return 'We couldn\'t cancel the ride right now. Please try again.';
+    } finally {
+      _cancelling = false;
+      notifyListeners();
     }
-    reset();
   }
 
   void reset() {

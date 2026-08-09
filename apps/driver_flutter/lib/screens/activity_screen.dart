@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -94,11 +94,11 @@ class _ActivityScreenState extends State<ActivityScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFEEEBE6),
+      backgroundColor: const Color(0xFF294C3A),
       appBar: AppBar(
-        backgroundColor: const Color(0xFFEEEBE6),
+        backgroundColor: const Color(0xFF294C3A),
         elevation: 0,
-        title: Text('Earnings & Activity', style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: Text('Earnings & Activity', style: GoogleFonts.poppins(color: const Color(0xFFD0CFBA), fontWeight: FontWeight.bold)),
       ),
       body: StateContainer(
         state: _state,
@@ -137,17 +137,17 @@ class _ActivityScreenState extends State<ActivityScreen> {
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.black,
+        color: const Color(0xFF315646),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Total Earnings', style: GoogleFonts.poppins(color: Colors.grey, fontSize: 14)),
+          Text('Total Earnings', style: GoogleFonts.poppins(color: const Color(0xFF9BAE9E), fontSize: 14)),
           const SizedBox(height: 8),
-          Text('\$${total.toStringAsFixed(2)}', style: GoogleFonts.poppins(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          Text('\$${total.toStringAsFixed(2)}', style: GoogleFonts.poppins(color: const Color(0xFFD0CFBA), fontSize: 32, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          Text('${completed.length} completed trips', style: GoogleFonts.poppins(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('${completed.length} completed trips', style: GoogleFonts.poppins(color: const Color(0xFF7FAE8C), fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -180,14 +180,14 @@ class _ActivityScreenState extends State<ActivityScreen> {
     Color fareColor;
     String farePrefix;
     if (status == 'COMPLETED') {
-      fareColor = Colors.green[700]!;
+      fareColor = const Color(0xFF7FAE8C);
       farePrefix = '+\$';
     } else if (status == 'CANCELLED') {
-      fareColor = Colors.red[400]!;
+      fareColor = const Color(0xFFE07373);
       farePrefix = '';
       fare = '0.00';
     } else {
-      fareColor = Colors.grey[600]!;
+      fareColor = const Color(0xFF9BAE9E);
       farePrefix = '\$';
     }
 
@@ -195,9 +195,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: const Color(0xFF315646),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: const Color(0xFF3D5F4D)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,7 +229,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
               Expanded(
                 child: Text(
                   ride['pickup']?['address']?.toString() ?? ride['pickup_address']?.toString() ?? 'Pickup',
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
+                  style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF9BAE9E)),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -239,12 +239,12 @@ class _ActivityScreenState extends State<ActivityScreen> {
           const SizedBox(height: 4),
           Row(
             children: [
-              const Icon(Icons.square, size: 8, color: Colors.black),
+              const Icon(Icons.square, size: 8, color: Color(0xFFD0CFBA)),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   ride['destination']?['address']?.toString() ?? ride['destination_address']?.toString() ?? 'Destination',
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
+                  style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF9BAE9E)),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -255,7 +255,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
             const Divider(height: 24),
             Row(
               children: [
-                Text('Rider rated you: ', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
+                Text('Rider rated you: ', style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF9BAE9E))),
                 const Spacer(),
                 ...List.generate(5, (i) => Icon(
                   Icons.star,

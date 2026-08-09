@@ -35,7 +35,7 @@ export class AdminController {
   }
 
   static async getUsers(req: AuthRequest, res: Response) {
-    const { role, status, search, page = 1, limit = 10, dangerousOnly, documentPending } = req.query;
+    const { role, status, search, page = 1, limit = 10, dangerousOnly, documentPending, includeTest } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: any = {};
@@ -47,6 +47,12 @@ export class AdminController {
       } else {
         where.role = role as UserRole;
       }
+    }
+    // Test users are auto-generated E2E accounts (@test.netride). They flood
+    // the first pages (sorted by created_at DESC) and bury real users, so
+    // they are hidden by default; admins opt in with includeTest=true.
+    if (includeTest !== 'true') {
+      where.NOT = { email: { endsWith: '@test.netride' } };
     }
     if (status) where.verification_status = status as VerificationStatus;
     if (search) {

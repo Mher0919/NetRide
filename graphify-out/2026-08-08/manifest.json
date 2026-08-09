@@ -740,8 +740,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/map_screen.dart": {
-    "mtime": 1786172020.0527682,
-    "ast_hash": "240723836d061f06cdb42b710b942e50",
+    "mtime": 1786175914.2798736,
+    "ast_hash": "3e0ffcb2b125aeebe4146c6dab13098a",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/onboarding_screen.dart": {
@@ -750,8 +750,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/profile_screen.dart": {
-    "mtime": 1786145914.2975812,
-    "ast_hash": "f5f1f79dea3a628d1c6b0b4de61acec4",
+    "mtime": 1786175788.2398548,
+    "ast_hash": "1cdba8b27fbcfb1148428e2bd0481711",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/rating_screen.dart": {
@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "backend/run-tests.cjs": {
-    "mtime": 1786172159.7708707,
-    "ast_hash": "18bff29c0901d987d140f94cd3fd509e",
+    "mtime": 1786174319.0365195,
+    "ast_hash": "5a8fe7af3a84de9b48be0e607147318d",
     "semantic_hash": ""
   },
   "backend/scripts/build-osrm.sh": {
@@ -1215,8 +1215,8 @@
     "semantic_hash": ""
   },
   "backend/src/app.ts": {
-    "mtime": 1786145557.7818534,
-    "ast_hash": "83b9593b962a4ecf392da92e0ecdb3d2",
+    "mtime": 1786174766.7464583,
+    "ast_hash": "d2abb866944e6ba088d3ccf7edc83a7a",
     "semantic_hash": ""
   },
   "backend/src/benchmark_routing.ts": {
@@ -1400,8 +1400,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/ride/ride.service.ts": {
-    "mtime": 1786170918.5626493,
-    "ast_hash": "76527f09c8618a9dcef32b3b749dcee7",
+    "mtime": 1786174265.5422099,
+    "ast_hash": "f1758a8747128e69cd4aae0e1fcd698c",
     "semantic_hash": ""
   },
   "backend/src/modules/ride/ride_messages.repository.ts": {
@@ -1690,8 +1690,8 @@
     "semantic_hash": ""
   },
   "backend/src/services/push-notification.service.ts": {
-    "mtime": 1785887019.3154774,
-    "ast_hash": "09b4ac6eb964e38ae83a2e051cf4c817",
+    "mtime": 1786174247.7638533,
+    "ast_hash": "9ba080ec2613341177d41fe2df201480",
     "semantic_hash": ""
   },
   "backend/src/services/road-snapper.service.ts": {
@@ -2670,8 +2670,8 @@
     "semantic_hash": ""
   },
   "backend/migrations/032_google_routes_cache.sql": {
-    "mtime": 1785373273.8048244,
-    "ast_hash": "74e7a223c2b41349ee0f58f52d344ca8",
+    "mtime": 1786174724.5035431,
+    "ast_hash": "5ffd08078f7b7c4a9c2a887c54abb9b0",
     "semantic_hash": ""
   },
   "backend/src/modules/routing/google-routes.engine.ts": {
@@ -2680,8 +2680,8 @@
     "semantic_hash": ""
   },
   "backend/migrations/033_places_search.sql": {
-    "mtime": 1785397630.3297,
-    "ast_hash": "819f64601d6cdab5a66d39621a2f629a",
+    "mtime": 1786174630.5640006,
+    "ast_hash": "51fa9551c69bff947bd6a60bed2dc2e8",
     "semantic_hash": ""
   },
   "backend/src/modules/places/places.controller.ts": {
@@ -2730,8 +2730,8 @@
     "semantic_hash": ""
   },
   "backend/migrations/034_ride_routes.sql": {
-    "mtime": 1785466353.7764544,
-    "ast_hash": "0bc8959937c91a57c67c59c0d96c0a3b",
+    "mtime": 1786174760.1406581,
+    "ast_hash": "eeba58fd3474f581fad5633044485a65",
     "semantic_hash": ""
   },
   "backend/migrations/035_platform_pricing.sql": {
@@ -2785,8 +2785,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/reward_models.dart": {
-    "mtime": 1785887267.7460735,
-    "ast_hash": "79aa5bce39da0c2ece5723634d932e87",
+    "mtime": 1786174818.7423449,
+    "ast_hash": "c1a05f16abe8e029ca77b55b90604001",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/credits_screen.dart": {
@@ -2805,8 +2805,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/services/rewards_service.dart": {
-    "mtime": 1786163961.1534355,
-    "ast_hash": "c167d0f9611bb69022cb97e92aceaf40",
+    "mtime": 1786174824.5360405,
+    "ast_hash": "6dbabdf8e659593e3210467a8b2300b3",
     "semantic_hash": ""
   },
   "backend/migrations/036_pricing_profiles.sql": {
@@ -2900,8 +2900,8 @@
     "semantic_hash": ""
   },
   "backend/src/services/reward-engine.service.ts": {
-    "mtime": 1786170908.7395616,
-    "ast_hash": "ec26b3be42d1fc0c6d0305e4979a94c0",
+    "mtime": 1786174225.404103,
+    "ast_hash": "660bc13ed296c987663e7bb4e8e769ba",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/post_auth_gate.dart": {
@@ -2940,8 +2940,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/luxury_car.dart": {
-    "mtime": 1786171339.9614203,
-    "ast_hash": "8ea3fd7c57bf144b4dcaa0da06d775f7",
+    "mtime": 1786175942.7506025,
+    "ast_hash": "170097708228044ebb2b76809e9354ed",
     "semantic_hash": ""
   },
   "backend/src/modules/credits/__tests__/credits-cap.unit.test.ts": {
@@ -2972,6 +2972,41 @@
   "apps/driver_flutter/assets/sounds/online.wav": {
     "mtime": 1786154004.7509563,
     "ast_hash": "9255fe2cf80ba8c1a3e849c3a708df9f",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/screens/wallet_screen.dart": {
+    "mtime": 1786175644.3889918,
+    "ast_hash": "2df8d812ac9daf6bd33908c8d64bf526",
+    "semantic_hash": ""
+  },
+  "backend/migrations/039_rider_wallet.sql": {
+    "mtime": 1786174162.2450597,
+    "ast_hash": "817ae5c418bbcc68b1c3f4a8f37eec73",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/wallet/__tests__/wallet-cap.unit.test.ts": {
+    "mtime": 1786174308.9771414,
+    "ast_hash": "bbc69f7a86a0c0b6d870fc976c8fc785",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/wallet/wallet-cap.ts": {
+    "mtime": 1786174172.800377,
+    "ast_hash": "36bb6c72364eff4488d9aeeae73478f9",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/wallet/wallet.controller.ts": {
+    "mtime": 1786174193.8630135,
+    "ast_hash": "eb2b5ad87cc6bab63f5326814bb2a483",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/wallet/wallet.routes.ts": {
+    "mtime": 1786174194.5429225,
+    "ast_hash": "c6d25fb9e003380973407446ca2c9dc7",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/wallet/wallet.service.ts": {
+    "mtime": 1786174188.4662848,
+    "ast_hash": "1772ee778da36b6e5f79af07b750a3ef",
     "semantic_hash": ""
   }
 }

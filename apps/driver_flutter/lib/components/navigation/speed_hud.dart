@@ -22,7 +22,7 @@ class SpeedHudCard extends StatelessWidget {
       width: 110,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.lightCardBackground,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: isSpeeding ? AppTheme.errorColor : AppTheme.softBorderColor,
@@ -30,7 +30,7 @@ class SpeedHudCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withOpacity(0.35),
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),

@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -322,13 +322,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFEEEBE6),
+      backgroundColor: const Color(0xFF294C3A),
       appBar: AppBar(
-        backgroundColor: const Color(0xFFEEEBE6),
+        backgroundColor: const Color(0xFF294C3A),
         elevation: 0,
         leading: _currentStep > 0
             ? IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black),
+                icon: const Icon(Icons.arrow_back, color: Color(0xFFD0CFBA)),
                 onPressed: () {
                   if (_currentStep == 4 && _selectedCarMake != null) {
                     setState(() {
@@ -382,7 +382,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       _stepLabels[_currentStep],
                       style: GoogleFonts.poppins(
                         fontSize: 13,
-                        color: Colors.grey[600],
+                        color: Color(0xFF9BAE9E),
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -395,14 +395,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             ? null
                             : (_currentStep == 5 ? _submit : _nextStep),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.black,
-                          foregroundColor: Colors.white,
+                          backgroundColor: const Color(0xFFD0CFBA),
+                          foregroundColor: const Color(0xFF294C3A),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
                         child: _isSubmitting
-                            ? const CircularProgressIndicator(color: Colors.white)
+                            ? const CircularProgressIndicator(color: Color(0xFF294C3A))
                             : Text(
                                 _currentStep == 5
                                     ? 'Submit Application'
@@ -434,7 +434,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 8),
           Text(
             'This photo will be used for your profile and verification.',
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            style: GoogleFonts.poppins(fontSize: 14, color: Color(0xFF9BAE9E)),
           ),
           const SizedBox(height: 40),
           Center(
@@ -442,7 +442,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               onTap: () => _pickImage((url) => _profileImageUrl = url),
               child: CircleAvatar(
                 radius: 80,
-                backgroundColor: Colors.grey[100],
+                backgroundColor: Color(0xFF315646),
                 backgroundImage: _profileImageUrl != null
                     ? CachedNetworkImageProvider(resolveFileUrl(_profileImageUrl!))
                     : null,
@@ -451,13 +451,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const Icon(Icons.add_a_photo_outlined,
-                              size: 36, color: Colors.grey),
+                              size: 36, color: Color(0xFF9BAE9E)),
                           const SizedBox(height: 8),
                           Text(
                             'Tap to upload',
                             style: GoogleFonts.poppins(
                               fontSize: 13,
-                              color: Colors.grey,
+                              color: Color(0xFF9BAE9E),
                             ),
                           ),
                         ],
@@ -485,7 +485,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 8),
           Text(
             'Tell us about yourself.',
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            style: GoogleFonts.poppins(fontSize: 14, color: Color(0xFF9BAE9E)),
           ),
           const SizedBox(height: 32),
           _buildTextField(
@@ -522,7 +522,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 8),
           Text(
             'We need to verify your phone number to continue.',
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            style: GoogleFonts.poppins(fontSize: 14, color: Color(0xFF9BAE9E)),
           ),
           const SizedBox(height: 32),
           if (!_isPhoneVerified) ...[
@@ -544,8 +544,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ElevatedButton(
                     onPressed: (!_phoneValid || _isSendingCode) ? null : _sendPhoneCode,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      foregroundColor: Colors.white,
+                      backgroundColor: const Color(0xFFD0CFBA),
+                      foregroundColor: const Color(0xFF294C3A),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -555,7 +555,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
-                              color: Colors.white,
+                              color: Color(0xFF294C3A),
                               strokeWidth: 2,
                             ),
                           )
@@ -567,7 +567,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               const SizedBox(height: 24),
               Text(
                 'Enter the 6-digit code sent to\n${_phoneController.text}',
-                style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+                style: GoogleFonts.poppins(fontSize: 14, color: Color(0xFF9BAE9E)),
               ),
               const SizedBox(height: 24),
               Row(
@@ -581,8 +581,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: ElevatedButton(
                   onPressed: _isSendingCode ? null : _verifyPhoneCode,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
+                    backgroundColor: const Color(0xFFD0CFBA),
+                    foregroundColor: const Color(0xFF294C3A),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -592,7 +592,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           width: 20,
                           height: 20,
                           child: CircularProgressIndicator(
-                            color: Colors.white,
+                            color: Color(0xFF294C3A),
                             strokeWidth: 2,
                           ),
                         )
@@ -609,7 +609,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 },
                 child: const Text(
                   'Change phone number',
-                  style: TextStyle(color: Colors.grey),
+                  style: TextStyle(color: Color(0xFF9BAE9E)),
                 ),
               ),
             ],
@@ -618,13 +618,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.green[50],
+                color: const Color(0xFF2E4A3C),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green[200]!),
+                border: Border.all(color: const Color(0xFF3D5F4D)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.check_circle, color: Colors.green[700], size: 28),
+                  Icon(Icons.check_circle, color: Color(0xFF7FAE8C), size: 28),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -641,7 +641,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           _phoneController.text,
                           style: GoogleFonts.poppins(
                             fontSize: 14,
-                            color: Colors.grey[600],
+                            color: Color(0xFF9BAE9E),
                           ),
                         ),
                       ],
@@ -725,15 +725,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         keyboardType: TextInputType.number,
         textAlign: TextAlign.center,
         maxLength: 1,
-        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFFD0CFBA)),
         decoration: InputDecoration(
           counterText: '',
           filled: true,
-          fillColor: Colors.grey.shade50,
+          fillColor: const Color(0xFF315646),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.black, width: 1.5),
+            borderSide: const BorderSide(color: Color(0xFFD0CFBA), width: 1.5),
           ),
         ),
         onChanged: (value) {
@@ -767,7 +767,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   void _showSuccess(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.green),
+      SnackBar(content: Text(msg), backgroundColor: Color(0xFF7FAE8C)),
     );
   }
 
@@ -784,7 +784,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 8),
           Text(
             'Upload clear photos of your documents.',
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            style: GoogleFonts.poppins(fontSize: 14, color: Color(0xFF9BAE9E)),
           ),
           const SizedBox(height: 32),
           Row(
@@ -821,7 +821,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 12),
           Text(
             'We also verify your documents with our compliance team.',
-            style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey),
+            style: GoogleFonts.poppins(fontSize: 12, color: Color(0xFF9BAE9E)),
           ),
         ],
       ),
@@ -853,14 +853,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               const SizedBox(height: 8),
               Text(
                 'Select your vehicle manufacturer.',
-                style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+                style: GoogleFonts.poppins(fontSize: 14, color: Color(0xFF9BAE9E)),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _searchController,
                 decoration: _inputDecoration('Search Manufacturer').copyWith(
                   prefixIcon:
-                      const Icon(Icons.search, color: Colors.black),
+                      const Icon(Icons.search, color: Color(0xFFD0CFBA)),
                   suffixIcon: _searchController.text.isNotEmpty
                       ? IconButton(
                           icon: const Icon(Icons.clear),
@@ -901,11 +901,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               width: double.infinity,
               child: TextButton.icon(
                 onPressed: () => _enterCustomVehicle(),
-                icon: const Icon(Icons.add_circle_outline, color: Colors.black),
+                icon: const Icon(Icons.add_circle_outline, color: Color(0xFFD0CFBA)),
                 label: Text(
                   "Didn't find your car?",
                   style: GoogleFonts.poppins(
-                    color: Colors.black,
+                    color: Color(0xFFD0CFBA),
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
                   ),
@@ -914,7 +914,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Colors.grey[300]!),
+                    side: BorderSide(color: Color(0xFF3D5F4D)),
                   ),
                 ),
               ),
@@ -927,7 +927,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Widget _buildModelSelection() {
     if (_isLoadingVehicles) {
-      return const Center(child: CircularProgressIndicator(color: Colors.black));
+      return const Center(child: CircularProgressIndicator(color: Color(0xFFD0CFBA)));
     }
 
     return Column(
@@ -946,7 +946,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 controller: _searchController,
                 decoration: _inputDecoration('Search Model').copyWith(
                   prefixIcon:
-                      const Icon(Icons.search, color: Colors.black),
+                      const Icon(Icons.search, color: Color(0xFFD0CFBA)),
                   suffixIcon: _searchController.text.isNotEmpty
                       ? IconButton(
                           icon: const Icon(Icons.clear),
@@ -983,11 +983,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               width: double.infinity,
               child: TextButton.icon(
                 onPressed: () => _enterCustomVehicle(),
-                icon: const Icon(Icons.add_circle_outline, color: Colors.black),
+                icon: const Icon(Icons.add_circle_outline, color: Color(0xFFD0CFBA)),
                 label: Text(
                   "Didn't find your car?",
                   style: GoogleFonts.poppins(
-                    color: Colors.black,
+                    color: Color(0xFFD0CFBA),
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
                   ),
@@ -996,7 +996,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Colors.grey[300]!),
+                    side: BorderSide(color: Color(0xFF3D5F4D)),
                   ),
                 ),
               ),
@@ -1122,7 +1122,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
-                            color: Colors.grey[700])),
+                            color: Color(0xFF9BAE9E))),
                     const SizedBox(height: 6),
                     TextField(
                         controller: makeController,
@@ -1132,7 +1132,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
-                            color: Colors.grey[700])),
+                            color: Color(0xFF9BAE9E))),
                     const SizedBox(height: 6),
                     TextField(
                         controller: modelController,
@@ -1142,7 +1142,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
-                            color: Colors.grey[700])),
+                            color: Color(0xFF9BAE9E))),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<int>(
                       value: pickedYear,
@@ -1158,7 +1158,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
-                            color: Colors.grey[700])),
+                            color: Color(0xFF9BAE9E))),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<String>(
                       value: pickedColor,
@@ -1190,8 +1190,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         }
                       : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
+                    backgroundColor: const Color(0xFFD0CFBA),
+                    foregroundColor: const Color(0xFF294C3A),
                   ),
                   child: const Text('CONFIRM'),
                 ),
@@ -1262,14 +1262,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.amber[50],
+              color: Color(0xFF2E4A3C),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.amber[200]!),
+              border: Border.all(color: Color(0xFF3D5F4D)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline, color: Colors.amber[800], size: 20),
+                Icon(Icons.info_outline, color: Color(0xFFE0B04F), size: 20),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -1277,7 +1277,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     'Your background check status will be updated within 24 hours.',
                     style: GoogleFonts.poppins(
                       fontSize: 13,
-                      color: Colors.amber[900],
+                      color: Color(0xFFE0B04F),
                     ),
                   ),
                 ),
@@ -1295,7 +1295,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       style: GoogleFonts.poppins(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        color: Colors.grey[700],
+        color: Color(0xFF9BAE9E),
       ),
     );
   }
@@ -1317,7 +1317,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Colors.black, width: 2),
+        borderSide: const BorderSide(color: Color(0xFFD0CFBA), width: 2),
       ),
     );
   }
@@ -1333,7 +1333,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         width: double.infinity,
         height: 100,
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[300]!),
+          border: Border.all(color: Color(0xFF3D5F4D)),
           borderRadius: BorderRadius.circular(12),
           image: imageUrl != null
               ? DecorationImage(
@@ -1344,9 +1344,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ? Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.cloud_upload_outlined, color: Colors.grey),
+                  const Icon(Icons.cloud_upload_outlined, color: Color(0xFF9BAE9E)),
                   Text(label,
-                      style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      style: const TextStyle(color: Color(0xFF9BAE9E), fontSize: 12)),
                 ],
               )
             : null,
@@ -1418,7 +1418,7 @@ class _StepIndicator extends StatelessWidget {
           height: 4,
           margin: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
-            color: index <= currentStep ? Colors.black : Colors.grey[200],
+            color: index <= currentStep ? const Color(0xFFD0CFBA) : Color(0xFF3D5F4D),
             borderRadius: BorderRadius.circular(2),
           ),
         ),
@@ -1438,7 +1438,7 @@ class _ReviewItem extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey)),
+          Text(label, style: const TextStyle(color: Color(0xFF9BAE9E))),
           Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),

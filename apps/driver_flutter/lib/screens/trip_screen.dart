@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
@@ -121,7 +121,7 @@ class _TripScreenState extends State<TripScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const CircularProgressIndicator(color: Color(0xFF2F3A32)),
+              const CircularProgressIndicator(color: Color(0xFFD0CFBA)),
               const SizedBox(height: 32),
               Text(
                 'Establishing Secure Route...',
@@ -132,7 +132,7 @@ class _TripScreenState extends State<TripScreen> {
               Text(
                 'Preparing professional navigation.',
                 style: TextStyle(
-                    color: Colors.black.withOpacity(0.5),
+                    color: const Color(0xFF9BAE9E),
                     fontWeight: FontWeight.w500),
               ),
             ],
@@ -151,7 +151,7 @@ class _TripScreenState extends State<TripScreen> {
     NavigationService navService,
   ) {
     // Keep the NavigationService's leg in sync with the trip status.
-    // Accept → pickup, InProgress → destination.
+    // Accept â†’ pickup, InProgress â†’ destination.
     final desiredLeg = trip.status == models.TripStatus.ACCEPTED
         ? NavigationLeg.pickup
         : NavigationLeg.destination;
@@ -175,7 +175,7 @@ class _TripScreenState extends State<TripScreen> {
           onCall: () => _startCall(context, trip),
         ),
         const DriverCallOverlayHost(),
-        // Cancel button — only visible before pickup (ACCEPTED status)
+        // Cancel button â€” only visible before pickup (ACCEPTED status)
         if (trip.status == models.TripStatus.ACCEPTED)
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
@@ -186,7 +186,7 @@ class _TripScreenState extends State<TripScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFC65A5A),
+                    color: const Color(0xFFE07373),
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
@@ -227,7 +227,7 @@ class _TripScreenState extends State<TripScreen> {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFC65A5A).withOpacity(0.92),
+                  color: const Color(0xFFE07373).withOpacity(0.92),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Text(
@@ -263,7 +263,7 @@ class _TripScreenState extends State<TripScreen> {
               driverProvider.cancelTrip(trip.id);
               if (mounted) Navigator.pop(context);
             },
-            child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
+            child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFE07373))),
           ),
         ],
       ),
@@ -301,7 +301,7 @@ class _TripScreenState extends State<TripScreen> {
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          backgroundColor: Colors.white,
+          backgroundColor: const Color(0xFF294C3A),
           surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24)),
@@ -310,7 +310,7 @@ class _TripScreenState extends State<TripScreen> {
             style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 20,
-                color: Color(0xFF2F3A32)),
+                color: Color(0xFFD0CFBA)),
             textAlign: TextAlign.center,
           ),
           content: Column(
@@ -320,7 +320,7 @@ class _TripScreenState extends State<TripScreen> {
                 'How was your experience with this rider?',
                 style: TextStyle(
                     fontSize: 14,
-                    color: const Color(0xFF2F3A32).withOpacity(0.7)),
+                    color: const Color(0xFFD0CFBA).withOpacity(0.7)),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
@@ -330,7 +330,7 @@ class _TripScreenState extends State<TripScreen> {
                   return IconButton(
                     icon: Icon(
                       index < selectedRating ? Icons.star : Icons.star_border,
-                      color: const Color(0xFFC79A4A),
+                      color: const Color(0xFFE0B04F),
                       size: 32,
                     ),
                     onPressed: () =>
@@ -346,9 +346,9 @@ class _TripScreenState extends State<TripScreen> {
                   hintText: 'Add a comment (optional)',
                   hintStyle: TextStyle(
                       fontSize: 13,
-                      color: const Color(0xFF2F3A32).withOpacity(0.4)),
+                      color: const Color(0xFFD0CFBA).withOpacity(0.4)),
                   filled: true,
-                  fillColor: const Color(0xFFF7F4EF),
+                  fillColor: const Color(0xFF315646),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
@@ -407,7 +407,7 @@ class _TripScreenState extends State<TripScreen> {
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
+                            color: Color(0xFF294C3A), strokeWidth: 2))
                     : const Text('SUBMIT & FINISH'),
               ),
             ),
@@ -463,8 +463,8 @@ class _TripScreenState extends State<TripScreen> {
     );
     final ft = (m * 3.281).round();
     return isPickup
-        ? 'Drive closer to pickup — $ft ft away'
-        : 'Drive closer to destination — $ft ft away';
+        ? 'Drive closer to pickup â€” $ft ft away'
+        : 'Drive closer to destination â€” $ft ft away';
   }
 
   // ---- In-trip chat + masked call helpers --------------------------------

@@ -25,7 +25,7 @@ class RoutingOptionsBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
+        color: AppTheme.lightCardBackground.withOpacity(0.92),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppTheme.softBorderColor),
       ),
