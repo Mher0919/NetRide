@@ -58,6 +58,20 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
   // ── Earnings ──────────────────────────────────────────────────────
 
+  /// Pull-to-refresh: re-fetches profile + document requirements
+  /// (bypassing cache) and refreshes the weekly earnings rollup.
+  Future<void> _handleRefresh() async {
+    try {
+      final provider = Provider.of<DriverProvider>(context, listen: false);
+      await Future.wait([
+        provider.refreshAll(),
+        _loadWeeklyEarnings(),
+      ]);
+    } catch (_) {
+      // Refresh failures are non-fatal; cached/current state stays visible.
+    }
+  }
+
   /// Pulls the driver's completed rides from the history API and rolls up
   /// fares + tips for the trailing 7 days ("This Week").
   Future<void> _loadWeeklyEarnings() async {
@@ -844,17 +858,23 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     child: SafeArea(
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(20, 12, 20, mapCardH + 28),
-                        child: SingleChildScrollView(
-                          physics: const ClampingScrollPhysics(),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _buildOfflineHeader(driverProvider, isOnline),
-                              const SizedBox(height: 10),
-                              _buildStatusCards(driverProvider),
-                              const SizedBox(height: 10),
-                              _buildWeeklyEarningsCard(),
-                            ],
+                        child: RefreshIndicator(
+                          color: const Color(0xFF5B7760),
+                          onRefresh: _handleRefresh,
+                          child: SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: ClampingScrollPhysics(),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _buildOfflineHeader(driverProvider, isOnline),
+                                const SizedBox(height: 10),
+                                _buildStatusCards(driverProvider),
+                                const SizedBox(height: 10),
+                                _buildWeeklyEarningsCard(),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -889,15 +909,14 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                 ),
 
                 // ── GO ONLINE / GO OFFLINE circular control ────────────
+                // Sits at the bottom of the map (offline: on the map card's
+                // bottom area, 28px above the card's bottom edge).
                 if (!hasRequest)
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 500),
                     curve: Curves.easeInOutCubic,
                     left: 0, right: 0,
-                    // Offline: floats slightly above the map card's bottom
-                    // edge (card bottom sits 20px above the screen bottom,
-                    // so the control's bottom edge sits 44px up).
-                    bottom: isOnline ? 32 : mapCardH + 20 - 40,
+                    bottom: isOnline ? 32 : 48,
                     child: Center(
                       child: isOnline
                           ? _buildGoOfflineButton()
@@ -911,7 +930,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     duration: const Duration(milliseconds: 500),
                     curve: Curves.easeInOutCubic,
                     right: isOnline ? 20 : 32,
-                    bottom: isOnline ? 128 : mapCardH + 20 - 64,
+                    bottom: isOnline ? 128 : 140,
                     child: FloatingActionButton(
                       heroTag: null,
                       mini: true,

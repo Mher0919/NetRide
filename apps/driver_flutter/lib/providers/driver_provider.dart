@@ -640,6 +640,33 @@ class DriverProvider with ChangeNotifier {
     return _fetchAndCacheProfile();
   }
 
+  /// Pulls the latest document requirements from the server, bypasses cache.
+  /// Call after a document/vehicle resubmission so compliance cards (e.g. the
+  /// "vehicle inspection required" card) never render stale state.
+  Future<void> refreshDocumentRequirements() async {
+    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    if (driverId != null) {
+      await CacheService.instance.invalidate(CacheKeys.driverDocumentRequirements(driverId));
+    }
+    await _fetchAndCacheDocumentRequirements();
+  }
+
+  /// Refreshes profile + document requirements from the server, bypassing
+  /// cache. Call after any mutation (uploads, resubmissions, profile
+  /// changes) and from pull-to-refresh so all compliance cards are fresh.
+  Future<void> refreshAll() async {
+    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    if (driverId != null) {
+      await CacheService.instance.invalidate(CacheKeys.driverProfile(driverId));
+      await CacheService.instance.invalidate(CacheKeys.driverDocumentRequirements(driverId));
+      await CacheService.instance.invalidate(CacheKeys.driverVerificationStatus(driverId));
+    }
+    await Future.wait([
+      _fetchAndCacheProfile(),
+      _fetchAndCacheDocumentRequirements(),
+    ]);
+  }
+
   void markProfileChangeApprovedShown() {
     _showApprovedToast = false;
     notifyListeners();

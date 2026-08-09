@@ -136,7 +136,7 @@ class _DocumentResubmissionScreenState
 
       if (!mounted) return;
       final provider = Provider.of<DriverProvider>(context, listen: false);
-      await provider.refreshProfile();
+      await provider.refreshAll();
       setState(() {
         _isSubmitting = false;
         _submitSuccess = true;

@@ -5,8 +5,10 @@ import 'package:intl/intl.dart';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
@@ -17,7 +19,6 @@ import '../widgets/phone_input_field.dart';
 import '../components/state_container.dart';
 import '../cache/cache_service.dart';
 import '../utils/file_url.dart';
-import '../utils/pick_image.dart';
 import '../cache/cache_keys.dart';
 import '../cache/cache_policy.dart';
 import 'settings_screen.dart';
@@ -198,6 +199,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _errorMessage = 'We were unable to load your driver credentials. Please verify your connection.';
       });
     }
+  }
+
+  /// Pull-to-refresh: re-fetches profile + document requirements from the
+  /// server (bypassing cache) without flipping to the loading state.
+  Future<void> _refreshProfileData() async {
+    try {
+      await Provider.of<DriverProvider>(context, listen: false).refreshAll();
+    } catch (_) {}
+    await _fetchProfile();
   }
 
   void _applyProfileData(Map<String, dynamic> profile) {
@@ -481,7 +491,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Verification request sent to admin!')));
-        _fetchProfile(); 
+        _refreshProfileData(); 
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Request failed: $e')));
@@ -594,7 +604,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               backgroundColor: Color(0xFF5B7760),
                             ),
                           );
-                          _fetchProfile();
+                          _refreshProfileData();
                         }
                       } catch (e) {
                         setDialogState(() => _isSendingPhoneCode = false);
@@ -738,7 +748,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _isEditing = false;
           _isSaving = false;
         });
-        if (mounted) _fetchProfile();
+        if (mounted) _refreshProfileData();
         return;
       }
 
@@ -757,7 +767,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             backgroundColor: Color(0xFF5B7760),
           ),
         );
-        _fetchProfile();
+        _refreshProfileData();
       }
     } catch (e) {
       setState(() => _isSaving = false);
@@ -950,9 +960,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetchProfile,
-        successWidget: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
-          child: Column(
+        successWidget: RefreshIndicator(
+          color: const Color(0xFF5B7760),
+          onRefresh: _refreshProfileData,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
+            child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_hasPendingChange) _buildPendingChangeBanner(),
@@ -1088,6 +1102,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

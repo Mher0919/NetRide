@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../utils/pick_image.dart';
@@ -293,7 +295,10 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Vehicle submitted for admin review.')),
         );
-        Navigator.pop(context, true);
+        try {
+          await Provider.of<DriverProvider>(context, listen: false).refreshAll();
+        } catch (_) {}
+        if (mounted) Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) _showError('Failed to submit vehicle: $e');

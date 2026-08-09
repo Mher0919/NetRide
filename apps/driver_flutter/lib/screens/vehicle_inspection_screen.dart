@@ -240,7 +240,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
         newDocumentUrls: List<String>.from(_uploadedUrls),
       );
       if (!mounted) return;
-      await provider.refreshProfile();
+      await provider.refreshAll();
       setState(() {
         _isSubmitting = false;
         _submitSuccess = true;

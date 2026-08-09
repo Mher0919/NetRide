@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/driver_provider.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
 
@@ -47,6 +49,24 @@ class _ActivityScreenState extends State<ActivityScreen> {
         _state = ViewState.failure;
         _errorMessage = 'Unable to synchronize your driving data. Please check your connection.';
       });
+    }
+  }
+
+  /// Pull-to-refresh: re-fetches ride history (and quietly re-validates
+  /// profile/document requirements) without flipping to the loading state.
+  Future<void> _refreshHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token');
+      if (token != null) {
+        final response = await ApiService.dio.get('/ride/history');
+        if (mounted) setState(() => _history = response.data);
+      }
+      try {
+        await Provider.of<DriverProvider>(context, listen: false).refreshAll();
+      } catch (_) {}
+    } catch (_) {
+      // Keep current data visible on refresh failure.
     }
   }
 
@@ -105,21 +125,38 @@ class _ActivityScreenState extends State<ActivityScreen> {
         errorMessage: _errorMessage,
         onRetry: _fetchHistory,
         successWidget: _history.isEmpty
-            ? _buildEmptyState()
-            : Column(
-                children: [
-                  _buildEarningsSummary(),
-                  Expanded(
-                    child: ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _history.length,
-                      itemBuilder: (context, index) {
-                        final ride = _history[index];
-                        return _buildRideCard(ride);
-                      },
+            ? RefreshIndicator(
+                color: const Color(0xFF5B7760),
+                onRefresh: _refreshHistory,
+                child: LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: SizedBox(
+                      height: constraints.maxHeight,
+                      child: _buildEmptyState(),
                     ),
                   ),
-                ],
+                ),
+              )
+            : RefreshIndicator(
+                color: const Color(0xFF5B7760),
+                onRefresh: _refreshHistory,
+                child: Column(
+                  children: [
+                    _buildEarningsSummary(),
+                    Expanded(
+                      child: ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _history.length,
+                        itemBuilder: (context, index) {
+                          final ride = _history[index];
+                          return _buildRideCard(ride);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ),
       ),
     );
