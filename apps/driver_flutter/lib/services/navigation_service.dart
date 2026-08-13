@@ -146,23 +146,26 @@ class NavigationRoute {
       if (s is! Map) return <String, dynamic>{};
       final step = Map<String, dynamic>.from(s);
 
-      if (step['maneuver'] != null) return step;
+      final existing = step['maneuver'];
+      if (existing is Map &&
+          existing['type'] is String &&
+          (existing['location'] is List || existing['location'] == null)) {
+        return step;
+      }
 
       final instruction = step['instruction'] as String? ?? '';
-      final maneuver = step['maneuverStr'] as String? ?? step['maneuver'] as String? ?? '';
+      final maneuver = step['maneuverStr'] as String? ?? '';
 
-      if (maneuver.isNotEmpty || instruction.isNotEmpty) {
-        final osrmMan = _googleManeuverToOsrm(maneuver);
-        final roadName = _extractRoadName(instruction);
-        step['name'] = roadName;
-        step['maneuver'] = {
-          'type': osrmMan['type'],
-          'modifier': osrmMan['modifier'],
-          'location': [0.0, 0.0],
-        };
-        step['distance'] = (step['distanceMeters'] as num?)?.toDouble() ?? 0;
-        step['duration'] = (step['durationSeconds'] as num?)?.toDouble() ?? 0;
-      }
+      final osrmMan = _googleManeuverToOsrm(maneuver);
+      final roadName = _extractRoadName(instruction);
+      step['name'] = roadName;
+      step['maneuver'] = {
+        'type': osrmMan['type'],
+        'modifier': osrmMan['modifier'],
+        'location': [0.0, 0.0],
+      };
+      step['distance'] = (step['distanceMeters'] as num?)?.toDouble() ?? 0;
+      step['duration'] = (step['durationSeconds'] as num?)?.toDouble() ?? 0;
 
       return step;
     }).toList();

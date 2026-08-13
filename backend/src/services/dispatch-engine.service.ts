@@ -4,7 +4,7 @@ import { env } from '../config/env';
 import { RideRepository } from '../modules/ride/ride.repository';
 import { LocationsService } from '../modules/location/locations.service';
 import { GeospatialService } from '../modules/geospatial/geospatial.service';
-import { resolveRideFare } from './pricing.service';
+import { resolveRideFare, computeRevenueAllocation } from './pricing.service';
 import { DispatchService, ScoredDriver } from './dispatch.service';
 import { DriverEligibilityService } from './driver-eligibility.service';
 import { DriverOfferService, OfferStatus } from './driver-offer.service';
@@ -165,12 +165,20 @@ export class DispatchEngine {
       ` for ride ${rideId} (price=$${calculatedPrice}, dist=${distanceKm.toFixed(2)}km)`,
     );
 
+    // Driver earnings = the driver's 60% share (fleet shares come out of the
+    // platform pool, so the fleet assignment does not affect this number).
+    // Server-computed so the driver app never derives money client-side.
+    const driverShare = await computeRevenueAllocation(
+      Math.round(calculatedPrice * 100), null,
+    );
+
     io.to(`driver:${driverId}`).emit('newTripRequest', {
       ...trip,
       offerId: offer.offerId,
       is_scheduled: (trip as any).is_scheduled,
       scheduled_at: (trip as any).scheduled_at,
       calculated_price: calculatedPrice,
+      driver_earnings_cents: driverShare.driverShareCents,
       trip_distance_meters: tripRoute ? tripRoute.distance : distanceKm * 1000,
       trip_duration_seconds: tripRoute ? tripRoute.eta : (trip.duration_minutes ? trip.duration_minutes * 60 : 600),
       route_geometry: tripRoute ? tripRoute.geometry : null,

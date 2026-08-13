@@ -14,6 +14,7 @@ import '../components/state_container.dart';
 import 'rating_screen.dart';
 import 'chat_sheet.dart';
 import 'call_overlay.dart';
+import 'report_sheet.dart';
 
 class TripScreen extends StatefulWidget {
   const TripScreen({super.key});
@@ -84,8 +85,22 @@ class _TripScreenState extends State<TripScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
+              // 042: cancelling an accepted ride requires a reason.
+              final reason = await showModalBottomSheet<({String code, String label})>(
+                context: context,
+                backgroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                isScrollControlled: true,
+                builder: (sheetContext) => const CancellationReasonSheet(),
+              );
+              if (reason == null) return;
               try {
-                final error = await rideProvider.cancelRide();
+                final error = await rideProvider.cancelRide(
+                  reasonCode: reason.code,
+                  reasonText: reason.code == 'other' ? reason.label : null,
+                );
                 if (error != null) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(

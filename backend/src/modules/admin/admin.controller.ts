@@ -7,6 +7,15 @@ import { SpeedingDetector } from '../../services/speeding_detector';
 import { EmailService } from '../../services/email.service';
 import { StorageService } from '../../services/storage.service';
 import { io } from '../../app';
+import {
+  getProfiles,
+  getConfig,
+  getRevenueConfig,
+  getRevenueSummary,
+  invalidateRevenueCache,
+} from '../../services/pricing.service';
+import { ReportService } from '../reporting/report.service';
+import { reportReasonLabel, PartyRole } from '../reporting/report.reasons';
 
 export class AdminController {
   static async getStats(req: AuthRequest, res: Response) {
@@ -31,6 +40,185 @@ export class AdminController {
     } catch (error: any) {
       console.error(`[ADMIN] ❌ Stats error: ${error.message}`);
       res.status(500).json({ error: 'Failed to retrieve administrative statistics.' });
+    }
+  }
+
+  // ============================================================
+  // Fleet partner management (041) — revenue split configuration
+  // ============================================================
+
+  static async listFleets(req: AuthRequest, res: Response) {
+    try {
+      const fleets = await pool.query(
+        `SELECT f.*,
+                COUNT(d.user_id)::int AS driver_count,
+                COALESCE(SUM((s.fleet_allocations->0->>'cents')::bigint), 0)::bigint AS fleet_earnings_cents
+         FROM fleet_partners f
+         LEFT JOIN drivers d ON d.fleet_id = f.id
+         LEFT JOIN ride_price_snapshots s ON s.driver_fleet_id = f.id
+         GROUP BY f.id
+         ORDER BY f.name`,
+      );
+      res.json({ fleets: fleets.rows });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Fleet list error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to list fleet partners.' });
+    }
+  }
+
+  static async createFleet(req: AuthRequest, res: Response) {
+    const { name, platform_share_percent, contact_name, contact_email, notes } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Fleet name is required.' });
+    }
+    const share = Number(platform_share_percent ?? 0);
+    if (!Number.isFinite(share) || share < 0 || share > 100) {
+      return res.status(400).json({ error: 'platform_share_percent must be between 0 and 100.' });
+    }
+    try {
+      const ins = await pool.query(
+        `INSERT INTO fleet_partners (name, platform_share_percent, contact_name, contact_email, notes)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [String(name).trim(), share, contact_name ?? null, contact_email ?? null, notes ?? null],
+      );
+      invalidateRevenueCache();
+      res.status(201).json({ fleet: ins.rows[0] });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Fleet create error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to create fleet partner.' });
+    }
+  }
+
+  static async updateFleet(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const { name, platform_share_percent, is_active, contact_name, contact_email, notes } = req.body;
+    try {
+      const fields: string[] = [];
+      const values: any[] = [];
+      let i = 1;
+      if (name !== undefined) {
+        if (!String(name).trim()) return res.status(400).json({ error: 'Fleet name cannot be empty.' });
+        fields.push(`name = $${i++}`);
+        values.push(String(name).trim());
+      }
+      if (platform_share_percent !== undefined) {
+        const share = Number(platform_share_percent);
+        if (!Number.isFinite(share) || share < 0 || share > 100) {
+          return res.status(400).json({ error: 'platform_share_percent must be between 0 and 100.' });
+        }
+        fields.push(`platform_share_percent = $${i++}`);
+        values.push(share);
+      }
+      if (is_active !== undefined) {
+        fields.push(`is_active = $${i++}`);
+        values.push(is_active === true || is_active === 'true');
+      }
+      if (contact_name !== undefined) { fields.push(`contact_name = $${i++}`); values.push(contact_name ?? null); }
+      if (contact_email !== undefined) { fields.push(`contact_email = $${i++}`); values.push(contact_email ?? null); }
+      if (notes !== undefined) { fields.push(`notes = $${i++}`); values.push(notes ?? null); }
+      if (fields.length === 0) return res.status(400).json({ error: 'No fields to update.' });
+
+      fields.push(`updated_at = NOW()`);
+      values.push(id);
+      const upd = await pool.query(
+        `UPDATE fleet_partners SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+        values,
+      );
+      if (!upd.rowCount) return res.status(404).json({ error: 'Fleet partner not found.' });
+      invalidateRevenueCache();
+      res.json({ fleet: upd.rows[0] });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Fleet update error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to update fleet partner.' });
+    }
+  }
+
+  /** Assign (fleet_id) or unassign (null) a driver to/from a fleet. */
+  static async assignDriverFleet(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const { fleet_id } = req.body;
+    try {
+      if (fleet_id !== null) {
+        const fleet = await pool.query(`SELECT 1 FROM fleet_partners WHERE id = $1`, [fleet_id]);
+        if (!fleet.rowCount) return res.status(400).json({ error: 'Unknown fleet partner.' });
+      }
+      const upd = await pool.query(
+        `UPDATE drivers SET fleet_id = $1 WHERE user_id = $2 RETURNING user_id, fleet_id`,
+        [fleet_id ?? null, id],
+      );
+      if (!upd.rowCount) return res.status(404).json({ error: 'Driver not found.' });
+      res.json({ driver_id: id, fleet_id: upd.rows[0].fleet_id });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Fleet assignment error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to assign driver to fleet.' });
+    }
+  }
+
+  // ============================================================
+  // Pricing + revenue visibility (041)
+  // ============================================================
+
+  static async listPricingProfiles(req: AuthRequest, res: Response) {
+    try {
+      const profiles = await getProfiles();
+      res.json({ profiles });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to list pricing profiles.' });
+    }
+  }
+
+  /** Update a profile's rates; the 60s engine cache is busted immediately. */
+  static async updatePricingProfile(req: AuthRequest, res: Response) {
+    const { code } = req.params;
+    const body = req.body;
+    const numberKeys = [
+      'base_fare', 'per_mile_rate', 'per_minute_rate', 'minimum_fare',
+      'booking_fee', 'service_fee_rate', 'tax_rate',
+      'max_demand_multiplier', 'peak_time_multiplier', 'off_peak_multiplier',
+      'weather_multiplier', 'location_multiplier', 'fleet_multiplier',
+    ];
+    const fields: string[] = [];
+    const values: any[] = [];
+    let i = 1;
+    for (const key of numberKeys) {
+      if (body[key] === undefined) continue;
+      const v = Number(body[key]);
+      if (!Number.isFinite(v) || v < 0) {
+        return res.status(400).json({ error: `${key} must be a non-negative number.` });
+      }
+      fields.push(`${key} = $${i++}`);
+      values.push(v);
+    }
+    if (body.label !== undefined) {
+      fields.push(`label = $${i++}`);
+      values.push(String(body.label));
+    }
+    if (fields.length === 0) return res.status(400).json({ error: 'No fields to update.' });
+
+    try {
+      fields.push(`updated_at = NOW()`);
+      values.push(String(code).toUpperCase());
+      const upd = await pool.query(
+        `UPDATE pricing_profiles SET ${fields.join(', ')} WHERE code = $${i} AND active = TRUE RETURNING *`,
+        values,
+      );
+      if (!upd.rowCount) return res.status(404).json({ error: 'Pricing profile not found.' });
+      // Bust the in-memory cache so the next estimate uses the new rates.
+      await getConfig(String(code).toUpperCase(), true);
+      res.json({ profile: upd.rows[0] });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Pricing update error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to update pricing profile.' });
+    }
+  }
+
+  static async getRevenueOverview(req: AuthRequest, res: Response) {
+    try {
+      const [config, summary] = await Promise.all([getRevenueConfig(), getRevenueSummary()]);
+      res.json({ revenue_config: config, ...summary });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Revenue overview error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to load revenue overview.' });
     }
   }
 
@@ -2078,8 +2266,64 @@ export class AdminController {
       console.log(`[ADMIN] Deleted ${field} for user ${id}`);
       res.json({ success: true });
     } catch (error: any) {
-      console.error(`[ADMIN] ❌ Delete document error: ${error.message}`);
+      console.error(`[ADMIN] �?O Delete document error: ${error.message}`);
       res.status(500).json({ error: 'Failed to delete document.' });
+    }
+  }
+
+  // ============================================================
+  // Ride reports (042) — post-cancellation / post-ride party reporting
+
+  static async listReports(req: AuthRequest, res: Response) {
+    try {
+      const { status, reported_role, q, limit, offset } = req.query as any;
+      const result = await ReportService.listReports({
+        status: typeof status === 'string' ? status : undefined,
+        reported_role: typeof reported_role === 'string' ? reported_role : undefined,
+        q: typeof q === 'string' ? q : undefined,
+        limit: limit ? parseInt(limit, 10) : 25,
+        offset: offset ? parseInt(offset, 10) : 0,
+      });
+
+      const rows = result.rows.map((row: any) => ({
+        ...row,
+        reason_label: reportReasonLabel(row.reported_role as PartyRole, row.reason_code),
+      }));
+
+      res.json({ total: result.total, rows });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ List reports error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to list ride reports.' });
+    }
+  }
+
+  static async resolveReport(req: AuthRequest, res: Response) {
+    try {
+      const adminId = req.user?.id;
+      if (!adminId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { status, action, admin_notes } = req.body ?? {};
+      if (!['IN_REVIEW', 'RESOLVED', 'DISMISSED'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid resolution status.' });
+      }
+      if (status === 'DISMISSED' && action && action !== 'NO_ACTION') {
+        return res.status(400).json({ error: 'A dismissed report cannot carry a penalty action.' });
+      }
+
+      const report = await ReportService.resolveReport(req.params.id, adminId, {
+        status,
+        action: action ?? 'NO_ACTION',
+        admin_notes,
+      });
+
+      const withLabel = {
+        ...(report as any),
+        reason_label: reportReasonLabel(report.reported_role, report.reason_code),
+      };
+      res.json(withLabel);
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Resolve report error: ${error.message}`);
+res.status(error?.status ?? 400).json({ error: error?.message || 'Failed to resolve report.' });
     }
   }
 }

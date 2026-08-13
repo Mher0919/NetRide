@@ -33,6 +33,10 @@ import HandshakeIcon from '@mui/icons-material/Handshake';
 import TagIcon from '@mui/icons-material/LocalOffer';
 import ShareIcon from '@mui/icons-material/Share';
 import StarsIcon from '@mui/icons-material/Stars';
+import GroupsIcon from '@mui/icons-material/Groups';
+import PriceChangeIcon from '@mui/icons-material/PriceChange';
+import PaidIcon from '@mui/icons-material/Paid';
+import FlagIcon from '@mui/icons-material/Flag';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getDangerousDrivers, listProfileChanges, listPayoutCards, listPayouts, getPendingDocumentReviewsCount } from '../api/admin';
@@ -109,6 +113,10 @@ const MainLayout: React.FC = () => {
     { text: 'Promo Codes', icon: <TagIcon />, path: '/promos' },
     { text: 'Referrals', icon: <ShareIcon />, path: '/referrals' },
     { text: 'Ride Credits', icon: <StarsIcon />, path: '/credits' },
+    { text: 'Fleet Partners', icon: <GroupsIcon />, path: '/fleets' },
+    { text: 'Pricing', icon: <PriceChangeIcon />, path: '/pricing' },
+    { text: 'Revenue', icon: <PaidIcon />, path: '/revenue' },
+    { text: 'Reports', icon: <FlagIcon />, path: '/reports' },
     { text: 'Audit Logs', icon: <HistoryIcon />, path: '/logs' },
   ];
 

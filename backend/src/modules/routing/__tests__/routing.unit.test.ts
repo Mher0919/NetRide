@@ -13,7 +13,11 @@ import {
   InvalidCoordinatesError,
   RoutingService,
 } from '../routing.service';
-import { computeEstimate } from '../../../services/pricing.service';
+import {
+  computeFare,
+  computeEstimate,
+  DEFAULT_PRICING_CONFIG,
+} from '../../../services/pricing.service';
 import { GoogleRoutesEngine } from '../google-routes.engine';
 import { RouteStoreService } from '../../../services/route-store.service';
 
@@ -37,22 +41,37 @@ test('parseCoordinates rejects out-of-range lat/lng', () => {
 
 // ---- Fast fare computation ----------------------------------------------
 
-test('computeEstimate is deterministic and itemized', () => {
-  const fare = computeEstimate({
-    distanceMeters: 5000,
-    durationSeconds: 600,
-  });
+const NEUTRAL_MARKET = {
+  demandRatio: 1.0,
+  onlineDrivers: 10,
+  activeRequests: 10,
+  hourOfDay: 12,
+  demandMultiplier: 1.0,
+  timeMultiplier: 1.0,
+  reasons: ['Neutral test market'],
+  computedAt: 0,
+};
+
+test('computeFare is deterministic and itemized', () => {
+  const fare = computeFare(
+    { distanceMeters: 5000, durationSeconds: 600 },
+    DEFAULT_PRICING_CONFIG,
+    NEUTRAL_MARKET,
+  );
   assert.equal(fare.currency, 'USD');
-  // base 3.50 + distance 5km*1.50=7.50 + time 10min*0.35=3.50 + booking 1.50
-  // = 16.00; service 10% = 1.60; taxable = 17.60; taxes 8.75% = 1.54
-  // total = 17.60 + 1.54 = 19.14
-  assert.ok(Math.abs(fare.totalFare - 19.14) < 0.02, `total=${fare.totalFare}`);
+  // Flat production formula (041): base 4.00 + 3.11mi*2.50=7.77 + 10min*0.40=4.00
+  // = 15.77 (no booking fee, no service fee, no tax, surge pinned to 1.0)
+  assert.ok(Math.abs(fare.totalFare - 15.77) < 0.02, `total=${fare.totalFare}`);
   assert.ok(fare.baseFare > 0 && fare.distanceFare > 0 && fare.timeFare > 0);
 });
 
-test('computeEstimate respects the minimum fare', () => {
-  const fare = computeEstimate({ distanceMeters: 10, durationSeconds: 5 });
-  assert.ok(fare.totalFare >= 7.0);
+test('computeFare respects the minimum fare', () => {
+  const fare = computeFare(
+    { distanceMeters: 10, durationSeconds: 5 },
+    DEFAULT_PRICING_CONFIG,
+    NEUTRAL_MARKET,
+  );
+  assert.ok(fare.totalFare >= 10.0);
 });
 
 test('computeEstimate runs in microseconds (no I/O)', () => {

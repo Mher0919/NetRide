@@ -62,4 +62,19 @@ router.post('/vehicles/submissions/:id/reject', AdminController.rejectVehicleSub
 router.post('/vehicles/submissions/:id/request-changes', AdminController.requestVehicleChanges);
 router.post('/users/:id/request-vehicle-resubmission', AdminController.requestVehicleResubmission);
 
+// Fleet partner management + revenue split (041)
+router.get('/fleets', AdminController.listFleets);
+router.post('/fleets', AdminController.createFleet);
+router.patch('/fleets/:id', AdminController.updateFleet);
+router.patch('/drivers/:id/fleet', AdminController.assignDriverFleet);
+
+// Pricing profiles + revenue visibility (041)
+router.get('/pricing', AdminController.listPricingProfiles);
+router.patch('/pricing/:code', AdminController.updatePricingProfile);
+router.get('/revenue', AdminController.getRevenueOverview);
+
+// Ride reports (042)
+router.get('/reports', AdminController.listReports);
+router.post('/reports/:id/resolve', AdminController.resolveReport);
+
 export default router;

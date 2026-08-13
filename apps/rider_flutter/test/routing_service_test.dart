@@ -9,8 +9,11 @@
 
 import 'dart:async';
 import 'package:dio/dio.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:rider_flutter/services/api_service.dart';
+import 'package:rider_flutter/services/route_cache_service.dart';
 import 'package:rider_flutter/services/routing_service.dart';
 
 /// Builds a fake POST implementation that returns a canned GeoJSON route
@@ -29,16 +32,20 @@ Future<Response<T>> fakePost<T>({
     );
   }
   // Simulate a real road-following geometry: many points, not 2.
+  // The google-plan endpoint returns an encoded [lng, lat] polyline while
+  // /routing/plan returns GeoJSON geometry — the fake serves both shapes.
+  final polyline = List.generate(
+    25,
+    (i) => [
+      -118.24 + i * 0.001,
+      34.05 + (i % 2 == 0 ? 0.001 : -0.001),
+    ],
+  );
   final geojson = {
+    'polyline': polyline,
     'geometry': {
       'type': 'LineString',
-      'coordinates': List.generate(
-        25,
-        (i) => [
-          -118.24 + i * 0.001,
-          34.05 + (i % 2 == 0 ? 0.001 : -0.001),
-        ],
-      ),
+      'coordinates': polyline,
     },
     'distanceMeters': 5200.0,
     'durationSeconds': 600.0,
@@ -46,13 +53,10 @@ Future<Response<T>> fakePost<T>({
     'engine': 'OSRM',
     'cacheHit': false,
     'fare': {
-      'baseFare': 3.5,
+      'baseFare': 4.0,
       'distanceFare': 7.8,
-      'timeFare': 3.5,
-      'bookingFee': 1.5,
+      'timeFare': 4.0,
       'surgeMultiplier': 1.0,
-      'serviceFee': 1.63,
-      'taxes': 1.49,
       'totalFare': 19.42,
       'currency': 'USD',
     },
@@ -65,6 +69,18 @@ Future<Response<T>> fakePost<T>({
 }
 
 void main() {
+  setUpAll(() async {
+    // RoutingService reads ApiService.dio at construction; the app boot
+    // path awaits ApiService.init() before anything else runs.
+    await dotenv.load(fileName: '.env');
+    await ApiService.init();
+  });
+
+  setUp(() async {
+    // The route cache is a process-wide singleton; keep tests independent.
+    await RouteCacheService.instance.clear();
+  });
+
   group('RoutingService', () {
     test('flattens GeoJSON geometry into road-following points', () async {
       final svc = RoutingService();

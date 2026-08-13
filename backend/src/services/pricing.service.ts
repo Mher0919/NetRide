@@ -23,6 +23,18 @@
 //                     multiplier breakdown, profile, final fare) so the fare
 //                     quoted at request time is the fare charged at accept
 //                     time — booking, payout, and payment all agree.
+//
+// Production fare model (041): flat fare —
+//   rawFare    = base_fare + miles × per_mile_rate + minutes × per_minute_rate
+//   finalFare  = max(minimum_fare, round(rawFare))
+// Booking fee, service fee, and tax are zeroed and multipliers pinned to 1.00
+// in the live PREMIUM profile, so the engine output is deterministic-flat.
+//
+// Revenue model (041): 60% driver / 40% platform (revenue_configs singleton).
+// The platform pool is split between the ride's fleet partner (configured
+// share of the pool) and NetRide (remainder). The per-ride allocation is
+// persisted on the price snapshot so every ride reconciles exactly:
+//   finalFare = driverShare + fleetShare + netrideShare (cent-exact).
 
 import { pool } from '../config/database';
 import { redis, DRIVER_LOCATIONS_KEY } from '../config/redis';
@@ -38,8 +50,8 @@ export interface PricingConfig {
   label: string;
   /** Flat fare per ride (USD). */
   base_fare: number;
-  /** Rate per kilometer (USD). */
-  per_km_rate: number;
+  /** Rate per mile (USD). */
+  per_mile_rate: number;
   /** Rate per minute of trip time (USD). */
   per_minute_rate: number;
   /** Floor below which a ride is never priced (USD). */
@@ -66,21 +78,22 @@ export interface PricingConfig {
 
 /**
  * Fallback profile used when the DB row is missing/unreachable. This is the
- * live PREMIUM profile — the only ride category currently exposed.
+ * live PREMIUM profile — the only ride category currently exposed. Values
+ * match the production flat-fare spec (041).
  */
 export const DEFAULT_PRICING_CONFIG: PricingConfig = {
   code: 'PREMIUM',
   label: 'NetRide Premium',
-  base_fare: 3.50,
-  per_km_rate: 1.50,
-  per_minute_rate: 0.35,
-  minimum_fare: 7.00,
-  booking_fee: 1.50,
-  service_fee_rate: 0.10,
-  tax_rate: 0.0875,
-  max_demand_multiplier: 2.00,
-  peak_time_multiplier: 1.25,
-  off_peak_multiplier: 0.95,
+  base_fare: 4.00,
+  per_mile_rate: 2.50,
+  per_minute_rate: 0.40,
+  minimum_fare: 10.00,
+  booking_fee: 0.00,
+  service_fee_rate: 0.00,
+  tax_rate: 0.00,
+  max_demand_multiplier: 1.00,
+  peak_time_multiplier: 1.00,
+  off_peak_multiplier: 1.00,
   weather_multiplier: 1.00,
   location_multiplier: 1.00,
   fleet_multiplier: 1.00,
@@ -98,7 +111,7 @@ function normalizeConfig(raw: any): PricingConfig {
     code: (raw.code ?? DEFAULT_PRICING_CONFIG.code).toString().toUpperCase(),
     label: (raw.label ?? DEFAULT_PRICING_CONFIG.label).toString(),
     base_fare: num(raw.base_fare, DEFAULT_PRICING_CONFIG.base_fare),
-    per_km_rate: num(raw.per_km_rate, DEFAULT_PRICING_CONFIG.per_km_rate),
+    per_mile_rate: num(raw.per_mile_rate, DEFAULT_PRICING_CONFIG.per_mile_rate),
     per_minute_rate: num(raw.per_minute_rate, DEFAULT_PRICING_CONFIG.per_minute_rate),
     minimum_fare: num(raw.minimum_fare, DEFAULT_PRICING_CONFIG.minimum_fare),
     booking_fee: num(raw.booking_fee, DEFAULT_PRICING_CONFIG.booking_fee),
@@ -333,6 +346,10 @@ export interface MultiplierBreakdown {
 }
 
 export interface FareBreakdown {
+  /** Trip distance in miles (production spec). */
+  distanceMiles: number;
+  /** Trip duration in minutes (production spec). */
+  durationMinutes: number;
   baseFare: number;
   distanceFare: number;
   timeFare: number;
@@ -346,6 +363,9 @@ export interface FareBreakdown {
   multiplierBreakdown: MultiplierBreakdown;
 }
 
+/** Meters per mile (US statute). */
+const METERS_PER_MILE = 1609.344;
+
 /**
  * Pure, deterministic fare computation. No I/O — safe to call from the
  * routing hot path. `market` and `config` are supplied by the caller
@@ -356,12 +376,14 @@ export function computeFare(
   config: PricingConfig = currentConfig(),
   market: MarketConditions = currentMarket,
 ): FareBreakdown {
-  const distanceKm = input.distanceMeters / 1000;
+  const distanceMiles = input.distanceMeters / METERS_PER_MILE;
   const durationMinutes = input.durationSeconds / 60;
 
   // Multiplier pipeline. Demand × time come from live market conditions;
   // fleet, weather, and location come from the profile configuration. Every
-  // factor is non-negative and clamped to the profile's surge ceiling.
+  // factor is non-negative and clamped to the profile's surge ceiling. The
+  // live PREMIUM profile pins every multiplier to 1.00, so the production
+  // fare is deterministic-flat; raising the caps in config re-enables surge.
   const demandTime = clamp(
     market.demandMultiplier * market.timeMultiplier,
     0.85,
@@ -384,7 +406,7 @@ export function computeFare(
   }
 
   const baseFare = config.base_fare;
-  const distanceFare = distanceKm * config.per_km_rate;
+  const distanceFare = distanceMiles * config.per_mile_rate;
   const timeFare = durationMinutes * config.per_minute_rate;
   const bookingFee = config.booking_fee;
 
@@ -396,6 +418,8 @@ export function computeFare(
   const totalFare = Math.max(config.minimum_fare, round2(taxable + taxes));
 
   return {
+    distanceMiles: round2(distanceMiles),
+    durationMinutes: round2(durationMinutes),
     baseFare: round2(baseFare),
     distanceFare: round2(distanceFare),
     timeFare: round2(timeFare),
@@ -522,6 +546,283 @@ export async function resolveRideFare(rideId: string, input: FareInput): Promise
   return computeEstimate(input).totalFare;
 }
 
+// ---------------------------------------------------------------------------
+// 5. REVENUE ALLOCATION  (60/40 driver/platform + dynamic fleet shares)
+// ---------------------------------------------------------------------------
+// Single source of truth for the money split. Every completed ride records
+// its allocation on the price snapshot, and the invariant always holds:
+//   finalFare = driverShare + ΣfleetShares + netrideShare  (cent-exact)
+//
+// Global split (revenue_configs, id=1): driver 60% / platform 40%.
+// Platform pool: the ride's fleet partner (assigned + active) receives its
+// configured share of the pool; NetRide keeps the remainder. A driver
+// without a fleet leaves the entire platform pool to NetRide.
+
+export interface RevenueConfig {
+  driverSharePercent: number;
+  platformSharePercent: number;
+}
+
+export interface FleetShare {
+  fleetId: string;
+  name: string;
+  cents: number;
+}
+
+export interface RevenueAllocation {
+  driverShareCents: number;
+  platformShareCents: number;
+  fleetShares: FleetShare[];
+  netrideShareCents: number;
+  driverSharePercent: number;
+  platformSharePercent: number;
+  /** fleetId → cents (mirrors fleetShares for lookup). */
+  fleetAllocationMap: Record<string, number>;
+}
+
+export interface FleetPartnerRow {
+  id: string;
+  name: string;
+  platformSharePercent: number;
+  isActive: boolean;
+}
+
+export const DEFAULT_REVENUE_CONFIG: RevenueConfig = {
+  driverSharePercent: 60,
+  platformSharePercent: 40,
+};
+
+const REVENUE_CACHE_TTL_MS = 60_000;
+let cachedRevenueConfig: { config: RevenueConfig; at: number } | null = null;
+let cachedFleets: { fleets: FleetPartnerRow[]; at: number } | null = null;
+
+/** Global split from revenue_configs (60/40 fallback, never throws). */
+export async function getRevenueConfig(force = false): Promise<RevenueConfig> {
+  if (!force && cachedRevenueConfig && Date.now() - cachedRevenueConfig.at < REVENUE_CACHE_TTL_MS) {
+    return cachedRevenueConfig.config;
+  }
+  try {
+    const res = await pool.query(
+      `SELECT driver_share_percent, platform_share_percent
+       FROM revenue_configs WHERE id = 1`,
+    );
+    const row = res.rows[0];
+    if (row) {
+      const candidate = {
+        driverSharePercent: Number(row.driver_share_percent),
+        platformSharePercent: Number(row.platform_share_percent),
+      };
+      // DB CHECK guarantees the sum; validate defensively anyway.
+      if (Math.abs(candidate.driverSharePercent + candidate.platformSharePercent - 100) < 0.01) {
+        cachedRevenueConfig = { config: candidate, at: Date.now() };
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[PRICING] ⚠️ Revenue config load failed (using 60/40): ${err.message}`);
+  }
+  if (cachedRevenueConfig) return cachedRevenueConfig.config;
+  return { ...DEFAULT_REVENUE_CONFIG };
+}
+
+/** Active fleet partners (empty fallback, never throws). */
+export async function getFleetPartners(force = false): Promise<FleetPartnerRow[]> {
+  if (!force && cachedFleets && Date.now() - cachedFleets.at < REVENUE_CACHE_TTL_MS) {
+    return cachedFleets.fleets;
+  }
+  try {
+    const res = await pool.query(
+      `SELECT id, name, platform_share_percent, is_active
+       FROM fleet_partners WHERE is_active = TRUE ORDER BY name`,
+    );
+    cachedFleets = {
+      fleets: res.rows.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        platformSharePercent: Number(r.platform_share_percent),
+        isActive: r.is_active === true,
+      })),
+      at: Date.now(),
+    };
+  } catch (err: any) {
+    console.warn(`[PRICING] ⚠️ Fleet partner load failed: ${err.message}`);
+  }
+  if (cachedFleets) return cachedFleets.fleets;
+  return [];
+}
+
+/** Drop the revenue caches after an admin edit so the next call re-reads. */
+export function invalidateRevenueCache(): void {
+  cachedRevenueConfig = null;
+  cachedFleets = null;
+}
+
+/**
+ * Pure, deterministic revenue split. No I/O. Cent-exact by construction:
+ * driverShare + Σfleet + netride === fareCents.
+ *
+ * @param fareCents      gross fare in whole cents (>= 0)
+ * @param driverFleetId  the ride driver's fleet assignment (null = platform-direct)
+ * @param revenueConfig  global split (falls back to 60/40 if invalid)
+ * @param fleets         active fleet partners
+ */
+export function computeRevenueSplit(
+  fareCents: number,
+  driverFleetId: string | null,
+  revenueConfig: RevenueConfig = DEFAULT_REVENUE_CONFIG,
+  fleets: FleetPartnerRow[] = [],
+): RevenueAllocation {
+  const fare = Math.max(0, Math.round(fareCents));
+  const cfg =
+    Math.abs(revenueConfig.driverSharePercent + revenueConfig.platformSharePercent - 100) < 0.01
+      ? revenueConfig
+      : DEFAULT_REVENUE_CONFIG;
+
+  const driverShareCents = Math.round((fare * cfg.driverSharePercent) / 100);
+  const platformShareCents = fare - driverShareCents;
+
+  const fleet = driverFleetId
+    ? fleets.find((f) => f.id === driverFleetId && f.isActive && f.platformSharePercent > 0)
+    : undefined;
+
+  let fleetShares: FleetShare[] = [];
+  let netrideShareCents = platformShareCents;
+  if (fleet) {
+    const fleetCents = Math.round((platformShareCents * fleet.platformSharePercent) / 100);
+    fleetShares = [{ fleetId: fleet.id, name: fleet.name, cents: fleetCents }];
+    netrideShareCents = platformShareCents - fleetCents;
+  }
+
+  const fleetAllocationMap: Record<string, number> = {};
+  for (const fs of fleetShares) fleetAllocationMap[fs.fleetId] = fs.cents;
+
+  return {
+    driverShareCents,
+    platformShareCents,
+    fleetShares,
+    netrideShareCents,
+    driverSharePercent: cfg.driverSharePercent,
+    platformSharePercent: cfg.platformSharePercent,
+    fleetAllocationMap,
+  };
+}
+
+/** Live allocation for a fare + driver fleet (cached config, no DB on caller). */
+export async function computeRevenueAllocation(
+  fareCents: number,
+  driverFleetId: string | null,
+): Promise<RevenueAllocation> {
+  const [config, fleets] = await Promise.all([getRevenueConfig(), getFleetPartners()]);
+  return computeRevenueSplit(fareCents, driverFleetId, config, fleets);
+}
+
+/**
+ * Computes the allocation for a ride and persists it on the price snapshot.
+ * `client` (optional) runs the write inside the caller's transaction.
+ * Never throws — returns the allocation, or null when persistence failed.
+ */
+export async function persistRevenueAllocation(
+  rideId: string,
+  driverId: string | null,
+  fareCents: number,
+  client?: any,
+): Promise<RevenueAllocation | null> {
+  try {
+    let fleetId: string | null = null;
+    if (driverId) {
+      const res = await pool.query('SELECT fleet_id FROM drivers WHERE user_id = $1', [driverId]);
+      fleetId = res.rows[0]?.fleet_id ?? null;
+    }
+    const [config, fleets] = await Promise.all([getRevenueConfig(), getFleetPartners()]);
+    const allocation = computeRevenueSplit(fareCents, fleetId, config, fleets);
+
+    const db = client ?? pool;
+    await db.query(
+      `UPDATE ride_price_snapshots SET
+         driver_share_cents      = $2,
+         platform_share_cents    = $3,
+         netride_share_cents     = $4,
+         fleet_allocations       = $5::jsonb,
+         driver_fleet_id         = $6,
+         revenue_config_snapshot = $7::jsonb
+       WHERE ride_id = $1`,
+      [
+        rideId,
+        allocation.driverShareCents,
+        allocation.platformShareCents,
+        allocation.netrideShareCents,
+        JSON.stringify(allocation.fleetShares),
+        fleetId,
+        JSON.stringify({
+          driverSharePercent: config.driverSharePercent,
+          platformSharePercent: config.platformSharePercent,
+        }),
+      ],
+    );
+    return allocation;
+  } catch (err: any) {
+    console.error(`[PRICING] ❌ Revenue allocation persist failed for ride ${rideId}: ${err.message}`);
+    return null;
+  }
+}
+
+/** Reads a ride's persisted revenue allocation, or null when absent. */
+export async function getRevenueAllocationForRide(rideId: string): Promise<RevenueAllocation | null> {
+  try {
+    const res = await pool.query(
+      `SELECT driver_share_cents, platform_share_cents, netride_share_cents,
+              fleet_allocations, revenue_config_snapshot
+       FROM ride_price_snapshots WHERE ride_id = $1`,
+      [rideId],
+    );
+    const r = res.rows[0];
+    if (!r || r.driver_share_cents == null) return null;
+
+    const fleetShares: FleetShare[] = Array.isArray(r.fleet_allocations) ? r.fleet_allocations : [];
+    const fleetAllocationMap: Record<string, number> = {};
+    for (const fs of fleetShares) fleetAllocationMap[fs.fleetId] = fs.cents;
+    const cfgSnap = r.revenue_config_snapshot ?? {};
+
+    return {
+      driverShareCents: Number(r.driver_share_cents),
+      platformShareCents: Number(r.platform_share_cents),
+      netrideShareCents: Number(r.netride_share_cents),
+      fleetShares,
+      fleetAllocationMap,
+      driverSharePercent: Number(cfgSnap.driverSharePercent ?? DEFAULT_REVENUE_CONFIG.driverSharePercent),
+      platformSharePercent: Number(cfgSnap.platformSharePercent ?? DEFAULT_REVENUE_CONFIG.platformSharePercent),
+    };
+  } catch (err: any) {
+    console.warn(`[PRICING] ⚠️ Revenue allocation read failed for ride ${rideId}: ${err.message}`);
+    return null;
+  }
+}
+
+/** Admin financial visibility: global + per-fleet aggregates (cents). */
+export async function getRevenueSummary(): Promise<any> {
+  const globalRes = await pool.query(
+    `SELECT
+       COALESCE(SUM(final_fare * 100), 0)::bigint AS total_fare_cents,
+       COALESCE(SUM(driver_share_cents), 0)::bigint AS total_driver_share_cents,
+       COALESCE(SUM(platform_share_cents), 0)::bigint AS total_platform_share_cents,
+       COALESCE(SUM(netride_share_cents), 0)::bigint AS total_netride_share_cents,
+       COUNT(*)::int AS rides_with_allocation
+     FROM ride_price_snapshots
+     WHERE driver_share_cents IS NOT NULL`,
+  );
+  const fleetRes = await pool.query(
+    `SELECT s.driver_fleet_id AS fleet_id,
+            COALESCE(f.name, 'Unknown') AS fleet_name,
+            COUNT(*)::int AS rides,
+            COALESCE(SUM((s.fleet_allocations->0->>'cents')::bigint), 0)::bigint AS fleet_earnings_cents
+     FROM ride_price_snapshots s
+     LEFT JOIN fleet_partners f ON f.id = s.driver_fleet_id
+     WHERE s.driver_fleet_id IS NOT NULL
+     GROUP BY s.driver_fleet_id, f.name
+     ORDER BY fleet_earnings_cents DESC`,
+  );
+  return { global: globalRes.rows[0] ?? null, per_fleet: fleetRes.rows };
+}
+
 export const pricingService = {
   DEFAULT_PRICING_CONFIG,
   getConfig,
@@ -532,4 +833,12 @@ export const pricingService = {
   createPriceSnapshot,
   getSnapshotForRide,
   resolveRideFare,
+  getRevenueConfig,
+  getFleetPartners,
+  invalidateRevenueCache,
+  computeRevenueSplit,
+  computeRevenueAllocation,
+  persistRevenueAllocation,
+  getRevenueAllocationForRide,
+  getRevenueSummary,
 };

@@ -1750,11 +1750,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           final rawCents = ((double.tryParse(amount.text.replaceAll(',', '').replaceAll('\$', '')) ?? 0) * 100).round();
           final feeCents = (rawCents * 0.05).round();
           final netCents = rawCents - feeCents;
-          final tooSmall = rawCents < 500; // $5 minimum
+          final tooSmall = rawCents < 1000; // $10 minimum (server-enforced)
           final tooLarge = rawCents > balanceCents;
           final canSubmit = rawCents > 0 && !tooSmall && !tooLarge;
           String? validation;
-          if (rawCents > 0 && tooSmall) validation = 'Minimum payout is \$5.00';
+          if (rawCents > 0 && tooSmall) validation = 'Minimum payout is \$10.00';
           if (rawCents > 0 && tooLarge) validation = 'Amount exceeds your balance';
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

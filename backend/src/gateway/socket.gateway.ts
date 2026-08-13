@@ -514,20 +514,28 @@ export function setupSocketGateway(io: Server) {
         }
       });
 
-      socket.on('cancelTrip', async (tripId: string) => {
-        const validated = validate(CancelTripSchema, tripId, socket, 'cancelTrip');
+      socket.on('cancelTrip', async (payload: unknown) => {
+        const validated = validate(CancelTripSchema, payload, socket, 'cancelTrip');
         if (!validated.success || !validated.data) return;
-        
-        console.log(`[SOCKET] Trip cancellation from driver ${id} for trip: ${validated.data}`);
+
+        const tripId = typeof validated.data === 'string' ? validated.data : validated.data.tripId;
+        const cancelOpts = typeof validated.data === 'string'
+          ? {}
+          : {
+              reasonCode: validated.data.reasonCode,
+              reasonText: validated.data.reasonText,
+            };
+
+        console.log(`[SOCKET] Trip cancellation from driver ${id} for trip: ${tripId}`);
         try {
           // Release any active offers and clean up
           const { DriverOfferService } = await import('../services/driver-offer.service');
           await DriverOfferService.releaseDriver(id);
 
-          await RideService.cancelTrip(validated.data, id);
+          await RideService.cancelTrip(tripId, id, cancelOpts);
         } catch (err: any) {
           console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
-          socket.emit('error', 'Unable to cancel trip. Please try again.');
+          socket.emit('error', err.message);
         }
       });
 
@@ -888,11 +896,19 @@ export function setupSocketGateway(io: Server) {
         }
       });
 
-      socket.on('cancelTrip', async (tripId: string) => {
-        const validated = validate(CancelTripSchema, tripId, socket, 'cancelTrip');
+      socket.on('cancelTrip', async (payload: unknown) => {
+        const validated = validate(CancelTripSchema, payload, socket, 'cancelTrip');
         if (!validated.success || !validated.data) return;
-        
-        console.log(`[SOCKET] Trip cancellation from rider ${id} for trip: ${validated.data}`);
+
+        const tripId = typeof validated.data === 'string' ? validated.data : validated.data.tripId;
+        const cancelOpts = typeof validated.data === 'string'
+          ? {}
+          : {
+              reasonCode: validated.data.reasonCode,
+              reasonText: validated.data.reasonText,
+            };
+
+        console.log(`[SOCKET] Trip cancellation from rider ${id} for trip: ${tripId}`);
         try {
           // Clean up any active driver offer before cancelling
           const { DriverOfferService } = await import('../services/driver-offer.service');
@@ -900,10 +916,10 @@ export function setupSocketGateway(io: Server) {
           if (releasedDriver) {
             console.log(`[SOCKET] Released driver ${releasedDriver} from cancelled ride ${tripId}`);
           }
-          await RideService.cancelTrip(tripId, id);
+          await RideService.cancelTrip(tripId, id, cancelOpts);
         } catch (err: any) {
           console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
-          socket.emit('error', 'Unable to cancel trip. Please try again.');
+          socket.emit('error', err.message);
         }
       });
 

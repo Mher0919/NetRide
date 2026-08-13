@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
+import 'report_sheet.dart';
 
 class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
@@ -271,8 +272,53 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 ),
             ],
           ),
+          // 042: both parties can report the other after a terminal ride.
+          if (status == 'CANCELLED' || status == 'COMPLETED') ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => _openReportSheet(ride['id']),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.report_gmailerrorred_outlined,
+                        size: 16,
+                        color: const Color(0xFFC65A5A),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Report an issue',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFFC65A5A),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Future<void> _openReportSheet(String rideId) async {
+    await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      isScrollControlled: true,
+      builder: (sheetContext) => ReportSheet(rideId: rideId),
     );
   }
 

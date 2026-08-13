@@ -138,7 +138,7 @@ router.post('/:rideId/complete-test', authMiddleware, async (req: AuthRequest, r
             const tipCents = Math.round(parseFloat((updated as any).tip_amount ?? '0') * 100);
             const totalCents = fareCents + tipCents;
             if (totalCents > 0) {
-                await DriverService.creditOnRideComplete(ride.driver_id, totalCents, rideId);
+                await DriverService.creditOnRideComplete(ride.driver_id, fareCents, tipCents, rideId);
             }
             console.log(
                 `[RIDE] 🧪 Test-mode: complete-test finalized ride ${rideId} ($${(totalCents / 100).toFixed(2)} credited)`,

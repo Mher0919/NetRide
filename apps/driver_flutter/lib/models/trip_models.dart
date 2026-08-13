@@ -103,6 +103,9 @@ class Trip {
   
   // Custom fields for driver request screen
   final double? calculatedPrice;
+  /// Server-computed driver earnings (60% of fare) in cents — the driver
+  /// app never derives money client-side.
+  final int? driverEarningsCents;
   final double? tripDistanceMeters;
   final double? tripDurationSeconds;
   final Map<String, dynamic>? routeGeometry;
@@ -126,6 +129,7 @@ class Trip {
     this.riderInfo,
     this.driverInfo,
     this.calculatedPrice,
+    this.driverEarningsCents,
     this.tripDistanceMeters,
     this.tripDurationSeconds,
     this.routeGeometry,
@@ -156,6 +160,7 @@ class Trip {
       riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
       driverInfo: json['driver_info'] != null ? DriverInfo.fromJson(json['driver_info']) : null,
       calculatedPrice: (json['calculated_price'] as num?)?.toDouble(),
+      driverEarningsCents: (json['driver_earnings_cents'] as num?)?.toInt(),
       tripDistanceMeters: (json['trip_distance_meters'] as num?)?.toDouble(),
       tripDurationSeconds: (json['trip_duration_seconds'] as num?)?.toDouble(),
       routeGeometry: json['route_geometry'] != null ? Map<String, dynamic>.from(json['route_geometry']) : null,

@@ -76,6 +76,18 @@ export class RideRepository {
       fields.push(`cancelled_at = $${values.length + 1}`);
       values.push(extra.cancelled_at);
     }
+    if (extra.cancelled_by) {
+      fields.push(`cancelled_by = $${values.length + 1}`);
+      values.push(extra.cancelled_by);
+    }
+    if (extra.cancellation_reason_code !== undefined && extra.cancellation_reason_code !== null) {
+      fields.push(`cancellation_reason_code = $${values.length + 1}`);
+      values.push(extra.cancellation_reason_code);
+    }
+    if (extra.cancellation_reason_text !== undefined && extra.cancellation_reason_text !== null) {
+      fields.push(`cancellation_reason_text = $${values.length + 1}`);
+      values.push(extra.cancellation_reason_text);
+    }
     if (extra.trajectory) {
       fields.push(`trajectory = $${values.length + 1}`);
       values.push(extra.trajectory);
@@ -141,7 +153,7 @@ export class RideRepository {
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
-      WHERE r.driver_id = $1 AND r.status IN ('COMPLETED', 'ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
+      WHERE r.driver_id = $1 AND r.status IN ('COMPLETED', 'ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'CANCELLED')
       ORDER BY r.created_at DESC
     `, [driverId]);
     return res.rows.map(row => this.mapToTrip(row));

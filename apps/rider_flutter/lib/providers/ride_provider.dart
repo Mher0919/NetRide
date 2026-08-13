@@ -312,16 +312,26 @@ class RideProvider with ChangeNotifier {
   ///   2. REST `POST /ride/cancel` (idempotent, no tripId needed) — this
   ///      closes the race where the rider hits X before the tripUpdate
   ///      round-trip arrives and the client has no tripId yet.
-  Future<String?> cancelRide() async {
+  Future<String?> cancelRide({String? reasonCode, String? reasonText}) async {
     if (_cancelling) return null;
     _cancelling = true;
     notifyListeners();
     try {
       if (_tripId != null) {
         debugPrint('[RIDE] Cancelling trip $_tripId via socket + REST');
-        _socket?.emit('cancelTrip', _tripId);
+        _socket?.emit('cancelTrip', {
+          'tripId': _tripId,
+          if (reasonCode != null) 'reasonCode': reasonCode,
+          if (reasonText != null) 'reasonText': reasonText,
+        });
       }
-      final response = await ApiService.dio.post('/ride/cancel');
+      final response = await ApiService.dio.post(
+        '/ride/cancel',
+        data: {
+          if (reasonCode != null) 'reasonCode': reasonCode,
+          if (reasonText != null) 'reasonText': reasonText,
+        },
+      );
       final data = response.data;
       final cancelled = data is Map && data['cancelled'] == true;
       debugPrint('[RIDE] Cancel REST ok cancelled=$cancelled');

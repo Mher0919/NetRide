@@ -10,6 +10,9 @@ class CachedRouteData {
   final double? trafficDurationSeconds;
   final DateTime cachedAt;
   final List<LatLng>? polyline;
+  /// Backend-computed fare breakdown (single source of truth). Cached with
+  /// the route so cached plans never re-derive pricing client-side.
+  final Map<String, dynamic>? fare;
 
   const CachedRouteData({
     required this.distanceMeters,
@@ -17,6 +20,7 @@ class CachedRouteData {
     this.trafficDurationSeconds,
     required this.cachedAt,
     this.polyline,
+    this.fare,
   });
 
   bool get isExpired {
@@ -31,6 +35,7 @@ class CachedRouteData {
     'trafficDurationSeconds': trafficDurationSeconds,
     'cachedAt': cachedAt.toIso8601String(),
     'polyline': polyline?.map((p) => [p.latitude, p.longitude]).toList(),
+    'fare': fare,
   };
 
   factory CachedRouteData.fromJson(Map<String, dynamic> json) => CachedRouteData(
@@ -39,6 +44,7 @@ class CachedRouteData {
     trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)?.toDouble(),
     cachedAt: DateTime.parse(json['cachedAt'] as String),
     polyline: (json['polyline'] as List?)?.map((c) => LatLng((c[0] as num).toDouble(), (c[1] as num).toDouble())).toList(),
+    fare: (json['fare'] as Map?)?.cast<String, dynamic>(),
   );
 }
 
@@ -92,6 +98,7 @@ class RouteCacheService {
     required double durationSeconds,
     double? trafficDurationSeconds,
     List<LatLng>? polyline,
+    Map<String, dynamic>? fare,
   }) async {
     final originHash = SpatialHash.encode(originLat, originLng);
     final destHash = SpatialHash.encode(destLat, destLng);
@@ -103,6 +110,7 @@ class RouteCacheService {
       trafficDurationSeconds: trafficDurationSeconds,
       cachedAt: DateTime.now(),
       polyline: polyline,
+      fare: fare,
     );
 
     _memoryCache[key] = data;

@@ -119,8 +119,10 @@ class RoutingService {
 
         final distanceMeters = (data['distanceMeters'] as num?)?.toDouble() ?? 0;
         final durationSeconds = (data['durationSeconds'] as num?)?.toDouble() ?? 0;
+        // Backend-computed fare is the single source of truth. An empty map
+        // (missing field) means "no price available" — never derived locally.
         final fare = data['fare'] as Map<String, dynamic>? ??
-            _localFare(distanceMeters, durationSeconds);
+            const <String, dynamic>{};
 
         final plan = TripPlan(
           points: points,
@@ -143,6 +145,7 @@ class RoutingService {
           durationSeconds: plan.durationSeconds,
           trafficDurationSeconds: plan.trafficDurationSeconds,
           polyline: points,
+          fare: fare,
         );
 
         return plan;
@@ -247,7 +250,9 @@ class RoutingService {
       durationSeconds: cached.durationSeconds,
       etaSeconds: cached.trafficDurationSeconds ?? cached.durationSeconds,
       trafficDurationSeconds: cached.trafficDurationSeconds,
-      fare: _localFare(cached.distanceMeters, cached.durationSeconds),
+      // The backend fare was persisted with the route; a cached plan never
+      // re-derives pricing client-side. Missing fare = no price available.
+      fare: cached.fare ?? const <String, dynamic>{},
       engine: source,
       cacheHit: true,
       decodeMicros: 0,
@@ -277,34 +282,11 @@ class RoutingService {
       distanceMeters: streetDist,
       durationSeconds: durationSeconds,
       etaSeconds: durationSeconds * 1.2,
-      fare: _localFare(streetDist, durationSeconds),
+      // Offline fallback has no backend fare — never derived locally.
+      fare: const <String, dynamic>{},
       engine: 'Local-Premium-Fallback',
       cacheHit: false,
       decodeMicros: 0,
     );
-  }
-
-  Map<String, dynamic> _localFare(double distanceMeters, double durationSeconds) {
-    const base = 3.50;
-    const perKm = 1.50;
-    const perMin = 0.35;
-    const booking = 1.50;
-    final distanceKm = distanceMeters / 1000;
-    final minutes = durationSeconds / 60;
-    final subtotal = base + distanceKm * perKm + minutes * perMin + booking;
-    final service = subtotal * 0.10;
-    final taxes = (subtotal + service) * 0.0875;
-    final total = (subtotal + service + taxes);
-    return {
-      'baseFare': base,
-      'distanceFare': distanceKm * perKm,
-      'timeFare': minutes * perMin,
-      'bookingFee': booking,
-      'surgeMultiplier': 1.0,
-      'serviceFee': service,
-      'taxes': taxes,
-      'totalFare': double.parse(total.toStringAsFixed(2)),
-      'currency': 'USD',
-    };
   }
 }

@@ -360,3 +360,54 @@ export const downloadBlob = (blob: Blob, filename: string) => {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 };
+
+// ----- Fleet partners (041) -------------------------------------------------
+
+export const listFleets = async () => {
+  const response = await api.get('/admin/fleets');
+  return response.data as { fleets: any[] };
+};
+
+export const createFleet = async (data: Record<string, unknown>) => {
+  const response = await api.post('/admin/fleets', data);
+  return response.data as { fleet: any };
+};
+
+export const updateFleet = async (id: string, data: Record<string, unknown>) => {
+  const response = await api.patch(`/admin/fleets/${id}`, data);
+  return response.data as { fleet: any };
+};
+
+export const assignDriverFleet = async (driverId: string, fleetId: string | null) => {
+  const response = await api.patch(`/admin/drivers/${driverId}/fleet`, { fleet_id: fleetId });
+  return response.data as { driver_id: string; fleet_id: string | null };
+};
+
+// ----- Pricing + revenue (041) ----------------------------------------------
+
+export const listPricingProfiles = async () => {
+  const response = await api.get('/admin/pricing');
+  return response.data as { profiles: any[] };
+};
+
+export const updatePricingProfile = async (code: string, data: Record<string, unknown>) => {
+  const response = await api.patch(`/admin/pricing/${code}`, data);
+  return response.data as { profile: any };
+};
+
+export const getRevenueOverview = async () => {
+  const response = await api.get('/admin/revenue');
+  return response.data as { revenue_config: any; global: any; per_fleet: any[] };
+};
+
+// ----- Ride reports (042) ---------------------------------------------------
+
+export const listReports = async (params: { status?: string; reported_role?: string; q?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/reports', { params });
+  return response.data as { total: number; rows: any[] };
+};
+
+export const resolveReport = async (id: string, data: { status: string; action: string; admin_notes?: string }) => {
+  const response = await api.post(`/admin/reports/${id}/resolve`, data);
+  return response.data as any;
+};

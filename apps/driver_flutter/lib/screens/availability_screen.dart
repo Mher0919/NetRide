@@ -1589,6 +1589,11 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
 
   Widget _buildCard(models.Trip req) {
     final price = req.calculatedPrice ?? req.fareAmount ?? 0.0;
+    // Server-computed 60% driver share (cents). The line is hidden when the
+    // field is absent — earnings are never derived client-side.
+    final earnings = req.driverEarningsCents != null
+        ? req.driverEarningsCents! / 100.0
+        : null;
     final etaSec = req.driverToPickupEta;
     final distMeters = req.tripDistanceMeters;
     final rider = req.riderInfo;
@@ -1633,6 +1638,21 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
               ),
             ],
           ),
+          if (earnings != null) ...[
+            const SizedBox(height: 2),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                'You earn \$${earnings.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF5B7760),
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
 
           // ---- Route thumbnail + addresses --------------------------------

@@ -7,6 +7,9 @@ class TripCompletedDialog extends StatefulWidget {
   final double tipAmount;
   final double? initialMaxFare;
   final bool isDriver;
+  /// Server-computed 60% driver share in cents. Null on stale payloads —
+  /// falls back to the full fare (old pre-split behavior).
+  final int? driverEarningsCents;
 
   const TripCompletedDialog({
     super.key,
@@ -14,6 +17,7 @@ class TripCompletedDialog extends StatefulWidget {
     this.tipAmount = 0.0,
     this.initialMaxFare,
     required this.isDriver,
+    this.driverEarningsCents,
   });
 
   @override
@@ -38,7 +42,12 @@ class _TripCompletedDialogState extends State<TripCompletedDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final double totalEarnings = widget.fareAmount + widget.tipAmount;
+    final double driverShare = widget.driverEarningsCents != null
+        ? widget.driverEarningsCents! / 100.0
+        : widget.fareAmount;
+    final double totalEarnings =
+        widget.isDriver ? driverShare + widget.tipAmount
+            : widget.fareAmount + widget.tipAmount;
     final String title = widget.isDriver ? "You completed the trip!" : "Trip complete!";
     
     String subtitle = "";

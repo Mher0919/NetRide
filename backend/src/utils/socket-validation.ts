@@ -39,7 +39,16 @@ export const AcceptTripSchema = z.string().uuid();
 
 export const DeclineTripSchema = z.string().uuid();
 
-export const CancelTripSchema = z.string().uuid();
+// Legacy string tripId is accepted for backwards compatibility; the 042
+// payload carries the required cancellation reason for ACCEPTED rides.
+export const CancelTripSchema = z.union([
+  z.string().uuid(),
+  z.object({
+    tripId: z.string().uuid(),
+    reasonCode: z.string().trim().min(1).max(64).optional(),
+    reasonText: z.string().trim().max(300).optional(),
+  }),
+]);
 
 export const PickUpRiderSchema = z.string().uuid();
 

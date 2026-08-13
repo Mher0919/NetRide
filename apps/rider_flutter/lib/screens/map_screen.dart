@@ -485,35 +485,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     await _fetchEstimate();
   }
 
-  /// Platform fare estimate. The backend computes the exact quote with the
-  /// same formula used for the ride's price snapshot, so the panel price is
-  /// what the rider will be charged.
-  static double _computeFare({
-    required double distanceMeters,
-    required double durationSeconds,
-  }) {
-    const base = 3.50,
-        perKm = 1.50,
-        perMin = 0.35,
-        booking = 1.50,
-        minFare = 7.00;
-    const serviceRate = 0.10, taxRate = 0.0875;
-    final distanceKm = distanceMeters / 1000.0;
-    final minutes = durationSeconds / 60.0;
-    final subtotal = base + distanceKm * perKm + minutes * perMin + booking;
-    final service = subtotal * serviceRate;
-    final taxable = subtotal + service;
-    final taxes = taxable * taxRate;
-    final raw = taxable + taxes;
-    return ((raw * 100).roundToDouble() / 100).clamp(
-      minFare,
-      double.infinity,
-    );
-  }
-
   /// Pulls the ride estimate (route geometry + platform fare).
   /// Checks the ETA cache first; makes ONE backend call for route data.
-  /// Writes to cache on success.
+  /// Writes to cache on success. The fare is always the backend-computed
+  /// value — never derived client-side.
   Future<void> _fetchEstimate() async {
     if (_pickup == null || _destination == null) return;
     setState(() => _loadingEstimates = true);
@@ -534,6 +509,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _buildEstimateFromRouteData(
         distanceMeters: cachedEta.distanceMeters,
         durationSeconds: cachedEta.durationSeconds,
+        backendFareTotal: cachedEta.fareTotal ?? 0.0,
         engine: 'EtaCache',
       );
       if (mounted) {
@@ -556,6 +532,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         distanceMeters: plan.distanceMeters,
         durationSeconds: plan.durationSeconds,
         trafficDurationSeconds: plan.trafficDurationSeconds,
+        fareTotal: (plan.fare['totalFare'] as num?)?.toDouble(),
       );
 
       _buildEstimateFromRouteData(
@@ -588,12 +565,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     required String engine,
   }) {
     _estimateDurationSeconds = durationSeconds;
-    _estimateFare = backendFareTotal > 0
-        ? backendFareTotal
-        : _computeFare(
-            distanceMeters: distanceMeters,
-            durationSeconds: durationSeconds,
-          );
+    // Backend total when available; otherwise no price is shown (the
+    // backend is the only place fares are computed).
+    _estimateFare = backendFareTotal > 0 ? backendFareTotal : 0.0;
   }
 
   // ---------------------------------------------------------------------
@@ -1011,17 +985,19 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           AnimatedOpacity(
                             opacity: _routePoints.isNotEmpty ? 1 : 0,
                             duration: const Duration(milliseconds: 350),
-                            child: PolylineLayer(
-                              polylines: [
-                                Polyline<Object>(
-                                  points: _routePoints,
-                                  color: const Color(0xFF5B7760),
-                                  strokeWidth: 4.0,
-                                  borderColor: Colors.white,
-                                  borderStrokeWidth: 1.0,
-                                ),
-                              ],
-                            ),
+                            child: _routePoints.isEmpty
+                                ? const SizedBox.shrink()
+                                : PolylineLayer(
+                                    polylines: [
+                                      Polyline<Object>(
+                                        points: _routePoints,
+                                        color: const Color(0xFF5B7760),
+                                        strokeWidth: 4.0,
+                                        borderColor: Colors.white,
+                                        borderStrokeWidth: 1.0,
+                                      ),
+                                    ],
+                                  ),
                           ),
                           MarkerLayer(
                             markers: [
@@ -1261,9 +1237,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   /// Collapsed state: centered drag handle + one-line ride summary.
   Widget _buildSheetPill(ThemeData theme) {
-    final priceText = _finalCents >= 0
-        ? formatCents(_finalCents)
-        : ( _estimateFare > 0 ? '\$${_estimateFare.toStringAsFixed(2)}' : '—');
+    // No backend fare available (offline / cached plan without fare) →
+    // show an em dash instead of a locally-computed or $0.00 price.
+    final priceText = _estimateFare <= 0
+        ? '—'
+        : (_finalCents >= 0
+            ? formatCents(_finalCents)
+            : '\$${_estimateFare.toStringAsFixed(2)}');
     return GestureDetector(
       onTap: () => _animateSheetTo(1),
       behavior: HitTestBehavior.opaque,

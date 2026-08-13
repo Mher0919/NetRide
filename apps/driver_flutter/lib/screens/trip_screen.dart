@@ -14,6 +14,7 @@ import '../components/state_container.dart';
 import 'navigation_screen.dart';
 import 'chat_sheet.dart';
 import 'call_overlay.dart';
+import 'report_sheet.dart';
 
 class TripScreen extends StatefulWidget {
   const TripScreen({super.key});
@@ -372,13 +373,28 @@ class _TripScreenState extends State<TripScreen> {
             child: const Text('No, Keep'),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
+              // 042: cancelling an accepted ride requires a reason.
+              final reason = await showModalBottomSheet<({String code, String label})>(
+                context: context,
+                backgroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                isScrollControlled: true,
+                builder: (sheetContext) => const CancellationReasonSheet(),
+              );
+              if (reason == null) return;
               // Stop navigation listeners and timers before cancelling
               // so stale GPS / reroute callbacks can't fire after the
               // trip screen is popped.
               navService.stopNavigation();
-              driverProvider.cancelTrip(trip.id);
+              driverProvider.cancelTrip(
+                trip.id,
+                reasonCode: reason.code,
+                reasonText: reason.code == 'other' ? reason.label : null,
+              );
               if (mounted) Navigator.pop(context);
             },
             child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
@@ -403,6 +419,7 @@ class _TripScreenState extends State<TripScreen> {
           fareAmount: trip.fareAmount ?? 0.0,
           tipAmount: 0.0,
           isDriver: true,
+          driverEarningsCents: trip.driverEarningsCents,
         ),
       ).then((_) {
         if (mounted) Navigator.pop(context);
@@ -505,6 +522,7 @@ class _TripScreenState extends State<TripScreen> {
                                   fareAmount: trip.fareAmount ?? 0.0,
                                   tipAmount: 0.0,
                                   isDriver: true,
+                                  driverEarningsCents: trip.driverEarningsCents,
                                 ),
                               );
                             }

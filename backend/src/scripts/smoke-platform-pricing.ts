@@ -22,7 +22,7 @@ function check(name: string, ok: boolean, detail = '') {
 async function main() {
   // 1. Config from the seeded PREMIUM pricing profile row.
   const config = await pricingService.getConfig('PREMIUM', true);
-  check('getConfig loads seeded PREMIUM profile from DB', config.code === 'PREMIUM' && config.base_fare === 3.5 && config.per_km_rate === 1.5 && config.booking_fee === 1.5 && config.tax_rate === 0.0875, `code=${config.code} base=${config.base_fare}`);
+  check('getConfig loads seeded PREMIUM profile from DB', config.code === 'PREMIUM' && config.base_fare === 4 && config.per_mile_rate === 2.5 && config.booking_fee === 0 && config.minimum_fare === 10, `code=${config.code} base=${config.base_fare} mile=${config.per_mile_rate}`);
 
   // 2. Market conditions from Redis + DB counters.
   const market = await computeMarketConditions();

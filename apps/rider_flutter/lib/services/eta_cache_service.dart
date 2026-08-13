@@ -8,12 +8,16 @@ class CachedEtaData {
   final double durationSeconds;
   final double? trafficDurationSeconds;
   final DateTime cachedAt;
+  /// Backend-computed fare total (single source of truth), cached with the
+  /// ETA so cached estimates never re-derive pricing client-side.
+  final double? fareTotal;
 
   const CachedEtaData({
     required this.distanceMeters,
     required this.durationSeconds,
     this.trafficDurationSeconds,
     required this.cachedAt,
+    this.fareTotal,
   });
 
   bool get isExpired {
@@ -27,6 +31,7 @@ class CachedEtaData {
     'durationSeconds': durationSeconds,
     'trafficDurationSeconds': trafficDurationSeconds,
     'cachedAt': cachedAt.toIso8601String(),
+    'fareTotal': fareTotal,
   };
 
   factory CachedEtaData.fromJson(Map<String, dynamic> json) => CachedEtaData(
@@ -34,6 +39,7 @@ class CachedEtaData {
     durationSeconds: (json['durationSeconds'] as num).toDouble(),
     trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)?.toDouble(),
     cachedAt: DateTime.parse(json['cachedAt'] as String),
+    fareTotal: (json['fareTotal'] as num?)?.toDouble(),
   );
 }
 
@@ -86,6 +92,7 @@ class EtaCacheService {
     required double distanceMeters,
     required double durationSeconds,
     double? trafficDurationSeconds,
+    double? fareTotal,
   }) async {
     final originHash = SpatialHash.encode(originLat, originLng);
     final destHash = SpatialHash.encode(destLat, destLng);
@@ -96,6 +103,7 @@ class EtaCacheService {
       durationSeconds: durationSeconds,
       trafficDurationSeconds: trafficDurationSeconds,
       cachedAt: DateTime.now(),
+      fareTotal: fareTotal,
     );
 
     _memoryCache[key] = data;

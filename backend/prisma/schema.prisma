@@ -132,6 +132,9 @@ model User {
   device_risk_state         String   @default("NORMAL")
   devices                   UserDevice[]
 
+  reports_filed     RideReport[] @relation("ReportsFiled")
+  reports_against   RideReport[] @relation("ReportsAgainst")
+
   @@map("users")
 }
 
@@ -165,11 +168,16 @@ model Driver {
   is_flagged         Boolean?  @default(false)
   fcm_token          String?
 
+  // --- 041: fleet partner assignment (nullable = platform direct) ---
+  fleet_id String? @db.Uuid
+
   user         User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
   vehicles     DriverVehicle[]
   favorited_by FavoriteDriver[] @relation("DriverFavorited")
+  fleet        FleetPartner?    @relation(fields: [fleet_id], references: [id], onDelete: SetNull)
 
   @@index([is_active, active_class])
+  @@index([fleet_id])
   @@map("drivers")
 }
 
@@ -314,6 +322,11 @@ model Ride {
   wallet_payment_cents BigInt?   @default(0)
   wallet_refunded_at   DateTime? @db.Timestamptz(6)
 
+  // --- 042: Cancellation audit trail (who cancelled and why) ---
+  cancelled_by            String?   @db.Uuid
+  cancellation_reason_code String?
+  cancellation_reason_text String?
+
   created_at DateTime? @default(now()) @db.Timestamptz(6)
 
   rider          User?              @relation("RiderRides", fields: [rider_id], references: [id])
@@ -321,6 +334,7 @@ model Ride {
   rating         Rating?
   payouts        Payout[]           @relation("RidePayouts")
   price_snapshot RidePriceSnapshot?
+  reports        RideReport[]
 
   promo        PromoCode?          @relation(fields: [promo_id], references: [id], onDelete: SetNull)
   promo_usages PromoUsage[]        @relation("RidePromoUsages")
@@ -334,6 +348,35 @@ model Ride {
   @@map("rides")
 }
 
+/// 042: Post-ride party reports. Both ride parties may independently file
+/// a report against the other party after a terminal ride (CANCELLED or
+/// COMPLETED), regardless of who cancelled. One report per (ride, reporter).
+model RideReport {
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ride_id           String    @db.Uuid
+  reporter_id       String    @db.Uuid
+  reported_user_id  String    @db.Uuid
+  reported_role     String
+  reason_code       String
+  reason_text       String?
+  description       String
+  status            String    @default("OPEN")
+  resolution_action String?
+  admin_notes       String?
+  resolved_by       String?   @db.Uuid
+  resolved_at       DateTime? @db.Timestamptz(6)
+  created_at        DateTime? @default(now()) @db.Timestamptz(6)
+
+  ride     Ride  @relation(fields: [ride_id], references: [id], onDelete: Cascade)
+  reporter User  @relation("ReportsFiled", fields: [reporter_id], references: [id])
+  reported User  @relation("ReportsAgainst", fields: [reported_user_id], references: [id])
+
+  @@unique([ride_id, reporter_id])
+  @@index([status, created_at(sort: Desc)])
+  @@index([reported_user_id])
+  @@map("ride_reports")
+}
+
 // ---------------------------------------------------------------------------
 // Platform pricing (035): config singleton + per-ride price snapshots.
 // The quoted fare at request time is the fare charged at accept time.
@@ -345,16 +388,16 @@ model Ride {
 model PricingProfile {
   code                  String   @id
   label                 String
-  base_fare             Decimal  @default(3.50) @db.Decimal(10, 2)
-  per_km_rate           Decimal  @default(1.50) @db.Decimal(10, 2)
-  per_minute_rate       Decimal  @default(0.35) @db.Decimal(10, 2)
-  minimum_fare          Decimal  @default(7.00) @db.Decimal(10, 2)
-  booking_fee           Decimal  @default(1.50) @db.Decimal(10, 2)
-  service_fee_rate      Decimal  @default(0.10) @db.Decimal(5, 4)
-  tax_rate              Decimal  @default(0.0875) @db.Decimal(5, 4)
-  max_demand_multiplier Decimal  @default(2.00) @db.Decimal(4, 2)
-  peak_time_multiplier  Decimal  @default(1.25) @db.Decimal(4, 2)
-  off_peak_multiplier   Decimal  @default(0.95) @db.Decimal(4, 2)
+  base_fare             Decimal  @default(4.00) @db.Decimal(10, 2)
+  per_mile_rate         Decimal  @default(2.50) @db.Decimal(10, 2)
+  per_minute_rate       Decimal  @default(0.40) @db.Decimal(10, 2)
+  minimum_fare          Decimal  @default(10.00) @db.Decimal(10, 2)
+  booking_fee           Decimal  @default(0.00) @db.Decimal(10, 2)
+  service_fee_rate      Decimal  @default(0.0000) @db.Decimal(5, 4)
+  tax_rate              Decimal  @default(0.0000) @db.Decimal(5, 4)
+  max_demand_multiplier Decimal  @default(1.00) @db.Decimal(4, 2)
+  peak_time_multiplier  Decimal  @default(1.00) @db.Decimal(4, 2)
+  off_peak_multiplier   Decimal  @default(1.00) @db.Decimal(4, 2)
   weather_multiplier    Decimal  @default(1.00) @db.Decimal(4, 2)
   location_multiplier   Decimal  @default(1.00) @db.Decimal(4, 2)
   fleet_multiplier      Decimal  @default(1.00) @db.Decimal(4, 2)
@@ -392,10 +435,48 @@ model RidePriceSnapshot {
   final_fare           Decimal  @db.Decimal(10, 2)
   created_at           DateTime @default(now()) @db.Timestamptz(6)
 
+  // --- 041: per-ride revenue allocation (cent-exact reconciliation) ---
+  driver_share_cents      BigInt?
+  platform_share_cents    BigInt?
+  netride_share_cents     BigInt?
+  fleet_allocations       Json     @default("[]")
+  driver_fleet_id         String?  @db.Uuid
+  revenue_config_snapshot Json     @default("{}")
+
   ride Ride @relation(fields: [ride_id], references: [id], onDelete: Cascade)
 
   @@index([ride_id])
   @@map("ride_price_snapshots")
+}
+
+/// 041: Fleet partners earn a configured % of the 40% platform revenue pool
+/// on rides completed by their assigned drivers. NetRide keeps the remainder.
+model FleetPartner {
+  id                     String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                   String
+  contact_name           String?
+  contact_email          String?
+  platform_share_percent Decimal    @default(0) @db.Decimal(5, 2)
+  is_active              Boolean    @default(true)
+  notes                  String?
+  created_at             DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime   @default(now()) @db.Timestamptz(6)
+
+  drivers Driver[]
+
+  @@index([is_active])
+  @@map("fleet_partners")
+}
+
+/// 041: Global revenue split singleton (id = 1). Currently locked at
+/// 60% driver / 40% platform. Sum must always equal 100.
+model RevenueConfig {
+  id                     Int      @id @default(1)
+  driver_share_percent   Decimal  @default(60.00) @db.Decimal(5, 2)
+  platform_share_percent Decimal  @default(40.00) @db.Decimal(5, 2)
+  updated_at             DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("revenue_configs")
 }
 
 model Rating {

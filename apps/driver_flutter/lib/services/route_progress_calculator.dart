@@ -162,20 +162,35 @@ class RouteProgressCalculator {
   /// Convert the OSRM step payload into our internal ProgressStep
   /// list with cumulativeStartMeters filled in. Called once when the
   /// route arrives; subsequent GPS ticks only call `compute()`.
+  /// Never throws on malformed payloads — every field is guarded so a
+  /// single bad step can't kill the route view.
   static List<ProgressStep> buildSteps(
       List<Map<String, dynamic>> rawSteps) {
     double cursor = 0;
     final out = <ProgressStep>[];
     for (final s in rawSteps) {
-      final length = (s['distance'] as num).toDouble();
-      final loc = (s['maneuver']['location'] as List);
+      final length = (s['distance'] as num?)?.toDouble() ?? 0.0;
+      final maneuver = s['maneuver'];
+      var exitLat = 0.0;
+      var exitLng = 0.0;
+      var modifier = '';
+      var type = '';
+      if (maneuver is Map) {
+        final loc = maneuver['location'];
+        if (loc is List && loc.length >= 2 && loc[0] is num && loc[1] is num) {
+          exitLng = (loc[0] as num).toDouble();
+          exitLat = (loc[1] as num).toDouble();
+        }
+        modifier = (maneuver['modifier'] as String?) ?? '';
+        type = (maneuver['type'] as String?) ?? '';
+      }
       out.add(
         ProgressStep(
           name: (s['name'] as String?) ?? '',
           lengthMeters: length,
-          exitLocation: LatLng(loc[1] as double, loc[0] as double),
-          modifier: (s['maneuver']['modifier'] as String?) ?? '',
-          type: (s['maneuver']['type'] as String?) ?? '',
+          exitLocation: LatLng(exitLat, exitLng),
+          modifier: modifier,
+          type: type,
           cumulativeStartMeters: cursor,
         ),
       );

@@ -4,6 +4,10 @@ import { prisma } from '../../services/prisma.service';
 import { redis } from '../../config/redis';
 import { env } from '../../config/env';
 import { maskCardNumber, detectCardBrand, isValidLuhn } from '../../utils/card';
+import {
+  getRevenueAllocationForRide,
+  computeRevenueAllocation,
+} from '../../services/pricing.service';
 
 export class DriverService {
   static async getProfile(userId: string) {
@@ -1303,12 +1307,27 @@ export class DriverService {
    * Idempotent ride-completion wallet credit. Safe to call multiple times
    * for the same ride — the unique index on payouts(ride_id) WHERE
    * method='RIDE_CREDIT' prevents double-counting.
+   *
+   * Revenue split (041): the driver receives the full tip plus their 60%
+   * driver share of the fare. The 40% platform pool is allocated to the
+   * driver's fleet partner (if assigned) with NetRide keeping the remainder —
+   * see pricing.service.ts. The per-ride allocation persisted at accept time
+   * is authoritative; a missing allocation falls back to a live computation.
    */
-  static async creditOnRideComplete(driverId: string, fareCents: number, rideId: string) {
-    if (!driverId || fareCents <= 0) return;
-    const platformFeePct = 0.10; // 10% platform fee
-    const driverNetCents = Math.round(fareCents * (1 - platformFeePct));
-    const platformFeeCents = fareCents - driverNetCents;
+  static async creditOnRideComplete(driverId: string, fareCents: number, tipCents: number, rideId: string) {
+    if (!driverId) return;
+    const safeFare = Math.max(0, Math.round(fareCents));
+    const safeTip = Math.max(0, Math.round(tipCents));
+    if (safeFare + safeTip <= 0) return;
+
+    // Authoritative allocation from the price snapshot (persisted at accept);
+    // fall back to a live computation for legacy rides without one.
+    const allocation =
+      (await getRevenueAllocationForRide(rideId)) ??
+      (await computeRevenueAllocation(safeFare, null).catch(() => null));
+    const driverShareCents = allocation ? allocation.driverShareCents : safeFare;
+    const driverNetCents = safeTip + driverShareCents;
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -1326,12 +1345,12 @@ export class DriverService {
       );
       await client.query(
         `INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
-         VALUES ($1, $2, $3, $1, 'PAID', 'RIDE_CREDIT', $4)
+         VALUES ($1, $2, 0, $2, 'PAID', 'RIDE_CREDIT', $3)
          ON CONFLICT (ride_id) WHERE method = 'RIDE_CREDIT' DO NOTHING`,
-        [driverNetCents, fareCents, platformFeeCents, rideId]
+        [driverId, driverNetCents, rideId]
       );
       console.log(
-        `[WALLET] 💰 Ride ${rideId}: rider paid $${(fareCents / 100).toFixed(2)}, driver received $${(driverNetCents / 100).toFixed(2)} (90%), platform fee $${(platformFeeCents / 100).toFixed(2)} (10%)`
+        `[WALLET] 💰 Ride ${rideId}: rider paid $${(safeFare / 100).toFixed(2)}, driver received $${(driverNetCents / 100).toFixed(2)} (fare share $${(driverShareCents / 100).toFixed(2)} + tip $${(safeTip / 100).toFixed(2)})`
       );
       await client.query('COMMIT');
     } catch (err: any) {

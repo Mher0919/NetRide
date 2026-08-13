@@ -14,6 +14,10 @@ router.post('/estimate', authMiddleware, riderMiddleware, RideController.estimat
 router.post('/accept', authMiddleware, driverMiddleware, RideController.acceptTrip);
 router.post('/rate', authMiddleware, RideController.rateRide);
 router.post('/cancel', authMiddleware, riderMiddleware, RideController.cancelCurrentRide);
+
+// Post-ride party reporting (042) — both parties may report independently.
+router.get('/:id/report', authMiddleware, RideController.getReportStatus);
+router.post('/:id/report', authMiddleware, RideController.submitReport);
 router.get('/history', authMiddleware, RideController.getHistory);
 router.get('/current', authMiddleware, RideController.getCurrent);
 router.delete('/history/:id', authMiddleware, RideController.deleteHistory);

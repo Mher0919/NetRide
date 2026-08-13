@@ -11,6 +11,8 @@ import { RideMessagesRepository } from './ride_messages.repository';
 import { TwilioService } from '../../services/twilio.service';
 import { pushIncomingCall } from '../../services/push-notification.service';
 import { pool } from '../../config/database';
+import { ReportService } from '../reporting/report.service';
+import { REPORT_REASONS, PartyRole } from '../reporting/report.reasons';
 
 const RequestRideSchema = z.object({
   pickup: z.object({
@@ -48,6 +50,12 @@ const RateRideSchema = z.object({
   rating: z.number().int().min(1).max(5),
   review_text: z.string().optional(),
   favorite: z.boolean().optional(), // Added for favorite logic
+});
+
+const SubmitReportSchema = z.object({
+  reason_code: z.string().trim().min(1).max(64),
+  reason_text: z.string().trim().max(300).optional(),
+  description: z.string().trim().min(10).max(2000),
 });
 
 export class RideController {
@@ -237,11 +245,58 @@ export class RideController {
       if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
         return res.status(409).json({ error: 'This ride is already in progress and cannot be cancelled.' });
       }
-      await RideService.cancelTrip(trip.id, userId);
+      await RideService.cancelTrip(trip.id, userId, {
+        reasonCode: req.body?.reasonCode,
+        reasonText: req.body?.reasonText,
+      });
       res.json({ cancelled: true, tripId: trip.id });
     } catch (error: any) {
       console.error(`[RIDE] ❌ Cancel current ride error: ${error.message}`);
       res.status(400).json({ error: 'Unable to cancel the ride. Please try again.' });
+    }
+  }
+
+  // ---- Post-ride party reporting (042) --------------------------------
+
+  /**
+   * Can the caller file a report for this ride? Returns the other party's
+   * identity + the role-scoped reason list so the app can render the
+   * report sheet without hardcoding codes.
+   */
+  static async getReportStatus(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const role = req.user?.role;
+      const rideId = req.params.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const status = await ReportService.getReportStatus(rideId, userId, role);
+      const reporterRole = (role === 'DRIVER' ? 'DRIVER' : 'RIDER') as PartyRole;
+      res.json({ ...status, reasons: status.canReport ? REPORT_REASONS[reporterRole] : [] });
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Report status error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to load report status.' });
+    }
+  }
+
+  /**
+   * File a report against the other ride party. Both parties may report
+   * independently — each gets exactly one report per ride.
+   */
+  static async submitReport(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const role = req.user?.role;
+      const rideId = req.params.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const validatedData = SubmitReportSchema.parse(req.body);
+      const report = await ReportService.submitReport(rideId, userId, role, validatedData);
+      res.status(201).json(report);
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Report submission error: ${error.message}`);
+      const status = error?.status ?? 400;
+      res.status(status).json({ error: error?.message || 'Failed to submit report.' });
     }
   }
 

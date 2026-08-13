@@ -24,6 +24,10 @@ import Partners from './pages/Partners';
 import Promos from './pages/Promos';
 import Referrals from './pages/Referrals';
 import Credits from './pages/Credits';
+import FleetPartners from './pages/FleetPartners';
+import Pricing from './pages/Pricing';
+import Revenue from './pages/Revenue';
+import Reports from './pages/Reports';
 import NotFound from './pages/NotFound';
 import UserTable from './components/UserTable';
 import MainLayout from './components/MainLayout';
@@ -81,6 +85,10 @@ const App: React.FC = () => {
               <Route path="promos" element={<Promos />} />
               <Route path="referrals" element={<Referrals />} />
               <Route path="credits" element={<Credits />} />
+              <Route path="fleets" element={<FleetPartners />} />
+              <Route path="pricing" element={<Pricing />} />
+              <Route path="revenue" element={<Revenue />} />
+              <Route path="reports" element={<Reports />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

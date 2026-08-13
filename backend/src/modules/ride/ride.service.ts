@@ -9,7 +9,7 @@ import { env } from '../../config/env';
 import { io } from '../../app';
 import { pool } from '../../config/database';
 import { redis } from '../../config/redis';
-import { createPriceSnapshot, computeEstimate, getSnapshotForRide } from '../../services/pricing.service';
+import { createPriceSnapshot, computeEstimate, getSnapshotForRide, persistRevenueAllocation, getRevenueAllocationForRide } from '../../services/pricing.service';
 import { NavigationService, CachedRoutePayload } from '../../services/navigation.service';
 import { RouteStoreService, haversineMeters } from '../../services/route-store.service';
 import { SpeedingDetector } from '../../services/speeding_detector';
@@ -367,6 +367,13 @@ export class RideService {
       fare_amount: finalFare
     });
 
+    // Persist the per-ride revenue allocation (the driver — and thus the
+    // fleet partner share — is now known). Never blocks the accept path;
+    // the wallet credit at completion falls back to a live computation
+    // when this write is missing.
+    persistRevenueAllocation(tripId, driverId, Math.round(finalFare * 100))
+      .catch((err: any) => console.error(`[RIDE] ⚠️ Revenue allocation persist failed: ${err.message}`));
+
     // Cache active trip for trajectory buffering
     await redis.set(`driver:${driverId}:active_trip`, tripId, 'EX', 14400); // 4h safety TTL
 
@@ -568,7 +575,8 @@ export class RideService {
         if (totalCents > 0) {
           await DriverService.creditOnRideComplete(
             updatedTrip.driver_id,
-            totalCents,
+            fareCents,
+            tipCents,
             tripId
           );
         }
@@ -576,6 +584,13 @@ export class RideService {
         console.warn(
           `[RIDE] ⚠️ Wallet credit failed (non-blocking) for trip ${tripId}: ${err.message}`
         );
+      }
+
+      // Driver earnings (60% share, from the persisted allocation) ride along
+      // on the payload so the driver app never computes money client-side.
+      const allocation = await getRevenueAllocationForRide(tripId);
+      if (allocation) {
+        (updatedTrip as any).driver_earnings_cents = allocation.driverShareCents;
       }
 
       // Rewards ecosystem: finalize promo usage + partner commission and
@@ -613,7 +628,11 @@ export class RideService {
     return updatedTrip;
   }
 
-  static async cancelTrip(tripId: string, userId: string): Promise<Trip> {
+  static async cancelTrip(
+    tripId: string,
+    userId: string,
+    opts: { reasonCode?: string; reasonText?: string } = {},
+  ): Promise<Trip> {
     const trip = await RideRepository.findById(tripId);
     if (!trip) throw new Error('Trip not found');
 
@@ -627,9 +646,22 @@ export class RideService {
       throw new Error('Cannot cancel a ride that is already in progress or completed');
     }
 
+    // Required cancellation reasons (042): an ACCEPTED ride may only be
+    // dissolved by a human party with a reason code. System timeouts and
+    // searching-phase cancels (REQUESTED) stay reason-free.
+    if (trip.status === 'ACCEPTED' && !opts.reasonCode) {
+      throw new Error('Please select a reason for cancelling this ride.');
+    }
+
     const isDriverCancellingAfterAccept = userId === trip.driver_id && trip.status === 'ACCEPTED';
 
-    const extra: any = {};
+    const extra: any = {
+      // Audit trail: who initiated the release/cancel and why. Null for
+      // system cancels (cleanup/timeouts), which never pass through here.
+      cancelled_by: userId,
+      cancellation_reason_code: opts.reasonCode ?? null,
+      cancellation_reason_text: (opts.reasonText ?? '').trim().slice(0, 300) || null,
+    };
     if (isDriverCancellingAfterAccept) {
       // Driver cancelled after accepting — release assignment and return
       // the ride to REQUESTED so the system can re-match to another driver.
