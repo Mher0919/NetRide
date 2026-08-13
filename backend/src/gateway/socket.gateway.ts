@@ -56,14 +56,19 @@ const RATE_LIMIT_PER_MINUTE = 30;
 const RATE_WINDOW_MS = 60 * 1000;
 
 const SOCKET_RATE_LIMIT_LUA = `
-local cutoff = tonumber(ARGV[3]) - tonumber(ARGV[2])
-redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", cutoff)
+local limit_amt   = tonumber(ARGV[1])
+local window_ms   = tonumber(ARGV[2])
+local now_ms      = tonumber(ARGV[3])
+local member_val  = ARGV[4]
+local cutoff_ms   = now_ms - window_ms
+
+redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", cutoff_ms)
 local count = redis.call("ZCARD", KEYS[1])
-if count >= tonumber(ARGV[1]) then
+if count >= limit_amt then
   return {0, count}
 end
-redis.call("ZADD", KEYS[1], ARGV[3], ARGV[4])
-redis.call("PEXPIRE", KEYS[1], tonumber(ARGV[2]))
+redis.call("ZADD", KEYS[1], now_ms, member_val)
+redis.call("PEXPIRE", KEYS[1], window_ms)
 return {1, count + 1}
 `;
 
@@ -71,7 +76,15 @@ async function consumeRateBudget(key: string): Promise<boolean> {
   const now = Date.now();
   const member = `${now}:${Math.random().toString(36).slice(2, 10)}`;
   const redisKey = `ratelimit:sock:${key}`;
-  const result = await redis.eval(SOCKET_RATE_LIMIT_LUA, 1, redisKey, String(RATE_LIMIT_PER_MINUTE), String(RATE_WINDOW_MS), String(now), member) as [number, number];
+  const result = await redis.eval(
+    SOCKET_RATE_LIMIT_LUA,
+    1,
+    redisKey,
+    String(RATE_LIMIT_PER_MINUTE),
+    String(RATE_WINDOW_MS),
+    String(now),
+    member,
+  ) as [number, number];
   if (result[0] === 0) {
     rateLimitedTotal.inc({ bucket: 'socket' });
     return false;

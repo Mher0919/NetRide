@@ -76,9 +76,15 @@ class _TripScreenState extends State<TripScreen> {
         }
       }
 
-      final leg = trip.status == models.TripStatus.ACCEPTED
-          ? NavigationLeg.pickup
-          : NavigationLeg.destination;
+      // On first load, always start with pickup leg regardless of trip status.
+      // The trip's status may still be REQUESTED from the optimistic
+      // acceptTrip update if the ACCEPTED tripUpdate hasn't arrived yet.
+      // Navigation only switches to destination when trip goes IN_PROGRESS.
+      final leg = navService.isNavigating
+          ? (trip.status == models.TripStatus.ACCEPTED
+              ? NavigationLeg.pickup
+              : NavigationLeg.destination)
+          : NavigationLeg.pickup;
 
       final end = leg == NavigationLeg.pickup
           ? LatLng(trip.pickup.lat, trip.pickup.lng)
