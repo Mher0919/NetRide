@@ -135,23 +135,27 @@ export async function checkRateLimit(socket: any, eventName: string): Promise<bo
   try {
     const { redis } = await import('../config/redis');
     const now = Date.now();
-    const cutoff = now - limit.windowMs;
     
     // Clean old entries and count current
     const lua = `
-      local cutoff = tonumber(ARGV[1])
-      redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", cutoff)
+      local limit_amt  = tonumber(ARGV[1])
+      local window_ms  = tonumber(ARGV[2])
+      local now_ms     = tonumber(ARGV[3])
+      local member_val = ARGV[4]
+      local cutoff_ms  = now_ms - window_ms
+
+      redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", cutoff_ms)
       local count = redis.call("ZCARD", KEYS[1])
-      if count >= tonumber(ARGV[2]) then
+      if count >= limit_amt then
         return {0, count}
       end
-      redis.call("ZADD", KEYS[1], ARGV[3], ARGV[4])
-      redis.call("PEXPIRE", KEYS[1], ARGV[5])
+      redis.call("ZADD", KEYS[1], now_ms, member_val)
+      redis.call("PEXPIRE", KEYS[1], window_ms)
       return {1, count + 1}
     `;
-    
+
     const member = `${now}:${Math.random().toString(36).slice(2, 10)}`;
-    const result = await redis.eval(lua, 1, key, String(cutoff), String(limit.max), member, String(limit.windowMs)) as [number, number];
+    const result = await redis.eval(lua, 1, key, String(limit.max), String(limit.windowMs), String(now), member) as [number, number];
     
     if (result[0] === 0) {
       console.warn(`[SOCKET RATE LIMIT] ${eventName} rate limited for user ${userId} (${result[1]}/${limit.max})`);
