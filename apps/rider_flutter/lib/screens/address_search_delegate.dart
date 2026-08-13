@@ -25,6 +25,14 @@ class AddressSearchDelegate extends SearchDelegate<SearchResult?> {
     debugPrint(
       '[SEARCH_DELEGATE] Loaded history: ${_recentSearches.length} searches',
     );
+    _refreshDistances();
+  }
+
+  void _refreshDistances() {
+    if (userLat == null || userLon == null) return;
+    for (final result in _recentSearches) {
+      result.recalculateFrom(userLat!, userLon!);
+    }
   }
 
   @override

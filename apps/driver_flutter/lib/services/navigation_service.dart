@@ -8,6 +8,7 @@ import 'reroute_controller.dart';
 import 'route_matcher.dart';
 import 'route_progress_calculator.dart';
 import 'routing_service.dart';
+import 'route_errors.dart';
 import 'speed_monitor.dart';
 import 'navigation_voice_service.dart';
 
@@ -239,6 +240,11 @@ class NavigationService extends ChangeNotifier {
   RouteProgress? _progress;
   bool _isNavigating = false;
 
+  /// Monotonically increasing request counter so stale route results
+  /// (e.g. route A finishes after route B was already applied) never
+  /// overwrite the latest route.
+  int _routeRequestVersion = 0;
+
   /// Local map-matcher over the active route polyline. Rebuilt when a
   /// new route is applied; null between routes.
   RouteMatcher? _matcher;
@@ -272,6 +278,16 @@ class NavigationService extends ChangeNotifier {
     required LatLng end,
     Map<String, dynamic>? cachedRoute,
   }) async {
+    // Validate origin and destination before any API calls.
+    final originError = RouteValidator.validateOrigin(start.latitude, start.longitude);
+    if (originError != null) throw originError;
+
+    final destError = RouteValidator.validateDestination(end.latitude, end.longitude);
+    if (destError != null) throw destError;
+
+    // Increment version to invalidate any in-flight route from a previous call.
+    _routeRequestVersion++;
+    final requestVersion = _routeRequestVersion;
     _tripId = tripId;
     _leg = leg;
 
@@ -279,8 +295,15 @@ class NavigationService extends ChangeNotifier {
     if (data == null) {
       data = await _routingService.getCachedLeg(tripId: tripId, leg: leg.name);
       if (data == null) {
-        data = await _routingService.getRoute(start, end);
+        data = await _fetchRouteWithRetry(start, end, leg);
       }
+    }
+
+    // If a newer navigation was started while we were fetching, discard
+    // this result to avoid stale route overwrites.
+    if (_routeRequestVersion != requestVersion) {
+      debugPrint('[NAV] Discarding stale route result (version $requestVersion < $_routeRequestVersion)');
+      return;
     }
 
     _applyRoute(NavigationRoute.fromServer(data));
@@ -296,6 +319,97 @@ class NavigationService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Fetch route with up to 2 retries for transient failures.
+  /// Non-transient errors (invalid coords, auth) are thrown immediately.
+  Future<Map<String, dynamic>> _fetchRouteWithRetry(
+    LatLng start,
+    LatLng end,
+    NavigationLeg leg,
+  ) async {
+    const maxRetries = 2;
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await _routingService.getRoute(start, end);
+      } catch (e) {
+        final routeError = _classifyError(e);
+        if (!routeError.isTransient || attempt >= maxRetries) {
+          rethrow;
+        }
+        final delay = Duration(milliseconds: (500 * (attempt + 1)).round());
+        debugPrint('[NAV] Route attempt $attempt failed (transient), retrying in ${delay.inMilliseconds}ms: $e');
+        await Future.delayed(delay);
+      }
+    }
+    throw const RouteError(
+      category: RouteErrorCategory.networkError,
+      message: 'Route fetch failed after retries',
+      isRetryable: true,
+      isTransient: true,
+    );
+  }
+
+  RouteError _classifyError(Object error) {
+    if (error is RouteError) return error;
+
+    final msg = error.toString().toLowerCase();
+
+    if (msg.contains('timeout') || msg.contains('timed out')) {
+      return const RouteError(
+        category: RouteErrorCategory.timeout,
+        message: 'Route request timed out',
+        isRetryable: true,
+        isTransient: true,
+      );
+    }
+    if (msg.contains('socket') || msg.contains('network') || msg.contains('connection')) {
+      return const RouteError(
+        category: RouteErrorCategory.networkError,
+        message: 'Network error during routing',
+        isRetryable: true,
+        isTransient: true,
+      );
+    }
+    if (msg.contains('401') || msg.contains('unauthorized') || msg.contains('403') || msg.contains('forbidden')) {
+      return const RouteError(
+        category: RouteErrorCategory.apiAuthentication,
+        message: 'API authentication failed',
+      );
+    }
+    if (msg.contains('429') || msg.contains('too many requests') || msg.contains('rate limit')) {
+      return const RouteError(
+        category: RouteErrorCategory.rateLimited,
+        message: 'Rate limited',
+        isRetryable: true,
+        isTransient: true,
+      );
+    }
+    if (msg.contains('402') || msg.contains('quota') || msg.contains('billing')) {
+      return const RouteError(
+        category: RouteErrorCategory.apiQuota,
+        message: 'API quota exceeded',
+      );
+    }
+    if (msg.contains('no route') || msg.contains('not found') || msg.contains('ZERO_RESULTS')) {
+      return const RouteError(
+        category: RouteErrorCategory.noRouteFound,
+        message: 'No route found',
+      );
+    }
+    if (msg.contains('cancel')) {
+      return const RouteError(
+        category: RouteErrorCategory.routeCancelled,
+        message: 'Route cancelled',
+      );
+    }
+
+    return const RouteError(
+      category: RouteErrorCategory.unknown,
+      message: 'Unknown route error',
+      isRetryable: true,
+      isTransient: true,
+    );
+  }
+
   Future<void> advanceToDestination({
     required LatLng start,
     required LatLng end,
@@ -303,6 +417,9 @@ class NavigationService extends ChangeNotifier {
   }) async {
     if (_leg != NavigationLeg.pickup) return;
     _leg = NavigationLeg.destination;
+    // Validate coordinates before starting destination navigation
+    final destError = RouteValidator.validateDestination(end.latitude, end.longitude);
+    if (destError != null) throw destError;
     await startNavigation(
       tripId: _tripId ?? '',
       leg: _leg,
@@ -318,11 +435,15 @@ class NavigationService extends ChangeNotifier {
     _matcher = null;
     _progress = null;
     _tripId = null;
+    _routeRequestVersion++;
     _gpsSub?.cancel();
     _gpsSub = null;
     _speedMonitor.stop();
     _rerouteController.reset();
     NavigationVoiceService.instance.stop();
+    // Release the GPS tracker so it stops consuming OS location
+    // resources when there is no active navigation.
+    GpsTracker.instance.stop();
     notifyListeners();
   }
 
@@ -341,6 +462,8 @@ class NavigationService extends ChangeNotifier {
   Future<void> _requestBackendReroute(LatLng from) async {
     if (_tripId == null || _route == null) return;
     _rerouteController.rerouting = true;
+    _routeRequestVersion++;
+    final requestVersion = _routeRequestVersion;
     try {
       final fresh = await _routingService.requestReroute(
         tripId: _tripId!,
@@ -348,6 +471,8 @@ class NavigationService extends ChangeNotifier {
         from: from,
       );
       if (fresh != null) {
+        // Discard if a newer route was requested while we were fetching.
+        if (_routeRequestVersion != requestVersion) return;
         _applyRoute(NavigationRoute.fromServer(fresh));
         await _speedMonitor.start(route: fresh);
         notifyListeners();

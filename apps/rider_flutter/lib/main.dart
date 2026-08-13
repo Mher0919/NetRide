@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -57,6 +59,17 @@ String kInitialTargetRoute = '/login';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Production error boundary — never show stack traces to users.
+  FlutterError.onError = (details) {
+    debugPrint('[FATAL] FlutterError: ${details.exception}');
+    debugPrint('[FATAL] Stack: ${details.stack}');
+  };
+  ui.PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[FATAL] PlatformDispatcher error: $error');
+    return true;
+  };
+
   await dotenv.load(fileName: ".env");
   
   await Supabase.initialize(
@@ -144,24 +157,32 @@ void main() async {
     kInitialTargetRoute = '/login';
   }
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) {
-          final provider = RideProvider();
-          if (token != null) {
-            provider.initSocket(token);
-          }
-          return provider;
-        }),
-        // Communication service is shared across the trip screens for
-        // chat + masked calls. The service is attached lazily once a
-        // trip is active so it doesn't burn listeners on the splash
-        // screen or login flow.
-        ChangeNotifierProvider(create: (_) => CommunicationService()),
-      ],
-      child: const NetRideRider(),
-    ),
+  runZonedGuarded(
+    () {
+      runApp(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (_) {
+              final provider = RideProvider();
+              if (token != null) {
+                provider.initSocket(token);
+              }
+              return provider;
+            }),
+            // Communication service is shared across the trip screens for
+            // chat + masked calls. The service is attached lazily once a
+            // trip is active so it doesn't burn listeners on the splash
+            // screen or login flow.
+            ChangeNotifierProvider(create: (_) => CommunicationService()),
+          ],
+          child: const NetRideRider(),
+        ),
+      );
+    },
+    (error, stack) {
+      debugPrint('[FATAL] Uncaught async error: $error');
+      debugPrint('[FATAL] Stack: $stack');
+    },
   );
 }
 

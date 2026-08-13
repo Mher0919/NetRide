@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,7 +10,6 @@ import 'screens/trip_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/signup_screen.dart';
-import 'screens/verification_screen.dart';
 import 'screens/success_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/document_resubmission_screen.dart';
@@ -49,6 +50,17 @@ void _routeFromNotification(Map<String, String> data) {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Production error boundary — never show stack traces to users.
+  FlutterError.onError = (details) {
+    debugPrint('[FATAL] FlutterError: ${details.exception}');
+    debugPrint('[FATAL] Stack: ${details.stack}');
+  };
+  ui.PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[FATAL] PlatformDispatcher error: $error');
+    return true;
+  };
+
   await dotenv.load(fileName: ".env");
 
   await Supabase.initialize(
@@ -133,21 +145,29 @@ void main() async {
     await NotificationService.instance.registerDevice();
   }
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) {
-          final provider = DriverProvider();
-          if (token != null) {
-            provider.initSocket(token);
-          }
-          return provider;
-        }),
-        ChangeNotifierProvider(create: (_) => NavigationService()),
-        ChangeNotifierProvider(create: (_) => CommunicationService()),
-      ],
-      child: NetRideDriver(isAuthenticated: token != null),
-    ),
+  runZonedGuarded(
+    () {
+      runApp(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (_) {
+              final provider = DriverProvider();
+              if (token != null) {
+                provider.initSocket(token);
+              }
+              return provider;
+            }),
+            ChangeNotifierProvider(create: (_) => NavigationService()),
+            ChangeNotifierProvider(create: (_) => CommunicationService()),
+          ],
+          child: NetRideDriver(isAuthenticated: token != null),
+        ),
+      );
+    },
+    (error, stack) {
+      debugPrint('[FATAL] Uncaught async error: $error');
+      debugPrint('[FATAL] Stack: $stack');
+    },
   );
 }
 

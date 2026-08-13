@@ -1,9 +1,11 @@
+import 'dart:math' as math;
+
 class SearchResult {
   final String displayName;
   final double lat;
   final double lon;
   final String state;
-  final double? distanceMiles;
+  double? distanceMiles;
   final String type;
   final bool isSuggestion;
 
@@ -14,7 +16,7 @@ class SearchResult {
   final String? zip;
   final String? category;
   final String? subcategory;
-  final double? etaMinutes;
+  double? etaMinutes;
 
   SearchResult({
     required this.displayName,
@@ -119,6 +121,31 @@ class SearchResult {
   }
 
   bool get hasValidCoordinates => lat != 0.0 || lon != 0.0;
+
+  void recalculateFrom(double originLat, double originLon) {
+    if (lat.isNaN || lon.isNaN || originLat.isNaN || originLon.isNaN) return;
+    if (lat.isInfinite || lon.isInfinite || originLat.isInfinite || originLon.isInfinite) return;
+    distanceMiles = _haversineMiles(originLat, originLon, lat, lon);
+    etaMinutes = distanceMiles != null && distanceMiles! > 0
+        ? distanceMiles! * 2.0
+        : null;
+  }
+
+  static double _haversineMiles(double lat1, double lon1, double lat2, double lon2) {
+    const double r = 3958.8;
+    final dLat = _toRadians(lat2 - lat1);
+    final dLon = _toRadians(lon2 - lon1);
+    final sinDLat = math.sin(dLat / 2);
+    final sinDLon = math.sin(dLon / 2);
+    final a = sinDLat * sinDLat +
+        _cos(lat1) * _cos(lat2) * sinDLon * sinDLon;
+    final c = 2 * _asin(math.sqrt(a));
+    return r * c;
+  }
+
+  static double _toRadians(double deg) => deg * (math.pi / 180);
+  static double _cos(double x) => math.cos(x);
+  static double _asin(double x) => math.asin(x);
 
   @override
   String toString() => 'SearchResult($displayName, $lat, $lon, ${distanceMiles?.toStringAsFixed(1)}mi)';

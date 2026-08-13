@@ -129,7 +129,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Future<void> _loadRecentSearches() async {
     final recent = await SearchHistoryService.instance.fetch();
     if (!mounted) return;
-    setState(() => _recentSearches = recent.take(6).toList());
+    final results = recent.take(6).toList();
+    if (_userPosition != null) {
+      for (final result in results) {
+        result.recalculateFrom(_userPosition!.latitude, _userPosition!.longitude);
+      }
+    }
+    setState(() => _recentSearches = results);
   }
 
   /// Tapping a recent search sets it straight as the destination (same
@@ -215,6 +221,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     setState(() => _state = ViewState.loading);
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!mounted) return;
       if (!serviceEnabled) {
         setState(() {
           _state = ViewState.failure;
@@ -225,8 +232,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
+      if (!mounted) return;
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
+        if (!mounted) return;
         if (permission == LocationPermission.denied) {
           setState(() {
             _state = ViewState.failure;
@@ -237,6 +246,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       }
 
       if (permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
         setState(() {
           _state = ViewState.failure;
           _errorMessage =
@@ -248,6 +258,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.bestForNavigation,
       );
+      if (!mounted) return;
 
       _userPosition = LatLng(position.latitude, position.longitude);
       _smoothedPosition = _userPosition;
@@ -263,8 +274,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             _updateUserLocation(position);
           });
 
+      if (!mounted) return;
       setState(() => _state = ViewState.success);
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _state = ViewState.failure;
         _errorMessage =
@@ -287,6 +300,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         address: 'Current Location',
       );
     });
+
+    // Refresh distances for recent places when location changes
+    if (_recentSearches.isNotEmpty && _userPosition != null) {
+      for (final result in _recentSearches) {
+        result.recalculateFrom(_userPosition!.latitude, _userPosition!.longitude);
+      }
+    }
 
     if (_shouldFollowUser && _smoothedPosition != null && _isMapReady) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -767,6 +787,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _hasNavigatedToTrip = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.pushReplacementNamed(context, '/trip');
+      });
+    }
+
+    // Auto-close the ride panel when the ride status returns to IDLE
+    // after a cancellation that originated from the TripScreen (not from
+    // MapScreen's own _requestCancel / _closePanel flow).
+    if (_panelOpen && _requesting &&
+        rideProvider.status == models.TripStatus.IDLE &&
+        !_hasNavigatedToTrip) {
+      _hasNavigatedToTrip = true; // prevent re-entry
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _closePanel(cancelIfRequesting: false);
       });
     }
 

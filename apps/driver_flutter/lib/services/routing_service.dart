@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 import 'api_service.dart';
 import 'google_routes_service.dart';
+import 'route_errors.dart';
 import '../models/route_models.dart';
 
 class RoutingService {
@@ -11,6 +12,13 @@ class RoutingService {
   final GoogleRoutesService _googleRoutes = GoogleRoutesService();
 
   Future<Map<String, dynamic>> getRoute(LatLng start, LatLng end) async {
+    // Validate both coordinates before making any API call.
+    final originError = RouteValidator.validateOrigin(start.latitude, start.longitude);
+    if (originError != null) throw originError;
+
+    final destError = RouteValidator.validateDestination(end.latitude, end.longitude);
+    if (destError != null) throw destError;
+
     try {
       final routeResponse = await _googleRoutes.getRoute(
         origin: start,
@@ -18,6 +26,12 @@ class RoutingService {
       );
 
       return _hydrateFromRoute(routeResponse);
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) rethrow;
+      debugPrint('[ROUTING] Google Routes failed: $e');
+      // Classify the Dio error for better error messages upstream
+      final classified = _classifyDioError(e);
+      if (classified != null) throw classified;
     } catch (e) {
       debugPrint('[ROUTING] Google Routes failed: $e');
     }
@@ -52,11 +66,78 @@ class RoutingService {
           });
         }
       }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) rethrow;
+      debugPrint('[ROUTING] Backend Call Failed: $e');
+      final classified = _classifyDioError(e);
+      if (classified != null) throw classified;
     } catch (e) {
       debugPrint('[ROUTING] Backend Call Failed: $e');
     }
 
     return calculateLocalFallback(start, end);
+  }
+
+  /// Map DioException types to typed RouteErrors for proper error classification.
+  RouteError? _classifyDioError(DioException e) {
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return const RouteError(
+          category: RouteErrorCategory.timeout,
+          message: 'Routing API timeout',
+          isRetryable: true,
+          isTransient: true,
+        );
+      case DioExceptionType.connectionError:
+        return const RouteError(
+          category: RouteErrorCategory.networkError,
+          message: 'Routing API connection error',
+          isRetryable: true,
+          isTransient: true,
+        );
+      case DioExceptionType.badResponse:
+        if (e.response != null) {
+          final status = e.response!.statusCode ?? 0;
+          if (status == 401 || status == 403) {
+            return const RouteError(
+              category: RouteErrorCategory.apiAuthentication,
+              message: 'Routing API auth failure',
+            );
+          }
+          if (status == 429) {
+            return const RouteError(
+              category: RouteErrorCategory.rateLimited,
+              message: 'Routing API rate limited',
+              isRetryable: true,
+              isTransient: true,
+            );
+          }
+          if (status == 400) {
+            return const RouteError(
+              category: RouteErrorCategory.malformedRequest,
+              message: 'Routing API rejected request',
+            );
+          }
+          if (status >= 500) {
+            return const RouteError(
+              category: RouteErrorCategory.networkError,
+              message: 'Routing API server error',
+              isRetryable: true,
+              isTransient: true,
+            );
+          }
+        }
+        return null;
+      case DioExceptionType.cancel:
+        return const RouteError(
+          category: RouteErrorCategory.routeCancelled,
+          message: 'Route request was cancelled',
+        );
+      default:
+        return null;
+    }
   }
 
   Future<Map<String, dynamic>?> requestReroute({

@@ -120,9 +120,15 @@ class RideProvider with ChangeNotifier {
       // After an intentional reset (e.g. the rider cancelled), late
       // tripUpdates for the old trip must NOT resurrect stale state —
       // the server's CANCELLED broadcast arrives after our REST cancel.
-      if (_status == TripStatus.IDLE &&
-          (trip.status == TripStatus.REQUESTED || trip.status == TripStatus.CANCELLED)) {
+      // Reject ALL stale updates when IDLE, not just REQUESTED/CANCELLED.
+      // A stale ACCEPTED arriving after reset would resurrect driver state.
+      if (_status == TripStatus.IDLE) {
         debugPrint('[RIDE] Ignoring stale ${trip.status} tripUpdate while IDLE (trip ${trip.id})');
+        return;
+      }
+      // Reject updates for a different ride ID after we have an active trip.
+      if (_tripId != null && trip.id != _tripId) {
+        debugPrint('[RIDE] Ignoring tripUpdate for different trip ${trip.id} (current: $_tripId)');
         return;
       }
       _currentTrip = trip;
@@ -277,7 +283,7 @@ class RideProvider with ChangeNotifier {
       'pickup': pickup.toJson(),
       'destination': destination.toJson(),
       'isScheduled': isScheduled,
-      if (scheduledAt != null) 'scheduledAt': scheduledAt!.toIso8601String(),
+      if (scheduledAt != null) 'scheduledAt': scheduledAt.toIso8601String(),
       'favoritePriority': favoritePriority,
       'idempotencyKey': key,
       if (cleanedPromo != null && cleanedPromo.isNotEmpty) 'promoCode': cleanedPromo.toUpperCase(),
@@ -346,6 +352,8 @@ class RideProvider with ChangeNotifier {
     _navigationEtaSeconds = null;
     _driverEtaSeconds = null;
     _driverRemainingMeters = null;
+    _cancelling = false;
+    _nearbyDrivers.clear();
     notifyListeners();
   }
 

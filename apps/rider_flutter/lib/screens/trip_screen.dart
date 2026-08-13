@@ -84,15 +84,22 @@ class _TripScreenState extends State<TripScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              final error = await rideProvider.cancelRide();
-              if (error != null) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(error)),
-                  );
+              try {
+                final error = await rideProvider.cancelRide();
+                if (error != null) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(error)),
+                    );
+                  }
+                } else if (context.mounted) {
+                  Navigator.pop(context);
                 }
-              } else if (context.mounted) {
-                Navigator.pop(context);
+              } catch (e) {
+                debugPrint('[TRIP] Cancel navigation error: $e');
+                if (context.mounted) {
+                  Navigator.pop(context);
+                }
               }
             },
             child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
@@ -404,14 +411,18 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
               final rideProvider = Provider.of<RideProvider>(context, listen: false);
               final trip = rideProvider.currentTrip;
               rideProvider.reset();
-              Navigator.pop(context); // Close dialog
-              if (trip != null) {
-                Navigator.pushReplacement(
-                  context, 
-                  MaterialPageRoute(builder: (context) => RatingScreen(trip: trip))
-                );
-              } else {
-                Navigator.pop(context);
+              try {
+                Navigator.pop(context); // Close dialog
+                if (trip != null) {
+                  Navigator.pushReplacement(
+                    context, 
+                    MaterialPageRoute(builder: (context) => RatingScreen(trip: trip))
+                  );
+                } else {
+                  Navigator.pop(context);
+                }
+              } catch (e) {
+                debugPrint('[ARRIVAL] Navigation error after reset: $e');
               }
             },
             style: ElevatedButton.styleFrom(

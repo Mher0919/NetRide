@@ -721,8 +721,19 @@ class DriverProvider with ChangeNotifier {
     _socket?.emit('acceptTrip', tripId);
   }
 
+  bool _cancelling = false;
+
   void cancelTrip(String tripId) {
+    if (_cancelling) return;
+    _cancelling = true;
     _socket?.emit('cancelTrip', tripId);
+    // Reset local state immediately so stale callbacks are harmless.
+    _currentTrip = null;
+    _incomingRequest = null;
+    _riderLocation = null;
+    _messages = [];
+    _cancelling = false;
+    notifyListeners();
   }
 
   void declineTrip(String tripId) {

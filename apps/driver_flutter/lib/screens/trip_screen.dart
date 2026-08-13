@@ -8,6 +8,7 @@ import '../models/trip_models.dart' as models;
 import '../services/navigation_service.dart';
 import '../services/communication_service.dart';
 import '../services/sound_service.dart';
+import '../services/route_errors.dart';
 import '../components/trip_completed_dialog.dart';
 import '../components/state_container.dart';
 import 'navigation_screen.dart';
@@ -53,10 +54,27 @@ class _TripScreenState extends State<TripScreen> {
         return;
       }
 
-      final start = driverProvider.lastLocation != null
-          ? LatLng(driverProvider.lastLocation!.lat,
-              driverProvider.lastLocation!.lng)
-          : LatLng(trip.pickup.lat, trip.pickup.lng);
+      // Validate pickup coordinates before proceeding
+      final pickupError = RouteValidator.validateDestination(trip.pickup.lat, trip.pickup.lng);
+      if (pickupError != null) {
+        setState(() {
+          _state = ViewState.failure;
+          _errorMessage = pickupError.userFacingMessage;
+        });
+        return;
+      }
+
+      // If trip is IN_PROGRESS, also validate destination
+      if (trip.status == models.TripStatus.IN_PROGRESS) {
+        final destError = RouteValidator.validateDestination(trip.destination.lat, trip.destination.lng);
+        if (destError != null) {
+          setState(() {
+            _state = ViewState.failure;
+            _errorMessage = destError.userFacingMessage;
+          });
+          return;
+        }
+      }
 
       final leg = trip.status == models.TripStatus.ACCEPTED
           ? NavigationLeg.pickup
@@ -66,6 +84,17 @@ class _TripScreenState extends State<TripScreen> {
           ? LatLng(trip.pickup.lat, trip.pickup.lng)
           : LatLng(trip.destination.lat, trip.destination.lng);
 
+      // Validate driver location freshness
+      final lastLoc = driverProvider.lastLocation;
+      LatLng start;
+      if (lastLoc != null) {
+        start = LatLng(lastLoc.lat, lastLoc.lng);
+      } else {
+        // No driver location available - use pickup as origin
+        // (the navigation service will compute route from driver once GPS is available)
+        start = LatLng(trip.pickup.lat, trip.pickup.lng);
+      }
+
       await navService.startNavigation(
         tripId: trip.id,
         leg: leg,
@@ -74,13 +103,89 @@ class _TripScreenState extends State<TripScreen> {
       );
 
       if (mounted) setState(() => _state = ViewState.success);
-    } catch (e) {
+    } on RouteError catch (e) {
       setState(() {
         _state = ViewState.failure;
-        _errorMessage =
-            'Could not calculate the optimal route. Please verify your GPS signal.';
+        _errorMessage = e.userFacingMessage;
+      });
+    } catch (e) {
+      // Map known exception types to route errors.
+      final routeError = _classifyError(e);
+      setState(() {
+        _state = ViewState.failure;
+        _errorMessage = routeError.userFacingMessage;
       });
     }
+  }
+
+  RouteError _classifyError(Object error) {
+    if (error is RouteError) return error;
+
+    final msg = error.toString().toLowerCase();
+
+    if (msg.contains('timeout') || msg.contains('timed out')) {
+      return const RouteError(
+        category: RouteErrorCategory.timeout,
+        message: 'Route request timed out',
+        isRetryable: true,
+        isTransient: true,
+      );
+    }
+    if (msg.contains('socket') || msg.contains('network') || msg.contains('connection')) {
+      return const RouteError(
+        category: RouteErrorCategory.networkError,
+        message: 'Network error during routing',
+        isRetryable: true,
+        isTransient: true,
+      );
+    }
+    if (msg.contains('401') || msg.contains('unauthorized') || msg.contains('403') || msg.contains('forbidden')) {
+      return const RouteError(
+        category: RouteErrorCategory.apiAuthentication,
+        message: 'API authentication failed',
+      );
+    }
+    if (msg.contains('429') || msg.contains('too many requests') || msg.contains('rate limit')) {
+      return const RouteError(
+        category: RouteErrorCategory.rateLimited,
+        message: 'Rate limited',
+        isRetryable: true,
+        isTransient: true,
+      );
+    }
+    if (msg.contains('402') || msg.contains('quota') || msg.contains('billing')) {
+      return const RouteError(
+        category: RouteErrorCategory.apiQuota,
+        message: 'API quota exceeded',
+      );
+    }
+    if (msg.contains('no route') || msg.contains('not found') || msg.contains('ZERO_RESULTS')) {
+      return const RouteError(
+        category: RouteErrorCategory.noRouteFound,
+        message: 'No route found',
+      );
+    }
+    if (msg.contains('gps') || msg.contains('location') && (msg.contains('unavail') || msg.contains('disabled') || msg.contains('denied'))) {
+      return const RouteError(
+        category: RouteErrorCategory.locationUnavailable,
+        message: 'GPS location unavailable',
+        isRetryable: true,
+        isTransient: true,
+      );
+    }
+    if (msg.contains('cancel')) {
+      return const RouteError(
+        category: RouteErrorCategory.routeCancelled,
+        message: 'Route cancelled',
+      );
+    }
+
+    return const RouteError(
+      category: RouteErrorCategory.unknown,
+      message: 'Unknown route error',
+      isRetryable: true,
+      isTransient: true,
+    );
   }
 
   void _swapLeg(NavigationLeg newLeg, models.Trip trip) async {
@@ -246,6 +351,9 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   void _showCancelDialog(BuildContext context, DriverProvider driverProvider, models.Trip trip) {
+    // Capture NavigationService before showDialog so we can stop it
+    // on cancel regardless of dialog context availability.
+    final navService = Provider.of<NavigationService>(context, listen: false);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -260,6 +368,10 @@ class _TripScreenState extends State<TripScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
+              // Stop navigation listeners and timers before cancelling
+              // so stale GPS / reroute callbacks can't fire after the
+              // trip screen is popped.
+              navService.stopNavigation();
               driverProvider.cancelTrip(trip.id);
               if (mounted) Navigator.pop(context);
             },
