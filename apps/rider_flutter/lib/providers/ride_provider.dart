@@ -329,6 +329,15 @@ class RideProvider with ChangeNotifier {
       return null;
     } on DioException catch (e) {
       if (e.response?.statusCode == 409) {
+        // The server may reject the REST cancel because the socket
+        // tripUpdate already arrived and the trip is CANCELLED. This
+        // is actually a success — the ride was already cancelled by
+        // our own socket emit that fired first. Treat it as success.
+        if (_status == TripStatus.CANCELLED) {
+          debugPrint('[RIDE] Cancel 409 but already CANCELLED via socket — resetting');
+          reset();
+          return null;
+        }
         debugPrint('[RIDE] Cancel refused (409): ride in progress');
         return 'This ride is already in progress and cannot be cancelled.';
       }

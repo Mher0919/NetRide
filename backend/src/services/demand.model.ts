@@ -60,8 +60,8 @@ export interface DemandConfig {
   maxZones: number;
   /** Cells scoring below this fraction of the max are dropped. */
   minZoneScore: number;
-  /** Radius grows with the square root of relative score (sub-linear). */
-  radiusCurve: 'linear' | 'sqrt';
+  /** Radius grows with relative score — 'quadratic' keeps low-score zones small. */
+  radiusCurve: 'linear' | 'sqrt' | 'quadratic';
 }
 
 export const DEFAULT_DEMAND_CONFIG: DemandConfig = {
@@ -86,11 +86,11 @@ export const DEFAULT_DEMAND_CONFIG: DemandConfig = {
     APP_ACTIVE: 180,
     APP_OPEN: 300, // 5 min — map subscibe fires every 15 s
   },
-  minRadiusMeters: 700,
+  minRadiusMeters: 250,
   maxRadiusMeters: 2600,
   maxZones: 40,
   minZoneScore: 0.06,
-  radiusCurve: 'sqrt',
+  radiusCurve: 'quadratic',
 };
 
 /** Cap so a burst of bogus events can never explode the payload. */
@@ -280,6 +280,8 @@ export function buildZones(
     let radiusFrac = score;
     if (config.radiusCurve === 'sqrt') {
       radiusFrac = Math.sqrt(score);
+    } else if (config.radiusCurve === 'quadratic') {
+      radiusFrac = score * score;
     }
     const radiusM = Math.round(
       config.minRadiusMeters +

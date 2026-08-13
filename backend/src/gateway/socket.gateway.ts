@@ -296,6 +296,39 @@ export function setupSocketGateway(io: Server) {
         if (validated.data.lat && validated.data.lng) {
           const gh = await LocationsService.updateDriverLocation(id, { lat: validated.data.lat, lng: validated.data.lng });
           updateDriverGeohashRoom(socket, gh);
+
+          // When a driver comes online, check for any pending REQUESTED
+          // rides nearby and trigger re-matching. The dispatch engine
+          // will find this driver naturally via GEORADIUS once the
+          // matchRide job runs.
+          try {
+            const result = await pool.query(`
+              SELECT id, pickup_lat, pickup_lng, rider_id
+              FROM rides
+              WHERE status = 'REQUESTED'
+                AND driver_id IS NULL
+                AND pickup_lat IS NOT NULL
+                AND pickup_lng IS NOT NULL
+                AND created_at > NOW() - INTERVAL '10 minutes'
+              ORDER BY created_at ASC
+              LIMIT 5
+            `);
+            if (result.rows.length > 0) {
+              const { matchQueue } = await import('../queue/queue');
+              for (const row of result.rows) {
+                await matchQueue.add('matchRide', {
+                  tripId: row.id,
+                  pickupLat: Number(row.pickup_lat),
+                  pickupLng: Number(row.pickup_lng),
+                  riderId: row.rider_id,
+                  retryCount: 0,
+                });
+                console.log(`[SOCKET] 🔄 Re-triggered matching for pending ride ${row.id} after driver ${id} came online`);
+              }
+            }
+          } catch (err: any) {
+            console.error(`[SOCKET] ❌ Failed to check pending rides on goOnline: ${err.message}`);
+          }
         }
       });
 
