@@ -13,12 +13,6 @@ router.post('/onboarding/step', auth_middleware_1.authMiddleware, driver_control
 router.post('/onboarding/complete', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.completeOnboarding);
 router.post('/onboard', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.onboard);
 router.get('/vehicles', driver_controller_1.DriverController.getVehicles);
-router.patch('/operating-class', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.updateOperatingClass);
-router.get('/ride-preferences', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getRidePreferences);
-router.put('/ride-preferences', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.setRidePreferences);
-router.get('/pricing', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getPricing);
-router.post('/pricing/update', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.updatePrice);
-router.get('/recommendations', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getRecommendations);
 // Vehicle Model Search
 router.get('/vehicle-models/search', driver_controller_1.DriverController.searchVehicleModels);
 router.get('/vehicle-models/years', driver_controller_1.DriverController.getVehicleYears);

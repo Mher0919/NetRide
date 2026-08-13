@@ -68,9 +68,16 @@ const geospatial_routes_1 = __importDefault(require("./modules/geospatial/geospa
 const navigation_routes_1 = __importDefault(require("./modules/navigation/navigation.routes"));
 const routing_routes_1 = __importDefault(require("./modules/routing/routing.routes"));
 const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
+const admin_rewards_routes_1 = __importDefault(require("./modules/admin/admin-rewards.routes"));
+const credits_routes_1 = __importDefault(require("./modules/credits/credits.routes"));
+const promo_routes_1 = __importDefault(require("./modules/promo/promo.routes"));
+const referral_routes_1 = __importDefault(require("./modules/referral/referral.routes"));
+const wallet_routes_1 = __importDefault(require("./modules/wallet/wallet.routes"));
 const routing_api_1 = __importDefault(require("./routing/api/routing-api"));
 const push_routes_1 = __importDefault(require("./modules/push/push.routes"));
 const places_routes_1 = __importDefault(require("./modules/places/places.routes"));
+const notifications_routes_1 = __importDefault(require("./modules/notifications/notifications.routes"));
+const heatmap_routes_1 = __importDefault(require("./modules/heatmap/heatmap.routes"));
 const geospatial_service_1 = require("./modules/geospatial/geospatial.service");
 const upload_service_1 = require("./services/upload.service");
 const speeding_detector_1 = require("./services/speeding_detector");
@@ -191,9 +198,16 @@ app.use('/api/navigation', navigation_routes_1.default);
 app.use('/api/routing', routing_routes_1.default);
 app.use('/api/routing', routing_api_1.default);
 app.use('/api/admin', admin_routes_1.default);
+app.use('/api/admin', admin_rewards_routes_1.default);
+app.use('/api/credits', credits_routes_1.default);
+app.use('/api/promo', promo_routes_1.default);
+app.use('/api/referral', referral_routes_1.default);
+app.use('/api/wallet', wallet_routes_1.default);
 app.use('/api/files', files_routes_1.default);
 app.use('/api/push', push_routes_1.default);
 app.use('/api/places', places_routes_1.default);
+app.use('/api/notifications', notifications_routes_1.default);
+app.use('/api/heatmap', heatmap_routes_1.default);
 app.post('/api/upload', upload_service_1.UploadService.upload);
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -479,6 +493,62 @@ async function runMigrations() {
             await database_1.pool.query(schema);
             console.log('✅ Places search schema (033) applied successfully');
         }
+        // Google Routes OD cache tables (032) — created once, then fed by
+        // RouteStoreService. Wrapped in its own guard because the table was
+        // defined before the bootstrap ever applied it.
+        const hasRouteCache = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'route_cache'");
+        if (hasRouteCache.rowCount === 0) {
+            console.log('⚡ Applying Google Routes cache schema (032)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/032_google_routes_cache.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Google Routes cache schema (032) applied');
+        }
+        // Ride-scoped authoritative route store (034)
+        const hasRideRoutes = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'ride_routes'");
+        if (hasRideRoutes.rowCount === 0) {
+            console.log('⚡ Applying ride route store schema (034)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/034_ride_routes.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Ride route store schema (034) applied');
+        }
+        // Partner + promo + referral + ride credits ecosystem (037)
+        const hasPartners = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'partners'");
+        if (hasPartners.rowCount === 0) {
+            console.log('⚡ Applying partner/promo/referral/credits schema (037)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/037_partner_promo_referral_credits.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Partner/promo/referral/credits schema (037) applied');
+        }
+        // Referral onboarding + device fraud signals (038)
+        const hasUserDevices = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'user_devices'");
+        if (hasUserDevices.rowCount === 0) {
+            console.log('⚡ Applying referral onboarding/device schema (038)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/038_referral_onboarding_device.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Referral onboarding/device schema (038) applied');
+        }
+        // Rider wallet — default fare payment method (039)
+        const hasWallets = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'rider_wallets'");
+        if (hasWallets.rowCount === 0) {
+            console.log('⚡ Applying rider wallet schema (039)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/039_rider_wallet.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Rider wallet schema (039) applied');
+        }
+        // Real phone notifications + demand heatmap foundations (040)
+        const hasDeviceTokens = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'device_tokens'");
+        if (hasDeviceTokens.rowCount === 0) {
+            console.log('⚡ Applying notifications + heatmap schema (040)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/040_notifications_heatmap.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Notifications + heatmap schema (040) applied');
+        }
         console.log('🚀 All migrations completed');
     }
     catch (err) {
@@ -552,13 +622,16 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
             SchedulerService.checkScheduledRides();
         }, 60 * 1000);
     });
-    // Recalculate Driver Pricing Ranges (Every 30 minutes)
-    Promise.resolve().then(() => __importStar(require('./services/fare.service'))).then(({ fareService }) => {
-        setInterval(() => {
-            fareService.recalculateDriverRanges();
-        }, 30 * 60 * 1000);
+    // Refresh Platform Pricing Market Conditions (Every 5 minutes)
+    Promise.resolve().then(() => __importStar(require('./services/pricing.service'))).then(({ pricingService }) => {
+        const refresh = () => {
+            pricingService.refreshMarketConditions().catch((err) => {
+                console.error(`[PRICING] ❌ Market refresh failed: ${err.message}`);
+            });
+        };
+        setInterval(refresh, 5 * 60 * 1000);
         // Initial run on start
-        fareService.recalculateDriverRanges();
+        refresh();
     });
     // Vehicle Data Background Sync (Once on start)
     Promise.resolve().then(() => __importStar(require('./services/vehicleData.service'))).then(({ VehicleDataService }) => {

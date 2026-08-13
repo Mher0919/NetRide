@@ -16,7 +16,11 @@ import { applyPromoToRide, finalizePromoForCompletedRide, voidPromoForCancelledR
 import { CreditsService } from '../modules/credits/credits.service';
 import { WalletService } from '../modules/wallet/wallet.service';
 import { ReferralService } from '../modules/referral/referral.service';
-import { pushPromoAccepted, pushCreditsApplied, pushWalletCharged } from './push-notification.service';
+import {
+  notifyPromoApplied,
+  notifyCreditsApplied,
+  notifyWalletCharged,
+} from './notification.service';
 
 export interface RideEvent {
   id: string;
@@ -93,15 +97,17 @@ export class RewardEngine {
       ],
     );
 
-    // Best-effort post-request notifications (fire and forget).
+    // Best-effort post-request notifications (fire and forget). Each one is
+    // recorded in the persisted feed AND pushed to every device once —
+    // deduplicated by eventId (rideId-scoped).
     if (promoApplied) {
-      pushPromoAccepted(riderId, promoApplied.promo.code, discountCents).catch(() => undefined);
+      notifyPromoApplied(riderId, promoApplied.promo.code, discountCents, rideId).catch(() => undefined);
     }
     if (credits.appliedCents > 0) {
-      pushCreditsApplied(riderId, credits.appliedCents, rideId).catch(() => undefined);
+      notifyCreditsApplied(riderId, credits.appliedCents, rideId).catch(() => undefined);
     }
     if (wallet.walletChargeCents > 0) {
-      pushWalletCharged(riderId, wallet.walletChargeCents, rideId).catch(() => undefined);
+      notifyWalletCharged(riderId, wallet.walletChargeCents, rideId).catch(() => undefined);
     }
 
     return {

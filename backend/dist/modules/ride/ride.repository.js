@@ -183,6 +183,7 @@ class RideRepository {
             cancelled_at: row.cancelled_at,
             distance_km: row.distance_meters ? row.distance_meters / 1000 : undefined,
             fare_amount: row.fare_amount ? parseFloat(row.fare_amount) : undefined,
+            tip_amount: row.tip_amount ? parseFloat(row.tip_amount) : undefined,
             initial_max_fare: row.initial_max_fare ? parseFloat(row.initial_max_fare) : undefined,
             saving_likelihood: row.saving_likelihood !== null ? parseInt(row.saving_likelihood) : undefined,
             trajectory: row.trajectory,

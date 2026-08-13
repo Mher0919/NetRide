@@ -15,7 +15,9 @@ router.post('/request', auth_middleware_1.authMiddleware, auth_middleware_1.ride
 router.post('/estimate', auth_middleware_1.authMiddleware, auth_middleware_1.riderMiddleware, ride_controller_1.RideController.estimateRide);
 router.post('/accept', auth_middleware_1.authMiddleware, auth_middleware_1.driverMiddleware, ride_controller_1.RideController.acceptTrip);
 router.post('/rate', auth_middleware_1.authMiddleware, ride_controller_1.RideController.rateRide);
+router.post('/cancel', auth_middleware_1.authMiddleware, auth_middleware_1.riderMiddleware, ride_controller_1.RideController.cancelCurrentRide);
 router.get('/history', auth_middleware_1.authMiddleware, ride_controller_1.RideController.getHistory);
+router.get('/current', auth_middleware_1.authMiddleware, ride_controller_1.RideController.getCurrent);
 router.delete('/history/:id', auth_middleware_1.authMiddleware, ride_controller_1.RideController.deleteHistory);
 // ---- In-trip chat + masked call -----------------------------------------
 // Twilio's Voice SDK calls /call/connect with no JWT (it authenticates

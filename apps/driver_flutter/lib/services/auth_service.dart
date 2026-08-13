@@ -7,6 +7,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 import '../providers/driver_provider.dart';
 import '../cache/cache_service.dart';
+import 'notification_service.dart';
+
+/// Fire-and-forget per-device FCM registration after any successful login.
+Future<void> _registerDeviceForCurrentUser() async {
+  try {
+    await NotificationService.instance.registerDevice();
+  } catch (e) {
+    debugPrint('[AUTH] Device registration skipped: $e');
+  }
+}
 
 class AuthService {
   static final ValueNotifier<bool> isAuthenticatedNotifier = ValueNotifier<bool>(false);
@@ -49,6 +59,7 @@ class AuthService {
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
           isAuthenticatedNotifier.value = true;
+          await _registerDeviceForCurrentUser();
         } else {
           debugPrint('[AuthService] No token found in response');
         }
@@ -125,6 +136,7 @@ class AuthService {
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
           isAuthenticatedNotifier.value = true;
+          await _registerDeviceForCurrentUser();
         } else {
           debugPrint('[AuthService] No token found in response');
         }
@@ -161,6 +173,7 @@ class AuthService {
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
           isAuthenticatedNotifier.value = true;
+          await _registerDeviceForCurrentUser();
         } else {
           debugPrint('[AuthService] No token found in response');
         }
@@ -199,6 +212,7 @@ class AuthService {
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
           isAuthenticatedNotifier.value = true;
+          await _registerDeviceForCurrentUser();
         } else {
           debugPrint('[AuthService] No token found in response');
         }
@@ -390,6 +404,10 @@ class AuthService {
   }
 
   static Future<void> logout() async {
+    // Stop pushes on THIS device first — the HTTP call needs the JWT still
+    // present in prefs, so unregister before clearing credentials.
+    await NotificationService.instance.clearDevice();
+
     // Clear all user-scoped cached data first (privacy/security)
     try {
       await CacheService.instance.clearAll();
@@ -438,6 +456,7 @@ class AuthService {
       if (res['token'] != null) {
         debugPrint('[AUTH SYNC] ✅ Sync successful');
         isAuthenticatedNotifier.value = true;
+        await _registerDeviceForCurrentUser();
         return true;
       }
       return false;

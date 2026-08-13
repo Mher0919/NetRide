@@ -14,6 +14,8 @@ import '../services/api_service.dart';
 import '../components/state_container.dart';
 import '../components/driver_status_card.dart';
 import '../services/sound_service.dart';
+import '../services/heatmap_service.dart';
+import '../models/demand_zone.dart';
 
 /// NetRide driver dashboard.
 ///
@@ -47,6 +49,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   double _weeklyFare = 0;
   double _weeklyTips = 0;
   int _weeklyRides = 0;
+
+  // Demand heatmap (server-computed from real rider activity).
+  List<DemandZone> _demandZones = [];
+  Timer? _demandTimer;
+  bool _demandLastFailed = false;
 
   @override
   void initState() {
@@ -466,10 +473,58 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     }
   }
 
+  // ── Demand heatmap ────────────────────────────────────────────────
+
+  /// Pulls the demand zones for the driver's current area. Only meaningful
+  /// while online, idle (no incoming request), and a position is known.
+  Future<void> _refreshDemand() async {
+    final pos = _lastPosition;
+    if (pos == null || !mounted) return;
+    try {
+      final query = await HeatmapService.fetchZones(
+        lat: pos.latitude,
+        lng: pos.longitude,
+      );
+      if (!mounted) return;
+      setState(() {
+        _demandZones = query.zones;
+        _demandLastFailed = false;
+      });
+    } on DioException catch (e) {
+      debugPrint('[HEATMAP] fetch failed (kept last zones): ${HeatmapService.friendlyError(e)}');
+      if (mounted && _demandZones.isEmpty) {
+        // First fetch failed — nothing to show yet; surface that quietly.
+        setState(() => _demandLastFailed = true);
+      }
+    }
+  }
+
+  /// Poll while online + idle. The backend caches for 45 s, so 60 s keeps
+  /// us comfortably behind the cache boundary without hammering the API.
+  void _startDemandTimer() {
+    _demandTimer?.cancel();
+    _refreshDemand();
+    _demandTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      final provider = Provider.of<DriverProvider>(context, listen: false);
+      if (provider.status != models.DriverStatus.offline &&
+          provider.incomingRequest == null) {
+        _refreshDemand();
+      }
+    });
+  }
+
+  void _stopDemandTimer() {
+    _demandTimer?.cancel();
+    _demandTimer = null;
+    _demandZones = [];
+    _demandLastFailed = false;
+  }
+
   @override
   void dispose() {
     _positionSubscription?.cancel();
     _heartbeatTimer?.cancel();
+    _demandTimer?.cancel();
     super.dispose();
   }
 
@@ -593,6 +648,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         // Play the confirmation cue only after the backend accepted; the
         // screen never claims to be online before that.
         SoundService.instance.playOnline();
+        // Start cooling the demand heatmap for this area.
+        _startDemandTimer();
       } else if (mounted) {
         _showHeadshotModal(reason: 'headshot');
       }
@@ -606,6 +663,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     setState(() => _isTogglingOnline = true);
     SoundService.instance.playOffline();
     provider.setOffline();
+    // Heatmap is an online-mode surface — stop polling and clear zones.
+    _stopDemandTimer();
     // Re-center on the driver and refresh earnings while the map
     // contracts back into its card.
     _shouldFollowUser = true;
@@ -807,6 +866,35 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                               ),
                             ],
                           ),
+                        // Demand heatmap (only while idle — never during an
+                        // active request, keep the driver's focus on it).
+                        if (isOnline && !hasRequest && _demandZones.isNotEmpty)
+                          CircleLayer(
+                            circles: _demandZones.map((z) {
+                              final alpha = 0.06 + z.score * 0.30;
+                              return CircleMarker(
+                                point: LatLng(z.lat, z.lng),
+                                radius: z.radiusM,
+                                useRadiusInMeter: true,
+                                color: const Color(0xFF5B7760)
+                                    .withOpacity(alpha),
+                                borderStrokeWidth: 0,
+                              );
+                            }).toList(),
+                          ),
+                        if (isOnline && _demandLastFailed)
+                          CircleLayer(
+                            circles: [
+                              CircleMarker(
+                                point: initialCenter,
+                                radius: 12,
+                                useRadiusInMeter: false,
+                                color: const Color(0xFF5B7760)
+                                    .withOpacity(0.12),
+                                borderStrokeWidth: 0,
+                              ),
+                            ],
+                          ),
                         MarkerLayer(
                           markers: [
                             if (_lastPosition != null)
@@ -905,6 +993,10 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                               if (isOnline && !hasRequest) ...[
                                 const SizedBox(height: 10),
                                 _buildSearchingPill(),
+                                if (_demandZones.isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  _buildDemandLegend(),
+                                ],
                               ],
                             ],
                           ),
@@ -1152,6 +1244,44 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
           SizedBox(width: 12),
           Text('SEARCHING FOR RIDES', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
+        ],
+      ),
+    );
+  }
+
+  /// Small translucent chip explaining the green circles on the map. Only
+  /// shown while the heatmap is actually rendered.
+  Widget _buildDemandLegend() {
+    final hot = _demandZones.where((z) => z.score >= 0.5).length;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: const BoxDecoration(
+              color: Color(0xFF5B7760),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Demand map · $hot hot area${hot == 1 ? '' : 's'}',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF2F3A32),
+            ),
+          ),
         ],
       ),
     );

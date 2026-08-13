@@ -41,9 +41,9 @@ import { CreditsService } from '../credits/credits.service';
 import { AuditEventsService } from '../../services/audit-events.service';
 import { DeviceRiskService, DeviceFingerprintInput } from '../../services/device-risk.service';
 import {
-  pushReferralLinked,
-  pushReferralRewardGranted,
-} from '../../services/push-notification.service';
+  notifyReferralLinked,
+  notifyReferralRewardGranted,
+} from '../../services/notification.service';
 
 export const REFERRAL_STATES = [
   'QR_SCANNED',
@@ -403,8 +403,8 @@ export class ReferralService {
         status: 'LINKED',
         role: 'referrer',
       });
-      pushReferralLinked(scannerId, referrerName).catch((err: any) =>
-        console.warn(`[REFERRAL] ⚠️ push failed: ${err.message}`),
+      notifyReferralLinked(scannerId, referrerName, relationshipId).catch((err: any) =>
+        console.warn(`[REFERRAL] ⚠️ notification failed: ${err.message}`),
       );
       await AuditEventsService.record({
         actorId: scannerId,
@@ -715,8 +715,14 @@ export class ReferralService {
       } catch (err: any) {
         console.warn(`[REFERRAL] ⚠️ balance socket emit failed: ${err.message}`);
       }
-      pushReferralRewardGranted(rel.referrer_id, rewardCents, 'referrer').catch(() => undefined);
-      pushReferralRewardGranted(ride.rider_id, rewardCents, 'referred').catch(() => undefined);
+      // Persisted + deduplicated notification (records history, fans out to
+      // every device, and emits the live socket feed). One per event.
+      notifyReferralRewardGranted(rel.referrer_id, rewardCents, 'referrer', rel.id).catch(() => undefined);
+      notifyReferralRewardGranted(ride.rider_id, rewardCents, 'referred', rel.id).catch(() => undefined);
+      // Persisted + deduplicated notification history (the push above is the
+      // legacy one-shot; this is the record that powers the in-app feed).
+      notifyReferralRewardGranted(rel.referrer_id, rewardCents, 'referrer', rel.id).catch(() => undefined);
+      notifyReferralRewardGranted(ride.rider_id, rewardCents, 'referred', rel.id).catch(() => undefined);
       await AuditEventsService.record({
         action: 'REFERRAL_REWARD_GRANTED',
         entityType: 'REFERRAL_REWARD',

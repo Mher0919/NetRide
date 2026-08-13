@@ -19,7 +19,8 @@ export class DispatchService {
   static async getWeightedDrivers(
     pickup: { lat: number, lng: number },
     maxRadiusKm: number = 10,
-    riderId?: string // Added riderId for favorites priority
+    riderId?: string,
+    favoritePriority: boolean = false
   ): Promise<ScoredDriver[]> {
     // 1. Find nearby online drivers via Redis Geolocation
     const nearby = await LocationsService.findNearbyDrivers(pickup, maxRadiusKm);
@@ -119,10 +120,10 @@ export class DispatchService {
       const distance = (distanceInfo as any).distance;
       const rating = driver.rating;
       
-      const wDistance = 0.40;   // 40% weight on distance
-      const wRating = 0.30;     // 30% weight on driver rating
-      const wAcceptance = 0.15; // 15% weight on acceptance/cancellation history
-      const wFavorite = 0.15;   // 15% weight for favorite drivers
+      const wDistance = favoritePriority ? 0.40 : 0.50;
+      const wRating = favoritePriority ? 0.30 : 0.35;
+      const wAcceptance = favoritePriority ? 0.15 : 0.15;
+      const wFavorite = favoritePriority ? 0.15 : 0.00;
 
       // A. Distance Score (0.0 to 1.0)
       const distanceScore = Math.max(0, (maxRadiusKm - distance) / maxRadiusKm);
@@ -144,8 +145,8 @@ export class DispatchService {
         }
       }
 
-      // D. Favorite Score
-      const isFavorite = favoriteDriverIds.includes(driver.user_id);
+      // D. Favorite Score (only applied when favoritePriority is enabled)
+      const isFavorite = favoritePriority ? favoriteDriverIds.includes(driver.user_id) : false;
       const favoriteScore = isFavorite ? 1.0 : 0.0;
 
       // Experience factor (rides completed)

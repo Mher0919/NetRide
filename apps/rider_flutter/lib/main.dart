@@ -19,6 +19,8 @@ import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'services/user_service.dart';
 import 'services/sound_service.dart';
+import 'services/notification_service.dart';
+import 'screens/credits_screen.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,6 +31,24 @@ import 'package:app_links/app_links.dart';
 /// straight to the standalone blocked-account screen on startup.
 bool kInitialIsBlocked = false;
 String? kInitialBlockedReason;
+
+/// Notification taps arrive with a backend-assigned route
+/// ('/trip' | '/credits' | '/'). Navigate with the global navigator so
+/// this works from any screen, foreground or after a killed-process tap.
+void _routeFromNotification(NetRideNotification notification) {
+  final nav = ApiService.navigatorKey.currentState;
+  if (nav == null) return;
+  switch (notification.route) {
+    case '/trip':
+      nav.pushNamed('/trip');
+      break;
+    case '/credits':
+      nav.pushNamed('/credits');
+      break;
+    default:
+      break;
+  }
+}
 
 /// Resolved at startup from the backend. The backend is the single source of
 /// truth for whether onboarding (including mandatory phone verification) is
@@ -46,6 +66,11 @@ void main() async {
 
   await ApiService.init();
   await SoundService.instance.init();
+
+  // Push notifications: boot FCM (optional — degrades gracefully when no
+  // google-services.json is present) and configure where a tapped
+  // notification navigates.
+  await NotificationService.instance.init(onTap: _routeFromNotification);
 
   final prefs = await SharedPreferences.getInstance();
   String? token = prefs.getString('jwt_token');
@@ -88,6 +113,12 @@ void main() async {
   }
 
   AuthService.isAuthenticatedNotifier.value = token != null;
+
+  // Register this device (FCM token) with the backend so pushes reach this
+  // phone. Safe to call on every cold start — server upserts per token.
+  if (token != null) {
+    await NotificationService.instance.registerDevice();
+  }
 
   if (token != null) {
     // Determine the correct startup destination from authoritative backend
@@ -251,6 +282,9 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
                 break;
               case '/trip':
                 page = const TripScreen();
+                break;
+              case '/credits':
+                page = const CreditsScreen();
                 break;
               case '/profile':
                 page = const ProfileScreen();

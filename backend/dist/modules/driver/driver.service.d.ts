@@ -23,61 +23,9 @@ export declare class DriverService {
         message: string;
     }>;
     static onboard(userId: string, data: any): Promise<any>;
-    static updateOperatingClass(userId: string, activeClass: string): Promise<any>;
-    /**
-     * Returns the driver's verified vehicle class plus the full list of ride
-     * types they are ELIGIBLE to receive (derived, not user-selected) and their
-     * current per-ride-type preferences (enabled/disabled).
-     */
-    static getRidePreferences(userId: string): Promise<{
-        vehicleClass: any;
-        eligibleRideTypes: import("../../types").VehicleClass[];
-        allRideTypes: import("../../types").VehicleClass[];
-        preferences: Record<string, boolean>;
-    }>;
-    /**
-     * Persists the driver's ride-type preferences. Only ELIGIBLE ride types may
-     * be configured; any ineligible type in the payload is ignored to prevent
-     * invalid combinations. `enabled` is the list of ride types the driver
-     * wishes to receive; everything else eligible is disabled.
-     */
-    static setRidePreferences(userId: string, enabled: string[]): Promise<{
-        vehicleClass: any;
-        eligibleRideTypes: import("../../types").VehicleClass[];
-        allRideTypes: import("../../types").VehicleClass[];
-        preferences: Record<string, boolean>;
-    }>;
-    static getRecommendations(userId: string): Promise<{
-        recommended_class: import("../../types").VehicleClass;
-        reason: string;
-    } | null>;
     static updateProfile(userId: string, data: any): Promise<any>;
     static requestVerification(userId: string, data: any): Promise<any>;
     static getVehicles(): Promise<any[]>;
-    static getPricing(userId: string): Promise<{
-        price_per_mile: number;
-        price_range_min: number;
-        price_range_max: number;
-        recommended_price: number;
-        price_last_changed: Date | null;
-        cooldown_active: boolean;
-        cooldown_until: number | null;
-        cooldown_remaining_ms: number;
-        cooldown_ms: number;
-        server_time: number;
-    }>;
-    static updatePrice(userId: string, pricePerMile: number): Promise<{
-        price_per_mile: number;
-        price_range_min: number;
-        price_range_max: number;
-        recommended_price: number;
-        price_last_changed: Date | null;
-        cooldown_active: boolean;
-        cooldown_until: number | null;
-        cooldown_remaining_ms: number;
-        cooldown_ms: number;
-        server_time: number;
-    }>;
     static submitProfileChange(userId: string, changes: any, reason?: string): Promise<{
         request_id: any;
         status: string;

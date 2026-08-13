@@ -25,6 +25,7 @@ const RequestRideSchema = z.object({
   }),
   scheduledAt: z.string().datetime().nullish(),
   isScheduled: z.boolean().optional(),
+  favoritePriority: z.boolean().optional(),
   idempotencyKey: z.string().uuid().optional(),
   promoCode: z.string().trim().min(2).max(32).optional(),
   applyCredits: z.boolean().optional(),
@@ -68,7 +69,8 @@ export class RideController {
         validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined,
         validatedData.isScheduled,
         validatedData.idempotencyKey,
-        { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents }
+        { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents },
+        validatedData.favoritePriority
       );
       res.status(201).json(trip);
     } catch (error: any) {
@@ -189,6 +191,30 @@ export class RideController {
     } catch (error: any) {
       console.error(`[RIDE] ❌ Delete history error: ${error.message}`);
       res.status(500).json({ error: 'Failed to delete activity record.' });
+    }
+  }
+
+  /**
+   * The user's active trip (any non-terminal status), role-aware. Used by
+   * the rider app to hydrate the trip screen when it is opened from a push
+   * notification deep link (e.g. "Your driver has arrived" → /trip).
+   */
+  static async getCurrent(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const role = req.user?.role;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const activeRole = role === 'DRIVER' ? UserRole.DRIVER : UserRole.RIDER;
+      const trip = await RideService.getCurrentRide(userId, activeRole);
+      if (!trip) return res.json({ trip: null });
+      if (trip.status === 'COMPLETED' || trip.status === 'CANCELLED') {
+        return res.json({ trip: null });
+      }
+      return res.json({ trip });
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Get current ride error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to load current ride.' });
     }
   }
 

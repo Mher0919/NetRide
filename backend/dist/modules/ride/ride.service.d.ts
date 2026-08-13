@@ -1,4 +1,4 @@
-import { Trip, Location, VehicleClass } from '../../types';
+import { Trip, Location } from '../../types';
 export declare class RideService {
     static rateRide(data: {
         ride_id: string;
@@ -10,7 +10,11 @@ export declare class RideService {
         address: string;
     }, destination: Location & {
         address: string;
-    }, requestedClass?: VehicleClass, scheduledAt?: Date, isScheduled?: boolean, idempotencyKey?: string): Promise<Trip>;
+    }, scheduledAt?: Date, isScheduled?: boolean, idempotencyKey?: string, rewards?: {
+        promoCode?: string;
+        applyCredits?: boolean;
+        creditUseCents?: number;
+    }, favoritePriority?: boolean): Promise<Trip>;
     static acceptTrip(tripId: string, driverId: string): Promise<Trip>;
     static updateTripStatus(tripId: string, status: any, userId: string): Promise<Trip>;
     static cancelTrip(tripId: string, userId: string): Promise<Trip>;

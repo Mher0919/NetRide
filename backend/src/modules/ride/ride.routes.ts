@@ -15,6 +15,7 @@ router.post('/accept', authMiddleware, driverMiddleware, RideController.acceptTr
 router.post('/rate', authMiddleware, RideController.rateRide);
 router.post('/cancel', authMiddleware, riderMiddleware, RideController.cancelCurrentRide);
 router.get('/history', authMiddleware, RideController.getHistory);
+router.get('/current', authMiddleware, RideController.getCurrent);
 router.delete('/history/:id', authMiddleware, RideController.deleteHistory);
 
 // ---- In-trip chat + masked call -----------------------------------------

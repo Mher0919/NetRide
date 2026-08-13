@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
@@ -19,6 +20,17 @@ class RideProvider with ChangeNotifier {
   List<ChatMessage> _messages = [];
   final Map<String, Location> _nearbyDrivers = {};
   bool _cancelling = false;
+
+  /// Last rider position sent to the gateway. Used to attribute activity
+  /// signals (REQUEST_FLOW / APP_ACTIVE) with a real location.
+  Location? _lastKnownLocation;
+
+  /// Broadcast ping when the backend records a new notification for this
+  /// rider (socket `notificationReceived`). The notifications screen listens
+  /// to refresh its list live without polling.
+  final StreamController<void> _notificationPing =
+      StreamController<void>.broadcast();
+  Stream<void> get notificationPing => _notificationPing.stream;
 
   /// Authoritative route pushed by the backend (navigationStarted /
   /// navigationRerouteRequested). Rendering this — instead of calling
@@ -215,6 +227,13 @@ class RideProvider with ChangeNotifier {
       }
     });
 
+    // A new push was recorded for this rider (deduped server-side). The
+    // notifications screen uses this to refresh instead of polling.
+    _socket!.on('notificationReceived', (data) {
+      debugPrint('[RIDE] notificationReceived → ${data is Map ? data['type'] : data}');
+      if (!_notificationPing.isClosed) _notificationPing.add(null);
+    });
+
     _socket!.on('error', (data) => print('Socket Error: $data'));
   }
 
@@ -331,7 +350,26 @@ class RideProvider with ChangeNotifier {
   }
 
   void updateLocation(double lat, double lng) {
+    _lastKnownLocation = Location(lat: lat, lng: lng);
     _socket?.emit('updateLocation', {'lat': lat, 'lng': lng});
+  }
+
+  /// Report rider activity to the demand heatmap pipeline. The gateway
+  /// also records APP_OPEN (on subscribeToNearbyDrivers) and RIDE_REQUESTED
+  /// (on requestRide) itself; this covers the rest:
+  ///   - REQUEST_FLOW: rider is actively planning a ride (destination pick)
+  ///   - APP_ACTIVE:   rider is using the app right now (on foreground)
+  /// Coordinates are optional for APP_ACTIVE (the server can re-use the
+  /// rider's last known position).
+  void reportActivity(String type, {double? lat, double? lng}) {
+    final useLat = lat ?? _lastKnownLocation?.lat;
+    final useLng = lng ?? _lastKnownLocation?.lng;
+    if (useLat == null || useLng == null) {
+      debugPrint('[RIDE] reportActivity($type) skipped — no location yet');
+      return;
+    }
+    debugPrint('[RIDE] reportActivity($type) @ $useLat,$useLng');
+    _socket?.emit('reportActivity', {'type': type, 'lat': useLat, 'lng': useLng});
   }
 
   /// Parse the route payload shipped with navigationStarted /
@@ -452,11 +490,15 @@ class RideProvider with ChangeNotifier {
         initSocket(token);
       }
     }
+    // Signal "rider actively using the app" with their last known position
+    // (privacy-safe: backendside cooldowns cap the rate).
+    reportActivity('APP_ACTIVE');
   }
 
   @override
   void dispose() {
     _socket?.disconnect();
+    _notificationPing.close();
     super.dispose();
   }
 }

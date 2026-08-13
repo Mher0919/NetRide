@@ -7,6 +7,14 @@ export declare const env: {
     OSRM_DATA_PATH: string;
     ORS_PROFILE: string;
     ORS_TIMEOUT_MS: number;
+    DISPATCH_INITIAL_RADIUS_KM: number;
+    DISPATCH_SECONDARY_RADIUS_KM: number;
+    DISPATCH_MAX_RADIUS_KM: number;
+    DRIVER_OFFER_TIMEOUT_MS: number;
+    DRIVER_LOCK_TTL_S: number;
+    DRIVER_LOCATION_FRESHNESS_S: number;
+    NEAR_COMPLETION_THRESHOLD_S: number;
+    MAX_CANDIDATES_PER_RADIUS: number;
     DRIVER_MATCH_RADIUS_KM: number;
     DRIVER_ACCEPT_TIMEOUT_MS: number;
     DRIVER_PICKUP_PROXIMITY_M: number;
@@ -32,6 +40,9 @@ export declare const env: {
     LEGACY_SEQUENTIAL_DISPATCH: boolean;
     LEGACY_DB_SCORE: boolean;
     LEGACY_INLINE_PG: boolean;
+    REFERRAL_QR_SECRET: string;
+    REFERRAL_REWARD_CENTS: number;
+    REFERRAL_QR_TTL_DAYS: number;
     GOOGLE_MAPS_API_KEY?: string | undefined;
     GOOGLE_ROUTES_API_KEY?: string | undefined;
     ROUTING_GRAPH_PATH?: string | undefined;

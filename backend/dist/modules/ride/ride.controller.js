@@ -5,7 +5,7 @@ const ride_service_1 = require("./ride.service");
 const zod_1 = require("zod");
 const types_1 = require("../../types");
 const prisma_service_1 = require("../../services/prisma.service");
-const fare_service_1 = require("../../services/fare.service");
+const pricing_service_1 = require("../../services/pricing.service");
 const geospatial_service_1 = require("../geospatial/geospatial.service");
 const ride_messages_repository_1 = require("./ride_messages.repository");
 const twilio_service_1 = require("../../services/twilio.service");
@@ -22,9 +22,13 @@ const RequestRideSchema = zod_1.z.object({
         lng: zod_1.z.number(),
         address: zod_1.z.string(),
     }),
-    requestedClass: zod_1.z.nativeEnum(types_1.VehicleClass).optional(),
-    scheduledAt: zod_1.z.string().datetime().optional(),
+    scheduledAt: zod_1.z.string().datetime().nullish(),
     isScheduled: zod_1.z.boolean().optional(),
+    favoritePriority: zod_1.z.boolean().optional(),
+    idempotencyKey: zod_1.z.string().uuid().optional(),
+    promoCode: zod_1.z.string().trim().min(2).max(32).optional(),
+    applyCredits: zod_1.z.boolean().optional(),
+    creditUseCents: zod_1.z.number().int().min(1).optional(),
 });
 const EstimateRideSchema = zod_1.z.object({
     pickup: zod_1.z.object({
@@ -35,7 +39,6 @@ const EstimateRideSchema = zod_1.z.object({
         lat: zod_1.z.number(),
         lng: zod_1.z.number(),
     }),
-    requestedClass: zod_1.z.nativeEnum(types_1.VehicleClass).optional(),
 });
 const RateRideSchema = zod_1.z.object({
     ride_id: zod_1.z.string().uuid(),
@@ -53,7 +56,7 @@ class RideController {
             if (user?.verification_status === 'PENDING') {
                 return res.status(403).json({ error: 'Your account is undergoing age verification. Requests are restricted until completed.' });
             }
-            const trip = await ride_service_1.RideService.requestRide(riderId, validatedData.pickup, validatedData.destination, validatedData.requestedClass, validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined, validatedData.isScheduled);
+            const trip = await ride_service_1.RideService.requestRide(riderId, validatedData.pickup, validatedData.destination, validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined, validatedData.isScheduled, validatedData.idempotencyKey, { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents }, validatedData.favoritePriority);
             res.status(201).json(trip);
         }
         catch (error) {
@@ -71,11 +74,15 @@ class RideController {
                 new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
             ]).catch(() => null);
             const distanceKm = route ? (route.distance / 1000) : 10.0; // fallback to 10km
-            const estimate = await fare_service_1.fareService.calculateRiderPriceEstimate(validatedData.pickup.lat, validatedData.pickup.lng, validatedData.requestedClass || types_1.VehicleClass.CORE, distanceKm);
+            const breakdown = (0, pricing_service_1.computeEstimate)({
+                distanceMeters: distanceKm * 1000,
+                durationSeconds: route ? route.eta : 600,
+            });
             res.json({
                 distance_km: distanceKm,
                 duration_seconds: route ? route.eta : 600,
-                ...estimate
+                fare: breakdown,
+                total_fare: breakdown.totalFare,
             });
         }
         catch (error) {
@@ -162,6 +169,58 @@ class RideController {
         catch (error) {
             console.error(`[RIDE] ❌ Delete history error: ${error.message}`);
             res.status(500).json({ error: 'Failed to delete activity record.' });
+        }
+    }
+    /**
+     * The user's active trip (any non-terminal status), role-aware. Used by
+     * the rider app to hydrate the trip screen when it is opened from a push
+     * notification deep link (e.g. "Your driver has arrived" → /trip).
+     */
+    static async getCurrent(req, res) {
+        try {
+            const userId = req.user?.id;
+            const role = req.user?.role;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const activeRole = role === 'DRIVER' ? types_1.UserRole.DRIVER : types_1.UserRole.RIDER;
+            const trip = await ride_service_1.RideService.getCurrentRide(userId, activeRole);
+            if (!trip)
+                return res.json({ trip: null });
+            if (trip.status === 'COMPLETED' || trip.status === 'CANCELLED') {
+                return res.json({ trip: null });
+            }
+            return res.json({ trip });
+        }
+        catch (error) {
+            console.error(`[RIDE] ❌ Get current ride error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to load current ride.' });
+        }
+    }
+    /**
+     * Idempotent cancel of the rider's current request, by rider identity —
+     * no tripId needed. The Flutter client calls this when the rider hits the
+     * top-right X / Cancel Ride during "searching", where a race can leave the
+     * client without a tripId yet (the socket tripUpdate round-trip). Always
+     * returns 200 when there is nothing active to cancel.
+     */
+    static async cancelCurrentRide(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const trip = await ride_service_1.RideService.getCurrentRide(userId, types_1.UserRole.RIDER);
+            if (!trip) {
+                return res.json({ cancelled: false, tripId: null });
+            }
+            if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
+                return res.status(409).json({ error: 'This ride is already in progress and cannot be cancelled.' });
+            }
+            await ride_service_1.RideService.cancelTrip(trip.id, userId);
+            res.json({ cancelled: true, tripId: trip.id });
+        }
+        catch (error) {
+            console.error(`[RIDE] ❌ Cancel current ride error: ${error.message}`);
+            res.status(400).json({ error: 'Unable to cancel the ride. Please try again.' });
         }
     }
     // ---- In-trip chat + masked call ---------------------------------------

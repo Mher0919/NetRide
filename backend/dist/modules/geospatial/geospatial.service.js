@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -476,13 +509,43 @@ class GeospatialService {
         }
     }
     /**
-     * Fallback autocomplete: Google Places → static suggestions.
+     * Autocomplete search using local PostGIS database (primary) with Google Places as fallback.
+     * Uses PostGIS for nearby places with text matching + proximity ranking.
      */
     static async autocompleteSearch(query, userLat, userLon) {
         const q = (query || '').trim();
         if (q.length < this.MIN_AUTOCOMPLETE_LEN)
             return [];
-        // Google Places Autocomplete fallback
+        // Primary: Local PostGIS database search (closest places first)
+        const lat = Number.isFinite(userLat) ? userLat : 34.0522;
+        const lon = Number.isFinite(userLon) ? userLon : -118.2437;
+        try {
+            const { placesRepository } = await Promise.resolve().then(() => __importStar(require('../places/places.repository')));
+            const localResults = await placesRepository.searchByTextAndProximity(q, lat, lon, 10);
+            if (localResults.length > 0) {
+                return localResults.map((r) => ({
+                    display_name: r.name + (r.formatted_address ? ', ' + r.formatted_address : ''),
+                    lat: r.lat,
+                    lon: r.lon,
+                    type: r.category?.toLowerCase() || 'point_of_interest',
+                    state: r.state || 'CA',
+                    distance_miles: r.distance_miles,
+                    address: {
+                        road: r.street || '',
+                        city: r.city || '',
+                        state: r.state || '',
+                        postcode: r.zip || '',
+                    },
+                    is_suggestion: false,
+                    place_id: r.id,
+                }));
+            }
+        }
+        catch (err) {
+            // Places table may not exist yet, fall through to Google
+            logger_1.logger.debug({ err: err?.message }, 'autocomplete_local_fallback');
+        }
+        // Fallback: Google Places Autocomplete
         if (this.googleMapsApiKey) {
             const googleResults = await this.googlePlacesAutocomplete(q, userLat, userLon);
             if (googleResults.length > 0)
@@ -566,7 +629,7 @@ GeospatialService.SEARCH_RADII_MILES = [1, 3, 5, 10, 25, 50];
 GeospatialService.MAX_PLACES = 10;
 GeospatialService.SEARCH_CACHE_TTL_S = 600;
 GeospatialService.TEXT_SEARCH_CACHE_TTL_S = 300;
-GeospatialService.MIN_AUTOCOMPLETE_LEN = 2;
+GeospatialService.MIN_AUTOCOMPLETE_LEN = 1;
 GeospatialService.MIN_TEXT_SEARCH_LEN = 4;
 GeospatialService.inFlight = new Map();
 /**

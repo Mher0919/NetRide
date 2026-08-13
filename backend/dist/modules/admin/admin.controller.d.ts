@@ -4,11 +4,8 @@ export declare class AdminController {
     static getStats(req: AuthRequest, res: Response): Promise<void>;
     static getUsers(req: AuthRequest, res: Response): Promise<void>;
     /**
-     * Admin view of a driver's vehicle classification vs. their ride-type
-     * preferences. Clearly separates:
-     *   - vehicleClass: the verified class derived from the vehicle
-     *   - eligibleRideTypes: everything the class can serve (tier-inclusive)
-     *   - preferences: which eligible types the driver opted INTO
+     * Admin view of a driver's ride eligibility. NetRide operates a single
+     * NetRide Premium — every approved vehicle is eligible.
      */
     static getDriverRidePreferences(req: AuthRequest, res: Response): Promise<void>;
     static getUserById(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;

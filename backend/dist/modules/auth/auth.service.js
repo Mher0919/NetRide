@@ -135,6 +135,16 @@ class AuthService {
                 };
             }
         }
+        // Email OTP verification for every non-admin password login. The 6-digit
+        // code is sent to the user's email; the app exchanges it via
+        // /auth/verify-otp, which then issues the session token.
+        if (user.role !== types_1.UserRole.ADMIN) {
+            await otp_service_1.OTPService.generateOTP(user.email);
+            return {
+                otp_required: true,
+                message: 'Verification code sent to email',
+            };
+        }
         // Check password expiration (90 days)
         const expirationDays = 90;
         const passwordChangedAt = user.password_changed_at ? new Date(user.password_changed_at) : new Date(0);
@@ -201,13 +211,22 @@ class AuthService {
             await database_1.pool.query(`UPDATE users SET phone_number = $1, is_verified = true, phone_verified = true WHERE id = $2`, [driverPhone, userId]);
             riderPhoneVerified = true;
         }
+        else if (!driverVerified && riderPhoneVerified && user.phone_number) {
+            // Dual-role user who verified their phone on the RIDER profile but never
+            // triggered the driver-side phone flow (the driver app skips step 2 when
+            // progress reports phone_verified from the users row). Backfill the
+            // drivers row so the driver profile is treated as onboarding-complete
+            // instead of bouncing the app back to onboarding forever.
+            await database_1.pool.query(`UPDATE drivers SET phone_number = $1, phone_verified = true WHERE user_id = $2`, [user.phone_number, userId]);
+        }
         const riderOnboardingComplete = riderPhoneVerified;
         const driverExists = !!driver;
         const driverPhoneVerified = driverVerified || riderPhoneVerified;
-        // The rider-facing endpoint only needs to report completion for the
-        // active app profile; driver step gating is enforced elsewhere. We mark
-        // the driver profile complete when a verified driver row exists.
-        const driverOnboardingComplete = driverExists && driverVerified;
+        // A dual-role user who verified the phone on the rider profile (users row)
+        // but never on the driver profile must still be considered complete once
+        // the driver onboarding steps are done — otherwise the driver app bounces
+        // between MainWrapper and the onboarding screen indefinitely.
+        const driverOnboardingComplete = driverExists && driverPhoneVerified;
         const roles = ['RIDER'];
         if (driverExists)
             roles.push('DRIVER');

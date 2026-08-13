@@ -19,6 +19,22 @@ import { matchQueue } from '../../queue/queue';
 import { matchJobsTotal, dispatchAcceptOutcomeTotal } from '../../observability/metrics';
 import { traceAsync, getCurrentTraceId } from '../../utils/tracing';
 import { RewardEngine } from '../../services/reward-engine.service';
+import {
+  notifyRideAccepted,
+  notifyRideStarted,
+  notifyRideCompleted,
+  notifyRideCancelled,
+} from '../../services/notification.service';
+
+/** Display name of a platform user (used in notification copy). */
+async function fetchDisplayName(userId: string): Promise<string> {
+  try {
+    const res = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+    return res.rows[0]?.full_name || 'Your driver';
+  } catch {
+    return 'Your driver';
+  }
+}
 
 export class RideService {
   static async rateRide(data: {
@@ -120,7 +136,8 @@ export class RideService {
     scheduledAt?: Date,
     isScheduled: boolean = false,
     idempotencyKey?: string,
-    rewards: { promoCode?: string; applyCredits?: boolean; creditUseCents?: number } = {}
+    rewards: { promoCode?: string; applyCredits?: boolean; creditUseCents?: number } = {},
+    favoritePriority: boolean = false
   ): Promise<Trip> {
     return traceAsync('RideService.requestRide', async () => {
       const traceId = getCurrentTraceId();
@@ -245,19 +262,14 @@ export class RideService {
       const isNow = !isScheduled || (scheduledAt && (scheduledAt.getTime() - Date.now() < 15 * 60 * 1000));
 
       if (isNow) {
-        if (env.LEGACY_SYNC_MATCHING) {
-          import('../../services/matching.service').then(({ matchingService }) => {
-            matchingService.findAndDispatch(io, trip.id, pickup.lat, pickup.lng, riderId);
-          });
-        } else {
-          matchQueue.add('matchRide', {
-            tripId: trip.id,
-            pickupLat: pickup.lat,
-            pickupLng: pickup.lng,
-            riderId,
-          }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
-          matchJobsTotal.inc({ outcome: 'enqueued' });
-        }
+        matchQueue.add('matchRide', {
+          tripId: trip.id,
+          pickupLat: pickup.lat,
+          pickupLng: pickup.lng,
+          riderId,
+          favoritePriority,
+        }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
+        matchJobsTotal.inc({ outcome: 'enqueued' });
       }
 
       // Rewards bookkeeping (non-blocking): referral state machine progress.
@@ -288,6 +300,31 @@ export class RideService {
       } else {
         throw new Error('You already have an active trip. Complete it before accepting another.');
       }
+    }
+
+    // Validate that this driver has an active offer for this ride.
+    // This prevents stale acceptances (e.g., driver accepts after timeout)
+    // and ensures the driver was actually offered this ride.
+    const { DriverOfferService, OfferStatus } = await import('../../services/driver-offer.service');
+    const rideOffer = await DriverOfferService.getOfferForRide(tripId);
+    if (!rideOffer) {
+      throw new Error('No active offer for this ride. The offer may have expired.');
+    }
+    if (rideOffer.driverId !== driverId) {
+      throw new Error('This ride was offered to a different driver.');
+    }
+    if (rideOffer.status !== OfferStatus.SENT) {
+      if (rideOffer.status === OfferStatus.EXPIRED) {
+        throw new Error('This ride offer has expired.');
+      }
+      throw new Error(`Offer is in state ${rideOffer.status} and cannot be accepted.`);
+    }
+
+    // Atomically accept the offer — this prevents race conditions where
+    // two workers or two app clients both try to accept the same offer.
+    const accepted = await DriverOfferService.acceptOffer(rideOffer.offerId);
+    if (!accepted) {
+      throw new Error('Failed to accept offer. It may have already been accepted or expired.');
     }
 
     // Resolve the fare from the ride's price snapshot (platform price —
@@ -385,6 +422,14 @@ export class RideService {
 
     // Broadcast to Admin Monitoring
     io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+
+    // Real phone notification: driver accepted the ride. Deduplicated by
+    // eventId (ride:accepted:{tripId}) — never blocks the accept path.
+    fetchDisplayName(driverId)
+      .then((driverName) =>
+        notifyRideAccepted(trip.rider_id, tripId, driverName, Math.round(finalFare * 100))
+      )
+      .catch(() => undefined);
 
     return updatedTrip;
   }
@@ -553,6 +598,18 @@ export class RideService {
     // Broadcast to Admin Monitoring
     io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
 
+    // Real phone notifications (fire-and-forget, deduped by eventId):
+    if (status === 'IN_PROGRESS' && updatedTrip.driver_id) {
+      fetchDisplayName(updatedTrip.driver_id)
+        .then((driverName) => notifyRideStarted(updatedTrip.rider_id, tripId, driverName))
+        .catch(() => undefined);
+    } else if (status === 'COMPLETED') {
+      const fareCents = Math.round(
+        parseFloat((updatedTrip as any).fare_amount ?? '0') * 100
+      );
+      notifyRideCompleted(updatedTrip.rider_id, tripId, fareCents).catch(() => undefined);
+    }
+
     return updatedTrip;
   }
 
@@ -570,7 +627,16 @@ export class RideService {
       throw new Error('Cannot cancel a ride that is already in progress or completed');
     }
 
-    const extra: any = { cancelled_at: new Date() };
+    const isDriverCancellingAfterAccept = userId === trip.driver_id && trip.status === 'ACCEPTED';
+
+    const extra: any = {};
+    if (isDriverCancellingAfterAccept) {
+      // Driver cancelled after accepting — release assignment and return
+      // the ride to REQUESTED so the system can re-match to another driver.
+      extra.driver_id = null;
+    } else {
+      extra.cancelled_at = new Date();
+    }
 
     // If driver was assigned, cleanup trajectory
     if (trip.driver_id) {
@@ -583,35 +649,62 @@ export class RideService {
       await NavigationService.clearTrip(tripId);
     }
 
-    const updatedTrip = await RideRepository.updateStatus(tripId, 'CANCELLED' as any, extra);
+    const newStatus = isDriverCancellingAfterAccept ? 'REQUESTED' : 'CANCELLED';
+    const updatedTrip = await RideRepository.updateStatus(tripId, newStatus as any, extra);
 
-    // Rewards ecosystem: void promo usage + refund applied credits.
-    // Non-blocking and idempotent (refunds carry unique ledger keys).
-    RewardEngine.onRideCancelled({
-      id: tripId,
-      rider_id: trip.rider_id,
-      driver_id: trip.driver_id ?? null,
-      fare_amount: (trip as any).fare_amount ?? null,
-      status: 'CANCELLED',
-    }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCancelled failed: ${err.message}`));
+    if (isDriverCancellingAfterAccept) {
+      // Driver cancelled after accept — re-queue matching so the system
+      // finds another driver for this ride.
+      const { matchQueue } = await import('../../queue/queue');
+      matchQueue.add('matchRide', {
+        tripId,
+        pickupLat: trip.pickup.lat,
+        pickupLng: trip.pickup.lng,
+        riderId: trip.rider_id,
+        retryCount: 0,
+      }).catch((err: any) => console.error(`[RIDE] Failed to re-enqueue match after driver cancel: ${err.message}`));
 
-    // Safety + navigation teardown on cancel. finalizeTrip is a no-op
-    // if the trip had no violations, so it's safe to call on every
-    // cancel path (driver cancels, rider cancels mid-ride, etc).
-    if (trip.driver_id) {
-      await SpeedingDetector.finalizeTrip(trip.driver_id, tripId);
-      NavigationService.emitEnded(
-        io, tripId, trip.driver_id, trip.rider_id
-      );
+      // Notify the rider that their previous driver cancelled and we're
+      // finding a new one.
+      io.to(`rider:${trip.rider_id}`).emit('tripUpdate', {
+        ...updatedTrip,
+        cancelReason: 'Your driver cancelled. Finding a new driver...',
+      });
+
+      // Real phone notification: driver cancelled after accept (deduped).
+      notifyRideCancelled(trip.rider_id, 'rider', tripId, 'driver').catch(() => undefined);
+    } else {
+      // Rewards ecosystem: void promo usage + refund applied credits.
+      RewardEngine.onRideCancelled({
+        id: tripId,
+        rider_id: trip.rider_id,
+        driver_id: trip.driver_id ?? null,
+        fare_amount: (trip as any).fare_amount ?? null,
+        status: 'CANCELLED',
+      }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCancelled failed: ${err.message}`));
+
+      // Safety + navigation teardown on cancel.
+      if (trip.driver_id) {
+        await SpeedingDetector.finalizeTrip(trip.driver_id, tripId);
+        NavigationService.emitEnded(
+          io, tripId, trip.driver_id, trip.rider_id
+        );
+      }
+
+      io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
+      if (trip.driver_id) {
+        io.to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
+      }
+
+      // Broadcast to Admin Monitoring
+      io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+
+      // Real phone notification: the rider cancelled an accepted ride, so
+      // the assigned driver is informed (deduped per trip).
+      if (trip.driver_id && trip.status === 'ACCEPTED') {
+        notifyRideCancelled(trip.driver_id, 'driver', tripId, 'rider').catch(() => undefined);
+      }
     }
-
-    io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
-    if (trip.driver_id) {
-      io.to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
-    }
-
-    // Broadcast to Admin Monitoring
-    io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
 
     return updatedTrip;
   }

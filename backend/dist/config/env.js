@@ -33,6 +33,27 @@ const envSchema = zod_1.z.object({
     ORS_API_KEY: zod_1.z.string().optional(),
     ORS_PROFILE: zod_1.z.string().default('driving-car'),
     ORS_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(8000),
+    // ---- Dispatch Engine (v2) -----------------------------------------------
+    // Initial preferred search radius (km). The engine starts here and expands
+    // through secondary/max radii when no suitable driver is found.
+    DISPATCH_INITIAL_RADIUS_KM: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(10),
+    // Secondary search radius (km) — attempted when the initial radius yields
+    // no eligible driver.
+    DISPATCH_SECONDARY_RADIUS_KM: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15),
+    // Maximum search radius (km) — absolute ceiling before giving up.
+    DISPATCH_MAX_RADIUS_KM: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(20),
+    // How long (ms) a single driver offer stays valid before expiring.
+    DRIVER_OFFER_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(20000),
+    // How long (seconds) a driver lock is held when reserved for a ride.
+    DRIVER_LOCK_TTL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(60),
+    // Max seconds since last driver heartbeat for location to be considered fresh.
+    DRIVER_LOCATION_FRESHNESS_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(60),
+    // Threshold (seconds) for considering a driver "near completion" of their
+    // current ride and thus eligible for a new dispatch offer.
+    NEAR_COMPLETION_THRESHOLD_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(300),
+    // Max number of candidate drivers to try per radius stage before expanding.
+    MAX_CANDIDATES_PER_RADIUS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(10),
+    // ---- Legacy dispatch config ----------------------------------------------
     DRIVER_MATCH_RADIUS_KM: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     DRIVER_ACCEPT_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15000),
     DRIVER_PICKUP_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15),
@@ -102,6 +123,14 @@ const envSchema = zod_1.z.object({
     FCM_SERVICE_ACCOUNT_PATH: zod_1.z.string().optional(),
     // Alternatively, paste the JSON directly (base64-encoded for safety).
     FCM_SERVICE_ACCOUNT_B64: zod_1.z.string().optional(),
+    // ---- Referral system ----------------------------------------------------
+    // Secret used to sign referral QR payloads. MUST be stable across
+    // restarts or every outstanding QR becomes invalid.
+    REFERRAL_QR_SECRET: zod_1.z.string().default('netride-referral-dev-secret'),
+    // Per-referral reward in cents (both sides, $5.00 default).
+    REFERRAL_REWARD_CENTS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(500),
+    // Lifetime of a referral QR payload before the app must refresh it.
+    REFERRAL_QR_TTL_DAYS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(365),
 });
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {

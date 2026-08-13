@@ -67,7 +67,7 @@ class AdminController {
         }
     }
     static async getUsers(req, res) {
-        const { role, status, search, page = 1, limit = 10, dangerousOnly, documentPending } = req.query;
+        const { role, status, search, page = 1, limit = 10, dangerousOnly, documentPending, includeTest } = req.query;
         const skip = (Number(page) - 1) * Number(limit);
         const where = {};
         if (role) {
@@ -79,6 +79,12 @@ class AdminController {
             else {
                 where.role = role;
             }
+        }
+        // Test users are auto-generated E2E accounts (@test.netride). They flood
+        // the first pages (sorted by created_at DESC) and bury real users, so
+        // they are hidden by default; admins opt in with includeTest=true.
+        if (includeTest !== 'true') {
+            where.NOT = { email: { endsWith: '@test.netride' } };
         }
         if (status)
             where.verification_status = status;
@@ -152,16 +158,13 @@ class AdminController {
         }
     }
     /**
-     * Admin view of a driver's vehicle classification vs. their ride-type
-     * preferences. Clearly separates:
-     *   - vehicleClass: the verified class derived from the vehicle
-     *   - eligibleRideTypes: everything the class can serve (tier-inclusive)
-     *   - preferences: which eligible types the driver opted INTO
+     * Admin view of a driver's ride eligibility. NetRide operates a single
+     * NetRide Premium — every approved vehicle is eligible.
      */
     static async getDriverRidePreferences(req, res) {
         const { id } = req.params;
         try {
-            const { getEligibleRideTypes, ALL_RIDE_TYPES, rideTypeLabel } = await Promise.resolve().then(() => __importStar(require('../../services/vehicleEligibility.service')));
+            const { getEligibleRideTypes, rideTypeLabel } = await Promise.resolve().then(() => __importStar(require('../../services/vehicleEligibility.service')));
             const veh = await database_1.pool.query(`SELECT dv.service_class
          FROM driver_vehicles dv
          WHERE dv.driver_id = $1
@@ -169,14 +172,6 @@ class AdminController {
          LIMIT 1`, [id]);
             const vehicleClass = veh.rows[0]?.service_class || 'CORE';
             const eligible = getEligibleRideTypes(vehicleClass);
-            const prefsRes = await database_1.pool.query(`SELECT ride_type, enabled FROM driver_ride_preferences WHERE driver_id = $1`, [id]);
-            const enabledByType = new Map();
-            for (const r of prefsRes.rows)
-                enabledByType.set(r.ride_type, r.enabled);
-            const preferences = {};
-            for (const rt of eligible) {
-                preferences[rt] = enabledByType.has(rt) ? enabledByType.get(rt) : true;
-            }
             res.json({
                 vehicleClass,
                 vehicleClassLabel: rideTypeLabel(vehicleClass),
@@ -185,12 +180,11 @@ class AdminController {
                     acc[rt] = rideTypeLabel(rt);
                     return acc;
                 }, {}),
-                preferences,
             });
         }
         catch (error) {
-            console.error(`[ADMIN] ❌ Driver ride preferences error: ${error.message}`);
-            res.status(500).json({ error: 'Failed to load driver ride preferences.' });
+            console.error(`[ADMIN] ❌ Driver ride eligibility error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to load driver ride eligibility.' });
         }
     }
     static async getUserById(req, res) {

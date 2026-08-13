@@ -41,6 +41,8 @@ import walletRoutes from './modules/wallet/wallet.routes';
 import routingApi from './routing/api/routing-api';
 import pushRoutes from './modules/push/push.routes';
 import placesRoutes from './modules/places/places.routes';
+import notificationsRoutes from './modules/notifications/notifications.routes';
+import heatmapRoutes from './modules/heatmap/heatmap.routes';
 import { GeospatialService } from './modules/geospatial/geospatial.service';
 import { UploadService } from './services/upload.service';
 import { SpeedingDetector } from './services/speeding_detector';
@@ -180,6 +182,8 @@ app.use('/api/wallet', walletRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/places', placesRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/heatmap', heatmapRoutes);
 app.post('/api/upload', UploadService.upload);
 
 // Global Error Handler
@@ -566,6 +570,16 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ Rider wallet schema (039) applied');
+    }
+
+    // Real phone notifications + demand heatmap foundations (040)
+    const hasDeviceTokens = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'device_tokens'");
+    if (hasDeviceTokens.rowCount === 0) {
+      console.log('⚡ Applying notifications + heatmap schema (040)...');
+      const schemaPath = path.join(__dirname, '../migrations/040_notifications_heatmap.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Notifications + heatmap schema (040) applied');
     }
 
     console.log('🚀 All migrations completed');

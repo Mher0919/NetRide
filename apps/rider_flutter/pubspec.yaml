@@ -34,6 +34,11 @@ dependencies:
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.1.1
 
+  # Real phone push notifications (FCM + local rendering + device registry).
+  firebase_core: ^4.13.0
+  firebase_messaging: ^16.5.0
+  flutter_local_notifications: ^22.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

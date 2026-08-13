@@ -21,6 +21,7 @@ import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'services/sound_service.dart';
 import 'services/navigation_voice_service.dart';
+import 'services/notification_service.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -35,6 +36,17 @@ import 'services/navigation_service.dart';
 /// is complete. Until it confirms completion, the app must stay in onboarding.
 String kInitialTargetRoute = '/login';
 
+/// Notification taps carry a backend-assigned route. The driver currently
+/// receives ride-cancelled pushes only (route '/') — those land on the
+/// dashboard, so no navigation is needed. '/trip' is handled for future
+/// ride-scoped pushes.
+void _routeFromNotification(Map<String, String> data) {
+  final nav = ApiService.navigatorKey.currentState;
+  if (nav == null) return;
+  final route = data['route'];
+  if (route == '/trip') nav.pushNamed('/trip');
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
@@ -47,6 +59,10 @@ void main() async {
   await ApiService.init();
   await SoundService.instance.init();
   await NavigationVoiceService.instance.init();
+
+  // Push notifications: boot FCM (optional — degrades gracefully when no
+  // google-services.json is present) and configure tap navigation.
+  await NotificationService.instance.init(onTap: _routeFromNotification);
 
   final prefs = await SharedPreferences.getInstance();
 
@@ -109,6 +125,12 @@ void main() async {
     }
   } else {
     kInitialTargetRoute = '/login';
+  }
+
+  // Register this device (FCM token) with the backend so pushes reach this
+  // phone. Safe on every cold start — the server upserts per token.
+  if (token != null) {
+    await NotificationService.instance.registerDevice();
   }
 
   runApp(

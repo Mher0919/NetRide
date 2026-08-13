@@ -8,29 +8,29 @@ export declare const updateProfileSchema: z.ZodObject<{
         profile_image_url: z.ZodOptional<z.ZodString>;
         date_of_birth: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
-        phone_number?: string | undefined;
         full_name?: string | undefined;
-        date_of_birth?: string | undefined;
         profile_image_url?: string | undefined;
+        phone_number?: string | undefined;
+        date_of_birth?: string | undefined;
     }, {
-        phone_number?: string | undefined;
         full_name?: string | undefined;
-        date_of_birth?: string | undefined;
         profile_image_url?: string | undefined;
+        phone_number?: string | undefined;
+        date_of_birth?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
-        phone_number?: string | undefined;
         full_name?: string | undefined;
-        date_of_birth?: string | undefined;
         profile_image_url?: string | undefined;
+        phone_number?: string | undefined;
+        date_of_birth?: string | undefined;
     };
 }, {
     body: {
-        phone_number?: string | undefined;
         full_name?: string | undefined;
-        date_of_birth?: string | undefined;
         profile_image_url?: string | undefined;
+        phone_number?: string | undefined;
+        date_of_birth?: string | undefined;
     };
 }>;
 export declare const verifyIdentitySchema: z.ZodObject<{

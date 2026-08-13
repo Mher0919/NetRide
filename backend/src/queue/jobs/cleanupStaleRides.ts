@@ -3,10 +3,14 @@ import { prisma } from '../../services/prisma.service';
 import { TripStatus } from '../../types';
 import { RideRepository } from '../../modules/ride/ride.repository';
 import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } from '../../config/redis';
+import { sweepExpiredActivity } from '../../services/demand.service';
 
 export async function handleCleanupStaleRides(io: Server) {
   return async (job: any) => {
     try {
+      // Demand heatmap retention: purge rider_activity rows beyond the
+      // (window + buffer) horizon every 5 minutes.
+      await sweepExpiredActivity();
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
       const staleRides = await prisma.ride.findMany({
         where: {

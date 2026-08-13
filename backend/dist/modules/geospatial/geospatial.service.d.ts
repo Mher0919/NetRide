@@ -41,7 +41,7 @@ export declare class GeospatialService {
     private static readonly MAX_PLACES;
     private static readonly SEARCH_CACHE_TTL_S;
     private static readonly TEXT_SEARCH_CACHE_TTL_S;
-    static readonly MIN_AUTOCOMPLETE_LEN = 2;
+    static readonly MIN_AUTOCOMPLETE_LEN = 1;
     private static readonly MIN_TEXT_SEARCH_LEN;
     private static inFlight;
     private static get googleMapsApiKey();
@@ -66,7 +66,8 @@ export declare class GeospatialService {
     /** Geoapify Geocoding Autocomplete — PRIMARY provider. Returns real nearby coordinates. */
     private static geoapifyAutocomplete;
     /**
-     * Fallback autocomplete: Google Places → static suggestions.
+     * Autocomplete search using local PostGIS database (primary) with Google Places as fallback.
+     * Uses PostGIS for nearby places with text matching + proximity ranking.
      */
     static autocompleteSearch(query: string, userLat?: number, userLon?: number): Promise<any[]>;
     /** Sort results by distance (closest first). Results without distance go last. */

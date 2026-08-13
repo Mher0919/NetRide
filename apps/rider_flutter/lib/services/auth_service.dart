@@ -5,6 +5,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 import 'user_service.dart';
+import 'notification_service.dart';
+
+/// Seconds the app waits for the backend push registry before continuing —
+/// zero: registration is fire-and-forget on login paths (the server also
+/// upserts on every cold start from main()).
+Future<void> _registerDeviceForCurrentUser() async {
+  try {
+    await NotificationService.instance.registerDevice();
+  } catch (e) {
+    debugPrint('[AUTH] Device registration skipped: $e');
+  }
+}
 
 class AuthService {
   static final ValueNotifier<bool> isAuthenticatedNotifier = ValueNotifier<bool>(false);
@@ -37,6 +49,8 @@ class AuthService {
         
         final verifyToken = prefs.getString('jwt_token');
         debugPrint('[AUTH DEBUG] 💾 Token saved to storage. Read-back check: ${verifyToken != null ? "SUCCESS" : "FAILED"}');
+        
+        await _registerDeviceForCurrentUser();
         
         return data;
       }
@@ -110,6 +124,7 @@ class AuthService {
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['id']);
         await prefs.setString('user_role', data['user']['role']);
+        await _registerDeviceForCurrentUser();
         return data;
       }
       throw Exception('Verification failed');
@@ -142,6 +157,7 @@ class AuthService {
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['id']);
         await prefs.setString('user_role', data['user']['role']);
+        await _registerDeviceForCurrentUser();
         return data;
       }
       throw Exception('Signup failed');
@@ -172,6 +188,7 @@ class AuthService {
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['id']);
         await prefs.setString('user_role', data['user']['role']);
+        await _registerDeviceForCurrentUser();
         return data;
       }
       throw Exception('Login failed');
@@ -271,6 +288,9 @@ class AuthService {
   }
 
   static Future<void> logout() async {
+    // Stop pushes on THIS device first — the HTTP call needs the JWT still
+    // present in prefs, so unregister before clearing credentials.
+    await NotificationService.instance.clearDevice();
     try {
       await Supabase.instance.client.auth.signOut();
     } catch (e) {
@@ -311,6 +331,7 @@ class AuthService {
       if (res['token'] != null) {
         debugPrint('[AUTH SYNC] ✅ Sync successful');
         isAuthenticatedNotifier.value = true;
+        await _registerDeviceForCurrentUser();
         return true;
       }
       return false;

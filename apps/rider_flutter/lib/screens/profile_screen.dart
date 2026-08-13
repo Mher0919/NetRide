@@ -20,6 +20,8 @@ import 'settings_screen.dart';
 import 'credits_screen.dart';
 import 'wallet_screen.dart';
 import 'referral_screen.dart';
+import 'favorite_drivers_screen.dart';
+import 'notifications_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -486,6 +488,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: 'Settings',
                 children: [
                   _buildMenuTile(
+                    icon: Icons.favorite_outline_rounded,
+                    title: 'Favorite Drivers',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const FavoriteDriversScreen()),
+                    ),
+                  ),
+                  const Divider(height: 32),
+                  _buildMenuTile(
+                    icon: Icons.notifications_outlined,
+                    title: 'Notifications',
+                    trailing: FutureBuilder<int>(
+                      future: _unreadNotificationCount(),
+                      builder: (context, snapshot) {
+                        final unread = snapshot.data ?? 0;
+                        if (unread <= 0) return const SizedBox.shrink();
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2E7D32),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '$unread',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+                    ),
+                  ),
+                  const Divider(height: 32),
+                  _buildMenuTile(
                     icon: Icons.settings_outlined,
                     title: 'App Settings',
                     onTap: () => Navigator.push(
@@ -905,6 +947,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
       ],
     );
+  }
+
+  /// Unread push-notification count for the profile badge. Fails silently —
+  /// the badge simply stays hidden when the endpoint is unreachable.
+  Future<int> _unreadNotificationCount() async {
+    try {
+      final response = await ApiService.dio.get('notifications/unread-count');
+      return ((response.data as Map<String, dynamic>)['count'] as num?)?.toInt() ?? 0;
+    } catch (e) {
+      return 0;
+    }
   }
 
   Widget _buildMenuTile({

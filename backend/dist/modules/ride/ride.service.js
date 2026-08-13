@@ -41,18 +41,30 @@ console.log('[SVC_INIT] FULL findCurrentByDriverId toString:\n' + (ride_reposito
 const locations_service_1 = require("../location/locations.service");
 const geospatial_service_1 = require("../geospatial/geospatial.service");
 const types_1 = require("../../types");
-const env_1 = require("../../config/env");
 const app_1 = require("../../app");
 const database_1 = require("../../config/database");
 const redis_1 = require("../../config/redis");
-const fare_service_1 = require("../../services/fare.service");
+const pricing_service_1 = require("../../services/pricing.service");
 const navigation_service_1 = require("../../services/navigation.service");
+const route_store_service_1 = require("../../services/route-store.service");
 const speeding_detector_1 = require("../../services/speeding_detector");
 const driver_service_1 = require("../driver/driver.service");
 const testUser_1 = require("../../utils/testUser");
 const queue_1 = require("../../queue/queue");
 const metrics_1 = require("../../observability/metrics");
 const tracing_1 = require("../../utils/tracing");
+const reward_engine_service_1 = require("../../services/reward-engine.service");
+const notification_service_1 = require("../../services/notification.service");
+/** Display name of a platform user (used in notification copy). */
+async function fetchDisplayName(userId) {
+    try {
+        const res = await database_1.pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+        return res.rows[0]?.full_name || 'Your driver';
+    }
+    catch {
+        return 'Your driver';
+    }
+}
 class RideService {
     static async rateRide(data) {
         const client = await database_1.pool.connect();
@@ -118,10 +130,10 @@ class RideService {
             client.release();
         }
     }
-    static async requestRide(riderId, pickup, destination, requestedClass = types_1.VehicleClass.CORE, scheduledAt, isScheduled = false, idempotencyKey) {
+    static async requestRide(riderId, pickup, destination, scheduledAt, isScheduled = false, idempotencyKey, rewards = {}, favoritePriority = false) {
         return (0, tracing_1.traceAsync)('RideService.requestRide', async () => {
             const traceId = (0, tracing_1.getCurrentTraceId)();
-            console.log(`[RIDE] New request from rider ${riderId} for class ${requestedClass}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
+            console.log(`[RIDE] New request from rider ${riderId}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
             // Idempotency: if key provided, check for existing ride
             if (idempotencyKey) {
                 const existing = await database_1.pool.query(`SELECT * FROM rides WHERE idempotency_key = $1 AND rider_id = $2`, [idempotencyKey, riderId]);
@@ -142,68 +154,103 @@ class RideService {
             console.log(`[RIDE] Route fetched in ${Date.now() - routeStart}ms (cached=${route != null})`);
             const distanceKm = route ? (route.distance / 1000) : 10.0;
             const etaSeconds = route ? route.eta : 600;
-            // Calculate maximum fare and saving likelihood
-            const fareStart = Date.now();
-            const estimate = await fare_service_1.fareService.calculateRiderPriceEstimate(pickup.lat, pickup.lng, requestedClass, distanceKm);
-            console.log(`[RIDE] Fare calculated in ${Date.now() - fareStart}ms`);
-            // Use a transactional insert for safety
-            const res = await database_1.pool.query(`INSERT INTO rides (
-          rider_id, status, pickup_lat, pickup_lng, pickup_address,
-          destination_lat, destination_lng, destination_address,
-          requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
-          distance_meters, duration_seconds, initial_max_fare, saving_likelihood,
-          idempotency_key
-        )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-         RETURNING *`, [
-                riderId,
-                types_1.TripStatus.REQUESTED,
-                pickup.lat,
-                pickup.lng,
-                pickup.address,
-                destination.lat,
-                destination.lng,
-                destination.address,
-                requestedClass || 'CORE',
-                snapshotRating,
-                scheduledAt || null,
-                isScheduled,
-                route ? Math.round(route.distance) : null,
-                etaSeconds,
-                estimate.maxFare,
-                estimate.savingLikelihood,
-                idempotencyKey || null
-            ]);
-            const trip = await ride_repository_1.RideRepository.findById(res.rows[0].id);
+            // Every ride request runs through one transactional path: ride INSERT
+            // + price snapshot + promo/credits/wallet all commit atomically. A
+            // failed promo/credits application aborts the entire request so the
+            // rider can fix the code and re-request. The wallet is the default
+            // payment method — it is charged the fare remaining after discounts.
+            const client = await database_1.pool.connect();
+            let tripId;
+            try {
+                await client.query('BEGIN');
+                const res = await client.query(`INSERT INTO rides (
+            rider_id, status, pickup_lat, pickup_lng, pickup_address,
+            destination_lat, destination_lng, destination_address,
+            requested_class, snapshot_rider_rating, scheduled_at, is_scheduled,
+            distance_meters, duration_seconds, idempotency_key
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+           RETURNING id`, [
+                    riderId,
+                    types_1.TripStatus.REQUESTED,
+                    pickup.lat,
+                    pickup.lng,
+                    pickup.address,
+                    destination.lat,
+                    destination.lng,
+                    destination.address,
+                    'CORE',
+                    snapshotRating,
+                    scheduledAt || null,
+                    isScheduled,
+                    route ? Math.round(route.distance) : null,
+                    etaSeconds,
+                    idempotencyKey || null
+                ]);
+                tripId = res.rows[0].id;
+                const breakdown = await (0, pricing_service_1.createPriceSnapshot)(tripId, {
+                    distanceMeters: route ? route.distance : distanceKm * 1000,
+                    durationSeconds: etaSeconds,
+                }, client);
+                await reward_engine_service_1.RewardEngine.applyToRideRequest(client, {
+                    riderId,
+                    rideId: tripId,
+                    fareCents: Math.round(breakdown.totalFare * 100),
+                    promoCode: rewards.promoCode,
+                    applyCredits: rewards.applyCredits,
+                    creditUseCents: rewards.creditUseCents,
+                });
+                await client.query('COMMIT');
+            }
+            catch (err) {
+                try {
+                    await client.query('ROLLBACK');
+                }
+                catch { /* noop */ }
+                throw err;
+            }
+            finally {
+                client.release();
+            }
+            const trip = await ride_repository_1.RideRepository.findById(tripId);
             if (!trip)
                 throw new Error('Failed to create trip record');
             if (route) {
                 trip.route_geometry = route.geometry;
+                // Persist the rider-generated route as the authoritative
+                // destination leg (pickup → destination). The driver reuses it
+                // at IN_PROGRESS instead of requesting another Google route.
+                route_store_service_1.RouteStoreService.saveRideRoute({
+                    rideId: trip.id,
+                    leg: 'destination',
+                    origin: [pickup.lat, pickup.lng],
+                    destination: [destination.lat, destination.lng],
+                    distanceMeters: route.distance,
+                    durationSeconds: route.osrm_duration,
+                    trafficDurationSeconds: null,
+                    etaSeconds: route.eta,
+                    geometry: route.geometry,
+                    steps: route.steps ?? [],
+                    engine: route.engine,
+                    cacheHit: route.cache_hit === true,
+                }).catch((err) => console.error(`[RIDE] ride_routes persist failed: ${err.message}`));
             }
             // Trigger Matching ONLY if it's NOT a future scheduled ride
             // or if scheduledAt is within the next 15 minutes.
             const isNow = !isScheduled || (scheduledAt && (scheduledAt.getTime() - Date.now() < 15 * 60 * 1000));
             if (isNow) {
-                if (env_1.env.LEGACY_SYNC_MATCHING) {
-                    Promise.resolve().then(() => __importStar(require('../../services/matching.service'))).then(({ matchingService }) => {
-                        matchingService.findAndDispatch(app_1.io, trip.id, pickup.lat, pickup.lng, requestedClass, riderId);
-                    });
-                }
-                else {
-                    queue_1.matchQueue.add('matchRide', {
-                        tripId: trip.id,
-                        pickupLat: pickup.lat,
-                        pickupLng: pickup.lng,
-                        requestedClass,
-                        riderId,
-                    }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
-                    metrics_1.matchJobsTotal.inc({ outcome: 'enqueued' });
-                }
+                queue_1.matchQueue.add('matchRide', {
+                    tripId: trip.id,
+                    pickupLat: pickup.lat,
+                    pickupLng: pickup.lng,
+                    riderId,
+                    favoritePriority,
+                }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
+                metrics_1.matchJobsTotal.inc({ outcome: 'enqueued' });
             }
-            // Update Redis Demand
-            redis_1.redis.incr(`demand:count:${requestedClass}`).then(() => {
-                redis_1.redis.expire(`demand:count:${requestedClass}`, 600);
-            });
+            // Rewards bookkeeping (non-blocking): referral state machine progress.
+            reward_engine_service_1.RewardEngine.onRideRequested({ id: trip.id, rider_id: riderId, driver_id: null, fare_amount: null, status: 'REQUESTED' })
+                .catch((err) => console.error(`[RIDE] ⚠️ onRideRequested failed: ${err.message}`));
             return trip;
         });
     }
@@ -230,15 +277,39 @@ class RideService {
                 throw new Error('You already have an active trip. Complete it before accepting another.');
             }
         }
-        // Fetch driver's chosen price_per_mile
-        const driverPricing = await database_1.pool.query('SELECT price_per_mile FROM drivers WHERE user_id = $1', [driverId]);
-        const driverPricePerMile = parseFloat(driverPricing.rows[0]?.price_per_mile || '2.00');
-        // Distance in miles
-        const distanceMiles = (trip.distance_km || 0) * 0.621371;
-        const calculatedFare = Math.round(driverPricePerMile * distanceMiles * 100) / 100;
-        // Final fare is the minimum of initial max fare and calculated driver fare
-        const maxFare = parseFloat(trip.initial_max_fare || '999');
-        const finalFare = Math.min(maxFare, Math.max(5.00, calculatedFare));
+        // Validate that this driver has an active offer for this ride.
+        // This prevents stale acceptances (e.g., driver accepts after timeout)
+        // and ensures the driver was actually offered this ride.
+        const { DriverOfferService, OfferStatus } = await Promise.resolve().then(() => __importStar(require('../../services/driver-offer.service')));
+        const rideOffer = await DriverOfferService.getOfferForRide(tripId);
+        if (!rideOffer) {
+            throw new Error('No active offer for this ride. The offer may have expired.');
+        }
+        if (rideOffer.driverId !== driverId) {
+            throw new Error('This ride was offered to a different driver.');
+        }
+        if (rideOffer.status !== OfferStatus.SENT) {
+            if (rideOffer.status === OfferStatus.EXPIRED) {
+                throw new Error('This ride offer has expired.');
+            }
+            throw new Error(`Offer is in state ${rideOffer.status} and cannot be accepted.`);
+        }
+        // Atomically accept the offer — this prevents race conditions where
+        // two workers or two app clients both try to accept the same offer.
+        const accepted = await DriverOfferService.acceptOffer(rideOffer.offerId);
+        if (!accepted) {
+            throw new Error('Failed to accept offer. It may have already been accepted or expired.');
+        }
+        // Resolve the fare from the ride's price snapshot (platform price —
+        // identical for every driver). Falls back to a live estimate for
+        // legacy rides created before snapshots existed.
+        const snapshot = await (0, pricing_service_1.getSnapshotForRide)(tripId);
+        const finalFare = snapshot
+            ? snapshot.final_fare
+            : (0, pricing_service_1.computeEstimate)({
+                distanceMeters: (trip.distance_km || 10.0) * 1000,
+                durationSeconds: (trip.duration_minutes ? trip.duration_minutes * 60 : 600),
+            }).totalFare;
         // Capture Compliance Snapshot
         const driverProfile = await database_1.pool.query(`SELECT d.*, dv.inspection_photo_url, dv.inspection_expiry_date, dv.inspection_status, dv.license_plate_number
        FROM drivers d
@@ -304,6 +375,11 @@ class RideService {
         metrics_1.dispatchAcceptOutcomeTotal.inc({ outcome: 'accepted' });
         // Broadcast to Admin Monitoring
         app_1.io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+        // Real phone notification: driver accepted the ride. Deduplicated by
+        // eventId (ride:accepted:{tripId}) — never blocks the accept path.
+        fetchDisplayName(driverId)
+            .then((driverName) => (0, notification_service_1.notifyRideAccepted)(trip.rider_id, tripId, driverName, Math.round(finalFare * 100)))
+            .catch(() => undefined);
         return updatedTrip;
     }
     static async updateTripStatus(tripId, status, userId) {
@@ -341,7 +417,35 @@ class RideService {
             try {
                 const driverLoc = await locations_service_1.LocationsService.getDriverLocation(userId);
                 if (driverLoc) {
-                    const destRoute = await navigation_service_1.NavigationService.cacheRouteLeg(tripId, 'destination', [driverLoc.lat, driverLoc.lng], [updatedTrip.destination.lat, updatedTrip.destination.lng]);
+                    // Reuse the rider-generated route (stored at request time) when
+                    // the driver is at/near pickup and the route is fresh — no
+                    // Google call. Only fall back to a fresh computation otherwise.
+                    const storedDest = await route_store_service_1.RouteStoreService.getRideRoute(tripId, 'destination');
+                    let destRoute = null;
+                    if (storedDest && storedDest.geometry.coordinates.length >= 2) {
+                        const ageMs = Date.now() - new Date(storedDest.createdAt).getTime();
+                        const pickupDistM = (0, route_store_service_1.haversineMeters)([driverLoc.lat, driverLoc.lng], [updatedTrip.pickup.lat, updatedTrip.pickup.lng]);
+                        if (ageMs <= 2 * 60 * 60 * 1000 && pickupDistM <= 500) {
+                            destRoute = {
+                                distance: storedDest.distanceMeters,
+                                osrm_duration: storedDest.durationSeconds,
+                                duration: storedDest.durationSeconds,
+                                eta: storedDest.etaSeconds,
+                                geometry: storedDest.geometry,
+                                polyline: storedDest.geometry.coordinates,
+                                steps: storedDest.steps,
+                                speedLimitsByRoad: {},
+                                cache_hit: storedDest.cacheHit,
+                                model_multiplier: 1.0,
+                                engine: storedDest.engine,
+                                trafficDurationSeconds: storedDest.trafficDurationSeconds,
+                                cachedAt: storedDest.createdAt,
+                            };
+                        }
+                    }
+                    if (!destRoute) {
+                        destRoute = await navigation_service_1.NavigationService.cacheRouteLeg(tripId, 'destination', [driverLoc.lat, driverLoc.lng], [updatedTrip.destination.lat, updatedTrip.destination.lng]);
+                    }
                     await database_1.pool.query(`UPDATE rides SET route_metadata = route_metadata || $1::jsonb WHERE id = $2`, [JSON.stringify({ destination: destRoute }), tripId]);
                     navigation_service_1.NavigationService.emitLegAdvanced(app_1.io, tripId, updatedTrip.driver_id, updatedTrip.rider_id, destRoute);
                 }
@@ -379,6 +483,16 @@ class RideService {
             catch (err) {
                 console.warn(`[RIDE] ⚠️ Wallet credit failed (non-blocking) for trip ${tripId}: ${err.message}`);
             }
+            // Rewards ecosystem: finalize promo usage + partner commission and
+            // grant any referral rewards. Non-blocking — must never block the
+            // trip end. Fully idempotent (unique guards on every table).
+            reward_engine_service_1.RewardEngine.onRideCompleted({
+                id: tripId,
+                rider_id: updatedTrip.rider_id,
+                driver_id: updatedTrip.driver_id,
+                fare_amount: updatedTrip.fare_amount ?? null,
+                status: 'COMPLETED',
+            }).catch((err) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCompleted failed: ${err.message}`));
         }
         app_1.io.to(`rider:${updatedTrip.rider_id}`).emit('tripUpdate', updatedTrip);
         if (updatedTrip.driver_id) {
@@ -386,6 +500,16 @@ class RideService {
         }
         // Broadcast to Admin Monitoring
         app_1.io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+        // Real phone notifications (fire-and-forget, deduped by eventId):
+        if (status === 'IN_PROGRESS' && updatedTrip.driver_id) {
+            fetchDisplayName(updatedTrip.driver_id)
+                .then((driverName) => (0, notification_service_1.notifyRideStarted)(updatedTrip.rider_id, tripId, driverName))
+                .catch(() => undefined);
+        }
+        else if (status === 'COMPLETED') {
+            const fareCents = Math.round(parseFloat(updatedTrip.fare_amount ?? '0') * 100);
+            (0, notification_service_1.notifyRideCompleted)(updatedTrip.rider_id, tripId, fareCents).catch(() => undefined);
+        }
         return updatedTrip;
     }
     static async cancelTrip(tripId, userId) {
@@ -400,7 +524,16 @@ class RideService {
         if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
             throw new Error('Cannot cancel a ride that is already in progress or completed');
         }
-        const extra = { cancelled_at: new Date() };
+        const isDriverCancellingAfterAccept = userId === trip.driver_id && trip.status === 'ACCEPTED';
+        const extra = {};
+        if (isDriverCancellingAfterAccept) {
+            // Driver cancelled after accepting — release assignment and return
+            // the ride to REQUESTED so the system can re-match to another driver.
+            extra.driver_id = null;
+        }
+        else {
+            extra.cancelled_at = new Date();
+        }
         // If driver was assigned, cleanup trajectory
         if (trip.driver_id) {
             const trajectory = await locations_service_1.LocationsService.getTrajectory(tripId);
@@ -411,20 +544,54 @@ class RideService {
             await locations_service_1.LocationsService.clearTrajectory(tripId);
             await navigation_service_1.NavigationService.clearTrip(tripId);
         }
-        const updatedTrip = await ride_repository_1.RideRepository.updateStatus(tripId, 'CANCELLED', extra);
-        // Safety + navigation teardown on cancel. finalizeTrip is a no-op
-        // if the trip had no violations, so it's safe to call on every
-        // cancel path (driver cancels, rider cancels mid-ride, etc).
-        if (trip.driver_id) {
-            await speeding_detector_1.SpeedingDetector.finalizeTrip(trip.driver_id, tripId);
-            navigation_service_1.NavigationService.emitEnded(app_1.io, tripId, trip.driver_id, trip.rider_id);
+        const newStatus = isDriverCancellingAfterAccept ? 'REQUESTED' : 'CANCELLED';
+        const updatedTrip = await ride_repository_1.RideRepository.updateStatus(tripId, newStatus, extra);
+        if (isDriverCancellingAfterAccept) {
+            // Driver cancelled after accept — re-queue matching so the system
+            // finds another driver for this ride.
+            const { matchQueue } = await Promise.resolve().then(() => __importStar(require('../../queue/queue')));
+            matchQueue.add('matchRide', {
+                tripId,
+                pickupLat: trip.pickup.lat,
+                pickupLng: trip.pickup.lng,
+                riderId: trip.rider_id,
+                retryCount: 0,
+            }).catch((err) => console.error(`[RIDE] Failed to re-enqueue match after driver cancel: ${err.message}`));
+            // Notify the rider that their previous driver cancelled and we're
+            // finding a new one.
+            app_1.io.to(`rider:${trip.rider_id}`).emit('tripUpdate', {
+                ...updatedTrip,
+                cancelReason: 'Your driver cancelled. Finding a new driver...',
+            });
+            // Real phone notification: driver cancelled after accept (deduped).
+            (0, notification_service_1.notifyRideCancelled)(trip.rider_id, 'rider', tripId, 'driver').catch(() => undefined);
         }
-        app_1.io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
-        if (trip.driver_id) {
-            app_1.io.to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
+        else {
+            // Rewards ecosystem: void promo usage + refund applied credits.
+            reward_engine_service_1.RewardEngine.onRideCancelled({
+                id: tripId,
+                rider_id: trip.rider_id,
+                driver_id: trip.driver_id ?? null,
+                fare_amount: trip.fare_amount ?? null,
+                status: 'CANCELLED',
+            }).catch((err) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCancelled failed: ${err.message}`));
+            // Safety + navigation teardown on cancel.
+            if (trip.driver_id) {
+                await speeding_detector_1.SpeedingDetector.finalizeTrip(trip.driver_id, tripId);
+                navigation_service_1.NavigationService.emitEnded(app_1.io, tripId, trip.driver_id, trip.rider_id);
+            }
+            app_1.io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
+            if (trip.driver_id) {
+                app_1.io.to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
+            }
+            // Broadcast to Admin Monitoring
+            app_1.io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+            // Real phone notification: the rider cancelled an accepted ride, so
+            // the assigned driver is informed (deduped per trip).
+            if (trip.driver_id && trip.status === 'ACCEPTED') {
+                (0, notification_service_1.notifyRideCancelled)(trip.driver_id, 'driver', tripId, 'rider').catch(() => undefined);
+            }
         }
-        // Broadcast to Admin Monitoring
-        app_1.io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
         return updatedTrip;
     }
     static async getHistory(userId, role) {

@@ -39,6 +39,15 @@ export declare class AuthService {
         password_expired?: undefined;
         onboarding?: undefined;
     } | {
+        otp_required: boolean;
+        message: string;
+        email?: undefined;
+        user?: undefined;
+        token?: undefined;
+        phone_number_required?: undefined;
+        password_expired?: undefined;
+        onboarding?: undefined;
+    } | {
         user: any;
         token: string;
         phone_number_required: boolean;

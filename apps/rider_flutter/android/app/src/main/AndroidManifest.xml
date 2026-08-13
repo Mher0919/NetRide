@@ -2,11 +2,32 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Android 13+ runtime notification permission (POST_NOTIFICATIONS is a
+         runtime permission; the app requests it once at startup). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="NetRide Rider"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
+        <!-- Default notification channel for FCM display messages. Tapping a
+             system notification with a payload others than the default channel
+             still arrives on the app's channel, created at runtime by
+             NotificationService. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="default" />
+        <!-- FCM offloads message handling to this service (required when
+             firebase_messaging is present). Data payloads are forwarded to
+             the Dart notification service; display messages render via the
+             system tray with the channel above. -->
+        <service
+            android:name="com.google.firebase.messaging.FirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <activity
             android:name=".MainActivity"
             android:exported="true"

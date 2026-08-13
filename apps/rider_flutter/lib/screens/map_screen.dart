@@ -72,6 +72,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final TextEditingController _customCreditController = TextEditingController();
   String? _creditAmountError;
 
+  // Part 6 — Favorite Driver toggle state
+  bool _favoriteDriverEnabled = false;
+
   // Zero-balance feedback: tapping the disabled Ride Credits toggle shakes
   // the row and flashes a red "no credits" hint (pulse).
   late final AnimationController _creditsShakeController;
@@ -320,6 +323,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         } else {
           _destination = loc;
           _shouldFollowUser = false;
+          // The rider is actively planning a ride → demand signal for the
+          // heatmap (server-side cooldowns dedupe bursts).
+          context.read<RideProvider>().reportActivity('REQUEST_FLOW', lat: loc.lat, lng: loc.lng);
         }
       });
       _updateRoute();
@@ -606,6 +612,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     ).requestRide(
       _pickup!,
       _destination!,
+      favoritePriority: _favoriteDriverEnabled,
       promoCode: _promoApplied ? _promoCodeController.text : null,
       applyCredits: _creditsToUseCents > 0,
       creditUseCents: _creditsToUseCents > 0 ? _creditsToUseCents : null,
@@ -627,6 +634,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         return;
       }
     }
+    if (!mounted) return;
     _cameraFitTimer?.cancel();
     setState(() {
       _panelOpen = false;
@@ -644,6 +652,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _creditAmountError = null;
       _creditsZeroFeedback = false;
       _customCreditController.clear();
+      _favoriteDriverEnabled = false;
     });
     _animateSheetTo(0);
   }
@@ -1206,15 +1215,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     ),
                   ],
                 ),
-                clipBehavior: Clip.antiAlias,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                  child: isCollapsed
-                      ? _buildSheetPill(theme)
-                      : _buildSheetBody(theme, searching: searching),
-                ),
+                clipBehavior: Clip.hardEdge,
+                child: isCollapsed
+                    ? _buildSheetPill(theme)
+                    : _buildSheetBody(theme, searching: searching),
               ),
             );
           },
@@ -1362,59 +1366,61 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             child: CircularProgressIndicator(color: Color(0xFF5B7760)),
           )
         else if (searching)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Column(
-              children: [
-                const SizedBox(
-                  width: 36,
-                  height: 36,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3,
-                    color: Color(0xFF5B7760),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                children: [
+                  const SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      color: Color(0xFF5B7760),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Matching you with nearby drivers…',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF2F3A32),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                if (cancelling)
+                  const SizedBox(height: 16),
                   const Text(
-                    'Cancelling ride request…',
+                    'Matching you with nearby drivers…',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: Color(0xFFC65A5A),
-                    ),
-                  )
-                else
-                  OutlinedButton.icon(
-                    onPressed: _requestCancel,
-                    icon: const Icon(Icons.close, size: 18, color: Color(0xFFC65A5A)),
-                    label: const Text(
-                      'Cancel Ride',
-                      style: TextStyle(
-                        color: Color(0xFFC65A5A),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFFE5B9B9)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 22,
-                        vertical: 12,
-                      ),
+                      color: Color(0xFF2F3A32),
                     ),
                   ),
-              ],
+                  const SizedBox(height: 24),
+                  if (cancelling)
+                    const Text(
+                      'Cancelling ride request…',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: Color(0xFFC65A5A),
+                      ),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: _requestCancel,
+                      icon: const Icon(Icons.close, size: 18, color: Color(0xFFC65A5A)),
+                      label: const Text(
+                        'Cancel Ride',
+                        style: TextStyle(
+                          color: Color(0xFFC65A5A),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFFE5B9B9)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 22,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           )
         else
@@ -1596,6 +1602,52 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
           ],
+          const Divider(height: 1, indent: 14, endIndent: 14),
+          // --- Favorite Driver ---
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  _favoriteDriverEnabled ? Icons.favorite_rounded : Icons.favorite_outline_rounded,
+                  size: 18,
+                  color: _favoriteDriverEnabled ? const Color(0xFFC65A5A) : const Color(0xFF5B7760),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Favorite Driver',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF2F3A32),
+                        ),
+                      ),
+                      Text(
+                        _favoriteDriverEnabled ? 'Prioritizing your favorite drivers' : 'Prioritize your favorite drivers',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: _favoriteDriverEnabled
+                              ? const Color(0xFF5B7760).withOpacity(0.7)
+                              : Colors.grey.shade500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _favoriteDriverEnabled,
+                  activeTrackColor: const Color(0xFF5B7760),
+                  onChanged: (v) => setState(() => _favoriteDriverEnabled = v),
+                ),
+              ],
+            ),
+          ),
           const Divider(height: 1, indent: 14, endIndent: 14),
           // --- Payment Method (no dollar balance) ---
           Padding(
@@ -1885,14 +1937,19 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
-              color: Colors.grey.shade700,
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+                color: Colors.grey.shade700,
+              ),
             ),
           ),
+          const SizedBox(width: 8),
           Text(
             positive ? formatCents(amount) : '-${formatCents(-amount)}',
             style: TextStyle(
@@ -2116,14 +2173,19 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
-              color: color ?? Colors.grey.shade700,
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
+                color: color ?? Colors.grey.shade700,
+              ),
             ),
           ),
+          const SizedBox(width: 8),
           Text(
             amount == 0 ? '' : formatCents(amount),
             style: priceStyle ??

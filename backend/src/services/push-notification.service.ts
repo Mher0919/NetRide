@@ -78,12 +78,33 @@ initFirebase();
 /**
  * Store a user's FCM token in the database.
  * Works for both riders (users table) and drivers (drivers table).
+ *
+ * Since 040, tokens live in the multi-device `device_tokens` registry so a
+ * user can receive pushes on every phone they run the app on. The legacy
+ * single-token columns (users.fcm_token / drivers.fcm_token) are kept in
+ * sync for backward compatibility with the old delivery path.
  */
 export async function storeFcmToken(
   userId: string,
   role: 'rider' | 'driver',
-  token: string
+  token: string,
+  meta?: { platform?: string; appVersion?: string }
 ): Promise<void> {
+  if (!token || token.length < 10) return;
+
+  await pool.query(
+    `INSERT INTO device_tokens (user_id, role, token, platform, app_version)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (token)
+     DO UPDATE SET user_id = EXCLUDED.user_id,
+                   role = EXCLUDED.role,
+                   platform = COALESCE(EXCLUDED.platform, device_tokens.platform),
+                   app_version = COALESCE(EXCLUDED.app_version, device_tokens.app_version),
+                   updated_at = NOW(),
+                   last_used_at = NOW()`,
+    [userId, role, token, meta?.platform ?? null, meta?.appVersion ?? null]
+  );
+
   if (role === 'rider') {
     await pool.query(
       'UPDATE users SET fcm_token = $1, updated_at = NOW() WHERE id = $2',
@@ -99,7 +120,33 @@ export async function storeFcmToken(
 }
 
 /**
- * Retrieve a user's or driver's FCM token.
+ * All active FCM tokens for a user+role (multi-device fan-out).
+ */
+export async function getFcmTokens(
+  userId: string,
+  role: 'rider' | 'driver'
+): Promise<string[]> {
+  try {
+    const res = await pool.query(
+      `SELECT token FROM device_tokens
+       WHERE user_id = $1 AND role = $2 AND token <> ''
+       ORDER BY last_used_at DESC`,
+      [userId, role]
+    );
+    const tokens = res.rows.map((r: any) => r.token as string);
+    if (tokens.length > 0) return tokens;
+
+    // Legacy fallback: single-column token from before 040.
+    const legacy = await getFcmToken(userId, role);
+    return legacy ? [legacy] : [];
+  } catch (err) {
+    logger.error({ err, userId, role }, '[FCM] Failed to fetch tokens');
+    return [];
+  }
+}
+
+/**
+ * Retrieve a user's or driver's FCM token (legacy single-token read).
  */
 export async function getFcmToken(
   userId: string,
@@ -118,12 +165,26 @@ export async function getFcmToken(
 }
 
 /**
- * Remove a user's FCM token (e.g. on logout).
+ * Remove a user's FCM token(s).
+ * - With `token`: removes only that device token (e.g. one phone logs out).
+ * - Without `token`: removes every token for the user+role (full logout).
  */
 export async function clearFcmToken(
   userId: string,
-  role: 'rider' | 'driver'
+  role: 'rider' | 'driver',
+  token?: string
 ): Promise<void> {
+  if (token) {
+    await pool.query(
+      `DELETE FROM device_tokens WHERE user_id = $1 AND role = $2 AND token = $3`,
+      [userId, role, token]
+    );
+    return;
+  }
+  await pool.query(
+    `DELETE FROM device_tokens WHERE user_id = $1 AND role = $2`,
+    [userId, role]
+  );
   if (role === 'rider') {
     await pool.query('UPDATE users SET fcm_token = NULL WHERE id = $1', [userId]);
   } else {
@@ -215,6 +276,81 @@ export async function sendPush(
     }
     return false;
   }
+}
+
+/**
+ * Fan-out a push to EVERY device token on record for the user+role.
+ * Returns the number of devices that accepted the message. Invalid tokens
+ * are pruned from the registry so a stale phone can't block later sends.
+ */
+export async function sendPushAll(
+  userId: string,
+  role: 'rider' | 'driver',
+  payload: PushPayload
+): Promise<number> {
+  const tokens = await getFcmTokens(userId, role);
+  if (tokens.length === 0) {
+    logger.debug({ userId, role, title: payload.title }, '[FCM] No tokens on record — skipping push');
+    return 0;
+  }
+
+  if (!fcmEnabled || !firebaseApp) {
+    logger.info({
+      userId,
+      role,
+      title: payload.title,
+      body: payload.body,
+      data: payload.data,
+    }, '[FCM] (stub) Push notification not sent — FCM not configured');
+    return tokens.length;
+  }
+
+  let delivered = 0;
+  for (const token of tokens) {
+    try {
+      const message: Message = {
+        token,
+        notification: {
+          title: payload.title,
+          body: payload.body,
+        },
+        data: payload.data || {},
+        android: {
+          priority: payload.priority || 'high',
+          notification: {
+            channelId: payload.channelId || 'default',
+            sound: payload.sound || 'default',
+            priority: 'high' as any,
+            defaultSound: true,
+            defaultVibrateTimings: true,
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              badge: payload.badge,
+              sound: payload.sound || 'default',
+              'content-available': 1,
+            },
+          },
+        },
+      };
+
+      const messaging = getMessaging(firebaseApp);
+      const messageId = await messaging.send(message);
+      delivered += 1;
+      logger.info({ userId, role, messageId, title: payload.title }, '[FCM] Push sent (device fan-out)');
+    } catch (err: any) {
+      if (err?.code === 'messaging/invalid-registration-token' ||
+          err?.code === 'messaging/registration-token-not-registerred') {
+        logger.warn({ userId, role, errCode: err.code }, '[FCM] Device token invalid — pruning');
+        await pool.query(`DELETE FROM device_tokens WHERE user_id = $1 AND role = $2 AND token = $3`, [userId, role, token]).catch(() => undefined);
+      } else {
+        logger.error({ err, userId, role }, '[FCM] Device push failed');
+      }
+    }
+  }
+  return delivered;
 }
 
 // ============================================

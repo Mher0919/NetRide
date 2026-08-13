@@ -3,7 +3,6 @@ import { Server, Socket } from 'socket.io';
 import { LocationsService } from '../modules/location/locations.service';
 import { RideService } from '../modules/ride/ride.service';
 import { RideMessagesRepository } from '../modules/ride/ride_messages.repository';
-import { matchingService } from '../services/matching.service';
 import { NavigationService } from '../services/navigation.service';
 import { RerouteService } from '../services/reroute.service';
 import { RouteStoreService } from '../services/route-store.service';
@@ -29,6 +28,9 @@ import {
   RiderDestinationChangedSchema,
 } from '../utils/socket-validation';
 import { isOnline, markOnline, markOffline, pushChatMessage, pushIncomingCall } from '../services/push-notification.service';
+import { notifyDriverArrived } from '../services/notification.service';
+import { recordRiderActivity } from '../services/demand.service';
+import { z } from 'zod';
 
 // ---- Chat hardening ------------------------------------------------------
 //
@@ -372,31 +374,97 @@ export function setupSocketGateway(io: Server) {
           } catch {
             // ETA push is best-effort — never block location updates on it.
           }
+
+          // Driver ARRIVED at pickup: once the driver enters the pickup
+          // grace zone, the rider gets a real phone notification. Guarded
+          // by a Redis NX key + DB event_id dedup → exactly one per trip.
+          if (currentTrip.status === TripStatus.ACCEPTED && currentTrip.rider_id) {
+            try {
+              const distToPickup = haversineMeters(
+                { lat: validated.data.lat, lng: validated.data.lng },
+                currentTrip.pickup,
+              );
+              if (distToPickup <= env.DRIVER_PICKUP_PROXIMITY_M * 2) {
+                notifyDriverArrived(
+                  currentTrip.rider_id,
+                  currentTrip.id,
+                  'Your driver',
+                ).catch(() => undefined);
+              }
+            } catch {
+              // Arrival notification is best-effort.
+            }
+          }
         }
       });
 
-      socket.on('acceptTrip', async (tripId: string) => {
+      socket.on('acceptTrip', async (payload: string | { tripId: string; offerId?: string }) => {
+        let tripId: string;
+        let offerId: string | undefined;
+
+        if (typeof payload === 'string') {
+          tripId = payload;
+        } else {
+          tripId = payload.tripId;
+          offerId = payload.offerId;
+        }
+
         const validated = validate(AcceptTripSchema, tripId, socket, 'acceptTrip');
-        if (!validated.success || !validated.data) return;
-        
-        console.log(`[SOCKET] 🤝 Driver ${id} accepts trip: ${validated.data}`);
+        if (!validated.success) return;
+
+        console.log(`[SOCKET] Driver ${id} accepts trip: ${tripId}${offerId ? ` (offer=${offerId})` : ''}`);
         try {
-          await RideService.acceptTrip(validated.data, id);
+          if (offerId) {
+            const { DriverOfferService } = await import('../services/driver-offer.service');
+            const accepted = await DriverOfferService.acceptOffer(offerId);
+            if (!accepted) {
+              socket.emit('error', 'This ride offer is no longer valid. It may have expired or been cancelled.');
+              return;
+            }
+          }
+          await RideService.acceptTrip(tripId, id);
         } catch (err: any) {
-          console.error(`[SOCKET] ❌ Accept trip failed: ${err.message}`);
+          console.error(`[SOCKET] Accept trip failed: ${err.message}`);
           socket.emit('error', err.message);
         }
       });
 
-      socket.on('declineTrip', async (tripId: string) => {
+      socket.on('declineTrip', async (payload: string | { tripId: string; offerId?: string }) => {
+        let tripId: string;
+        let offerId: string | undefined;
+
+        if (typeof payload === 'string') {
+          tripId = payload;
+        } else {
+          tripId = payload.tripId;
+          offerId = payload.offerId;
+        }
+
         const validated = validate(DeclineTripSchema, tripId, socket, 'declineTrip');
-        if (!validated.success || !validated.data) return;
-        
-        console.log(`[SOCKET] 🙅 Driver ${id} declined trip: ${validated.data}`);
+        if (!validated.success) return;
+
+        console.log(`[SOCKET] Driver ${id} declined trip: ${tripId}${offerId ? ` (offer=${offerId})` : ''}`);
         try {
-          await matchingService.handleDecline(io, validated.data, id);
+          if (offerId) {
+            const { DriverOfferService } = await import('../services/driver-offer.service');
+            await DriverOfferService.declineOffer(offerId);
+            await DriverOfferService.releaseDriver(id);
+          }
+          // Re-enqueue matching so the system progresses to the next candidate
+          const { RideRepository } = await import('../modules/ride/ride.repository');
+          const trip = await RideRepository.findById(tripId);
+          if (trip && trip.status === 'REQUESTED') {
+            const { matchQueue } = await import('../queue/queue');
+            await matchQueue.add('matchRide', {
+              tripId,
+              pickupLat: (trip as any).pickup?.lat ?? 0,
+              pickupLng: (trip as any).pickup?.lng ?? 0,
+              riderId: trip.rider_id,
+              retryCount: 0,
+            });
+          }
         } catch (err: any) {
-          console.error(`[SOCKET] ❌ Decline trip failed: ${err.message}`);
+          console.error(`[SOCKET] Decline trip failed: ${err.message}`);
         }
       });
 
@@ -404,11 +472,15 @@ export function setupSocketGateway(io: Server) {
         const validated = validate(CancelTripSchema, tripId, socket, 'cancelTrip');
         if (!validated.success || !validated.data) return;
         
-        console.log(`[SOCKET] 🚫 Trip cancellation from driver ${id} for trip: ${validated.data}`);
+        console.log(`[SOCKET] Trip cancellation from driver ${id} for trip: ${validated.data}`);
         try {
+          // Release any active offers and clean up
+          const { DriverOfferService } = await import('../services/driver-offer.service');
+          await DriverOfferService.releaseDriver(id);
+
           await RideService.cancelTrip(validated.data, id);
         } catch (err: any) {
-          console.error(`[SOCKET] ❌ Cancel trip failed: ${err.message}`);
+          console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
           socket.emit('error', 'Unable to cancel trip. Please try again.');
         }
       });
@@ -679,6 +751,39 @@ export function setupSocketGateway(io: Server) {
         (socket as any).subscribedGeohashes = rooms;
         
         console.log(`[SOCKET] 🔍 Rider ${id} subscribed to geohash rooms: ${rooms.length}`);
+
+        // Demand heatmap signal: the rider is live on the map. Cooldown
+        // (300 s) keeps the 15 s subscription from flooding the table.
+        recordRiderActivity({
+          riderId: id,
+          type: 'APP_OPEN',
+          lat: validated.data.lat,
+          lng: validated.data.lng,
+        }).catch(() => undefined);
+      });
+
+      /**
+       * RIDER-REPORTED ACTIVITY (demand heatmap). The rider app emits this
+       * when the user performs a meaningful in-app action that isn't a ride
+       * mutation:
+       *   REQUEST_FLOW — opened the ride request flow (picked pickup/dest)
+       *   APP_ACTIVE   — actively engaged while traveling (mid-trip)
+       * Cooldown-limited server-side; never blocks the socket.
+       */
+      const reportActivitySchema = z.object({
+        type: z.enum(['REQUEST_FLOW', 'APP_ACTIVE']),
+        lat: z.number().min(-90).max(90),
+        lng: z.number().min(-180).max(180),
+      });
+      socket.on('reportActivity', (payload: unknown) => {
+        const parsed = reportActivitySchema.safeParse(payload);
+        if (!parsed.success) return;
+        recordRiderActivity({
+          riderId: id,
+          type: parsed.data.type,
+          lat: parsed.data.lat,
+          lng: parsed.data.lng,
+        }).catch(() => undefined);
       });
 
       socket.on('updateLocation', async (loc: Location) => {
@@ -692,15 +797,23 @@ export function setupSocketGateway(io: Server) {
           if (currentTrip && currentTrip.driver_id && currentTrip.status !== TripStatus.COMPLETED) {
             console.log(`[SOCKET] 📡 Broadcasting rider loc to driver:${currentTrip.driver_id}`);
             io.to(`driver:${currentTrip.driver_id}`).emit('riderLocationUpdate', loc);
+            // Demand heatmap signal: a rider actively on a trip near here.
+            recordRiderActivity({
+              riderId: id,
+              type: 'APP_ACTIVE',
+              lat: validated.data.lat,
+              lng: validated.data.lng,
+              tripId: currentTrip.id,
+            }).catch(() => undefined);
           }
         } catch (err) {}
       });
 
-      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean; creditUseCents?: number }) => {
+      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; favoritePriority?: boolean; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean; creditUseCents?: number }) => {
         const validated = validate(RequestRideSchema, data, socket, 'requestRide');
         if (!validated.success || !validated.data) return;
         
-        console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address}`);
+        console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address} favorite=${!!validated.data.favoritePriority}`);
         try {
           const trip = await RideService.requestRide(
             id, 
@@ -709,9 +822,20 @@ export function setupSocketGateway(io: Server) {
             undefined,
             false,
             data.idempotencyKey,
-            { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents }
+            { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents },
+            validated.data.favoritePriority
           );
           socket.emit('tripUpdate', trip);
+
+          // Demand heatmap signal: a REAL ride request — the strongest
+          // demand marker on the platform.
+          recordRiderActivity({
+            riderId: id,
+            type: 'RIDE_REQUESTED',
+            lat: data.pickup.lat,
+            lng: data.pickup.lng,
+            tripId: trip.id,
+          }).catch(() => undefined);
         } catch (err: any) {
           console.error(`[SOCKET] ❌ Request ride failed: ${err.message}`);
           socket.emit('error', err.message);
@@ -722,11 +846,17 @@ export function setupSocketGateway(io: Server) {
         const validated = validate(CancelTripSchema, tripId, socket, 'cancelTrip');
         if (!validated.success || !validated.data) return;
         
-        console.log(`[SOCKET] 🚫 Trip cancellation from rider ${id} for trip: ${validated.data}`);
+        console.log(`[SOCKET] Trip cancellation from rider ${id} for trip: ${validated.data}`);
         try {
+          // Clean up any active driver offer before cancelling
+          const { DriverOfferService } = await import('../services/driver-offer.service');
+          const releasedDriver = await DriverOfferService.cancelRideOffers(tripId);
+          if (releasedDriver) {
+            console.log(`[SOCKET] Released driver ${releasedDriver} from cancelled ride ${tripId}`);
+          }
           await RideService.cancelTrip(tripId, id);
         } catch (err: any) {
-          console.error(`[SOCKET] ❌ Cancel trip failed: ${err.message}`);
+          console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
           socket.emit('error', 'Unable to cancel trip. Please try again.');
         }
       });

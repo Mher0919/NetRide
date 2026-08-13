@@ -22,6 +22,9 @@ export const CleanupService = {
     } catch {
       await this.cancelStaleRideRequests();
       await this.cleanupGhostDrivers();
+      // Fallback path when BullMQ is down — keep heatmap retention alive.
+      const { sweepExpiredActivity } = require('./demand.service') as typeof import('./demand.service');
+      sweepExpiredActivity().catch(() => undefined);
     }
   },
 
