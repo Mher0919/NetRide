@@ -23,15 +23,17 @@ class CachedRouteData {
     this.fare,
   });
 
+  /// Cached plans always render instantly — TTL is the only expiry rule.
   bool get isExpired {
-    // A cached plan with NO backend fare predates the fare-in-plan fix and
-    // would render "$—" forever — always treat it as expired so the next
-    // lookup refetches an authoritative (priced) plan.
-    if (fare == null || fare!.isEmpty) return true;
     final age = DateTime.now().difference(cachedAt);
     if (trafficDurationSeconds != null) return age.inMinutes > 15;
     return age.inHours > 24;
   }
+
+  /// True when this entry predates the fare-in-plan fix (backend fare was
+  /// missing). It is still served instantly, but the caller refreshes it in
+  /// the background so the price converges without any visible cache loss.
+  bool get needsFareRefresh => fare == null || fare!.isEmpty;
 
   Map<String, dynamic> toJson() => {
     'distanceMeters': distanceMeters,

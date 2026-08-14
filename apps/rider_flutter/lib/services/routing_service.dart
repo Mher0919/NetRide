@@ -53,11 +53,12 @@ class RoutingService {
   Future<TripPlan> plan({
     required LatLng origin,
     required LatLng destination,
+    bool bypassCache = false,
   }) async {
     final key =
         '${origin.latitude},${origin.longitude}|${destination.latitude},${destination.longitude}';
 
-    if (_dedupe.containsKey(key)) return _dedupe[key]!;
+    if (!bypassCache && _dedupe.containsKey(key)) return _dedupe[key]!;
 
     for (final entry in _inflight.entries.toList()) {
       if (entry.key != key) {
@@ -67,14 +68,22 @@ class RoutingService {
       }
     }
 
-    final cached = _routeCache.get(
-      originLat: origin.latitude,
-      originLng: origin.longitude,
-      destLat: destination.latitude,
-      destLng: destination.longitude,
-    );
-    if (cached != null) {
-      return _hydrateCached(cached, origin, destination, 'RouteCache');
+    if (!bypassCache) {
+      final cached = _routeCache.get(
+        originLat: origin.latitude,
+        originLng: origin.longitude,
+        destLat: destination.latitude,
+        destLng: destination.longitude,
+      );
+      if (cached != null) {
+        // Serve instantly — NEVER block the UI on a stale cache. When the
+        // cached plan lacks a backend fare (pre-fix entry), refresh it in
+        // the background so the price appears on the very next tick.
+        if (cached.needsFareRefresh) {
+          _refreshFareInBackground(origin, destination, key);
+        }
+        return _hydrateCached(cached, origin, destination, 'RouteCache');
+      }
     }
 
     final token = CancelToken();
@@ -87,6 +96,26 @@ class RoutingService {
 
     _dedupe[key] = future;
     return future;
+  }
+
+  /// Background refetch of a fare-less cached route. Fire-and-forget: the
+  /// cached plan keeps serving the UI; the fresh (priced) plan overwrites
+  /// the cache when it lands. Skipped in tests and when a live fetch is
+  /// already in flight for the same route (that one will refresh it).
+  void _refreshFareInBackground(LatLng origin, LatLng destination, String key) {
+    if (_testPost != null) return; // unit tests: no background traffic
+    if (_inflight.containsKey(key)) return; // a live fetch will refresh it
+    debugPrint('[ROUTING] Cached plan has no fare — refreshing in background');
+    Future<void>(() async {
+      try {
+        await _fetch(origin, destination, CancelToken());
+      } catch (e) {
+        // Non-fatal: the old cache entry keeps serving until TTL.
+        if (e is! DioException || e.type != DioExceptionType.cancel) {
+          debugPrint('[ROUTING] Background fare refresh failed (kept cache): $e');
+        }
+      }
+    });
   }
 
   Future<TripPlan> _fetch(

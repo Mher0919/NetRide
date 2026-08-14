@@ -20,15 +20,17 @@ class CachedEtaData {
     this.fareTotal,
   });
 
+  /// Cached ETAs always render instantly — TTL is the only expiry rule.
   bool get isExpired {
-    // A cached ETA with NO fare predates the fare-in-plan fix and would
-    // render "$—" forever — always treat it as expired so the next lookup
-    // refetches an authoritative (priced) estimate.
-    if (fareTotal == null || fareTotal! <= 0) return true;
     final age = DateTime.now().difference(cachedAt);
     if (trafficDurationSeconds != null) return age.inMinutes > 15;
     return age.inHours > 24;
   }
+
+  /// True when this entry predates the fare-in-plan fix (no saved fare).
+  /// It is still served instantly, but the caller refreshes it in the
+  /// background so the price converges without any visible cache loss.
+  bool get needsFareRefresh => fareTotal == null || fareTotal! <= 0;
 
   Map<String, dynamic> toJson() => {
     'distanceMeters': distanceMeters,
