@@ -115,6 +115,11 @@ class Trip {
   final DateTime? expiresAt;
   final DateTime? requestedAt;
 
+  /// Cancellation audit trail (042): who ended the ride and why.
+  final String? cancelledBy;
+  final String? cancellationReasonCode;
+  final String? cancellationReasonText;
+
   Trip({
     required this.id,
     required this.riderId,
@@ -138,6 +143,9 @@ class Trip {
     this.driverPricePerMile,
     this.expiresAt,
     this.requestedAt,
+    this.cancelledBy,
+    this.cancellationReasonCode,
+    this.cancellationReasonText,
   });
 
   bool get isTestTrip => isTestTripFor(riderInfo?.email, driverInfo?.email);
@@ -169,6 +177,9 @@ class Trip {
       driverPricePerMile: (json['driver_price_per_mile'] as num?)?.toDouble(),
       expiresAt: json['expires_at'] != null ? DateTime.tryParse(json['expires_at'].toString()) : null,
       requestedAt: json['requested_at'] != null ? DateTime.tryParse(json['requested_at'].toString()) : null,
+      cancelledBy: json['cancelled_by']?.toString(),
+      cancellationReasonCode: json['cancellation_reason_code']?.toString(),
+      cancellationReasonText: json['cancellation_reason_text']?.toString(),
     );
   }
 }

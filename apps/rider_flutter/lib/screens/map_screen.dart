@@ -1237,13 +1237,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   /// Collapsed state: centered drag handle + one-line ride summary.
   Widget _buildSheetPill(ThemeData theme) {
-    // No backend fare available (offline / cached plan without fare) →
-    // show an em dash instead of a locally-computed or $0.00 price.
-    final priceText = _estimateFare <= 0
-        ? '—'
-        : (_finalCents >= 0
-            ? formatCents(_finalCents)
-            : '\$${_estimateFare.toStringAsFixed(2)}');
+    // Calculation in flight → "Calculating…" (§6). No backend fare available
+    // after calculation (offline / cached plan without fare) → an em dash
+    // instead of a locally-computed or $0.00 price.
+    final priceText = _loadingEstimates
+        ? 'Calculating…'
+        : (_estimateFare <= 0
+            ? '—'
+            : (_finalCents >= 0
+                ? formatCents(_finalCents)
+                : '\$${_estimateFare.toStringAsFixed(2)}'));
     return GestureDetector(
       onTap: () => _animateSheetTo(1),
       behavior: HitTestBehavior.opaque,

@@ -264,23 +264,36 @@ export async function notifyRideCompleted(
   });
 }
 
-/** The other party ended the ride. Recipient hears who did it. */
+/**
+ * The other party ended the ride. Recipient hears who did it and (when
+ * provided) the cancellation reason chosen by the canceller. The reason
+ * code is included in `data` so the in-app cancelled dialog can render
+ * the same copy as the push.
+ */
 export async function notifyRideCancelled(
   recipientId: string,
   role: NotificationRole,
   tripId: string,
-  actorRole: 'rider' | 'driver'
+  actorRole: 'rider' | 'driver',
+  reasonCode?: string,
+  reasonText?: string
 ): Promise<NotifyResult> {
   const isRider = role === 'rider';
+  const reasonLabel = reasonCode ?? reasonText ?? null;
+  const body = isRider
+    ? reasonLabel
+      ? `Your driver cancelled this ride: ${reasonLabel}`
+      : 'Your driver cancelled this ride.'
+    : reasonLabel
+      ? `The rider cancelled this ride: ${reasonLabel}`
+      : 'The rider cancelled this ride.';
   return notifyUser({
     userId: recipientId,
     role,
     type: 'ride_cancelled',
     title: isRider ? 'Your driver cancelled' : 'Ride cancelled',
-    body: isRider
-      ? 'Your driver cancelled this ride. We\'re finding you a new driver.'
-      : 'The rider cancelled this ride. You can accept the next request.',
-    data: { tripId, actorRole },
+    body,
+    data: { tripId, actorRole, reasonCode: reasonCode ?? '', reasonText: reasonText ?? '' },
     eventId: `ride:cancelled:${tripId}`,
     sound: 'order_cancelled.wav',
   });

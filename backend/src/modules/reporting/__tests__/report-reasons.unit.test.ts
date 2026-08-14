@@ -43,22 +43,25 @@ test('report reasons exist for both roles with unique codes', () => {
 test('isCancellationReasonValid accepts known codes and rejects unknown/foreign codes', () => {
   assert.ok(isCancellationReasonValid('RIDER', 'changed_plans'));
   assert.ok(isCancellationReasonValid('DRIVER', 'vehicle_issue'));
+  assert.ok(isCancellationReasonValid('DRIVER', 'rider_not_at_pickup'));
   assert.ok(!isCancellationReasonValid('RIDER', 'vehicle_issue'), 'driver code is not valid for riders');
   assert.ok(!isCancellationReasonValid('DRIVER', 'changed_plans'), 'rider code is not valid for drivers');
   assert.ok(!isCancellationReasonValid('RIDER', 'made_up_code'));
 });
 
 test('isReportReasonValid is role-scoped', () => {
-  assert.ok(isReportReasonValid('RIDER', 'unsafe_driving'), 'rider can report unsafe driving');
-  assert.ok(isReportReasonValid('DRIVER', 'damage_to_vehicle'), 'driver can report vehicle damage');
-  assert.ok(!isReportReasonValid('RIDER', 'damage_to_vehicle'), 'rider cannot use driver-scoped code');
-  assert.ok(!isReportReasonValid('DRIVER', 'unsafe_driving'), 'driver cannot use rider-scoped code');
+  assert.ok(isReportReasonValid('RIDER', 'unsafe_behavior'), 'rider can report unsafe behavior');
+  assert.ok(isReportReasonValid('RIDER', 'driver_asked_cancel'), 'rider can report driver asked to cancel');
+  assert.ok(isReportReasonValid('DRIVER', 'rider_not_at_pickup'), 'driver can report rider not at pickup');
+  assert.ok(isReportReasonValid('DRIVER', 'false_information'), 'driver can report false information');
+  assert.ok(!isReportReasonValid('RIDER', 'rider_not_at_pickup'), 'rider cannot use driver-scoped code');
+  assert.ok(!isReportReasonValid('DRIVER', 'driver_asked_cancel'), 'driver cannot use rider-scoped code');
   assert.ok(!isReportReasonValid('RIDER', 'nonsense'));
 });
 
 test('labels fall back to the raw code for unknown values', () => {
   assert.equal(cancellationReasonLabel('RIDER', 'changed_plans'), 'I changed my plans');
   assert.equal(cancellationReasonLabel('RIDER', 'unknown_code'), 'unknown_code');
-  assert.equal(reportReasonLabel('DRIVER', 'damage_to_vehicle'), 'Damage to the vehicle');
+  assert.equal(reportReasonLabel('RIDER', 'driver_asked_cancel'), 'Driver asked me to cancel');
   assert.equal(reportReasonLabel('RIDER', 'unknown_code'), 'unknown_code');
 });

@@ -172,12 +172,21 @@ export class DispatchEngine {
       Math.round(calculatedPrice * 100), null,
     );
 
+    // Least-privilege driver payload: the driver sees ONLY what they need to
+    // decide — operational info + their own earnings. The rider's gross fare
+    // (calculated_price, fare_amount, initial_max_fare) and any internal
+    // allocation (fleet/NetRide shares) are NEVER sent to driver clients.
     io.to(`driver:${driverId}`).emit('newTripRequest', {
-      ...trip,
-      offerId: offer.offerId,
+      id: trip.id,
+      rider_id: trip.rider_id,
+      status: trip.status,
+      pickup: trip.pickup,
+      destination: trip.destination,
+      distance_km: distanceKm,
+      duration_minutes: trip.duration_minutes,
+      rider_info: (trip as any).rider_info,
       is_scheduled: (trip as any).is_scheduled,
       scheduled_at: (trip as any).scheduled_at,
-      calculated_price: calculatedPrice,
       driver_earnings_cents: driverShare.driverShareCents,
       trip_distance_meters: tripRoute ? tripRoute.distance : distanceKm * 1000,
       trip_duration_seconds: tripRoute ? tripRoute.eta : (trip.duration_minutes ? trip.duration_minutes * 60 : 600),
@@ -185,6 +194,7 @@ export class DispatchEngine {
       driver_to_pickup_eta: driverToPickupRoute ? driverToPickupRoute.eta : null,
       driver_to_pickup_distance: driverToPickupRoute ? driverToPickupRoute.distance : null,
       expires_at: offer.expiresAt,
+      offerId: offer.offerId,
     });
 
     return DispatchEngine._waitForOfferResponse(rideId, driverId, offer.offerId);

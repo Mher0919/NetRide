@@ -31,11 +31,14 @@ class _CancellationReasonSheetState extends State<CancellationReasonSheet> {
   // Static mirror of backend CANCELLATION_REASONS[DRIVER]. The server
   // validates the code, so an outdated client list only reduces choice.
   static const List<ReasonOption> _reasons = [
+    ReasonOption(code: 'rider_not_at_pickup', label: 'Rider is not at pickup location'),
+    ReasonOption(code: 'rider_requested_cancel', label: 'Rider requested cancellation'),
+    ReasonOption(code: 'unsafe_pickup', label: 'Unsafe pickup location'),
     ReasonOption(code: 'vehicle_issue', label: 'Vehicle issue'),
-    ReasonOption(code: 'too_far_pickup', label: 'Pickup is too far away'),
-    ReasonOption(code: 'personal_emergency', label: 'Personal emergency'),
-    ReasonOption(code: 'unruly_rider', label: 'Rider was unruly'),
-    ReasonOption(code: 'other', label: 'Another reason'),
+    ReasonOption(code: 'emergency', label: 'Emergency'),
+    ReasonOption(code: 'unable_to_complete', label: 'Unable to complete the ride'),
+    ReasonOption(code: 'rider_behavior', label: 'Rider behavior/problem'),
+    ReasonOption(code: 'other', label: 'Other'),
   ];
 
   @override

@@ -5,6 +5,7 @@ console.log('[SVC_INIT] FULL findCurrentByDriverId toString:\n' + (RideRepositor
 import { LocationsService } from '../location/locations.service';
 import { GeospatialService } from '../geospatial/geospatial.service';
 import { Trip, Location, UserRole, TripStatus } from '../../types';
+import { PartyRole } from '../reporting/report.reasons';
 import { env } from '../../config/env';
 import { io } from '../../app';
 import { pool } from '../../config/database';
@@ -25,6 +26,7 @@ import {
   notifyRideCompleted,
   notifyRideCancelled,
 } from '../../services/notification.service';
+import { cancellationReasonLabel } from '../reporting/report.reasons';
 
 /** Display name of a platform user (used in notification copy). */
 async function fetchDisplayName(userId: string): Promise<string> {
@@ -641,6 +643,14 @@ export class RideService {
       throw new Error('Unauthorized to cancel this trip');
     }
 
+    // Idempotency: if the ride is already cancelled (e.g. the other party
+    // cancelled simultaneously, or the user double-tapped), the existing
+    // authoritative cancelled state IS the answer — return it as success
+    // instead of erroring a second transition. One cancellation wins.
+    if (trip.status === 'CANCELLED') {
+      return trip;
+    }
+
     // Only allow cancellation before pickup (REQUESTED or ACCEPTED)
     if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
       throw new Error('Cannot cancel a ride that is already in progress or completed');
@@ -653,22 +663,22 @@ export class RideService {
       throw new Error('Please select a reason for cancelling this ride.');
     }
 
-    const isDriverCancellingAfterAccept = userId === trip.driver_id && trip.status === 'ACCEPTED';
+    // Accepted-ride cancellation by the DRIVER is a terminal cancellation
+    // (not a "release + re-match"): per the harness spec, accepted → cancelled
+    // counts as an accepted-ride cancellation, both parties see the terminal
+    // state, and both may report each other afterwards. The driver stays on
+    // the ride row so history + reporting work.
+    const isDriverCancelledAcceptedRide =
+      userId === trip.driver_id && trip.status === 'ACCEPTED';
 
+    // Audit trail: who initiated the cancel and why. Null for system
+    // cancels (cleanup/timeouts), which never pass through here.
     const extra: any = {
-      // Audit trail: who initiated the release/cancel and why. Null for
-      // system cancels (cleanup/timeouts), which never pass through here.
+      cancelled_at: new Date(),
       cancelled_by: userId,
       cancellation_reason_code: opts.reasonCode ?? null,
       cancellation_reason_text: (opts.reasonText ?? '').trim().slice(0, 300) || null,
     };
-    if (isDriverCancellingAfterAccept) {
-      // Driver cancelled after accepting — release assignment and return
-      // the ride to REQUESTED so the system can re-match to another driver.
-      extra.driver_id = null;
-    } else {
-      extra.cancelled_at = new Date();
-    }
 
     // If driver was assigned, cleanup trajectory
     if (trip.driver_id) {
@@ -681,61 +691,70 @@ export class RideService {
       await NavigationService.clearTrip(tripId);
     }
 
-    const newStatus = isDriverCancellingAfterAccept ? 'REQUESTED' : 'CANCELLED';
-    const updatedTrip = await RideRepository.updateStatus(tripId, newStatus as any, extra);
+    const updatedTrip = await RideRepository.updateStatus(tripId, TripStatus.CANCELLED, extra);
 
-    if (isDriverCancellingAfterAccept) {
-      // Driver cancelled after accept — re-queue matching so the system
-      // finds another driver for this ride.
-      const { matchQueue } = await import('../../queue/queue');
-      matchQueue.add('matchRide', {
-        tripId,
-        pickupLat: trip.pickup.lat,
-        pickupLng: trip.pickup.lng,
-        riderId: trip.rider_id,
-        retryCount: 0,
-      }).catch((err: any) => console.error(`[RIDE] Failed to re-enqueue match after driver cancel: ${err.message}`));
-
-      // Notify the rider that their previous driver cancelled and we're
-      // finding a new one.
-      io.to(`rider:${trip.rider_id}`).emit('tripUpdate', {
-        ...updatedTrip,
-        cancelReason: 'Your driver cancelled. Finding a new driver...',
-      });
-
-      // Real phone notification: driver cancelled after accept (deduped).
-      notifyRideCancelled(trip.rider_id, 'rider', tripId, 'driver').catch(() => undefined);
-    } else {
-      // Rewards ecosystem: void promo usage + refund applied credits.
-      RewardEngine.onRideCancelled({
-        id: tripId,
-        rider_id: trip.rider_id,
-        driver_id: trip.driver_id ?? null,
-        fare_amount: (trip as any).fare_amount ?? null,
-        status: 'CANCELLED',
-      }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCancelled failed: ${err.message}`));
-
-      // Safety + navigation teardown on cancel.
-      if (trip.driver_id) {
-        await SpeedingDetector.finalizeTrip(trip.driver_id, tripId);
-        NavigationService.emitEnded(
-          io, tripId, trip.driver_id, trip.rider_id
+    // Accepted-ride cancellation counters (spec §25: only accepted → cancelled
+    // counts as an accepted-ride cancellation; declines/searching cancels don't).
+    if (isDriverCancelledAcceptedRide) {
+      pool
+        .query(
+          `UPDATE drivers
+              SET cancellation_count = COALESCE(cancellation_count, 0) + 1,
+                  last_cancellation_at = NOW()
+            WHERE user_id = $1`,
+          [userId],
+        )
+        .catch((err: any) =>
+          console.error(`[RIDE] ⚠️ Failed to increment driver cancellation counter: ${err.message}`)
         );
-      }
+    }
 
-      io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
-      if (trip.driver_id) {
-        io.to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
-      }
+    // Rewards ecosystem: void promo usage + refund applied credits.
+    RewardEngine.onRideCancelled({
+      id: tripId,
+      rider_id: trip.rider_id,
+      driver_id: trip.driver_id ?? null,
+      fare_amount: (trip as any).fare_amount ?? null,
+      status: 'CANCELLED',
+    }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCancelled failed: ${err.message}`));
 
-      // Broadcast to Admin Monitoring
-      io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+    // Safety + navigation teardown on cancel.
+    if (trip.driver_id) {
+      await SpeedingDetector.finalizeTrip(trip.driver_id, tripId);
+      NavigationService.emitEnded(
+        io, tripId, trip.driver_id, trip.rider_id
+      );
+    }
 
-      // Real phone notification: the rider cancelled an accepted ride, so
-      // the assigned driver is informed (deduped per trip).
-      if (trip.driver_id && trip.status === 'ACCEPTED') {
-        notifyRideCancelled(trip.driver_id, 'driver', tripId, 'rider').catch(() => undefined);
-      }
+    // Authoritative state broadcast — both parties (and monitoring) react
+    // to this same CANCELLED payload carrying cancelled_by + reason.
+    io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
+    if (trip.driver_id) {
+      io.to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
+    }
+    io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+
+    // Real phone notification carrying WHO cancelled and WHY.
+    const actorRole: 'rider' | 'driver' =
+      userId === trip.driver_id ? 'driver' : 'rider';
+    const notified = trip.driver_id
+      ? actorRole === 'driver'
+        ? trip.rider_id
+        : trip.driver_id
+      : null;
+    if (notified) {
+      const recipientRole: 'rider' | 'driver' = actorRole === 'driver' ? 'rider' : 'driver';
+      const cancellerRole: PartyRole = actorRole === 'driver' ? 'DRIVER' : 'RIDER';
+      // Push copy uses a human label (never the raw code); the code + free
+      // text ride along in `data` for the in-app dialog.
+      notifyRideCancelled(
+        notified,
+        recipientRole,
+        tripId,
+        actorRole,
+        opts.reasonCode ? cancellationReasonLabel(cancellerRole, opts.reasonCode) : undefined,
+        opts.reasonText,
+      ).catch(() => undefined);
     }
 
     return updatedTrip;

@@ -1,19 +1,22 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/driver_provider.dart';
 import '../models/trip_models.dart' as models;
+import '../services/api_service.dart';
 import '../services/navigation_service.dart';
 import '../services/communication_service.dart';
 import '../services/sound_service.dart';
 import '../services/route_errors.dart';
+import '../services/navigation_voice_service.dart';
 import '../components/trip_completed_dialog.dart';
 import '../components/state_container.dart';
 import 'navigation_screen.dart';
 import 'chat_sheet.dart';
-import 'call_overlay.dart';
 import 'report_sheet.dart';
 
 class TripScreen extends StatefulWidget {
@@ -26,6 +29,11 @@ class TripScreen extends StatefulWidget {
 class _TripScreenState extends State<TripScreen> {
   ViewState _state = ViewState.loading;
   String? _errorMessage;
+
+  /// Guards: single cancellation dialog + single cancellation-failure
+  /// notification per ride (spec §27/§40 — exactly one nav owner).
+  bool _cancelledDialogShown = false;
+  bool _cancelFailureNotified = false;
 
   @override
   void initState() {
@@ -222,7 +230,35 @@ class _TripScreenState extends State<TripScreen> {
     final driverProvider = Provider.of<DriverProvider>(context);
     final navService = Provider.of<NavigationService>(context);
     final trip = driverProvider.currentTrip;
+    final cancelledTrip = driverProvider.lastCancelledTrip;
     final theme = Theme.of(context);
+
+    // First-class cancelled state (spec §30): the terminal trip (with
+    // cancelled_by + reason) is rendered before returning home — never a
+    // blank/null exit. Exactly ONE dialog + ONE navigation per ride.
+    if (trip == null && cancelledTrip != null && !_cancelledDialogShown) {
+      _cancelledDialogShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showRideCancelledDialog(
+          context,
+          cancelledTrip,
+          navService,
+        );
+      });
+    }
+
+    // Cancellation could not be confirmed by the server (spec §60): surface
+    // the failure once while the trip remains active so the driver can retry.
+    if (trip != null &&
+        driverProvider.cancelConfirmFailed &&
+        !_cancelFailureNotified) {
+      _cancelFailureNotified = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        showSnackBar(driverProvider.lastCancelError ??
+            'Cancellation could not be confirmed. Check your connection and try again.');
+      });
+    }
 
     return Scaffold(
       body: StateContainer(
@@ -257,6 +293,13 @@ class _TripScreenState extends State<TripScreen> {
     );
   }
 
+  void showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
+  }
+
   Widget _buildNavigation(
     models.Trip trip,
     DriverProvider driverProvider,
@@ -284,9 +327,8 @@ class _TripScreenState extends State<TripScreen> {
           onPickupRider: () => driverProvider.pickUpRider(trip.id),
           onCompleteTrip: _showRiderRatingDialog,
           onChat: () => _openChat(context, trip),
-          onCall: () => _startCall(context, trip),
+          onCall: () => _dialParticipant(context, trip),
         ),
-        const DriverCallOverlayHost(),
         // Cancel button — only visible before pickup (ACCEPTED status)
         if (trip.status == models.TripStatus.ACCEPTED)
           Positioned(
@@ -358,9 +400,6 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   void _showCancelDialog(BuildContext context, DriverProvider driverProvider, models.Trip trip) {
-    // Capture NavigationService before showDialog so we can stop it
-    // on cancel regardless of dialog context availability.
-    final navService = Provider.of<NavigationService>(context, listen: false);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -386,22 +425,59 @@ class _TripScreenState extends State<TripScreen> {
                 builder: (sheetContext) => const CancellationReasonSheet(),
               );
               if (reason == null) return;
-              // Stop navigation listeners and timers before cancelling
-              // so stale GPS / reroute callbacks can't fire after the
-              // trip screen is popped.
-              navService.stopNavigation();
+              // The backend is authoritative: submit the cancellation and
+              // let the server-confirmed CANCELLED tripUpdate drive the
+              // exit (first-class cancelled state). Do NOT pop the trip
+              // screen optimistically — that's how blank/duplicate states
+              // arise.
               driverProvider.cancelTrip(
                 trip.id,
                 reasonCode: reason.code,
                 reasonText: reason.code == 'other' ? reason.label : null,
               );
-              if (mounted) Navigator.pop(context);
             },
             child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
           ),
         ],
       ),
     );
+  }
+
+  /// First-class ride-cancelled dialog (spec §30/§33/§58): renders WHO
+  /// cancelled + WHY, stops navigation+voice+ride resources, then returns
+  /// the driver home exactly once through a single navigation owner.
+  Future<void> _showRideCancelledDialog(
+    BuildContext context,
+    models.Trip cancelled,
+    NavigationService navService,
+  ) async {
+    // Ride resources stop BEFORE any UI transition (spec §31): TTS, route
+    // updates, GPS listeners, speed monitor, reroute timers.
+    navService.stopNavigation();
+    NavigationVoiceService.instance.stop();
+
+    final prefs = await SharedPreferences.getInstance();
+    final ownId = prefs.getString('user_id');
+    final isOwnCancel = ownId != null && cancelled.cancelledBy == ownId;
+
+    final provider = Provider.of<DriverProvider>(context, listen: false);
+    final confirmFailed = provider.cancelConfirmFailed;
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => RideCancelledDialog(
+        cancelledTrip: cancelled,
+        isOwnCancel: isOwnCancel,
+        confirmFailed: confirmFailed,
+      ),
+    );
+
+    if (!mounted) return;
+    // Exactly one navigation out of the active-ride state.
+    Provider.of<DriverProvider>(context, listen: false).ackCancelled();
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   void _showRiderRatingDialog() {
@@ -632,38 +708,160 @@ class _TripScreenState extends State<TripScreen> {
     );
   }
 
-  Future<void> _startCall(BuildContext context, models.Trip trip) async {
-    final driverProvider = Provider.of<DriverProvider>(context, listen: false);
-    final comm = context.read<CommunicationService>();
-    final driverId = await _readUserId();
-    await comm.attachAndLoad(
-      socket: driverProvider.socket,
-      userId: driverId,
-      tripId: trip.id,
-      peerName: trip.riderInfo?.name ?? 'Your rider',
-    );
-    if (!context.mounted) return;
-    final ok = await comm.startCall();
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(comm.lastError ?? 'Call failed.')),
-      );
+  /// Native phone dialing (spec §17–§19): the OTHER party's authoritative
+  /// phone number comes from the backend's users table (party-only), and
+  /// the device's default dialer is opened via a tel: URI. No in-app/VoIP
+  /// calling surface.
+  Future<void> _dialParticipant(BuildContext context, models.Trip trip) async {
+    try {
+      final response = await ApiService.dio.get('/ride/${trip.id}/party-phone');
+      final phone = response.data['phone_number']?.toString();
+      if (phone == null || phone.trim().isEmpty) {
+        showSnackBar('Unable to call this user.');
+        return;
+      }
+      final uri = Uri(scheme: 'tel', path: phone.trim());
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        showSnackBar('Unable to open the phone app.');
+      }
+    } on DioException catch (e) {
+      String? serverMsg;
+      if (e.response?.data is Map) {
+        serverMsg = (e.response!.data as Map)['error']?.toString();
+      }
+      showSnackBar(serverMsg ?? 'Unable to call this user.');
+    } catch (e) {
+      debugPrint('[TRIP] Dial failed: $e');
+      showSnackBar('Unable to open the phone app.');
     }
   }
 }
 
-/// Surfaces the CallOverlay when the driver has an active or ringing
-/// call, so it can pop on top of the navigation map.
-class DriverCallOverlayHost extends StatelessWidget {
-  const DriverCallOverlayHost({super.key});
+/// First-class "ride cancelled" dialog (spec §30/§33): shows who cancelled
+/// and why, offers reporting regardless of who cancelled, then returns the
+/// driver home.
+class RideCancelledDialog extends StatelessWidget {
+  final models.Trip cancelledTrip;
+  final bool isOwnCancel;
+  final bool confirmFailed;
+
+  const RideCancelledDialog({
+    super.key,
+    required this.cancelledTrip,
+    required this.isOwnCancel,
+    required this.confirmFailed,
+  });
+
+  static const Map<String, String> _riderCancelLabels = {
+    'driver_took_too_long': 'Driver took too long to arrive',
+    'wrong_pickup': 'Wrong pickup location',
+    'driver_unprofessional': 'Driver was unprofessional',
+    'emergency': 'Emergency',
+    'changed_plans': 'Plans changed',
+    'other': 'Another reason',
+  };
+
+  String get _reasonLabel {
+    final code = cancelledTrip.cancellationReasonCode;
+    final text = cancelledTrip.cancellationReasonText;
+    if (code == 'other' && text != null && text.isNotEmpty) return text;
+    if (code != null) {
+      final label = _riderCancelLabels[code];
+      if (label != null) return label;
+    }
+    return text ?? 'No reason provided';
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<CommunicationService>(
-      builder: (context, comm, _) {
-        if (comm.callPhase == CallPhase.idle) return const SizedBox.shrink();
-        return Positioned.fill(child: CallOverlay(peerName: comm.peerName ?? 'Rider'));
-      },
+    final heading = confirmFailed
+        ? 'Could not confirm cancellation'
+        : isOwnCancel
+            ? 'You cancelled this ride'
+            : 'The rider cancelled this ride';
+    final body = confirmFailed
+        ? 'Your cancellation could not be confirmed. Check your connection — if the ride is still active, try cancelling again.'
+        : isOwnCancel
+            ? 'The ride has been cancelled. You can accept the next request.'
+            : 'Reason: $_reasonLabel';
+
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      backgroundColor: Colors.white,
+      title: Center(
+        child: Column(
+          children: [
+            Icon(
+              confirmFailed
+                  ? Icons.wifi_off_rounded
+                  : Icons.cancel_outlined,
+              size: 40,
+              color: confirmFailed ? const Color(0xFFC65A5A) : const Color(0xFF5B7760),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Ride Cancelled',
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22, color: Color(0xFF2F3A32)),
+            ),
+          ],
+        ),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            heading,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            body,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13, color: Colors.grey, height: 1.4),
+          ),
+        ],
+      ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: [
+        if (!confirmFailed) ...[
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.pop(context);
+                await showModalBottomSheet<bool>(
+                  context: context,
+                  backgroundColor: Colors.white,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                  ),
+                  isScrollControlled: true,
+                  builder: (_) => ReportSheet(rideId: cancelledTrip.id),
+                );
+              },
+              icon: const Icon(Icons.report_gmailerrorred_outlined, size: 18, color: Color(0xFFC65A5A)),
+              label: const Text('Report Rider', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        SizedBox(
+          width: double.infinity,
+          height: 46,
+          child: ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2F3A32),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ),
+      ],
     );
   }
 }

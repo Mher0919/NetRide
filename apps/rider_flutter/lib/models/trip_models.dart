@@ -134,6 +134,11 @@ class Trip {
   final RiderInfo? riderInfo;
   final DriverInfo? driverInfo;
 
+  /// Cancellation audit trail (042): who ended the ride and why.
+  final String? cancelledBy;
+  final String? cancellationReasonCode;
+  final String? cancellationReasonText;
+
   Trip({
     required this.id,
     required this.riderId,
@@ -146,6 +151,9 @@ class Trip {
     this.savingLikelihood,
     this.riderInfo,
     this.driverInfo,
+    this.cancelledBy,
+    this.cancellationReasonCode,
+    this.cancellationReasonText,
   });
 
   bool get isTestTrip => isTestTripFor(riderInfo?.email, driverInfo?.email);
@@ -166,6 +174,9 @@ class Trip {
       savingLikelihood: (json['saving_likelihood'] as num?)?.toInt(),
       riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
       driverInfo: json['driver_info'] != null ? DriverInfo.fromJson(json['driver_info']) : null,
+      cancelledBy: json['cancelled_by']?.toString(),
+      cancellationReasonCode: json['cancellation_reason_code']?.toString(),
+      cancellationReasonText: json['cancellation_reason_text']?.toString(),
     );
   }
 }

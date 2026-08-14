@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,6 +38,20 @@ class DriverProvider with ChangeNotifier {
   double _heading = 0;
   models.Location? _riderLocation;
   List<models.ChatMessage> _messages = [];
+
+  /// First-class cancelled state: the terminal trip (with cancelled_by +
+  /// reason) is kept until the UI acknowledges it (ackCancelled), so the
+  /// driver sees "Ride cancelled / who / why" instead of a null ride.
+  models.Trip? _lastCancelledTrip;
+
+  /// True when the driver's own cancel emit could not be confirmed by the
+  /// server within the fallback window (offline / socket error). The UI
+  /// shows this as "cancellation request failed / connection lost".
+  bool _cancelConfirmFailed = false;
+
+  /// Human-readable reason the last cancellation failed (rejected by the
+  /// server, or connection lost before confirmation).
+  String? _lastCancelError;
 
   bool _hasPendingProfileChange = false;
   String? _pendingRequestId;
@@ -91,6 +106,9 @@ class DriverProvider with ChangeNotifier {
 
   models.Trip? get currentTrip => _currentTrip;
   models.Trip? get incomingRequest => _incomingRequest;
+  models.Trip? get lastCancelledTrip => _lastCancelledTrip;
+  bool get cancelConfirmFailed => _cancelConfirmFailed;
+  String? get lastCancelError => _lastCancelError;
   bool get isConnected => _isConnected;
   models.Location? get lastLocation => _lastLocation;
   double get heading => _heading;
@@ -448,8 +466,8 @@ class DriverProvider with ChangeNotifier {
         _incomingRequest = null;
         _status = models.DriverStatus.onTrip;
         notifyListeners();
-      } else if (trip.status == models.TripStatus.COMPLETED || trip.status == models.TripStatus.CANCELLED) {
-        // If the current incoming offer is the one being cancelled (e.g.
+      } else if (trip.status == models.TripStatus.COMPLETED) {
+        // If the current incoming offer is the one being completed (e.g.
         // it expired, the rider cancelled, or another driver accepted),
         // clear it so the request card closes and sounds stop.
         if (_incomingRequest?.id == trip.id) {
@@ -458,7 +476,37 @@ class DriverProvider with ChangeNotifier {
         _currentTrip = null;
         _status = models.DriverStatus.online;
         notifyListeners();
+      } else if (trip.status == models.TripStatus.CANCELLED) {
+        // First-class cancelled state (never a raw "ride == null" exit):
+        // keep the terminal trip so the UI can render who cancelled + why,
+        // then the UI acknowledges it (ackCancelled) before returning home.
+        if (_incomingRequest?.id == trip.id) {
+          _incomingRequest = null;
+        }
+        _currentTrip = null;
+        _messages = [];
+        _riderLocation = null;
+        _lastCancelledTrip = trip;
+        _cancelConfirmFailed = false;
+        _onCancelConfirmed();
+        _status = models.DriverStatus.online;
+        notifyListeners();
       }
+    });
+
+    _socket!.on('cancelTripFailed', (data) {
+      debugPrint('[RIDE] Server rejected cancellation: $data');
+      String message = 'Unable to cancel the ride. Please try again.';
+      try {
+        final map = Map<String, dynamic>.from(data as Map);
+        message = map['message']?.toString() ?? message;
+      } catch (_) {}
+      _cancelling = false;
+      _cancelConfirmTimer?.cancel();
+      _cancelConfirmTimer = null;
+      _cancelConfirmFailed = true;
+      _lastCancelError = message;
+      notifyListeners();
     });
 
     _socket!.on('messageReceived', (data) {
@@ -721,22 +769,80 @@ class DriverProvider with ChangeNotifier {
     _socket?.emit('acceptTrip', tripId);
   }
 
+  /// Guards against double-tap / concurrent cancel emits (spec §27/§61).
   bool _cancelling = false;
+  Timer? _cancelConfirmTimer;
 
+  /// Request cancellation to the backend. The local transition to the
+  /// cancelled state happens ONLY on the authoritative `tripUpdate`
+  /// (CANCELLED) event — or via a bounded offline fallback that marks the
+  /// confirmation as failed so the UI can distinguish "confirmed" from
+  /// "request failed / connection lost" (spec §60).
   void cancelTrip(String tripId, {String? reasonCode, String? reasonText}) {
     if (_cancelling) return;
     _cancelling = true;
+    _cancelConfirmFailed = false;
+    _lastCancelError = null;
+    notifyListeners();
+
     _socket?.emit('cancelTrip', {
       'tripId': tripId,
       if (reasonCode != null) 'reasonCode': reasonCode,
       if (reasonText != null) 'reasonText': reasonText,
     });
-    // Reset local state immediately so stale callbacks are harmless.
+
+    // Offline fallback: if no authoritative CANCELLED tripUpdate arrives
+    // (socket dead / server unreachable), settle locally after a bounded
+    // window and flag the confirmation as failed — the UI shows the
+    // distinction instead of hanging forever.
+    _cancelConfirmTimer?.cancel();
+    _cancelConfirmTimer = Timer(const Duration(seconds: 12), () {
+      if (!_cancelling) return;
+      debugPrint('[RIDE] Cancel confirmation not received within window — settling as failed');
+      _cancelling = false;
+      _cancelConfirmFailed = true;
+      _lastCancelError = 'Connection lost — cancellation could not be confirmed.';
+      _settleCancelledLocally(_currentTrip);
+      notifyListeners();
+    });
+  }
+
+  /// Server-confirmed cancellation (from tripUpdate CANCELLED). Clears
+  /// the fallback timer; the cancelled trip itself is stored as the
+  /// first-class cancelled state by the tripUpdate handler.
+  void _onCancelConfirmed() {
+    _cancelling = false;
+    _cancelConfirmFailed = false;
+    _cancelConfirmTimer?.cancel();
+    _cancelConfirmTimer = null;
+  }
+
+  void _settleCancelledLocally(models.Trip? activeTrip) {
+    // Only used on the failure path: keep a minimal cancelled record so
+    // the UI still has a first-class state (never a null exit), marked by
+    // _cancelConfirmFailed so the dialog can warn the driver.
+    if (_lastCancelledTrip != null) return;
+    if (activeTrip != null) {
+      _lastCancelledTrip = activeTrip;
+    } else {
+      _lastCancelledTrip = null;
+    }
     _currentTrip = null;
     _incomingRequest = null;
     _riderLocation = null;
     _messages = [];
+    _status = models.DriverStatus.online;
+  }
+
+  /// The UI has shown the cancelled state; clear it so the driver returns
+  /// to the normal online/home screen.
+  void ackCancelled() {
+    _lastCancelledTrip = null;
+    _cancelConfirmFailed = false;
+    _lastCancelError = null;
     _cancelling = false;
+    _cancelConfirmTimer?.cancel();
+    _cancelConfirmTimer = null;
     notifyListeners();
   }
 
@@ -787,6 +893,8 @@ class DriverProvider with ChangeNotifier {
 
   @override
   void dispose() {
+    _cancelConfirmTimer?.cancel();
+    _cancelConfirmTimer = null;
     if (_socket != null) {
       _socket!.off('');
       _socket!.disconnect();

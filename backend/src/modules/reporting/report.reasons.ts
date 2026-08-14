@@ -24,33 +24,39 @@ export const CANCELLATION_REASONS: Record<PartyRole, ReasonOption[]> = {
     { code: 'changed_plans', label: 'I changed my plans' },
     { code: 'other', label: 'Another reason' },
   ],
+  // Driver cancellation list per the ride-lifecycle spec (§24): concise and
+  // operational — what a driver actually needs to express when releasing
+  // an accepted ride.
   DRIVER: [
+    { code: 'rider_not_at_pickup', label: 'Rider is not at pickup location' },
+    { code: 'rider_requested_cancel', label: 'Rider requested cancellation' },
+    { code: 'unsafe_pickup', label: 'Unsafe pickup location' },
     { code: 'vehicle_issue', label: 'Vehicle issue' },
-    { code: 'too_far_pickup', label: 'Pickup is too far away' },
-    { code: 'personal_emergency', label: 'Personal emergency' },
-    { code: 'unruly_rider', label: 'Rider was unruly' },
-    { code: 'other', label: 'Another reason' },
+    { code: 'emergency', label: 'Emergency' },
+    { code: 'unable_to_complete', label: 'Unable to complete the ride' },
+    { code: 'rider_behavior', label: 'Rider behavior/problem' },
+    { code: 'other', label: 'Other' },
   ],
 };
 
 export const REPORT_REASONS: Record<PartyRole, ReasonOption[]> = {
-  // A rider reporting their driver.
+  // A rider reporting their driver (§35).
   RIDER: [
-    { code: 'unsafe_driving', label: 'Unsafe or reckless driving' },
-    { code: 'vehicle_mismatch', label: 'Vehicle did not match the app' },
-    { code: 'unprofessional_behavior', label: 'Unprofessional behavior' },
-    { code: 'discriminatory_behavior', label: 'Discriminatory behavior' },
-    { code: 'unsanitary_vehicle', label: 'Unsanitary vehicle' },
-    { code: 'other', label: 'Something else' },
+    { code: 'unsafe_behavior', label: 'Unsafe behavior' },
+    { code: 'vehicle_mismatch', label: 'Driver/vehicle mismatch' },
+    { code: 'driver_asked_cancel', label: 'Driver asked me to cancel' },
+    { code: 'driver_not_where_expected', label: 'Driver was not where expected' },
+    { code: 'rude_behavior', label: 'Rude/inappropriate behavior' },
+    { code: 'other', label: 'Other' },
   ],
-  // A driver reporting their rider.
+  // A driver reporting their rider (§35).
   DRIVER: [
-    { code: 'unruly_behavior', label: 'Unruly or disrespectful behavior' },
-    { code: 'unsafe_behavior', label: 'Unsafe behavior in the vehicle' },
-    { code: 'unsanitary_behavior', label: 'Unsanitary behavior' },
-    { code: 'discriminatory_behavior', label: 'Discriminatory behavior' },
-    { code: 'damage_to_vehicle', label: 'Damage to the vehicle' },
-    { code: 'other', label: 'Something else' },
+    { code: 'rider_not_at_pickup', label: 'Rider was not at pickup' },
+    { code: 'unsafe_behavior', label: 'Unsafe behavior' },
+    { code: 'rider_asked_cancel', label: 'Rider asked me to cancel' },
+    { code: 'rude_behavior', label: 'Rude/inappropriate behavior' },
+    { code: 'false_information', label: 'False information' },
+    { code: 'other', label: 'Other' },
   ],
 };
 

@@ -1,19 +1,21 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/ride_provider.dart';
 import '../models/trip_models.dart' as models;
 import '../services/communication_service.dart';
+import '../services/api_service.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/state_container.dart';
 import 'rating_screen.dart';
 import 'chat_sheet.dart';
-import 'call_overlay.dart';
 import 'report_sheet.dart';
 
 class TripScreen extends StatefulWidget {
@@ -29,6 +31,9 @@ class _TripScreenState extends State<TripScreen> {
   StreamSubscription<Position>? _positionSubscription;
   bool _isMapReady = false;
   bool _dialogShown = false;
+
+  /// Guard: exactly one cancelled dialog + one exit per ride (spec §40).
+  bool _cancelledHandled = false;
 
   @override
   void initState() {
@@ -68,6 +73,51 @@ class _TripScreenState extends State<TripScreen> {
       barrierDismissible: false,
       builder: (context) => _ArrivalSummaryDialog(trip: trip),
     );
+  }
+
+  /// The other party cancelled the accepted ride. Shows who + why, offers
+  /// reporting (regardless of who cancelled), then resets ride state and
+  /// navigates home exactly once through this single owner.
+  Future<void> _handleRideCancelled(models.Trip? trip) async {
+    if (!mounted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final ownId = prefs.getString('user_id');
+    final isOwnCancel = trip?.cancelledBy != null && trip!.cancelledBy == ownId;
+
+    // Stop ride-specific tracking (driver location listener is socket-side;
+    // this screen's GPS stream is cancelled in dispose).
+    if (isOwnCancel) {
+      // Our own cancellation already went through cancelRide() → reset().
+      final rideProvider = Provider.of<RideProvider>(context, listen: false);
+      rideProvider.reset();
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const RideCancelledDialog(
+          cancelledTrip: null,
+          isDriver: false,
+        ),
+      );
+    } else {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => RideCancelledDialog(
+          cancelledTrip: trip,
+          isDriver: false,
+        ),
+      );
+    }
+
+    if (!mounted) return;
+    final rideProvider = Provider.of<RideProvider>(context, listen: false);
+    rideProvider.reset();
+    // Exactly one navigation out of the active-ride state: pop the trip
+    // screen back to the map. Stale tripUpdates are rejected while IDLE.
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
   }
 
   void _showCancelDialog(BuildContext context, RideProvider rideProvider) {
@@ -141,6 +191,18 @@ class _TripScreenState extends State<TripScreen> {
       _dialogShown = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showArrivalDialog();
+      });
+    }
+
+    // First-class cancelled state (spec §30/§33): when the DRIVER ends the
+    // ride, render who cancelled + why with a Report option, then exit once.
+    // The rider's OWN cancel already resets via cancelRide()'s REST confirm,
+    // so this only fires for the other party's cancellation.
+    if (rideProvider.status == models.TripStatus.CANCELLED && !_cancelledHandled) {
+      _cancelledHandled = true;
+      final currentTrip = rideProvider.currentTrip;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleRideCancelled(currentTrip);
       });
     }
 
@@ -370,10 +432,132 @@ class _TripScreenState extends State<TripScreen> {
               ),
             ),
           ),
-
-          const CallOverlayHost(),
         ],
       ),
+    );
+  }
+}
+
+/// First-class "ride cancelled" dialog (spec §30/§33): shows who cancelled
+/// and why, offers reporting regardless of who cancelled, then returns the
+/// rider home.
+class RideCancelledDialog extends StatelessWidget {
+  final models.Trip? cancelledTrip;
+  final bool isDriver;
+
+  const RideCancelledDialog({
+    super.key,
+    required this.cancelledTrip,
+    required this.isDriver,
+  });
+
+  static const Map<String, String> _driverCancelLabels = {
+    'rider_not_at_pickup': 'Rider is not at pickup location',
+    'rider_requested_cancel': 'Rider requested cancellation',
+    'unsafe_pickup': 'Unsafe pickup location',
+    'vehicle_issue': 'Vehicle issue',
+    'emergency': 'Emergency',
+    'unable_to_complete': 'Unable to complete the ride',
+    'rider_behavior': 'Rider behavior/problem',
+    'other': 'Another reason',
+  };
+
+  String get _reasonLabel {
+    final trip = cancelledTrip;
+    final code = trip?.cancellationReasonCode;
+    final text = trip?.cancellationReasonText;
+    if (code == 'other' && text != null && text.isNotEmpty) return text;
+    if (code != null) {
+      final label = _driverCancelLabels[code];
+      if (label != null) return label;
+    }
+    return text ?? 'No reason provided';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cancelled = cancelledTrip;
+    final heading = cancelled == null
+        ? 'You cancelled this ride'
+        : 'Your driver cancelled this ride';
+    final body = cancelled == null
+        ? 'The ride has been cancelled. You can request a new one anytime.'
+        : 'Reason: $_reasonLabel';
+
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      backgroundColor: Colors.white,
+      title: Center(
+        child: Column(
+          children: [
+            Icon(
+              cancelled == null ? Icons.close_rounded : Icons.cancel_outlined,
+              size: 40,
+              color: const Color(0xFF5B7760),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Ride Cancelled',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22, color: Color(0xFF2F3A32)),
+            ),
+          ],
+        ),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            heading,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            body,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13, color: Colors.grey, height: 1.4),
+          ),
+        ],
+      ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: [
+        if (cancelled != null) ...[
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                showModalBottomSheet<bool>(
+                  context: context,
+                  backgroundColor: Colors.white,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                  ),
+                  isScrollControlled: true,
+                  builder: (_) => ReportSheet(rideId: cancelled.id),
+                );
+              },
+              icon: const Icon(Icons.report_gmailerrorred_outlined, size: 18, color: Color(0xFFC65A5A)),
+              label: Text('Report ${isDriver ? 'Driver' : 'Rider'}', style: const TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        SizedBox(
+          width: double.infinity,
+          height: 46,
+          child: ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2F3A32),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -478,23 +662,40 @@ class _ChatCallButtons extends StatelessWidget {
     );
   }
 
+  /// Native phone dialing (spec §17–§19): the driver's authoritative phone
+  /// number comes from the backend users table (party-only) and the device
+  /// dialer opens via tel:. No in-app/VoIP calling surface.
   Future<void> _startCall(BuildContext context) async {
-    final rideProvider = Provider.of<RideProvider>(context, listen: false);
-    final comm = context.read<CommunicationService>();
-    final riderId = await _readUserId();
-    await comm.attachAndLoad(
-      socket: rideProvider.socket,
-      userId: riderId,
-      tripId: tripId,
-      peerName: peerName,
-    );
     if (!context.mounted) return;
-    final ok = await comm.startCall();
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(comm.lastError ?? 'Call failed.')),
-      );
+    try {
+      final response = await ApiService.dio.get('/ride/$tripId/party-phone');
+      final phone = response.data['phone_number']?.toString();
+      if (phone == null || phone.trim().isEmpty) {
+        _showSnack(context, 'Unable to call this user.');
+        return;
+      }
+      final uri = Uri(scheme: 'tel', path: phone.trim());
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        _showSnack(context, 'Unable to open the phone app.');
+      }
+    } on DioException catch (e) {
+      String? serverMsg;
+      if (e.response?.data is Map) {
+        serverMsg = (e.response!.data as Map)['error']?.toString();
+      }
+      _showSnack(context, serverMsg ?? 'Unable to call this user.');
+    } catch (e) {
+      debugPrint('[TRIP] Dial failed: $e');
+      _showSnack(context, 'Unable to open the phone app.');
     }
+  }
+
+  void _showSnack(BuildContext context, String message) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
   }
 
   Future<String?> _readUserId() async {
@@ -504,9 +705,6 @@ class _ChatCallButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final comm = context.watch<CommunicationService>();
-    final callActive = comm.callPhase != CallPhase.idle;
-
     return Row(
       children: [
         IconButton(
@@ -520,38 +718,15 @@ class _ChatCallButtons extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         IconButton(
-          tooltip: 'Call',
-          onPressed: callActive ? null : () => _startCall(context),
-          icon: Icon(
-            callActive ? Icons.phone_in_talk_rounded : Icons.phone_outlined,
-            color: const Color(0xFF2F3A32),
-          ),
+          tooltip: 'Call driver',
+          onPressed: () => _startCall(context),
+          icon: const Icon(Icons.phone_outlined, color: Color(0xFF2F3A32)),
           style: IconButton.styleFrom(
-            backgroundColor: callActive
-                ? const Color(0xFF5B7760).withOpacity(0.15)
-                : const Color(0xFFF7F4EF),
+            backgroundColor: const Color(0xFFF7F4EF),
             padding: const EdgeInsets.all(12),
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Wraps the CallOverlay so it can read the CommunicationService and
-/// the rider's current trip context from the same Provider tree.
-class CallOverlayHost extends StatelessWidget {
-  const CallOverlayHost({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<CommunicationService>(
-      builder: (context, comm, _) {
-        if (comm.callPhase == CallPhase.idle) return const SizedBox.shrink();
-        final provider = Provider.of<RideProvider>(context, listen: false);
-        final peer = comm.peerName ?? provider.driver?.name ?? 'Your driver';
-        return Positioned.fill(child: CallOverlay(peerName: peer));
-      },
     );
   }
 }

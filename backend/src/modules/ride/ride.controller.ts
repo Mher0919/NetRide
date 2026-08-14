@@ -300,6 +300,47 @@ export class RideController {
     }
   }
 
+  // ---- In-trip chat + native phone dialing ----------------------------
+
+  /**
+   * Return the OTHER ride party's authoritative phone number so the app
+   * can open the native dialer (tel: URI). Party-only + derived from the
+   * users table — the peer can never inject a phone number through ride
+   * payloads. Returns 404 when the other party has no usable number.
+   */
+  static async getPartyPhone(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const role = req.user?.role;
+      const rideId = req.params.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const party = await RideController.assertTripParty(rideId, userId, role);
+      if (!party.ok) return res.status(party.code).json({ error: party.error });
+
+      const trip = party.trip;
+      const otherId =
+        trip.rider_id === userId ? trip.driver_id : trip.rider_id;
+      if (!otherId) {
+        return res.status(409).json({ error: 'The other party is not on this ride anymore.' });
+      }
+
+      const other = await pool.query(
+        `SELECT id, full_name, phone_number FROM users WHERE id = $1`,
+        [otherId],
+      );
+      const row = other.rows[0];
+      const phone = row?.phone_number?.toString?.();
+      if (!row || !phone || phone.trim().length === 0) {
+        return res.status(404).json({ error: 'Unable to call this user.' });
+      }
+      res.json({ phone_number: phone.trim(), full_name: row.full_name || '' });
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Party phone error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to load the contact number.' });
+    }
+  }
+
   // ---- In-trip chat + masked call ---------------------------------------
 
   /**

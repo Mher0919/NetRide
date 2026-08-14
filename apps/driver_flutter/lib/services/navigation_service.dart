@@ -270,9 +270,37 @@ class NavigationService extends ChangeNotifier {
     _route = route;
     _matcher = RouteMatcher.forPolyline(route.polyline);
     _progress = null;
-    _lastNotifiedStepIndex = -1;
+    // Voice guard reset: a NEW route means the step/distance vocabulary has
+    // changed, so the next GPS event may announce the new current step ONCE
+    // (threshold-guarded in _onGpsFix). Preview re-speaks are blocked
+    // separately via _previewSpokenKey, so rebuilds/leg swaps never repeat
+    // the takeoff instruction.
+    _lastAnnouncedStepIndex = -1;
+    _lastAnnouncedThreshold = -1;
     _rerouteController.onRouteApplied();
   }
+
+  /// Key of the takeoff preview that has already been spoken for the
+  /// current (trip, leg). Prevents `startNavigation` re-runs (leg swaps,
+  /// reroutes, rebuilds) from repeating the same preview instruction.
+  String? _previewSpokenKey;
+
+  /// Voice state machine guards (spec §21/§22): the same maneuver is never
+  /// re-announced because the UI rebuilt or an unrelated button fired —
+  /// announcements are exclusively driven by GPS progress crossing into a
+  /// new step or past a distance threshold.
+  int _lastAnnouncedStepIndex = -1;
+
+  /// Index of the finest distance threshold already announced for the
+  /// current step (coarser → finer as the driver advances). Each bucket
+  /// fires exactly once, so GPS jitter/backward noise never repeats speech.
+  int _lastAnnouncedThreshold = -1;
+
+  /// Distance thresholds (meters) at which the NEXT maneuver is re-announced
+  /// while the driver is still on the same step.
+  static const List<double> _announceThresholdsMeters = [
+    1609.34 * 2, 1609.34, 804.67, 402.34, 200, 100,
+  ];
 
   Future<void> startNavigation({
     required String tripId,
@@ -318,7 +346,7 @@ class NavigationService extends ChangeNotifier {
     _gpsSub = GpsTracker.instance.fixes.listen(_onGpsFix);
 
     _isNavigating = true;
-    _speakRoutePreview();
+    _speakRoutePreview(tripId: tripId, leg: leg);
     notifyListeners();
   }
 
@@ -443,6 +471,7 @@ class NavigationService extends ChangeNotifier {
     _gpsSub = null;
     _speedMonitor.stop();
     _rerouteController.reset();
+    _previewSpokenKey = null;
     NavigationVoiceService.instance.stop();
     // Release the GPS tracker so it stops consuming OS location
     // resources when there is no active navigation.
@@ -511,16 +540,18 @@ class NavigationService extends ChangeNotifier {
     );
     _progress = progress;
 
-    if (progress != null &&
-        progress.currentStep != null &&
-        progress.currentStepIndex != _lastNotifiedStepIndex) {
+    if (progress != null && progress.currentStep != null) {
       _speedMonitor.notifyStepChanged(
         progress.currentStepIndex,
         route.rawSteps,
       );
-      _lastNotifiedStepIndex = progress.currentStepIndex;
 
-      if (!NavigationVoiceService.instance.muted) {
+      // Voice: event-driven + threshold-guarded (spec §20–§22). An
+      // announcement fires ONLY when navigation actually progressed —
+      // either into a new step (index advanced) or past a distance
+      // threshold toward the next maneuver. Widget rebuilds, orientation
+      // changes, and unrelated button presses cannot re-trigger speech.
+      if (!NavigationVoiceService.instance.muted && _shouldAnnounce(progress, snap)) {
         _speakNextManeuver(progress);
       }
     }
@@ -538,7 +569,14 @@ class NavigationService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _speakRoutePreview() {
+  void _speakRoutePreview({required String tripId, required NavigationLeg leg}) {
+    // Speak the takeoff preview exactly once per (trip, leg). Repeated
+    // startNavigation calls for the SAME leg — caused by widget rebuilds,
+    // leg-swap postFrame callbacks, or rehydration — are no-ops here.
+    final key = '$tripId:${leg.name}';
+    if (_previewSpokenKey == key) return;
+    _previewSpokenKey = key;
+
     final route = _route;
     if (route == null || route.steps.isEmpty) return;
 
@@ -567,6 +605,37 @@ class NavigationService extends ChangeNotifier {
     NavigationVoiceService.instance.speak(text);
   }
 
+  /// Decides whether a GPS tick warrants a voice announcement:
+  ///   - step index strictly advanced (new maneuver reached), OR
+  ///   - still on the same step but crossed into a finer distance
+  ///     threshold toward the next maneuver ("in 2 miles" → "in 1 mile"
+  ///     → "in 200 ft"), each bucket fired exactly once.
+  /// Backward GPS noise, stationary fixes, rebuilds and unrelated button
+  /// presses never announce (spec §20–§22).
+  bool _shouldAnnounce(RouteProgress progress, SnapResult snap) {
+    final stepIdx = progress.currentStepIndex;
+
+    // New maneuver reached — forward progression only.
+    if (stepIdx > _lastAnnouncedStepIndex) {
+      _lastAnnouncedStepIndex = stepIdx;
+      _lastAnnouncedThreshold = -1;
+      return true;
+    }
+
+    // Same step: finer distance bucket crossed (announce once per bucket).
+    final remaining = progress.distanceToNextManeuver;
+    for (int i = 0; i < _announceThresholdsMeters.length; i++) {
+      if (remaining <= _announceThresholdsMeters[i]) {
+        if (_lastAnnouncedThreshold < i && remaining > 20) {
+          _lastAnnouncedThreshold = i;
+          return true;
+        }
+        break;
+      }
+    }
+    return false;
+  }
+
   void _speakNextManeuver(RouteProgress progress) {
     final nextManeuver = progress.currentStep ?? progress.nextStep;
     if (nextManeuver == null) return;
@@ -585,8 +654,6 @@ class NavigationService extends ChangeNotifier {
     final text = "In $distanceStr, $instruction.";
     NavigationVoiceService.instance.speak(text);
   }
-
-  int _lastNotifiedStepIndex = -1;
 
   String formatDistance(double meters) {
     final mi = meters / 1609.34;

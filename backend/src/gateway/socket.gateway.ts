@@ -535,7 +535,9 @@ export function setupSocketGateway(io: Server) {
           await RideService.cancelTrip(tripId, id, cancelOpts);
         } catch (err: any) {
           console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
-          socket.emit('error', err.message);
+          // Dedicated event so the client can distinguish a REJECTED
+          // cancellation from a generic socket error (spec §60).
+          socket.emit('cancelTripFailed', { message: err.message });
         }
       });
 
@@ -919,7 +921,9 @@ export function setupSocketGateway(io: Server) {
           await RideService.cancelTrip(tripId, id, cancelOpts);
         } catch (err: any) {
           console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
-          socket.emit('error', err.message);
+          // Dedicated event so the client can distinguish a REJECTED
+          // cancellation from a generic socket error (spec §60).
+          socket.emit('cancelTripFailed', { message: err.message });
         }
       });
 

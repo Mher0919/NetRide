@@ -26,6 +26,10 @@ class ChatMessage {
   final DateTime timestamp;
   final bool pending;
 
+  /// True after the server rejected/dropped this outbound message — shown
+  /// as "Failed to send · Tap to retry" (spec §15), never as "sent".
+  final bool failed;
+
   const ChatMessage({
     this.id,
     required this.senderId,
@@ -33,6 +37,7 @@ class ChatMessage {
     required this.message,
     required this.timestamp,
     this.pending = false,
+    this.failed = false,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -46,16 +51,18 @@ class ChatMessage {
           ? ts
           : DateTime.parse(ts.toString()).toLocal(),
       pending: false,
+      failed: false,
     );
   }
 
-  ChatMessage copyWith({String? id, bool? pending}) => ChatMessage(
+  ChatMessage copyWith({String? id, bool? pending, bool? failed}) => ChatMessage(
         id: id ?? this.id,
         senderId: senderId,
         role: role,
         message: message,
         timestamp: timestamp,
         pending: pending ?? this.pending,
+        failed: failed ?? this.failed,
       );
 }
 
@@ -229,28 +236,43 @@ class CommunicationService extends ChangeNotifier {
   void _onSocketError(dynamic data) {
     final msg = data is String ? data : data?.toString() ?? 'Unknown error';
     _lastError = msg;
-    // Rate-limit and trip-state rejections come back as errors but
-    // shouldn't leave a stale "pending" bubble forever. Demote any
-    // pending rider-side optimistic row to failed by leaving its id
-    // null — the UI shows a clock icon until then.
+    // A rejected/dropped outbound message must NEVER linger as "sent" or
+    // spin pending forever — demote it to the explicit failed state so the
+    // UI offers "Tap to retry" (spec §15 / test case C).
     if (msg.toLowerCase().contains('too quickly') ||
         msg.toLowerCase().contains('only available') ||
-        msg.toLowerCase().contains('not part')) {
+        msg.toLowerCase().contains('not part') ||
+        msg.toLowerCase().contains('message') ||
+        msg.toLowerCase().contains('active trip')) {
       _markPendingFailed();
     }
     notifyListeners();
   }
 
   void _markPendingFailed() {
-    // We can't truly "fail" a message without an id; for the rider we
-    // just clear the pending flag so the bubble stops spinning. The
-    // server is the source of truth — a delivered copy will arrive via
-    // `messageDelivered` when the client retries correctly.
     for (var i = 0; i < _messages.length; i++) {
       if (_messages[i].pending && _messages[i].role == 'rider') {
-        _messages[i] = _messages[i].copyWith(pending: false);
+        _messages[i] = _messages[i].copyWith(pending: false, failed: true);
       }
     }
+  }
+
+  /// Retry a failed outbound message (spec §15): re-emit the same payload
+  /// exactly once and put the bubble back into the sending state. The
+  /// server's `messageDelivered` echo reconciles it when it lands.
+  void retryMessage(int index) {
+    if (index < 0 || index >= _messages.length) return;
+    final msg = _messages[index];
+    if (!msg.failed || msg.role != 'rider') return;
+    final socket = _socket;
+    if (socket == null || !socket.connected) {
+      _lastError = 'You appear to be offline. Message will retry when reconnected.';
+      notifyListeners();
+      return;
+    }
+    _messages[index] = msg.copyWith(pending: true, failed: false);
+    notifyListeners();
+    socket.emit('sendMessage', {'tripId': _currentTripId, 'message': msg.message});
   }
 
   void clearError() {

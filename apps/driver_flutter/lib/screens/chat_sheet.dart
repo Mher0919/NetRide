@@ -206,6 +206,8 @@ class _ChatSheetState extends State<ChatSheet> {
           isMine: msg.role == 'driver',
           timestamp: msg.timestamp,
           pending: msg.pending,
+          failed: msg.failed,
+          onRetry: msg.failed ? () => comm.retryMessage(index) : null,
         );
       },
     );

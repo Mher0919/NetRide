@@ -1588,9 +1588,9 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
   }
 
   Widget _buildCard(models.Trip req) {
-    final price = req.calculatedPrice ?? req.fareAmount ?? 0.0;
-    // Server-computed 60% driver share (cents). The line is hidden when the
-    // field is absent — earnings are never derived client-side.
+    // The driver sees ONLY their own server-computed earnings (BUG 8 / §7–§9).
+    // The rider's gross fare is never sent to the driver client — no fallback
+    // derivation from fareAmount/calculatedPrice exists here on purpose.
     final earnings = req.driverEarningsCents != null
         ? req.driverEarningsCents! / 100.0
         : null;
@@ -1629,30 +1629,17 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
                 ),
               ),
               Text(
-                '\$${price.toStringAsFixed(2)}',
+                earnings != null
+                    ? 'You earn \$${earnings.toStringAsFixed(2)}'
+                    : '—',
                 style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF2F3A32),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF5B7760),
                 ),
               ),
             ],
           ),
-          if (earnings != null) ...[
-            const SizedBox(height: 2),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                'You earn \$${earnings.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF5B7760),
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 16),
 
           // ---- Route thumbnail + addresses --------------------------------

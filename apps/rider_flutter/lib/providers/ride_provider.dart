@@ -134,7 +134,13 @@ class RideProvider with ChangeNotifier {
       _currentTrip = trip;
       _status = trip.status;
       _tripId = trip.id;
-      
+
+      // Chat dies with the ride (spec §16): no new messages, no stale
+      // bubbles surviving the transition.
+      if (trip.status == TripStatus.CANCELLED) {
+        _messages = [];
+      }
+
       if (oldStatus == TripStatus.REQUESTED && trip.status == TripStatus.ACCEPTED) {
         SoundService.instance.play(SoundEffect.orderAccepted);
       }
@@ -241,6 +247,13 @@ class RideProvider with ChangeNotifier {
     });
 
     _socket!.on('error', (data) => print('Socket Error: $data'));
+
+    // Cancellation rejected server-side (e.g. missing reason / not in a
+    // cancellable state). The REST confirm path surfaces the same message
+    // when the socket one arrived first — never a silent hang.
+    _socket!.on('cancelTripFailed', (data) {
+      debugPrint('[RIDE] Server rejected cancellation: $data');
+    });
   }
 
   void sendMessage(String tripId, String message) {
