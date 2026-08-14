@@ -53,6 +53,13 @@ class DriverProvider with ChangeNotifier {
   /// server, or connection lost before confirmation).
   String? _lastCancelError;
 
+  /// Trip ids that reached a terminal state (COMPLETED / CANCELLED).
+  /// Delayed duplicate socket updates for these rides — retries, event
+  /// ordering races, reconnects — must NEVER resurrect the active ride
+  /// (which would re-push the trip screen and yank the driver out of
+  /// chat/cancel flows).
+  final Set<String> _settledTripIds = {};
+
   bool _hasPendingProfileChange = false;
   String? _pendingRequestId;
   DateTime? _pendingSince;
@@ -456,11 +463,32 @@ class DriverProvider with ChangeNotifier {
 
     _socket!.on('newTripRequest', (data) {
       _incomingRequest = models.Trip.fromJson(data);
+      // A brand-new offer means the previous ride context is over — any
+      // still-tracked settled ids are stale (bounded memory too).
+      _settledTripIds.clear();
       notifyListeners();
     });
 
     _socket!.on('tripUpdate', (data) {
       final trip = models.Trip.fromJson(data);
+
+      // Stale guard (spec §40/§61): never resurrect a ride that already
+      // reached a terminal state, and never switch to a different ride
+      // than the one currently active. Without this, a delayed ACCEPTED
+      // resets _currentTrip → the availability screen re-pushes /trip →
+      // the driver is thrown back to the route screen mid-chat / mid-cancel.
+      if (_settledTripIds.contains(trip.id)) {
+        debugPrint('[RIDE] Ignoring stale tripUpdate for settled trip ${trip.id}');
+        return;
+      }
+      if ((trip.status == models.TripStatus.ACCEPTED ||
+              trip.status == models.TripStatus.IN_PROGRESS) &&
+          _currentTrip != null &&
+          _currentTrip!.id != trip.id) {
+        debugPrint('[RIDE] Ignoring tripUpdate for different trip ${trip.id} (current ${_currentTrip!.id})');
+        return;
+      }
+
       if (trip.status == models.TripStatus.ACCEPTED || trip.status == models.TripStatus.IN_PROGRESS) {
         _currentTrip = trip;
         _incomingRequest = null;
@@ -473,6 +501,7 @@ class DriverProvider with ChangeNotifier {
         if (_incomingRequest?.id == trip.id) {
           _incomingRequest = null;
         }
+        _settledTripIds.add(trip.id);
         _currentTrip = null;
         _status = models.DriverStatus.online;
         notifyListeners();
@@ -483,6 +512,7 @@ class DriverProvider with ChangeNotifier {
         if (_incomingRequest?.id == trip.id) {
           _incomingRequest = null;
         }
+        _settledTripIds.add(trip.id);
         _currentTrip = null;
         _messages = [];
         _riderLocation = null;
@@ -843,6 +873,7 @@ class DriverProvider with ChangeNotifier {
     _cancelling = false;
     _cancelConfirmTimer?.cancel();
     _cancelConfirmTimer = null;
+    _settledTripIds.clear();
     notifyListeners();
   }
 

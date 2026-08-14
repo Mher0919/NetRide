@@ -44,8 +44,8 @@ class DriverInfo {
   final String id;
   final String name;
   final String? email;
-  final String vehicle;
-  final String plate;
+  final String? vehicle;
+  final String? plate;
   final double rating;
   final int totalRides;
   final Location? location;
@@ -54,20 +54,22 @@ class DriverInfo {
     required this.id,
     required this.name,
     this.email,
-    required this.vehicle,
-    required this.plate,
+    this.vehicle,
+    this.plate,
     this.rating = 5.0,
     this.totalRides = 0,
     this.location,
   });
 
+  /// No fabricated vehicle/plate — those are only ever set from real
+  /// backend driver records (or null, and the UI hides the fields).
   factory DriverInfo.fromJson(Map<String, dynamic> json) {
     return DriverInfo(
       id: json['id'] ?? '',
-      name: json['name'] ?? 'Driver',
+      name: json['name'] ?? '',
       email: json['email'],
-      vehicle: json['vehicle'] ?? 'Sedan',
-      plate: json['plate'] as String? ?? '',
+      vehicle: json['vehicle']?.toString(),
+      plate: json['plate']?.toString(),
       rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
       totalRides: json['totalRides'] as int? ?? 0,
       location: json['location'] != null ? Location.fromJson(json['location']) : null,

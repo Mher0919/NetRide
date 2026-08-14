@@ -329,25 +329,28 @@ class _TripScreenState extends State<TripScreen> {
                                 style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1, color: Color(0xFF5B7760)),
                               ),
                               Text(
-                                driver.name,
+                                driver.name.isNotEmpty ? driver.name : 'Your driver',
                                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                               ),
                             ],
                           ),
                         ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              driver.plate,
-                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-                            ),
-                            Text(
-                              driver.vehicle,
-                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                            ),
-                          ],
-                        ),
+                        if (driver.plate != null || driver.vehicle != null)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (driver.plate != null)
+                                Text(
+                                  driver.plate!,
+                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                                ),
+                              if (driver.vehicle != null)
+                                Text(
+                                  driver.vehicle!,
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                ),
+                            ],
+                          ),
                       ],
                     ),
                   ],
@@ -425,7 +428,10 @@ class _TripScreenState extends State<TripScreen> {
                           icon: const Icon(Icons.close, color: Color(0xFFC65A5A), size: 18),
                           label: const Text('Cancel', style: TextStyle(color: Color(0xFFC65A5A), fontWeight: FontWeight.w600)),
                         ),
-                      _ChatCallButtons(tripId: rideProvider.tripId ?? '', peerName: driver.name),
+                      _ChatCallButtons(
+                        tripId: rideProvider.tripId ?? '',
+                        peerName: driver.name.isNotEmpty ? driver.name : 'Your driver',
+                      ),
                     ],
                   ),
                 ],

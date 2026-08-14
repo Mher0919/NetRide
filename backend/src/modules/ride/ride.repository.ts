@@ -39,14 +39,26 @@ export class RideRepository {
     return this.mapToTrip(res.rows[0]);
   }
 
+  private static readonly DRIVER_VEHICLE_JOIN = `
+      LEFT JOIN LATERAL (
+        SELECT make, model, license_plate_number
+        FROM driver_vehicles
+        WHERE driver_id = d.id AND make IS NOT NULL
+        ORDER BY id LIMIT 1
+      ) dv ON true
+  `;
+
   static async findById(id: string): Promise<Trip | null> {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.id = $1
     `, [id]);
     return res.rows[0] ? this.mapToTrip(res.rows[0]) : null;
@@ -121,10 +133,13 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.id = $1
     `, [id]);
     
@@ -135,10 +150,13 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.rider_id = $1 
       ORDER BY r.created_at DESC
     `, [riderId]);
@@ -149,10 +167,13 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.driver_id = $1 AND r.status IN ('COMPLETED', 'ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'CANCELLED')
       ORDER BY r.created_at DESC
     `, [driverId]);
@@ -163,10 +184,13 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.rider_id = $1 AND r.status NOT IN ($2, $3) 
       ORDER BY r.created_at DESC LIMIT 1
     `, [riderId, TripStatus.COMPLETED, TripStatus.CANCELLED]);
@@ -178,10 +202,13 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*,
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.driver_id = $1 AND r.status NOT IN ($2, $3)
       ORDER BY r.created_at DESC LIMIT 1
     `, [driverId, TripStatus.COMPLETED, TripStatus.CANCELLED]);
@@ -236,10 +263,18 @@ export class RideRepository {
         total_rides: row.rider_rides !== null ? parseInt(row.rider_rides) : 0,
       },
       driver_info: row.driver_id ? {
-        name: row.driver_name || 'Driver',
+        name: row.driver_name || '',
         email: row.driver_email,
         rating: row.driver_rating !== null ? parseFloat(row.driver_rating) : 5.0,
         total_rides: row.driver_rides !== null ? parseInt(row.driver_rides) : 0,
+        // Real vehicle identity from the driver's vehicle record — never
+        // fabricated. `vehicle` and `plate` are omitted when the driver has
+        // no vehicle row, and the client hides those fields instead of
+        // inventing "Sedan"/"ABC-123".
+        vehicle: row.driver_vehicle_make || row.driver_vehicle_model
+          ? [row.driver_vehicle_make, row.driver_vehicle_model].filter(Boolean).join(' ') || undefined
+          : undefined,
+        plate: row.driver_vehicle_plate || undefined,
       } : undefined,
     };
   }

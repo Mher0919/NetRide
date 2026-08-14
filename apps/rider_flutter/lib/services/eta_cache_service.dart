@@ -21,6 +21,10 @@ class CachedEtaData {
   });
 
   bool get isExpired {
+    // A cached ETA with NO fare predates the fare-in-plan fix and would
+    // render "$—" forever — always treat it as expired so the next lookup
+    // refetches an authoritative (priced) estimate.
+    if (fareTotal == null || fareTotal! <= 0) return true;
     final age = DateTime.now().difference(cachedAt);
     if (trafficDurationSeconds != null) return age.inMinutes > 15;
     return age.inHours > 24;

@@ -100,6 +100,8 @@ export interface Trip {
     email?: string;
     rating: number;
     total_rides: number;
+    vehicle?: string;
+    plate?: string;
   };
 }
 

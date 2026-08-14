@@ -89,6 +89,10 @@ export class RoutingController {
         engine: plan.engine,
         cacheHit: plan.cacheHit,
         steps: [],
+        // Authoritative backend fare — identical object to /plan. Without
+        // this the rider picks a route with no price at all (the old
+        // behavior that produced blank "$—" fare cards).
+        fare: plan.fare,
       });
     } catch (err: any) {
       if (err instanceof InvalidCoordinatesError) {

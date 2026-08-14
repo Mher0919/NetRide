@@ -157,21 +157,26 @@ class RideProvider with ChangeNotifier {
           initialLoc = Location.fromJson(data['driver_location']);
         }
 
+        // Real driver identity from the authoritative payload. The map
+        // carries driver_info.{name,vehicle,plate} from the users +
+        // driver_vehicles tables — never fabricated client-side. Fields
+        // absent from the payload stay null and the UI hides them.
+        final driverInfo = trip.driverInfo;
         if (_driver == null) {
           _driver = DriverInfo(
             id: trip.driverId ?? '',
-            name: 'Driver',
-            vehicle: 'Sedan',
-            plate: 'ABC-123',
+            name: driverInfo?.name ?? '',
+            vehicle: driverInfo?.vehicle,
+            plate: driverInfo?.plate,
             location: initialLoc,
           );
-        } else if (initialLoc != null) {
+        } else {
           _driver = DriverInfo(
-            id: _driver!.id,
+            id: _driver!.id.isNotEmpty ? _driver!.id : (trip.driverId ?? ''),
             name: _driver!.name,
             vehicle: _driver!.vehicle,
             plate: _driver!.plate,
-            location: initialLoc,
+            location: initialLoc ?? _driver!.location,
           );
         }
       }
