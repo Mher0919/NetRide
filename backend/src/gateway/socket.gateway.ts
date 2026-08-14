@@ -487,17 +487,13 @@ export function setupSocketGateway(io: Server) {
 
         console.log(`[SOCKET] Driver ${id} accepts trip: ${tripId}${offerId ? ` (offer=${offerId})` : ''}`);
         try {
-          if (offerId) {
-            const { DriverOfferService } = await import('../services/driver-offer.service');
-            const accepted = await DriverOfferService.acceptOffer(offerId);
-            if (!accepted) {
-              // Dedicated event so the driver app can roll back its
-              // optimistic accept state (the previous generic 'error' was
-              // only printed and left the driver stranded on a phantom trip).
-              socket.emit('acceptTripFailed', 'This ride offer is no longer valid. It may have expired or been cancelled.');
-              return;
-            }
-          }
+          // Single source of truth: RideService.acceptTrip validates the
+          // offer (SENT + belongs to this driver), atomically accepts it,
+          // and assigns the trip. The offer MUST NOT be accepted here first:
+          // RideService re-validates the offer status and would reject an
+          // already-ACCEPTED offer with "Offer is in state ACCEPTED...",
+          // failing every legitimate accept. On failure the driver app
+          // rolls back its optimistic state via the acceptTripFailed event.
           await RideService.acceptTrip(tripId, id);
         } catch (err: any) {
           console.error(`[SOCKET] Accept trip failed: ${err.message}`);

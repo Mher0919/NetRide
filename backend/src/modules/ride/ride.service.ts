@@ -295,6 +295,14 @@ export class RideService {
   static async acceptTrip(tripId: string, driverId: string): Promise<Trip> {
     const trip = await RideRepository.findById(tripId);
     if (!trip) throw new Error('Trip not found');
+
+    // Idempotent re-accept: the same driver accepting the same trip again
+    // (socket retransmit, double-tap) is a success, not an error — the
+    // trip is already assigned to this driver.
+    if (trip.driver_id === driverId &&
+        (trip.status === 'ACCEPTED' || trip.status === 'IN_PROGRESS')) {
+      return trip;
+    }
     if (trip.status !== 'REQUESTED') throw new Error('Trip already taken or cancelled');
 
     // Security: Ensure driver doesn't have another active trip. A stale
@@ -326,17 +334,27 @@ export class RideService {
       throw new Error('This ride was offered to a different driver.');
     }
     if (rideOffer.status !== OfferStatus.SENT) {
-      if (rideOffer.status === OfferStatus.EXPIRED) {
+      if (rideOffer.status === OfferStatus.ACCEPTED) {
+        // The offer was already atomically accepted for this driver —
+        // either a retransmitted accept (trip already assigned, handled
+        // above) or a crash between the offer accept and the ride flip.
+        // Reconcile by continuing the assignment below instead of failing.
+      } else if (rideOffer.status === OfferStatus.EXPIRED) {
         throw new Error('This ride offer has expired.');
+      } else {
+        throw new Error(`Offer is in state ${rideOffer.status} and cannot be accepted.`);
       }
-      throw new Error(`Offer is in state ${rideOffer.status} and cannot be accepted.`);
     }
 
     // Atomically accept the offer — this prevents race conditions where
     // two workers or two app clients both try to accept the same offer.
-    const accepted = await DriverOfferService.acceptOffer(rideOffer.offerId);
-    if (!accepted) {
-      throw new Error('Failed to accept offer. It may have already been accepted or expired.');
+    // Skipped when the offer is already ACCEPTED for this driver (the
+    // atomic guard above was already won by us).
+    if (rideOffer.status === OfferStatus.SENT) {
+      const accepted = await DriverOfferService.acceptOffer(rideOffer.offerId);
+      if (!accepted) {
+        throw new Error('Failed to accept offer. It may have already been accepted or expired.');
+      }
     }
 
     // Resolve the fare from the ride's price snapshot (platform price —
