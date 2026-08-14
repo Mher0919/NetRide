@@ -33,7 +33,7 @@ export class DriverEligibilityService {
    * was rejected and log meaningful diagnostics.
    */
   static async checkEligibility(driverId: string): Promise<DriverEligibility> {
-    const [heartbeat, activeTrip, activeOffer, driverDb] = await Promise.all([
+    const [heartbeat, activeTripKey, activeOffer, driverDb] = await Promise.all([
       redis.get(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`),
       redis.get(`driver:${driverId}:active_trip`),
       redis.get(`${DRIVER_OFFER_PREFIX}${driverId}`),
@@ -56,7 +56,45 @@ export class DriverEligibilityService {
 
     const isOnline = heartbeat !== null;
     const isActive = driverDb?.user?.is_active === true;
-    const hasActiveTrip = activeTrip !== null;
+
+    // Self-heal stale active-trip keys. The key is written at ACCEPT time
+    // with a 4h TTL and only cleared on COMPLETE or CANCEL — when a test or
+    // app kill leaves the ride dangling (or the ride was terminal in the DB
+    // all along), the driver would otherwise be excluded from EVERY
+    // dispatch for the full 4h while standing online at the pickup. This
+    // mirrors the reconciliation acceptTrip() already performs on its own
+    // path. A genuinely live IN_PROGRESS / ACCEPTED ride still blocks
+    // (correct behavior) — only impossible or terminal states are healed.
+    let hasActiveTrip = activeTripKey !== null;
+    if (hasActiveTrip) {
+      try {
+        const trip = await RideRepository.findById(activeTripKey!);
+        if (
+          !trip ||
+          trip.status === TripStatus.COMPLETED ||
+          trip.status === TripStatus.CANCELLED ||
+          trip.status === TripStatus.REQUESTED
+        ) {
+          await redis.del(`driver:${driverId}:active_trip`);
+          console.log(
+            `[DISPATCH] 🧹 Healed stale active_trip key for driver ${driverId} ` +
+            `(was ${activeTripKey}, status=${trip?.status ?? 'missing'})`,
+          );
+          hasActiveTrip = false;
+        } else if (trip.status === TripStatus.ACCEPTED && trip.driver_id !== driverId) {
+          // Cached key points at a ride this driver is not assigned to.
+          await redis.del(`driver:${driverId}:active_trip`);
+          console.log(
+            `[DISPATCH] 🧹 Cleared mismatched active_trip key for driver ${driverId} ` +
+            `(was ${activeTripKey}, assigned to ${trip.driver_id})`,
+          );
+          hasActiveTrip = false;
+        }
+      } catch {
+        // DB hiccup — keep blocking (conservative); the 4h TTL still self-heals.
+      }
+    }
+
     const hasActiveOffer = activeOffer !== null;
     const locationFresh = await DriverEligibilityService.isLocationFresh(driverId);
 
@@ -157,6 +195,10 @@ export class DriverEligibilityService {
   /**
    * Batch eligibility filter — efficiently filters a list of driver IDs
    * to only those who are eligible. Returns the eligible subset.
+   *
+   * Skipped drivers are logged with their reasons — a silent empty result
+   * here reads as "no candidates" in the dispatch pipeline, which hid the
+   * real cause (e.g. a stuck active-trip key) for far too long.
    */
   static async filterEligible(driverIds: string[]): Promise<string[]> {
     if (driverIds.length === 0) return [];
@@ -170,6 +212,12 @@ export class DriverEligibilityService {
       const r = results[i];
       if (r.status === 'fulfilled' && r.value.eligible) {
         eligible.push(driverIds[i]);
+      } else {
+        const reason =
+          r.status === 'fulfilled'
+            ? (r.value.reason ?? 'unknown')
+            : `check_failed: ${r.reason?.message ?? 'error'}`;
+        console.log(`[DISPATCH] Skipping driver ${driverIds[i]}: ${reason}`);
       }
     }
 

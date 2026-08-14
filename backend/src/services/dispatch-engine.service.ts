@@ -56,7 +56,16 @@ export class DispatchEngine {
     const scored = await DispatchService.getWeightedDrivers(pickup, radiusKm, riderId, favoritePriority);
     if (scored.length === 0) return [];
     const eligibleIds = await DriverEligibilityService.filterEligible(scored.map(d => d.id));
-    return scored.filter(d => eligibleIds.includes(d.id));
+    const eligible = scored.filter(d => eligibleIds.includes(d.id));
+    if (eligible.length === 0) {
+      // Nearby drivers existed but every one was ruled out — surface that
+      // instead of the misleading "no candidates" (the skip reasons are
+      // logged by DriverEligibilityService.filterEligible).
+      console.log(
+        `[DISPATCH] ${scored.length} nearby driver(s) found but all ineligible for ride (see skip reasons above)`,
+      );
+    }
+    return eligible;
   }
 
   static async executeMatching(

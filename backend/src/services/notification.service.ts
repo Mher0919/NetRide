@@ -105,7 +105,7 @@ export async function notifyUser(args: NotifyArgs): Promise<NotifyResult> {
       const res = await pool.query(
         `INSERT INTO notifications (user_id, role, type, title, body, data, event_id)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-         ON CONFLICT (event_id) DO NOTHING
+         ON CONFLICT DO NOTHING
          RETURNING id`,
         [userId, role, type, title, body, JSON.stringify(data), args.eventId]
       );
