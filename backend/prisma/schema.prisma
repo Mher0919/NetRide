@@ -536,6 +536,7 @@ enum PayoutMethod {
   WEEKLY_AUTO
   ON_DEMAND
   RIDE_CREDIT
+  TIP_CREDIT
 
   @@map("payout_method")
 }

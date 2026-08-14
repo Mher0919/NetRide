@@ -1361,4 +1361,50 @@ export class DriverService {
       client.release();
     }
   }
+
+  /**
+   * Wallet credit for tips added AFTER the ride completed. The completion
+   * credit only captured the tip that existed at completion time; this
+   * credits the delta separately. Idempotent per ride: the payouts
+   * TIP_CREDIT partial unique index plus delta math prevent double-
+   * counting, so re-running the same tip request is a no-op.
+   */
+  static async creditTipAfterComplete(driverId: string, tipCents: number, rideId: string) {
+    if (!driverId) return;
+    const safeTip = Math.max(0, Math.round(tipCents));
+    if (safeTip <= 0) return;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`,
+        [driverId]
+      );
+      await client.query(
+        `UPDATE driver_wallets
+         SET balance_cents = balance_cents + $1,
+             lifetime_earnings_cents = lifetime_earnings_cents + $1,
+             updated_at = NOW()
+         WHERE driver_id = $2`,
+        [safeTip, driverId]
+      );
+      await client.query(
+        `INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
+         VALUES ($1, $2, 0, $2, 'PAID', 'TIP_CREDIT', $3)
+         ON CONFLICT (ride_id) WHERE method = 'TIP_CREDIT' DO NOTHING`,
+        [driverId, safeTip, rideId]
+      );
+      console.log(
+        `[WALLET] 💰 Ride ${rideId}: after-trip tip of $${(safeTip / 100).toFixed(2)} credited to driver ${driverId}`
+      );
+      await client.query('COMMIT');
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      console.error(`[WALLET] ❌ creditTipAfterComplete failed for driver ${driverId}:`, err.message);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 }

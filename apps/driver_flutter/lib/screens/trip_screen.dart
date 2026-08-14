@@ -22,6 +22,13 @@ import 'report_sheet.dart';
 class TripScreen extends StatefulWidget {
   const TripScreen({super.key});
 
+  /// True while a TripScreen is in the navigator stack. Guards the
+  /// availability screen's auto-push so a late tripUpdate cannot push a
+  /// SECOND trip screen on top of the chat sheet / cancel dialog (which
+  /// used to re-run navigation and throw the driver back to the loading
+  /// state mid-action).
+  static bool isOpen = false;
+
   @override
   State<TripScreen> createState() => _TripScreenState();
 }
@@ -38,7 +45,14 @@ class _TripScreenState extends State<TripScreen> {
   @override
   void initState() {
     super.initState();
+    TripScreen.isOpen = true;
     WidgetsBinding.instance.addPostFrameCallback((_) => _initNavigation());
+  }
+
+  @override
+  void dispose() {
+    TripScreen.isOpen = false;
+    super.dispose();
   }
 
   Future<void> _initNavigation() async {
@@ -493,7 +507,7 @@ class _TripScreenState extends State<TripScreen> {
         barrierDismissible: false,
         builder: (context) => TripCompletedDialog(
           fareAmount: trip.fareAmount ?? 0.0,
-          tipAmount: 0.0,
+          tipAmount: trip.tipAmount ?? 0.0,
           isDriver: true,
           driverEarningsCents: trip.driverEarningsCents,
         ),
@@ -596,7 +610,7 @@ class _TripScreenState extends State<TripScreen> {
                                 barrierDismissible: false,
                                 builder: (context) => TripCompletedDialog(
                                   fareAmount: trip.fareAmount ?? 0.0,
-                                  tipAmount: 0.0,
+                                  tipAmount: trip.tipAmount ?? 0.0,
                                   isDriver: true,
                                   driverEarningsCents: trip.driverEarningsCents,
                                 ),

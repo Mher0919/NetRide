@@ -14,6 +14,7 @@ import '../services/communication_service.dart';
 import '../services/api_service.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/state_container.dart';
+import '../components/tip_fab.dart';
 import 'rating_screen.dart';
 import 'chat_sheet.dart';
 import 'report_sheet.dart';
@@ -358,6 +359,15 @@ class _TripScreenState extends State<TripScreen> {
               ),
             ),
           ),
+
+          // Tip FAB (during trip only, above the bottom controls)
+          if (rideProvider.status == models.TripStatus.ACCEPTED ||
+              rideProvider.status == models.TripStatus.IN_PROGRESS)
+            Positioned(
+              bottom: 210,
+              right: 16,
+              child: TipFab(rideId: rideProvider.currentTrip!.id),
+            ),
 
           // Bottom Controls
           Positioned(

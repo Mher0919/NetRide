@@ -4,6 +4,7 @@ import { authMiddleware } from '../../middleware/auth.middleware';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import { io } from '../../app';
 import { isTestEmail } from '../../utils/testUser';
+import { DriverService } from '../driver/driver.service';
 
 const router = Router();
 
@@ -26,6 +27,9 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
         if (ride.rider_id !== riderId) return res.status(403).json({ error: 'Unauthorized.' });
 
         const numericAmount = parseFloat(amount);
+        const oldTipCents = Math.round(
+            parseFloat((ride as any).tip_amount ?? '0') * 100
+        );
 
         await (prisma.ride as any).update({
             where: { id: rideId },
@@ -60,6 +64,29 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
             rideId,
             amount: numericAmount,
         });
+
+        // Tips added AFTER the ride completed were not part of the
+        // completion-time wallet credit. Credit the delta (new − old) so
+        // the driver actually receives post-trip tips. Idempotent: the
+        // delta is zero on a repeated request, and payouts carries at
+        // most one TIP_CREDIT row per ride.
+        if (ride.status === 'COMPLETED' && ride.driver_id) {
+            const newTipCents = Math.round(numericAmount * 100);
+            const deltaCents = newTipCents - oldTipCents;
+            if (deltaCents > 0) {
+                try {
+                    await DriverService.creditTipAfterComplete(
+                        ride.driver_id,
+                        deltaCents,
+                        rideId
+                    );
+                } catch (err: any) {
+                    console.warn(
+                        `[RIDE] ⚠️ After-trip tip credit failed (non-blocking) for ride ${rideId}: ${err.message}`
+                    );
+                }
+            }
+        }
 
         res.json({ message: 'Tip successfully added.' });
     } catch (err: any) {

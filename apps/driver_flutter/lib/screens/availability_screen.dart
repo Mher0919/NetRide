@@ -16,6 +16,7 @@ import '../components/driver_status_card.dart';
 import '../services/sound_service.dart';
 import '../services/heatmap_service.dart';
 import '../models/demand_zone.dart';
+import 'trip_screen.dart';
 
 /// NetRide driver dashboard.
 ///
@@ -745,15 +746,10 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   Widget build(BuildContext context) {
     final driverProvider = Provider.of<DriverProvider>(context);
     
-    if (driverProvider.currentTrip != null) {
+    if (driverProvider.currentTrip != null && !TripScreen.isOpen) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          bool isTripScreenOpen = false;
-          Navigator.popUntil(context, (route) {
-            if (route.settings.name == '/trip') isTripScreenOpen = true;
-            return true;
-          });
-          if (!isTripScreenOpen) Navigator.pushNamed(context, '/trip');
+        if (mounted && !TripScreen.isOpen) {
+          Navigator.pushNamed(context, '/trip');
         }
       });
     }
