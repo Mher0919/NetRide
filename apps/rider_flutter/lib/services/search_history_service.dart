@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/search_result.dart';
 import '../services/api_service.dart';
@@ -103,7 +104,10 @@ class SearchHistoryService {
           .map((j) => SearchResult.fromJson(j as Map<String, dynamic>))
           .where((r) => r.hasValidCoordinates)
           .toList();
-    } catch (_) {
+    } catch (e) {
+      // Never crash the map for a history fetch — but log it so an EMPTY
+      // recent list is diagnosable (unreachable backend vs truly empty).
+      debugPrint('[SEARCH_HISTORY] fetch failed (returning empty): $e');
       return [];
     }
   }
@@ -147,7 +151,8 @@ class SearchHistoryService {
           .cast<Map<String, dynamic>>()
           .map((j) => CachedRoute.fromJson(j))
           .toList();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[SEARCH_HISTORY] fetchRecentRoutes failed (returning empty): $e');
       return [];
     }
   }
