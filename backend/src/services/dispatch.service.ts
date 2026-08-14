@@ -48,7 +48,10 @@ export class DispatchService {
       const dbDrivers = await primaryPrisma.driver.findMany({
         where: {
           user_id: { in: driverIds },
-          is_active: true,
+          // Runtime account gate — see the note in driver-eligibility. The
+          // admin-onboarding `is_active` flag is false for self-serve
+          // drivers; gating on the user account matches the app's own gate.
+          user: { is_active: true },
         } as any,
         include: {
           user: { select: { rating: true, rating_count: true } },

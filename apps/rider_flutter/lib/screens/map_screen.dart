@@ -107,12 +107,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   // address-search delegate reads inside the search screen).
   List<SearchResult> _recentSearches = [];
 
-  /// Previously routed trips (route history). Written by this app on every
-  /// confirmed plan and served by the backend (most-recent 20, 30-day TTL).
-  /// This strip is the UI that actually RENDERS that store — without it the
-  /// routes were saved server-side but never visible to the rider.
-  List<CachedRoute> _recentRoutes = [];
-
   @override
   void initState() {
     super.initState();
@@ -129,20 +123,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _fetchProfile();
     _startGeohashUpdates();
     _loadRecentSearches();
-    _loadRecentRoutes();
     _loadRewardsOptions();
-  }
-
-  /// Loads the rider's recent routed trips from the backend store. Never
-  /// blocks the UI; failures keep the section hidden instead of erroring.
-  Future<void> _loadRecentRoutes() async {
-    try {
-      final recent = await SearchHistoryService.instance.fetchRecentRoutes();
-      if (!mounted) return;
-      setState(() => _recentRoutes = recent.take(3).toList());
-    } catch (e) {
-      debugPrint('[ROUTES] Recent routes load failed: $e');
-    }
   }
 
   Future<void> _loadRecentSearches() async {
@@ -165,25 +146,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         lat: result.lat,
         lng: result.lon,
         address: result.displayName,
-      );
-      _shouldFollowUser = false;
-    });
-    _updateRoute();
-  }
-
-  /// Tapping a recent ROUTE re-applies the full origin → destination pair
-  /// and replans it, so the rider can instantly repeat their usual trips.
-  Future<void> _applyRecentRoute(CachedRoute route) async {
-    setState(() {
-      _pickup = models.Location(
-        lat: route.originLat,
-        lng: route.originLon,
-        address: route.originName,
-      );
-      _destination = models.Location(
-        lat: route.destLat,
-        lng: route.destLon,
-        address: route.destName,
       );
       _shouldFollowUser = false;
     });
@@ -951,10 +913,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                 if (_recentSearches.isNotEmpty) ...[
                                   const SizedBox(height: 14),
                                   _buildRecentSearches(theme),
-                                ],
-                                if (_recentRoutes.isNotEmpty) ...[
-                                  const SizedBox(height: 14),
-                                  _buildRecentRoutes(theme),
                                 ],
                               ],
                             ),
@@ -2522,78 +2480,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           ),
         ),
       ),
-    );
-  }
-
-  /// Explore: the rider's recently routed trips (origin → destination) from
-  /// the backend route-history store. This is the UI that makes the saved
-  /// route history visible — tap any chip to re-plan that exact trip.
-  Widget _buildRecentRoutes(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Recent Routes',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: const Color(0xFF2F3A32).withOpacity(0.7),
-          ),
-        ),
-        const SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (final route in _recentRoutes)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Material(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    child: InkWell(
-                      onTap: () => _applyRecentRoute(route),
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFFD8D2CA)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.navigation_outlined,
-                              size: 16,
-                              color: Color(0xFF5B7760),
-                            ),
-                            const SizedBox(width: 8),
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 170),
-                              child: Text(
-                                '${route.destName}',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: Color(0xFF2F3A32),
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 

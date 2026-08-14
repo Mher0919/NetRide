@@ -29,6 +29,9 @@ export async function handleCleanupStaleRides(io: Server) {
         io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
         await redis.del(`dispatch:lock:${ride.id}`);
         await redis.del(`match:queue:dispatched:${ride.id}`);
+        // Release any dispatched driver offer so no stale offer can be accepted.
+        const { DriverOfferService } = await import('../../services/driver-offer.service');
+        await DriverOfferService.cancelRideOffers(ride.id).catch(() => undefined);
       }
 
       const driverIds = await redis.zrange(DRIVER_LOCATIONS_KEY, 0, -1);

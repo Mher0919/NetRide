@@ -796,7 +796,9 @@ class DriverProvider with ChangeNotifier {
       _status = models.DriverStatus.onTrip;
       notifyListeners();
     }
-    _socket?.emit('acceptTrip', tripId);
+    final offerId = _currentTrip?.offerId;
+    _socket?.emit('acceptTrip',
+        offerId != null ? {'tripId': tripId, 'offerId': offerId} : tripId);
   }
 
   /// Guards against double-tap / concurrent cancel emits (spec §27/§61).
@@ -878,7 +880,10 @@ class DriverProvider with ChangeNotifier {
   }
 
   void declineTrip(String tripId) {
-    _socket?.emit('declineTrip', tripId);
+    final offerId =
+        _incomingRequest?.id == tripId ? _incomingRequest?.offerId : null;
+    _socket?.emit('declineTrip',
+        offerId != null ? {'tripId': tripId, 'offerId': offerId} : tripId);
     if (_incomingRequest?.id == tripId) {
       _incomingRequest = null;
       notifyListeners();

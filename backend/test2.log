@@ -1,0 +1,187 @@
+🔌 Attempting to connect to database at: postgresql://postgres.lpcnkfqagpouwzikedzl:****@aws-1-us-east-2.pooler.supabase.com:6543/postgres?pgbouncer=true
+
+wallet-cap.unit.test.ts → 9 passed, 0 failed
+[SVC_INIT] ride.service.ts loaded at 2026-08-14T02:15:16.377Z
+[REPO_INIT] ride.repository.ts loaded from C:\Users\mmkrt\OneDrive\Desktop\NetRide\backend\src\modules\ride\ride.repository.ts
+[SVC_INIT] FULL findCurrentByDriverId toString:
+async findCurrentByDriverId(driverId) {
+        console.log('[REPO_TEST_HELLO] findCurrentByDriverId called', driverId);
+        const res = await database_1.pool.query(`
+      SELECT r.*,
+             u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
+      FROM rides r
+      LEFT JOIN users u ON r.rider_id = u.id
+      LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
+      WHERE r.driver_id = $1 AND r.status NOT IN ($2, $3)
+      ORDER BY r.created_at DESC LIMIT 1
+    `, [driverId, types_1.TripStatus.COMPLETED, types_1.TripStatus.CANCELLED]);
+        console.log(`[REPO] findCurrentByDriverId rowCount=${res.rowCount} keys=${Object.keys(res.rows[0] || {}).slice(0, 5).join(',')} id=${res.rows[0]?.id} status=${res.rows[0]?.status}`);
+        return res.rows[0] ? this.mapToTrip(res.rows[0]) : null;
+    }
+✔ parseCoordinates accepts a valid [lat,lng] tuple (1.7538ms)
+✔ parseCoordinates rejects wrong arity (9.0614ms)
+✔ parseCoordinates rejects out-of-range lat/lng (0.1928ms)
+✔ computeFare is deterministic and itemized (0.2617ms)
+✔ computeFare respects the minimum fare (0.1195ms)
+✔ computeEstimate runs in microseconds (no I/O) (0.7671ms)
+✔ synthetic fallback returns a multi-point road-shaped geometry (1.2397ms)
+[REDIS_SUB] Connected
+✔ identical concurrent plans share one computation (30.158ms)
+✔ computePromoDiscount: FIXED discount is exact (0.1965ms)
+✔ computePromoDiscount: FIXED discount never exceeds the fare (0.1399ms)
+✔ computePromoDiscount: PERCENTAGE math rounds to cents (0.0747ms)
+✔ computePromoDiscount: PERCENTAGE respects max_discount_cents cap (0.0413ms)
+✔ computePromoDiscount: cap below fare yields the cap (0.0355ms)
+✔ computePromoDiscount: zero fare yields zero discount (0.0309ms)
+✔ computePromoDiscount: percentage above 100 is clamped to the fare (0.0364ms)
+✔ computePromoDiscount: negative discount_value yields zero (0.0316ms)
+✔ signReferralPayload: round-trips and verifies (0.3965ms)
+✔ verifyReferralPayload: rejects tampered signature (0.1064ms)
+✔ verifyReferralPayload: rejects tampered user id (ownership binding) (0.0797ms)
+✔ verifyReferralPayload: rejects expired payloads (0.1778ms)
+✔ verifyReferralPayload: rejects unsupported version / malformed shapes (0.0553ms)
+✔ verifyReferralPayload: rejects payload signed with a different secret (0.204ms)
+✔ hmacFor is deterministic for the same body (0.1318ms)
+✔ generateReferralCode: always 10 chars from the safe alphabet (0.3687ms)
+✔ generateReferralCode: no ambiguous characters (I/O/0/1) (0.6438ms)
+✔ generateReferralCode: generates distinct codes (4.0294ms)
+✔ accountsToRisk: single account is NORMAL (0.1111ms)
+✔ accountsToRisk: exactly two accounts is REVIEW (0.0334ms)
+✔ accountsToRisk: three accounts is BLOCKED (0.0655ms)
+✔ accountsToRisk: heavy device sharing stays BLOCKED (0.055ms)
+✔ accountsToRisk: unknown/zero defaults to NORMAL (never blocks by accident) (0.0312ms)
+✔ no capCents -> applies min(balance, remaining fare) (0.1051ms)
+✔ capCents caps the amount below the balance (0.0298ms)
+✔ capCents above the balance -> balance wins (0.03ms)
+✔ capCents above remaining fare -> remaining wins (0.0243ms)
+✔ zero balance -> nothing applied (0.0221ms)
+✔ zero fare -> nothing applied even with balance (0.0215ms)
+✔ negative/NaN inputs clamp to zero (0.0308ms)
+✔ fractional inputs round to whole cents (0.026ms)
+✔ decayWeight: newest events score full weight (0.0831ms)
+✔ decayWeight: interpolates linearly between buckets (0.0337ms)
+✔ decayWeight: hits the bucket anchors exactly (0.0295ms)
+✔ decayWeight: past the window decays to zero (0.0226ms)
+✔ decayWeight: negative age clamps to zero (defensive) (0.0241ms)
+✔ eventAgeMinutes: computes age and clamps below zero (0.0511ms)
+✔ aggregateCells: one rider one event → cell weight = weight(type) × decay (0.2491ms)
+✔ aggregateCells: same rider geysering events counts only their max (0.0836ms)
+✔ aggregateCells: two riders in one cell sum their maxima (0.0615ms)
+✔ aggregateCells: stale events (past window) are excluded (0.0495ms)
+✔ aggregateCells: distinct cells are not merged by aggregation (0.0939ms)
+✔ aggregateCells: one rider across two cells counts once (moved rider → one heat point) (0.0821ms)
+✔ aggregateCells: same-weight cells tie-break to the NEWEST location (0.0529ms)
+✔ aggregateCells: centroid is weighted toward stronger points (0.0483ms)
+✔ mergeCells: no-op when under the cap (0.1164ms)
+✔ mergeCells: merges down to the cap (0.16ms)
+✔ mergeCells: weights accumulate across merges (0.0629ms)
+✔ buildZones: empty input → empty output (0.0975ms)
+✔ buildZones: relative scores normalized to the busiest cell = 1.0 (0.0823ms)
+✔ buildZones: radius clamped to [min, max] (0.0744ms)
+✔ buildZones: minZoneScore drops weak cells (0.0431ms)
+✔ buildZones: sorted busiest-first (0.3063ms)
+✔ haversineMeters: known distance (1 degree lat ≈ 111 km) (0.0636ms)
+✔ fmtMoney: formats integer cents as dollars (0.0604ms)
+✔ fmtMoney: rounds fractional cents to whole cents (0.053ms)
+✔ fmtMoney: negative and NaN clamp to zero (never a bogus charge copy) (0.0429ms)
+✔ fmtMoney: large amounts stay lossless (0.0273ms)
+✔ meta: covers every notification type exactly once (0.047ms)
+✔ meta: every type maps to a real app route (0.042ms)
+✔ meta: every type maps to a real notification channel (0.0328ms)
+✔ meta: trip-lifecycle events deep-link into the active trip screen (0.0401ms)
+✔ meta: money events deep-link into the credits/wallet surface (0.0337ms)
+✔ dedup: every ride-scoped event id carries the trip id exactly (0.0538ms)
+✔ dedup: credit/referral ids are anchored to the grant, not the clock (0.1441ms)
+✔ computeFare: flat formula base + $2.50/mile + $0.40/min (0.0579ms)
+✔ computeFare: $10.00 minimum applies to short rides (0.0471ms)
+✔ computeFare: surge is disabled in the live flat profile (0.0773ms)
+✔ computeFare: flat profile ignores LIVE market DISCOUNTS (no $10 floor collisions) (0.1112ms)
+✔ computeFare: market multipliers apply when a profile opts OUT of flat (0.0722ms)
+✔ computeFare: deterministic and itemized (spec $100 scenario shape) (0.0748ms)
+✔ computeFare respects custom configuration (0.0532ms)
+✔ computeFare runs in microseconds (no I/O) (0.6348ms)
+✔ revenue: $100 fare → driver $60, platform $40 (0.1522ms)
+✔ revenue: fleet split of the platform pool ($100 → $60/$20/$20) (0.0936ms)
+✔ revenue: driver without a fleet → NetRide keeps the whole platform pool (0.0424ms)
+✔ revenue: disabled fleet gets nothing (driver treated as platform-direct) (0.0349ms)
+✔ revenue: config with invalid sum falls back to the locked 60/40 (0.0488ms)
+✔ revenue: any config summing to 100 is honored (admin may rebalance) (0.0333ms)
+✔ revenue: cent-exact invariant on odd amounts (0.0557ms)
+✔ revenue: invariant holds across a sweep of fares and shares (0.4054ms)
+✔ revenue: deterministic — identical inputs yield identical outputs (0.0928ms)
+✔ cancellation reasons exist for both roles with unique codes (0.1158ms)
+✔ report reasons exist for both roles with unique codes (0.0781ms)
+✔ isCancellationReasonValid accepts known codes and rejects unknown/foreign codes (0.0672ms)
+✔ isReportReasonValid is role-scoped (0.0515ms)
+✔ labels fall back to the raw code for unknown values (0.0561ms)
+[2026-08-13 19:15:16.602 -0700] [33mWARN[39m (24436): [36m[FCM] No service account configured. Push notifications will be logged but not sent.[39m
+    service: "netride-backend"
+    env: "development"
+[2026-08-13 19:15:16.666 -0700] [32mINFO[39m (24436): [36m[SENTRY] SENTRY_DSN not set — error tracking disabled[39m
+    service: "netride-backend"
+    env: "development"
+[2026-08-13 19:15:16.955 -0700] [32mINFO[39m (24436): [36m[SAFETY] SpeedingDetector subscribed to trajectory events[39m
+    service: "netride-backend"
+    env: "development"
+[2026-08-13 19:15:16.988 -0700] [31mERROR[39m (24436): [36mrouting_engine_error[39m
+    service: "netride-backend"
+    env: "development"
+    engine: "GoogleRoutes"
+    err: "offline"
+[2026-08-13 19:15:16.988 -0700] [32mINFO[39m (24436): [36mrouting_plan[39m
+    service: "netride-backend"
+    env: "development"
+    origin: [
+      34.05,
+      -118.25
+    ]
+    destination: [
+      34.1,
+      -118.3
+    ]
+    engine: "Synthetic"
+    cacheHit: false
+    distanceMeters: 9746.05762329474
+    durationSeconds: 1597.7143644745477
+    latencyMs: 0
+[2026-08-13 19:15:17.019 -0700] [31mERROR[39m (24436): [36mrouting_engine_error[39m
+    service: "netride-backend"
+    env: "development"
+    engine: "GoogleRoutes"
+    err: "offline"
+[2026-08-13 19:15:17.019 -0700] [32mINFO[39m (24436): [36mrouting_plan[39m
+    service: "netride-backend"
+    env: "development"
+    origin: [
+      34,
+      -118.2
+    ]
+    destination: [
+      34.1,
+      -118.3
+    ]
+    engine: "Synthetic"
+    cacheHit: false
+    distanceMeters: 19494.453604667153
+    durationSeconds: 3195.8120663388777
+    latencyMs: 30
+[2026-08-13 19:15:17.019 -0700] [32mINFO[39m (24436): [36mrouting_plan[39m
+    service: "netride-backend"
+    env: "development"
+    origin: [
+      34,
+      -118.2
+    ]
+    destination: [
+      34.1,
+      -118.3
+    ]
+    engine: "Synthetic"
+    cacheHit: false
+    distanceMeters: 19494.453604667153
+    durationSeconds: 3195.8120663388777
+    latencyMs: 30

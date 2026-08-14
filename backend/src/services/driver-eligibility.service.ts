@@ -39,12 +39,23 @@ export class DriverEligibilityService {
       redis.get(`${DRIVER_OFFER_PREFIX}${driverId}`),
       prisma.driver.findUnique({
         where: { user_id: driverId },
-        select: { is_active: true },
+        // `drivers.is_active` is the ADMIN-ONBOARDING approval flag and
+        // stays FALSE for every self-serve / password-signup driver who
+        // never went through admin approval — using it here filtered out
+        // 100% of those drivers (the dispatch regression). The runtime gate
+        // mirrors the one the driver app itself enforces to go online:
+        // the USER account must be active (suspension flag); the compliance
+        // blockers (docs/headshot/vehicle/pending changes) gate the app UI
+        // before it ever emits `goOnline`.
+        select: {
+          is_active: true,
+          user: { select: { is_active: true } },
+        },
       }).catch(() => null),
     ]);
 
     const isOnline = heartbeat !== null;
-    const isActive = driverDb?.is_active === true;
+    const isActive = driverDb?.user?.is_active === true;
     const hasActiveTrip = activeTrip !== null;
     const hasActiveOffer = activeOffer !== null;
     const locationFresh = await DriverEligibilityService.isLocationFresh(driverId);

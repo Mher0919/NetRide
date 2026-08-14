@@ -12,7 +12,11 @@ import { cleanupQueue } from '../queue/queue';
 
 export const CleanupService = {
   async performMaintenance() {
-    console.log('[CLEANUP] Enqueuing maintenance job...');
+    // The staleness sweep MUST run inline every cycle — environments without
+    // a running BullMQ worker (LEGACY_SYNC_MATCHING + no cron worker) would
+    // otherwise accumulate never-cancelled REQUESTED rides forever. The
+    // best-effort queue enqueue remains so scaled deployments still process
+    // it exactly once per worker too; every step is idempotent.
     try {
       await cleanupQueue.add('cleanupStaleRides', {}, {
         attempts: 1,
@@ -20,12 +24,14 @@ export const CleanupService = {
         removeOnFail: { age: 3600 },
       });
     } catch {
-      await this.cancelStaleRideRequests();
-      await this.cleanupGhostDrivers();
-      // Fallback path when BullMQ is down — keep heatmap retention alive.
-      const { sweepExpiredActivity } = require('./demand.service') as typeof import('./demand.service');
-      sweepExpiredActivity().catch(() => undefined);
+      // Redis/BullMQ unavailable — inline run below still covers us.
     }
+
+    await this.cancelStaleRideRequests();
+    await this.cleanupGhostDrivers();
+    // Keep heatmap retention alive.
+    const { sweepExpiredActivity } = require('./demand.service') as typeof import('./demand.service');
+    sweepExpiredActivity().catch(() => undefined);
   },
 
   async cancelStaleRideRequests() {
@@ -43,6 +49,9 @@ export const CleanupService = {
       io.to(`rider:${ride.rider_id}`).emit('tripUpdate', updatedTrip);
       io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
       await redis.del(`dispatch:lock:${ride.id}`);
+      // Release any dispatched driver offer so no stale offer can be accepted.
+      const { DriverOfferService } = require('./driver-offer.service') as typeof import('./driver-offer.service');
+      await DriverOfferService.cancelRideOffers(ride.id).catch(() => undefined);
     }
   },
 

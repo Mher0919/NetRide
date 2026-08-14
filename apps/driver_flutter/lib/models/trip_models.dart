@@ -112,6 +112,9 @@ class Trip {
   final double? driverToPickupEta;
   final double? driverToPickupDistance;
   final double? driverPricePerMile;
+  /// Dispatch offer id — sent back on accept/decline so the backend can
+  /// transition the exact offer (fast decline, no timeout wait).
+  final String? offerId;
   final DateTime? expiresAt;
   final DateTime? requestedAt;
 
@@ -141,6 +144,7 @@ class Trip {
     this.driverToPickupEta,
     this.driverToPickupDistance,
     this.driverPricePerMile,
+    this.offerId,
     this.expiresAt,
     this.requestedAt,
     this.cancelledBy,
@@ -175,6 +179,7 @@ class Trip {
       driverToPickupEta: (json['driver_to_pickup_eta'] as num?)?.toDouble(),
       driverToPickupDistance: (json['driver_to_pickup_distance'] as num?)?.toDouble(),
       driverPricePerMile: (json['driver_price_per_mile'] as num?)?.toDouble(),
+      offerId: json['offerId']?.toString(),
       expiresAt: json['expires_at'] != null ? DateTime.tryParse(json['expires_at'].toString()) : null,
       requestedAt: json['requested_at'] != null ? DateTime.tryParse(json['requested_at'].toString()) : null,
       cancelledBy: json['cancelled_by']?.toString(),

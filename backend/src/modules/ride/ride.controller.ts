@@ -1,6 +1,7 @@
 // backend/src/modules/ride/ride.controller.ts
 import { Response } from 'express';
 import { RideService } from './ride.service';
+import { RideRepository } from './ride.repository';
 import { z } from 'zod';
 import { TripStatus, UserRole } from '../../types';
 import { prisma } from '../../services/prisma.service';
@@ -227,27 +228,51 @@ export class RideController {
   }
 
   /**
-   * Idempotent cancel of the rider's current request, by rider identity —
-   * no tripId needed. The Flutter client calls this when the rider hits the
-   * top-right X / Cancel Ride during "searching", where a race can leave the
-   * client without a tripId yet (the socket tripUpdate round-trip). Always
-   * returns 200 when there is nothing active to cancel.
+   * Idempotent cancel of the rider's current request, by rider identity.
+   * Accepts an optional `tripId` so the client can cancel the EXACT ride it
+   * is showing (its socket tripUpdate already carries the id). Without one
+   * (race window before the first tripUpdate), only an inferred REQUESTED
+   * ("searching") ride is cancelled — an ACCEPTED/IN_PROGRESS ride is never
+   * cancelled by inference, which is what previously produced the bogus
+   * "already in progress" 409 after the real request had already been
+   * cancelled through the socket path. Always returns 200 when there is
+   * nothing active to cancel.
    */
   static async cancelCurrentRide(req: any, res: Response) {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-      const trip = await RideService.getCurrentRide(userId, UserRole.RIDER);
+      const body = req.body ?? {};
+      const requestedTripId =
+        typeof body.tripId === 'string' && body.tripId.trim().length > 0
+          ? body.tripId.trim()
+          : null;
+
+      let trip = null;
+      if (requestedTripId) {
+        const found = await RideRepository.findById(requestedTripId);
+        // Never cancel a ride the caller doesn't own.
+        if (found && found.rider_id === userId) trip = found;
+      } else {
+        const current = await RideService.getCurrentRide(userId, UserRole.RIDER);
+        if (current && current.status === TripStatus.REQUESTED) trip = current;
+      }
+
       if (!trip) {
         return res.json({ cancelled: false, tripId: null });
+      }
+      // Terminal already — the parallel socket path cancelled it first, or a
+      // prior call did. Report success-with-no-op (idempotent).
+      if (trip.status === TripStatus.CANCELLED || trip.status === TripStatus.COMPLETED) {
+        return res.json({ cancelled: true, tripId: trip.id });
       }
       if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
         return res.status(409).json({ error: 'This ride is already in progress and cannot be cancelled.' });
       }
       await RideService.cancelTrip(trip.id, userId, {
-        reasonCode: req.body?.reasonCode,
-        reasonText: req.body?.reasonText,
+        reasonCode: body?.reasonCode,
+        reasonText: body?.reasonText,
       });
       res.json({ cancelled: true, tripId: trip.id });
     } catch (error: any) {

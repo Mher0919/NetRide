@@ -327,16 +327,26 @@ export function setupSocketGateway(io: Server) {
               LIMIT 5
             `);
             if (result.rows.length > 0) {
-              const { matchQueue } = await import('../queue/queue');
-              for (const row of result.rows) {
-                await matchQueue.add('matchRide', {
-                  tripId: row.id,
-                  pickupLat: Number(row.pickup_lat),
-                  pickupLng: Number(row.pickup_lng),
-                  riderId: row.rider_id,
-                  retryCount: 0,
-                });
-                console.log(`[SOCKET] 🔄 Re-triggered matching for pending ride ${row.id} after driver ${id} came online`);
+              if (env.LEGACY_SYNC_MATCHING) {
+                const { matchingService } = await import('../services/matching.service');
+                for (const row of result.rows) {
+                  matchingService.findAndDispatch(
+                    io, row.id, Number(row.pickup_lat), Number(row.pickup_lng), row.rider_id,
+                  ).catch((err: any) => console.error(`[SOCKET] In-process re-match failed for ${row.id}: ${err.message}`));
+                  console.log(`[SOCKET] 🔄 Re-triggered matching for pending ride ${row.id} after driver ${id} came online`);
+                }
+              } else {
+                const { matchQueue } = await import('../queue/queue');
+                for (const row of result.rows) {
+                  await matchQueue.add('matchRide', {
+                    tripId: row.id,
+                    pickupLat: Number(row.pickup_lat),
+                    pickupLng: Number(row.pickup_lng),
+                    riderId: row.rider_id,
+                    retryCount: 0,
+                  });
+                  console.log(`[SOCKET] 🔄 Re-triggered matching for pending ride ${row.id} after driver ${id} came online`);
+                }
               }
             }
           } catch (err: any) {
@@ -500,14 +510,21 @@ export function setupSocketGateway(io: Server) {
           const { RideRepository } = await import('../modules/ride/ride.repository');
           const trip = await RideRepository.findById(tripId);
           if (trip && trip.status === 'REQUESTED') {
-            const { matchQueue } = await import('../queue/queue');
-            await matchQueue.add('matchRide', {
-              tripId,
-              pickupLat: (trip as any).pickup?.lat ?? 0,
-              pickupLng: (trip as any).pickup?.lng ?? 0,
-              riderId: trip.rider_id,
-              retryCount: 0,
-            });
+            if (env.LEGACY_SYNC_MATCHING) {
+              const { matchingService } = await import('../services/matching.service');
+              matchingService.findAndDispatch(
+                io, tripId, (trip as any).pickup?.lat ?? 0, (trip as any).pickup?.lng ?? 0, trip.rider_id,
+              ).catch((err: any) => console.error(`[SOCKET] In-process re-match failed for ${tripId}: ${err.message}`));
+            } else {
+              const { matchQueue } = await import('../queue/queue');
+              await matchQueue.add('matchRide', {
+                tripId,
+                pickupLat: (trip as any).pickup?.lat ?? 0,
+                pickupLng: (trip as any).pickup?.lng ?? 0,
+                riderId: trip.rider_id,
+                retryCount: 0,
+              });
+            }
           }
         } catch (err: any) {
           console.error(`[SOCKET] Decline trip failed: ${err.message}`);

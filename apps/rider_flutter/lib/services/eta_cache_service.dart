@@ -27,10 +27,17 @@ class CachedEtaData {
     return age.inHours > 24;
   }
 
-  /// True when this entry predates the fare-in-plan fix (no saved fare).
-  /// It is still served instantly, but the caller refreshes it in the
-  /// background so the price converges without any visible cache loss.
-  bool get needsFareRefresh => fareTotal == null || fareTotal! <= 0;
+  /// True when this entry should be re-priced in the background: no saved
+  /// fare (pre-fare-in-plan entries) OR an aged fare. Fares are
+  /// backend-authoritative and can change (admin pricing edits), so a cached
+  /// price older than [kFareMaxAge] is refreshed while the stale value keeps
+  /// rendering instantly — the price converges without visible cache loss.
+  static const Duration kFareMaxAge = Duration(hours: 6);
+
+  bool get needsFareRefresh {
+    if (fareTotal == null || fareTotal! <= 0) return true;
+    return DateTime.now().difference(cachedAt) >= kFareMaxAge;
+  }
 
   Map<String, dynamic> toJson() => {
     'distanceMeters': distanceMeters,
@@ -55,10 +62,25 @@ class EtaCacheService {
 
   SharedPreferences? _prefs;
   final _memoryCache = HashMap<String, CachedEtaData>();
-  static const String _diskPrefix = 'rider_eta_cache:';
+  // v2: fares are always the backend-computed value. Bumping the namespace
+  // guarantees pre-v2 entries (stale minimum-fare prices from the old
+  // pricing era) can never be served — the first panel open after the app
+  // updates fetches fresh route + fare data from the backend.
+  static const String _diskPrefix = 'rider_eta_cache:v2:';
+  static const String _legacyCleanupKey = 'rider_eta_cache:v2_cleanup_done';
 
   Future<void> init(SharedPreferences prefs) async {
     _prefs = prefs;
+    if (prefs.getBool(_legacyCleanupKey) != true) {
+      final legacy = prefs
+          .getKeys()
+          .where((k) => k.startsWith('rider_eta_cache:') && !k.startsWith(_diskPrefix))
+          .toList();
+      for (final key in legacy) {
+        await prefs.remove(key);
+      }
+      await prefs.setBool(_legacyCleanupKey, true);
+    }
   }
 
   CachedEtaData? get({

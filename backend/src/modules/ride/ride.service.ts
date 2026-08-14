@@ -264,14 +264,24 @@ export class RideService {
       const isNow = !isScheduled || (scheduledAt && (scheduledAt.getTime() - Date.now() < 15 * 60 * 1000));
 
       if (isNow) {
-        matchQueue.add('matchRide', {
-          tripId: trip.id,
-          pickupLat: pickup.lat,
-          pickupLng: pickup.lng,
-          riderId,
-          favoritePriority,
-        }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
-        matchJobsTotal.inc({ outcome: 'enqueued' });
+        if (env.LEGACY_SYNC_MATCHING) {
+          // In-process dispatch (no BullMQ worker in this environment). Uses
+          // the same DispatchEngine/offer pipeline as the queue handler.
+          import('../../services/matching.service').then(({ matchingService }) => {
+            matchingService.findAndDispatch(
+              io, trip.id, pickup.lat, pickup.lng, riderId, favoritePriority,
+            ).catch((err: any) => console.error('[RIDE] In-process dispatch failed:', err.message));
+          });
+        } else {
+          matchQueue.add('matchRide', {
+            tripId: trip.id,
+            pickupLat: pickup.lat,
+            pickupLng: pickup.lng,
+            riderId,
+            favoritePriority,
+          }).catch((err) => console.error('[RIDE] Failed to enqueue match job:', err.message));
+          matchJobsTotal.inc({ outcome: 'enqueued' });
+        }
       }
 
       // Rewards bookkeeping (non-blocking): referral state machine progress.
@@ -362,12 +372,30 @@ export class RideService {
       captured_at: new Date().toISOString()
     };
 
-    const updatedTrip = await RideRepository.updateStatus(tripId, 'ACCEPTED' as any, {
-      driver_id: driverId,
-      accepted_at: new Date(),
-      compliance_snapshot: JSON.stringify(complianceSnapshot),
-      fare_amount: finalFare
-    });
+    // Atomic ride flip: the status guard means a rider cancellation that
+    // commits between the offer check and here wins cleanly — the accept is
+    // rejected instead of overwriting the CANCELLED state (race-condition
+    // safety). When the guard rejects, the offer we just accepted is
+    // superseded so the driver is released for the next request.
+    const acceptRes = await pool.query(
+      `UPDATE rides
+          SET status = $2, driver_id = $3, accepted_at = $4,
+              compliance_snapshot = $5, fare_amount = $6
+        WHERE id = $1 AND status = $7
+        RETURNING id`,
+      [tripId, 'ACCEPTED', driverId, new Date(), JSON.stringify(complianceSnapshot), finalFare, TripStatus.REQUESTED],
+    );
+    if ((acceptRes.rowCount ?? 0) === 0) {
+      await DriverOfferService.supersedeOffer(rideOffer.offerId);
+      const latest = await RideRepository.findById(tripId);
+      if (latest?.status === TripStatus.CANCELLED) {
+        throw new Error('This ride was cancelled by the rider.');
+      }
+      throw new Error('Trip already taken or cancelled');
+    }
+
+    const updatedTrip = await RideRepository.findById(tripId);
+    if (!updatedTrip) throw new Error('Failed to load accepted trip');
 
     // Persist the per-ride revenue allocation (the driver — and thus the
     // fleet partner share — is now known). Never blocks the accept path;
@@ -691,7 +719,45 @@ export class RideService {
       await NavigationService.clearTrip(tripId);
     }
 
-    const updatedTrip = await RideRepository.updateStatus(tripId, TripStatus.CANCELLED, extra);
+    // Release any dispatched driver offer first so a driver can never accept
+    // a request that is being cancelled. Idempotent — safe to run on every
+    // path (socket, REST, system cleanup).
+    if (trip.status === TripStatus.REQUESTED) {
+      const { DriverOfferService } = await import('../../services/driver-offer.service');
+      await DriverOfferService.cancelRideOffers(tripId);
+    }
+
+    // Atomic transition: the WHERE guard means a concurrent ACCEPT that
+    // commits between our read and this update wins the race — we never
+    // overwrite a fresher state (accept-vs-cancel race safety).
+    const cancelRes = await pool.query(
+      `UPDATE rides
+          SET status = $2, cancelled_at = $3, cancelled_by = $4,
+              cancellation_reason_code = $5, cancellation_reason_text = $6
+        WHERE id = $1 AND status IN ($7, $8)
+        RETURNING id`,
+      [
+        tripId,
+        TripStatus.CANCELLED,
+        extra.cancelled_at,
+        extra.cancelled_by,
+        extra.cancellation_reason_code,
+        extra.cancellation_reason_text,
+        TripStatus.REQUESTED,
+        TripStatus.ACCEPTED,
+      ],
+    );
+
+    if ((cancelRes.rowCount ?? 0) === 0) {
+      // Another actor flipped the ride between our read and the write
+      // (driver accepted, or the ride was already cancelled/completed).
+      const latest = await RideRepository.findById(tripId);
+      if (latest?.status === TripStatus.CANCELLED) return latest; // idempotent
+      throw new Error('Cannot cancel a ride that is already in progress or completed');
+    }
+
+    const updatedTrip = await RideRepository.findById(tripId);
+    if (!updatedTrip) throw new Error('Failed to load cancelled trip');
 
     // Accepted-ride cancellation counters (spec §25: only accepted → cancelled
     // counts as an accepted-ride cancellation; declines/searching cancels don't).

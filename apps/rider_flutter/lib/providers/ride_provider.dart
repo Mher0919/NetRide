@@ -346,6 +346,10 @@ class RideProvider with ChangeNotifier {
       final response = await ApiService.dio.post(
         '/ride/cancel',
         data: {
+          // Ride-scoped cancel: the backend must never infer a different
+          // (possibly in-progress) ride when the client already knows the
+          // exact trip it is cancelling.
+          if (_tripId != null) 'tripId': _tripId,
           if (reasonCode != null) 'reasonCode': reasonCode,
           if (reasonText != null) 'reasonText': reasonText,
         },
@@ -357,10 +361,26 @@ class RideProvider with ChangeNotifier {
       return null;
     } on DioException catch (e) {
       if (e.response?.statusCode == 409) {
-        // The server may reject the REST cancel because the socket
-        // tripUpdate already arrived and the trip is CANCELLED. This
-        // is actually a success — the ride was already cancelled by
-        // our own socket emit that fired first. Treat it as success.
+        // Only surface "in progress" if the ride we attempted to cancel is
+        // GENUINELY still active. Two benign cases resolve to success:
+        //   a) the parallel socket emit already cancelled it (authoritative
+        //      state is CANCELLED and /ride/current no longer returns it),
+        //   b) the trip we knew about is gone and the server evaluated a
+        //      different, older ride.
+        // Both are probed against the backend instead of guessed locally.
+        try {
+          final current = await ApiService.dio.get('/ride/current');
+          final active = current.data is Map ? current.data['trip'] : null;
+          final stillActive =
+              active is Map && active['id'] == _tripId && active['status'] != 'CANCELLED';
+          if (!stillActive) {
+            debugPrint('[RIDE] Cancel 409 but no matching active ride — treating as success');
+            reset();
+            return null;
+          }
+        } catch (probeErr) {
+          debugPrint('[RIDE] Cancel-409 probe failed: $probeErr');
+        }
         if (_status == TripStatus.CANCELLED) {
           debugPrint('[RIDE] Cancel 409 but already CANCELLED via socket — resetting');
           reset();
