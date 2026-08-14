@@ -506,26 +506,22 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
 
     if (cachedEta != null) {
+      // Serve the route metrics (distance/duration) instantly from cache —
+      // but NEVER a cached price. Fares are backend-authoritative and change
+      // whenever the admin edits pricing, so every cache hit re-fetches the
+      // fare from the backend and shows "Calculating…" until it lands.
       _buildEstimateFromRouteData(
         distanceMeters: cachedEta.distanceMeters,
         durationSeconds: cachedEta.durationSeconds,
-        backendFareTotal: cachedEta.fareTotal ?? 0.0,
+        backendFareTotal: 0.0,
         engine: 'EtaCache',
       );
-      if (mounted) {
-        setState(() => _loadingEstimates = false);
-      }
-      // Pre-fix cache entries carry no fare: keep rendering instantly from
-      // cache and refresh in the background so the real price lands on the
-      // very next render — no visible cache loss.
-      if (cachedEta.needsFareRefresh) {
-        _refreshEstimateInBackground(
-          originLat: originLat,
-          originLng: originLng,
-          destLat: destLat,
-          destLng: destLng,
-        );
-      }
+      _refreshEstimateInBackground(
+        originLat: originLat,
+        originLng: originLng,
+        destLat: destLat,
+        destLng: destLng,
+      );
       return;
     }
 
@@ -543,7 +539,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         distanceMeters: plan.distanceMeters,
         durationSeconds: plan.durationSeconds,
         trafficDurationSeconds: plan.trafficDurationSeconds,
-        fareTotal: (plan.fare['totalFare'] as num?)?.toDouble(),
       );
 
       _buildEstimateFromRouteData(
@@ -601,14 +596,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         distanceMeters: plan.distanceMeters,
         durationSeconds: plan.durationSeconds,
         trafficDurationSeconds: plan.trafficDurationSeconds,
-        fareTotal: fareTotal,
       );
       setState(() {
+        _loadingEstimates = false;
         if (plan.points.isNotEmpty) _routePoints = plan.points;
       });
       debugPrint('[ESTIMATE] Background fare refresh landed: ${fareTotal ?? 'no fare'}');
     } catch (e) {
       debugPrint('[ESTIMATE] Background fare refresh failed (kept cache): $e');
+      if (mounted) setState(() => _loadingEstimates = false);
     }
   }
 

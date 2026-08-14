@@ -10,8 +10,8 @@ class CachedRouteData {
   final double? trafficDurationSeconds;
   final DateTime cachedAt;
   final List<LatLng>? polyline;
-  /// Backend-computed fare breakdown (single source of truth). Cached with
-  /// the route so cached plans never re-derive pricing client-side.
+  /// Fares are never cached — every cache hit re-fetches the price from the
+  /// backend (kept for reading legacy entries only; never written).
   final Map<String, dynamic>? fare;
 
   const CachedRouteData({
@@ -30,17 +30,11 @@ class CachedRouteData {
     return age.inHours > 24;
   }
 
-  /// True when this entry should be re-priced in the background: no saved
-  /// fare (pre-fare-in-plan entries) OR an aged fare. Fares are
-  /// backend-authoritative and can change (admin pricing edits), so a cached
-  /// price older than [kFareMaxAge] is refreshed while the stale value keeps
-  /// rendering instantly — the price converges without visible cache loss.
-  static const Duration kFareMaxAge = Duration(hours: 6);
-
-  bool get needsFareRefresh {
-    if (fare == null || fare!.isEmpty) return true;
-    return DateTime.now().difference(cachedAt) >= kFareMaxAge;
-  }
+  /// Always true: a cached price is NEVER trusted. Fares are
+  /// backend-authoritative and change when the admin edits pricing, so every
+  /// cache hit re-fetches the fare from the backend in the background (the
+  /// stale value keeps rendering instantly while the fresh one converges).
+  bool get needsFareRefresh => true;
 
   Map<String, dynamic> toJson() => {
     'distanceMeters': distanceMeters,
@@ -126,7 +120,6 @@ class RouteCacheService {
     required double durationSeconds,
     double? trafficDurationSeconds,
     List<LatLng>? polyline,
-    Map<String, dynamic>? fare,
   }) async {
     final originHash = SpatialHash.encode(originLat, originLng);
     final destHash = SpatialHash.encode(destLat, destLng);
@@ -138,7 +131,8 @@ class RouteCacheService {
       trafficDurationSeconds: trafficDurationSeconds,
       cachedAt: DateTime.now(),
       polyline: polyline,
-      fare: fare,
+      // Fare intentionally NOT persisted — prices change on admin edits and
+      // must always come fresh from the backend.
     );
 
     _memoryCache[key] = data;

@@ -8,8 +8,8 @@ class CachedEtaData {
   final double durationSeconds;
   final double? trafficDurationSeconds;
   final DateTime cachedAt;
-  /// Backend-computed fare total (single source of truth), cached with the
-  /// ETA so cached estimates never re-derive pricing client-side.
+  /// Fares are never cached — every cache hit re-fetches the price from the
+  /// backend (kept for reading legacy entries only; never written).
   final double? fareTotal;
 
   const CachedEtaData({
@@ -27,17 +27,11 @@ class CachedEtaData {
     return age.inHours > 24;
   }
 
-  /// True when this entry should be re-priced in the background: no saved
-  /// fare (pre-fare-in-plan entries) OR an aged fare. Fares are
-  /// backend-authoritative and can change (admin pricing edits), so a cached
-  /// price older than [kFareMaxAge] is refreshed while the stale value keeps
-  /// rendering instantly — the price converges without visible cache loss.
-  static const Duration kFareMaxAge = Duration(hours: 6);
-
-  bool get needsFareRefresh {
-    if (fareTotal == null || fareTotal! <= 0) return true;
-    return DateTime.now().difference(cachedAt) >= kFareMaxAge;
-  }
+  /// Always true: a cached price is NEVER trusted. Fares are
+  /// backend-authoritative and change when the admin edits pricing, so every
+  /// cache hit re-fetches the fare from the backend in the background (the
+  /// stale value keeps rendering instantly while the fresh one converges).
+  bool get needsFareRefresh => true;
 
   Map<String, dynamic> toJson() => {
     'distanceMeters': distanceMeters,
@@ -120,7 +114,6 @@ class EtaCacheService {
     required double distanceMeters,
     required double durationSeconds,
     double? trafficDurationSeconds,
-    double? fareTotal,
   }) async {
     final originHash = SpatialHash.encode(originLat, originLng);
     final destHash = SpatialHash.encode(destLat, destLng);
@@ -131,7 +124,8 @@ class EtaCacheService {
       durationSeconds: durationSeconds,
       trafficDurationSeconds: trafficDurationSeconds,
       cachedAt: DateTime.now(),
-      fareTotal: fareTotal,
+      // Fare intentionally NOT persisted — prices change on admin edits and
+      // must always come fresh from the backend.
     );
 
     _memoryCache[key] = data;

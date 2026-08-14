@@ -174,7 +174,6 @@ class RoutingService {
           durationSeconds: plan.durationSeconds,
           trafficDurationSeconds: plan.trafficDurationSeconds,
           polyline: points,
-          fare: fare,
         );
 
         return plan;
@@ -279,9 +278,11 @@ class RoutingService {
       durationSeconds: cached.durationSeconds,
       etaSeconds: cached.trafficDurationSeconds ?? cached.durationSeconds,
       trafficDurationSeconds: cached.trafficDurationSeconds,
-      // The backend fare was persisted with the route; a cached plan never
-      // re-derives pricing client-side. Missing fare = no price available.
-      fare: cached.fare ?? const <String, dynamic>{},
+      // Cached plans never serve a price — fares are backend-authoritative
+      // and change on admin pricing edits. The cache-hit path always kicks a
+      // background refresh that lands the fresh backend fare on the next
+      // render; until then no price is shown.
+      fare: const <String, dynamic>{},
       engine: source,
       cacheHit: true,
       decodeMicros: 0,
