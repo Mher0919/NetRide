@@ -442,7 +442,24 @@ class DriverProvider with ChangeNotifier {
       _isConnected = true;
       // Extract driver ID from token and hydrate cache
       _tryHydrateFromToken(token);
+      // Reconnect resync: always ask for the authoritative active trip.
+      // Covers both a socket blip mid-trip AND app restart mid-trip
+      // (the ACCEPTED tripUpdate is not replayed automatically, so
+      // without this the driver would never recover the trip screen).
+      _socket?.emit('getCurrentTrip');
       notifyListeners();
+    });
+
+    _socket!.on('currentTripNone', (data) {
+      // Authoritative answer to getCurrentTrip: no active trip. Only act
+      // when we believe we have one — otherwise ignore (fresh connect).
+      if (_currentTrip != null || _status == models.DriverStatus.onTrip) {
+        debugPrint('[RIDE] Server reports no current trip — clearing stale local state');
+        _currentTrip = null;
+        _incomingRequest = null;
+        _status = models.DriverStatus.online;
+        notifyListeners();
+      }
     });
 
     _socket!.onDisconnect((reason) {
@@ -680,6 +697,19 @@ class DriverProvider with ChangeNotifier {
     });
 
     _socket!.on('error', (data) => print('Socket Error: $data'));
+
+    // The server rejected our acceptTrip (offer expired / superseded /
+    // ride cancelled). Roll back the optimistic _currentTrip so the
+    // driver does not sit on a phantom trip screen. The trip screen
+    // reacts to currentTrip == null by returning to the dashboard.
+    _socket!.on('acceptTripFailed', (data) {
+      debugPrint('[RIDE] Server rejected accept: $data');
+      if (_currentTrip != null && _currentTrip!.status == models.TripStatus.REQUESTED) {
+        _currentTrip = null;
+        _status = models.DriverStatus.online;
+        notifyListeners();
+      }
+    });
   }
 
   void _tryHydrateFromToken(String token) {
@@ -790,6 +820,13 @@ class DriverProvider with ChangeNotifier {
   void acceptTrip(String tripId) {
     // Optimistically set _currentTrip from the incoming request so the
     // trip screen doesn't race with the async tripUpdate socket event.
+    // Only do this while the socket is actually connected: an accept
+    // emitted into a dead socket is silently dropped, and the optimistic
+    // state must not push the driver onto a phantom trip.
+    if (!_isConnected) {
+      debugPrint('[RIDE] ⚠️ acceptTrip skipped — socket not connected');
+      return;
+    }
     if (_incomingRequest != null && _incomingRequest!.id == tripId) {
       _currentTrip = _incomingRequest;
       _incomingRequest = null;

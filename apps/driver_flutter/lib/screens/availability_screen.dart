@@ -1499,12 +1499,26 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
 
   void _onAcceptTap() {
     if (_accepted || _declined || _expired) return;
+    final driverProvider = Provider.of<DriverProvider>(context, listen: false);
+    // A disconnected socket would silently drop the acceptTrip emit; do
+    // not push the driver onto a phantom trip screen.
+    if (!driverProvider.isConnected) {
+      _controller.stop();
+      SoundService.instance.play(SoundEffect.orderCancelled);
+      _declined = true;
+      _countdownTimer?.cancel();
+      _expiryDismissTimer?.cancel();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Connection lost. Please try again.')),
+      );
+      return;
+    }
     _accepted = true;
     _countdownTimer?.cancel();
     _expiryDismissTimer?.cancel();
     _controller.stop();
     SoundService.instance.play(SoundEffect.orderAccepted);
-    final driverProvider = Provider.of<DriverProvider>(context, listen: false);
     driverProvider.acceptTrip(widget.request.id);
     Navigator.pushNamed(context, '/trip');
   }

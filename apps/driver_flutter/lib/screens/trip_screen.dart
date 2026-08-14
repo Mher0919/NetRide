@@ -41,6 +41,9 @@ class _TripScreenState extends State<TripScreen> {
   /// notification per ride (spec §27/§40 — exactly one nav owner).
   bool _cancelledDialogShown = false;
   bool _cancelFailureNotified = false;
+  bool _phantomRollbackNotified = false;
+  bool _tripEverConfirmed = false;
+  bool _completionNavStopped = false;
 
   @override
   void initState() {
@@ -99,14 +102,14 @@ class _TripScreenState extends State<TripScreen> {
         }
       }
 
-      // On first load, always start with pickup leg regardless of trip status.
-      // The trip's status may still be REQUESTED from the optimistic
+      // On first load, always start with the pickup leg regardless of trip
+      // status. The trip's status may still be REQUESTED from the optimistic
       // acceptTrip update if the ACCEPTED tripUpdate hasn't arrived yet.
-      // Navigation only switches to destination when trip goes IN_PROGRESS.
-      final leg = navService.isNavigating
-          ? (trip.status == models.TripStatus.ACCEPTED
-              ? NavigationLeg.pickup
-              : NavigationLeg.destination)
+      // Navigation only switches to destination when trip goes IN_PROGRESS —
+      // never route to destination for REQUESTED/ACCEPTED (a stale
+      // `isNavigating` from a previous trip must not skip the pickup leg).
+      final leg = trip.status == models.TripStatus.IN_PROGRESS
+          ? NavigationLeg.destination
           : NavigationLeg.pickup;
 
       final end = leg == NavigationLeg.pickup
@@ -247,6 +250,16 @@ class _TripScreenState extends State<TripScreen> {
     final cancelledTrip = driverProvider.lastCancelledTrip;
     final theme = Theme.of(context);
 
+    // Track whether this ride was ever server-confirmed (ACCEPTED or
+    // IN_PROGRESS). The COMPLETED/CANCELLED paths null out currentTrip on
+    // purpose — only an UNCONFIRMED trip that disappears is a phantom
+    // accept that must be rolled back to the dashboard.
+    if (trip != null &&
+        (trip.status == models.TripStatus.ACCEPTED ||
+            trip.status == models.TripStatus.IN_PROGRESS)) {
+      _tripEverConfirmed = true;
+    }
+
     // First-class cancelled state (spec §30): the terminal trip (with
     // cancelled_by + reason) is rendered before returning home — never a
     // blank/null exit. Exactly ONE dialog + ONE navigation per ride.
@@ -258,6 +271,37 @@ class _TripScreenState extends State<TripScreen> {
           cancelledTrip,
           navService,
         );
+      });
+    }
+
+    // Accept rollback (server rejected acceptTrip): the optimistic trip
+    // was reverted to null and the ride was NEVER server-confirmed. Pop
+    // back to the dashboard instead of rendering a blank screen. Exactly
+    // one navigation per ride — legit COMPLETED/CANCELLED exits take the
+    // dialog paths below and are excluded by _tripEverConfirmed.
+    if (trip == null &&
+        cancelledTrip == null &&
+        !_tripEverConfirmed &&
+        !_phantomRollbackNotified) {
+      _phantomRollbackNotified = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        navService.stopNavigation();
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      });
+    }
+
+    // Legit COMPLETED exit: the server confirmed the ride and the trip
+    // screen is being torn down. Stop navigation resources so a stale
+    // `isNavigating` from this trip never leaks into the next one.
+    if (trip == null &&
+        cancelledTrip == null &&
+        _tripEverConfirmed &&
+        !_completionNavStopped) {
+      _completionNavStopped = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        navService.stopNavigation();
       });
     }
 
@@ -320,10 +364,10 @@ class _TripScreenState extends State<TripScreen> {
     NavigationService navService,
   ) {
     // Keep the NavigationService's leg in sync with the trip status.
-    // Accept → pickup, InProgress → destination.
-    final desiredLeg = trip.status == models.TripStatus.ACCEPTED
-        ? NavigationLeg.pickup
-        : NavigationLeg.destination;
+    // Accept/Requested → pickup, InProgress → destination.
+    final desiredLeg = trip.status == models.TripStatus.IN_PROGRESS
+        ? NavigationLeg.destination
+        : NavigationLeg.pickup;
     if (navService.leg != desiredLeg && navService.isNavigating) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _swapLeg(desiredLeg, trip));

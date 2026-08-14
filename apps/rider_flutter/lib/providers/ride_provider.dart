@@ -96,6 +96,25 @@ class RideProvider with ChangeNotifier {
       debugPrint('[SOCKET] Rider connected URL=$socketUrl transport=${_socket?.io.engine?.transport?.name ?? '?'}');
       _isConnected = true;
       notifyListeners();
+      // Reconnect resync: if a trip is pending (REQUESTED/ACCEPTED/
+      // IN_PROGRESS), re-ask the server for the authoritative state. A
+      // socket blip right around the ACCEPTED broadcast otherwise leaves
+      // the rider stuck on "searching" forever — the tripUpdate is not
+      // replayed automatically.
+      if (_status != TripStatus.IDLE && _tripId != null) {
+        debugPrint('[RIDE] Resyncing current trip (status=$_status) after reconnect');
+        _socket?.emit('getCurrentTrip');
+      }
+    });
+
+    _socket!.on('currentTripNone', (data) {
+      // Authoritative answer to getCurrentTrip: no active trip. Only act
+      // when we believe we have one — the server may have cancelled it
+      // while we were disconnected.
+      if (_status != TripStatus.IDLE && _tripId != null) {
+        debugPrint('[RIDE] Server reports no current trip — clearing stale local state');
+        reset();
+      }
     });
 
     _socket!.onDisconnect((reason) {

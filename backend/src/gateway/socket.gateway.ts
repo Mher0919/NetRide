@@ -363,6 +363,23 @@ export function setupSocketGateway(io: Server) {
         await LocationsService.removeDriverLocation(id);
       });
 
+      socket.on('getCurrentTrip', async () => {
+        try {
+          // Reconnect resync (driver side): after a socket blip the app
+          // re-asks for the authoritative active trip so an accepted trip
+          // is never lost to a stale local state.
+          const currentTrip = await RideService.getCurrentRide(id, UserRole.DRIVER);
+          console.log(`[SOCKET] getCurrentTrip for driver ${id}: ${currentTrip?.id ?? 'none'}`);
+          if (currentTrip) {
+            socket.emit('tripUpdate', currentTrip);
+          } else {
+            socket.emit('currentTripNone');
+          }
+        } catch (err: any) {
+          console.error(`[SOCKET] getCurrentTrip failed: ${err.message}`);
+        }
+      });
+
       socket.on('updateLocation', async (loc: Location) => {
         const validated = validate(UpdateLocationSchema, loc, socket, 'updateLocation');
         if (!validated.success || !validated.data) return;
@@ -474,14 +491,17 @@ export function setupSocketGateway(io: Server) {
             const { DriverOfferService } = await import('../services/driver-offer.service');
             const accepted = await DriverOfferService.acceptOffer(offerId);
             if (!accepted) {
-              socket.emit('error', 'This ride offer is no longer valid. It may have expired or been cancelled.');
+              // Dedicated event so the driver app can roll back its
+              // optimistic accept state (the previous generic 'error' was
+              // only printed and left the driver stranded on a phantom trip).
+              socket.emit('acceptTripFailed', 'This ride offer is no longer valid. It may have expired or been cancelled.');
               return;
             }
           }
           await RideService.acceptTrip(tripId, id);
         } catch (err: any) {
           console.error(`[SOCKET] Accept trip failed: ${err.message}`);
-          socket.emit('error', err.message);
+          socket.emit('acceptTripFailed', err.message);
         }
       });
 
@@ -880,6 +900,24 @@ export function setupSocketGateway(io: Server) {
             }).catch(() => undefined);
           }
         } catch (err) {}
+      });
+
+      socket.on('getCurrentTrip', async () => {
+        try {
+          // Reconnect resync: after a socket blip, apps ask for the
+          // authoritative trip (if any) instead of staying stuck in a
+          // stale local state (e.g. rider stuck on "searching" after a
+          // missed ACCEPTED tripUpdate).
+          const currentTrip = await RideService.getCurrentRide(id, UserRole.RIDER);
+          console.log(`[SOCKET] getCurrentTrip for rider ${id}: ${currentTrip?.id ?? 'none'}`);
+          if (currentTrip) {
+            socket.emit('tripUpdate', currentTrip);
+          } else {
+            socket.emit('currentTripNone');
+          }
+        } catch (err: any) {
+          console.error(`[SOCKET] getCurrentTrip failed: ${err.message}`);
+        }
       });
 
       socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; favoritePriority?: boolean; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean; creditUseCents?: number }) => {
