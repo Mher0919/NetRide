@@ -267,9 +267,10 @@ export class RideController {
       if (trip.status === TripStatus.CANCELLED || trip.status === TripStatus.COMPLETED) {
         return res.json({ cancelled: true, tripId: trip.id });
       }
-      if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
-        return res.status(409).json({ error: 'This ride is already in progress and cannot be cancelled.' });
-      }
+      // Requested / accepted / in-progress rides are all cancellable; the
+      // authoritative status guard lives in RideService.cancelTrip (only
+      // COMPLETED rides are terminal). We also allow cancelling a current
+      // (non-REQUESTED) ride explicitly identified by tripId.
       await RideService.cancelTrip(trip.id, userId, {
         reasonCode: body?.reasonCode,
         reasonText: body?.reasonText,

@@ -432,7 +432,8 @@ class _TripScreenState extends State<TripScreen> {
                         ),
                       ),
                       const SizedBox(width: 16),
-                      if (rideProvider.status == models.TripStatus.ACCEPTED)
+                      if (rideProvider.status == models.TripStatus.ACCEPTED ||
+                          rideProvider.status == models.TripStatus.IN_PROGRESS)
                         TextButton.icon(
                           onPressed: () => _showCancelDialog(context, rideProvider),
                           icon: const Icon(Icons.close, color: Color(0xFFC65A5A), size: 18),

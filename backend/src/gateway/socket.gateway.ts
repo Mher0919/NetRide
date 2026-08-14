@@ -731,7 +731,12 @@ export function setupSocketGateway(io: Server) {
         const validated = validate(SendMessageSchema, data, socket, 'sendMessage');
         if (!validated.success || !validated.data) return;
         
-        await relayChatMessage(io, socket, 'driver', validated.data, { id, role: 'driver' });
+        // relayChatMessage needs the role of the OTHER party: a driver's
+        // counterpart is the rider. Passing 'driver' here emitted the
+        // message back into the driver's OWN room — the sender's app
+        // showed the message twice (optimistic copy + echoed copy) while
+        // the rider never got a live socket delivery.
+        await relayChatMessage(io, socket, 'rider', validated.data, { id, role: 'driver' });
       });
 
       /**

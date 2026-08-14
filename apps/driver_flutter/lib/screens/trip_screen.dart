@@ -640,13 +640,34 @@ class _TripScreenState extends State<TripScreen> {
                         try {
                           if (driverProvider.currentTrip != null) {
                             final trip = driverProvider.currentTrip!;
-                            await driverProvider.rateRide(
-                              trip.id,
-                              selectedRating,
-                              reviewController.text.trim(),
-                            );
+                            // Finish the trip FIRST: the backend only
+                            // accepts ratings for COMPLETED rides, so
+                            // rating before completing would fail AND
+                            // leave the trip unfinished.
                             SoundService.instance.play(SoundEffect.tripCompleted);
                             driverProvider.completeTrip(trip.id);
+                            // Wait for the authoritative COMPLETED
+                            // tripUpdate (provider clears currentTrip)
+                            // so the rating POST is not rejected.
+                            final deadline = DateTime.now()
+                                .add(const Duration(seconds: 6));
+                            while (driverProvider.currentTrip != null &&
+                                DateTime.now().isBefore(deadline)) {
+                              await Future.delayed(
+                                  const Duration(milliseconds: 150));
+                            }
+                            // Rating is best-effort — a rating failure must
+                            // never block the finished trip or the dialog.
+                            try {
+                              await driverProvider.rateRide(
+                                trip.id,
+                                selectedRating,
+                                reviewController.text.trim(),
+                              );
+                            } catch (rateErr) {
+                              debugPrint(
+                                  '[TRIP] Rating rider failed (non-blocking): $rateErr');
+                            }
                             if (mounted) {
                               Navigator.pop(context);
                               await showDialog(

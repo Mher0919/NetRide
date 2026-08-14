@@ -194,6 +194,11 @@ class CommunicationService extends ChangeNotifier {
       final json = Map<String, dynamic>.from(data as Map);
       final incomingTrip = json['tripId']?.toString();
       if (incomingTrip != null && incomingTrip != _currentTripId) return;
+      // Never append our own message twice: an echo of our own send
+      // (socket retransmit / routing glitch) must not be added next to
+      // the optimistic copy.
+      final senderId = json['senderId']?.toString();
+      if (senderId != null && _driverId != null && senderId == _driverId) return;
       _messages.add(ChatMessage.fromJson(json));
       notifyListeners();
     } catch (e) {

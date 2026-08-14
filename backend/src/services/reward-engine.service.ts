@@ -6,10 +6,16 @@
 // referral rewards. Called from RideService (request / complete / cancel).
 //
 //   ride REQUESTED  → promo validation + credits debit (authoritative, runs
-//                     inside the ride's own transaction) + referral state
+//                     inside the ride's own transaction) + referral state.
+//                     The WALLET IS NOT CHARGED here — the rider pays ONLY
+//                     when the ride completes successfully (final_payment_cents
+//                     is reserved now and settled at completion).
 //   ride COMPLETED  → promo usage USED + partner commission accrual
-//                   + referral reward grant (both $5s — once, idempotently)
-//   ride CANCELLED  → promo usage VOID + credits refunded
+//                     + referral reward grant (both $5s — once, idempotently).
+//                     The rider's wallet charge + driver payout both settle
+//                     in the completion block of RideService.updateTripStatus.
+//   ride CANCELLED  → promo usage VOID + credits refunded. No wallet refund
+//                     is needed because nothing was ever charged.
 
 import { pool } from '../config/database';
 import { applyPromoToRide, finalizePromoForCompletedRide, voidPromoForCancelledRide } from '../modules/promo/promo.service';
@@ -19,7 +25,6 @@ import { ReferralService } from '../modules/referral/referral.service';
 import {
   notifyPromoApplied,
   notifyCreditsApplied,
-  notifyWalletCharged,
 } from './notification.service';
 
 export interface RideEvent {
@@ -32,13 +37,14 @@ export interface RideEvent {
 
 export class RewardEngine {
   /**
-   * Applies promo + credits + wallet payment to a ride at request time.
-   * Runs INSIDE the caller's transaction (client) so ride row + promo usage
-   * + credit ledger + wallet ledger commit atomically.
+   * Applies promo + credits bookkeeping to a ride at request time and
+   * RESERVES the final amount due. Runs INSIDE the caller's transaction
+   * (client) so ride row + promo usage + credit ledger commit atomically.
    *
    * Payment order (server-authoritative): fare → promo discount → credits
-   * discount → wallet pays the rest (up to balance). The client never sends
-   * amounts — it only signals intent (promo code, credit amount hint).
+   * discount → wallet pays the rest AT COMPLETION (never at request — a
+   * cancelled ride costs nothing). The client never sends amounts — it
+   * only signals intent (promo code, credit amount hint).
    *
    * Returns the applied amounts, or throws a user-safe error when the
    * promo is invalid — the ride request fails so the rider can fix the
@@ -73,12 +79,10 @@ export class RewardEngine {
       : { appliedCents: 0, balanceCents: 0 };
     const dueAfterCredits = Math.max(0, remaining - credits.appliedCents);
 
-    // The wallet is the default payment method: it covers the remaining
-    // amount up to the available balance.
-    const wallet = await WalletService.chargeForRide(riderId, rideId, dueAfterCredits, {
-      client,
-    });
-    const finalPaymentCents = wallet.finalCents;
+    // The wallet is the default payment method, but it is charged ONLY at
+    // completion. Here we just reserve the amount due (fare - promo -
+    // credits) on the ride row so the completion block knows what to settle.
+    const finalPaymentCents = dueAfterCredits;
 
     await client.query(
       `UPDATE rides
@@ -91,7 +95,7 @@ export class RewardEngine {
         promoApplied?.promo.code ?? null,
         discountCents,
         credits.appliedCents,
-        wallet.walletChargeCents,
+        0,
         finalPaymentCents,
         rideId,
       ],
@@ -99,21 +103,19 @@ export class RewardEngine {
 
     // Best-effort post-request notifications (fire and forget). Each one is
     // recorded in the persisted feed AND pushed to every device once —
-    // deduplicated by eventId (rideId-scoped).
+    // deduplicated by eventId (rideId-scoped). The wallet-charged notice
+    // is deferred to completion (payment settles there).
     if (promoApplied) {
       notifyPromoApplied(riderId, promoApplied.promo.code, discountCents, rideId).catch(() => undefined);
     }
     if (credits.appliedCents > 0) {
       notifyCreditsApplied(riderId, credits.appliedCents, rideId).catch(() => undefined);
     }
-    if (wallet.walletChargeCents > 0) {
-      notifyWalletCharged(riderId, wallet.walletChargeCents, rideId).catch(() => undefined);
-    }
 
     return {
       discountCents,
       creditsAppliedCents: credits.appliedCents,
-      walletPaymentCents: wallet.walletChargeCents,
+      walletPaymentCents: 0,
       finalPaymentCents,
     };
   }
@@ -150,8 +152,11 @@ export class RewardEngine {
 
   /**
    * Called when a ride CANCELLED. Voids promo usage and refunds applied
-   * credits + the wallet payment. Idempotent — refunds carry their own
+   * credits + any wallet payment. Idempotent — refunds carry their own
    * ledger keys and rides gate re-refunds on refunded_at timestamps.
+   * New rides are never charged at request (payment settles at
+   * completion), so the wallet refund only affects rides that predate
+   * that change; for everything else it is a harmless no-op.
    */
   static async onRideCancelled(ride: RideEvent): Promise<void> {
     try {

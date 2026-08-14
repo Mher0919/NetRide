@@ -20,11 +20,13 @@ import { matchQueue } from '../../queue/queue';
 import { matchJobsTotal, dispatchAcceptOutcomeTotal } from '../../observability/metrics';
 import { traceAsync, getCurrentTraceId } from '../../utils/tracing';
 import { RewardEngine } from '../../services/reward-engine.service';
+import { WalletService } from '../wallet/wallet.service';
 import {
   notifyRideAccepted,
   notifyRideStarted,
   notifyRideCompleted,
   notifyRideCancelled,
+  notifyWalletCharged,
 } from '../../services/notification.service';
 import { cancellationReasonLabel } from '../reporting/report.reasons';
 
@@ -634,6 +636,40 @@ export class RideService {
         );
       }
 
+      // Rider payment: the wallet is charged ONLY when the ride completes
+      // successfully — never at request (a cancelled ride costs nothing).
+      // Settles the amount reserved at request time (final_payment_cents =
+      // fare after promo + credits). Idempotent via the wallet ledger's
+      // unique idempotency key (wallet-charge:{rideId}); non-blocking so a
+      // wallet issue can never strand an already-completed trip.
+      try {
+        const dueCents = Math.round(
+          parseFloat((updatedTrip as any).final_payment_cents ?? '0') * 100
+        );
+        if (dueCents > 0) {
+          const charged = await WalletService.chargeForRide(
+            updatedTrip.rider_id,
+            tripId,
+            dueCents,
+          );
+          if (charged.walletChargeCents > 0) {
+            await pool.query(
+              `UPDATE rides SET wallet_payment_cents = $1 WHERE id = $2`,
+              [charged.walletChargeCents, tripId],
+            );
+            notifyWalletCharged(
+              updatedTrip.rider_id,
+              charged.walletChargeCents,
+              tripId,
+            ).catch(() => undefined);
+          }
+        }
+      } catch (err: any) {
+        console.warn(
+          `[RIDE] ⚠️ Rider wallet charge failed (non-blocking) for trip ${tripId}: ${err.message}`
+        );
+      }
+
       // Driver earnings (60% share, from the persisted allocation) ride along
       // on the payload so the driver app never computes money client-side.
       const allocation = await getRevenueAllocationForRide(tripId);
@@ -697,15 +733,20 @@ export class RideService {
       return trip;
     }
 
-    // Only allow cancellation before pickup (REQUESTED or ACCEPTED)
-    if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
-      throw new Error('Cannot cancel a ride that is already in progress or completed');
+    // Cancellation is allowed while searching (REQUESTED), before pickup
+    // (ACCEPTED), and DURING the ride (IN_PROGRESS — the rider may change
+    // their mind mid-trip and the trip dissolves without a charge since
+    // payment only settles at completion). Only COMPLETED rides are final.
+    if (trip.status !== 'REQUESTED' &&
+        trip.status !== 'ACCEPTED' &&
+        trip.status !== 'IN_PROGRESS') {
+      throw new Error('Cannot cancel a ride that is already completed');
     }
 
-    // Required cancellation reasons (042): an ACCEPTED ride may only be
-    // dissolved by a human party with a reason code. System timeouts and
-    // searching-phase cancels (REQUESTED) stay reason-free.
-    if (trip.status === 'ACCEPTED' && !opts.reasonCode) {
+    // Required cancellation reasons (042): an ACCEPTED or IN_PROGRESS ride
+    // may only be dissolved by a human party with a reason code. System
+    // timeouts and searching-phase cancels (REQUESTED) stay reason-free.
+    if ((trip.status === 'ACCEPTED' || trip.status === 'IN_PROGRESS') && !opts.reasonCode) {
       throw new Error('Please select a reason for cancelling this ride.');
     }
 
@@ -752,7 +793,7 @@ export class RideService {
       `UPDATE rides
           SET status = $2, cancelled_at = $3, cancelled_by = $4,
               cancellation_reason_code = $5, cancellation_reason_text = $6
-        WHERE id = $1 AND status IN ($7, $8)
+        WHERE id = $1 AND status IN ($7, $8, $9)
         RETURNING id`,
       [
         tripId,
@@ -763,6 +804,7 @@ export class RideService {
         extra.cancellation_reason_text,
         TripStatus.REQUESTED,
         TripStatus.ACCEPTED,
+        TripStatus.IN_PROGRESS,
       ],
     );
 
@@ -771,7 +813,7 @@ export class RideService {
       // (driver accepted, or the ride was already cancelled/completed).
       const latest = await RideRepository.findById(tripId);
       if (latest?.status === TripStatus.CANCELLED) return latest; // idempotent
-      throw new Error('Cannot cancel a ride that is already in progress or completed');
+      throw new Error('Cannot cancel a ride that is already completed');
     }
 
     const updatedTrip = await RideRepository.findById(tripId);
