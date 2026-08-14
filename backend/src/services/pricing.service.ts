@@ -381,14 +381,23 @@ export function computeFare(
 
   // Multiplier pipeline. Demand × time come from live market conditions;
   // fleet, weather, and location come from the profile configuration. Every
-  // factor is non-negative and clamped to the profile's surge ceiling. The
-  // live PREMIUM profile pins every multiplier to 1.00, so the production
-  // fare is deterministic-flat; raising the caps in config re-enables surge.
-  const demandTime = clamp(
-    market.demandMultiplier * market.timeMultiplier,
-    0.85,
-    config.max_demand_multiplier,
-  );
+  // factor is non-negative and clamped to the profile's surge ceiling.
+  //
+  // FLAT PROFILE (041 spec): the live PREMIUM profile pins
+  // `max_demand_multiplier` to 1.00 — that pin is the explicit "deterministic
+  // flat fare" contract. When set, the LIVE market multipliers (which can dip
+  // to ×0.90 low-demand / ×0.95 off-peak) are IGNORED entirely and the total
+  // multiplier is exactly ×1.00. Without this, discounts dragged short trips
+  // below the raw fare and every estimate collided with the minimum fare
+  // (everything came out $10.00). Raising the cap in config re-enables
+  // market multipliers.
+  const demandTime = config.max_demand_multiplier === 1.0
+    ? 1.0
+    : clamp(
+        market.demandMultiplier * market.timeMultiplier,
+        0.85,
+        config.max_demand_multiplier,
+      );
   const fleetMultiplier = clamp(Math.max(0, config.fleet_multiplier), 0.85, config.max_demand_multiplier);
   const weatherMultiplier = clamp(Math.max(0, config.weather_multiplier), 0.85, config.max_demand_multiplier);
   const locationMultiplier = clamp(Math.max(0, config.location_multiplier), 0.85, config.max_demand_multiplier);

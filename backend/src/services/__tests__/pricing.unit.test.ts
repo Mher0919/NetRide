@@ -69,6 +69,36 @@ test('computeFare: surge is disabled in the live flat profile', () => {
   assert.equal(flat.totalFare, surged.totalFare);
 });
 
+test('computeFare: flat profile ignores LIVE market DISCOUNTS (no $10 floor collisions)', () => {
+  // Regression (2026-08): the live market could dip to ×0.90 demand / ×0.95
+  // off-peak. With the flat profile (max_demand_multiplier pinned to 1.00)
+  // those discounts forced short rides below the raw fare and every
+  // estimate collided with the minimum — "everything is $10".
+  const discounted = { ...NEUTRAL_MARKET, demandMultiplier: 0.9, timeMultiplier: 0.95 };
+  // 2.12 mi × 2.50 + 3.93 min × 0.40 + 4.00 = 10.87 — must NOT be floored.
+  const fare = computeFare(
+    { distanceMeters: 3407, durationSeconds: 236 },
+    DEFAULT_PRICING_CONFIG,
+    discounted,
+  );
+  assert.equal(fare.surgeMultiplier, 1.0, 'flat profile must ignore market discounts');
+  assert.equal(fare.totalFare, 10.87);
+});
+
+test('computeFare: market multipliers apply when a profile opts OUT of flat', () => {
+  const config = {
+    ...DEFAULT_PRICING_CONFIG,
+    max_demand_multiplier: 2.0,
+  };
+  const discounted = { ...NEUTRAL_MARKET, demandMultiplier: 0.9, timeMultiplier: 0.95 };
+  const fare = computeFare(
+    { distanceMeters: 3407, durationSeconds: 236 },
+    config,
+    discounted,
+  );
+  assert.ok(fare.surgeMultiplier < 1.0, 'market discounts must apply when surge is enabled');
+});
+
 test('computeFare: deterministic and itemized (spec $100 scenario shape)', () => {
   const fare = computeFare(
     { distanceMeters: 30 * 1609.344, durationSeconds: 20 * 60 },
