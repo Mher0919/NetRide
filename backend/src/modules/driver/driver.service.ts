@@ -754,7 +754,7 @@ export class DriverService {
         { id: requestId, requested_changes: sanitizedChanges, card_last4: cardLast4, card_brand: cardBrand }
       );
       await EmailService.sendProfileChangeNotice(
-        { email: env.GMAIL_USER_EMAIL || '' },
+        { email: env.ADMIN_NOTIFY_EMAIL || '' },
         { id: userId, email: driverEmail, full_name: driverName },
         { id: requestId, requested_changes: sanitizedChanges, card_last4: cardLast4, card_brand: cardBrand }
       );
@@ -820,7 +820,7 @@ export class DriverService {
     try {
       const driverInfo = await pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [userId]);
       await EmailService.sendPayoutCardNotice(
-        { email: env.GMAIL_USER_EMAIL || '' },
+        { email: env.ADMIN_NOTIFY_EMAIL || '' },
         { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' },
         { id: ins.rows[0].id, brand, last4: l4 }
       );
@@ -913,7 +913,7 @@ export class DriverService {
     try {
       const driverInfo = await pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [userId]);
       await EmailService.sendPayoutRequestedNotice(
-        { email: env.GMAIL_USER_EMAIL || '' },
+        { email: env.ADMIN_NOTIFY_EMAIL || '' },
         { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' },
         { id: payoutId, amount_cents: amountCents, fee_cents: fee, net_cents: net, method: 'ON_DEMAND' }
       );
@@ -1277,7 +1277,7 @@ export class DriverService {
 
           // Admin notification email
           EmailService.sendAdminDocumentResubmissionNoticeEmail(
-            { email: env.GMAIL_USER_EMAIL },
+            { email: env.ADMIN_NOTIFY_EMAIL },
             {
               id: userId,
               full_name: driver.full_name,
