@@ -105,6 +105,11 @@ export function eventAgeMinutes(
   return Math.max(0, (now.getTime() - t.getTime()) / 60_000);
 }
 
+/** Stable epoch-ms of a Postgres/JS timestamp for tie-breaking. */
+function rowEpochMs(createdAt: Date | string): number {
+  return createdAt instanceof Date ? createdAt.getTime() : new Date(createdAt).getTime();
+}
+
 /**
  * Piecewise-linear time decay. Returns 1.0 for events newer than the first
  * bucket, 0.0 at/after the last bucket, interpolating between buckets.
@@ -141,8 +146,11 @@ export interface AggregatedCell {
 }
 
 /**
- * Group activity rows into cells. Per rider, only their STRONGEST signal in
- * each cell counts (a rider geyser-ing events can't inflate a zone).
+ * Group activity rows into cells. EACH RIDER COUNTS EXACTLY ONCE: they
+ * contribute only to the cell holding their STRONGEST signal (tie → the
+ * newest row), so a rider who moved between H3 cells never splits into two
+ * heat points — one account = one point, at their most recent/active cell.
+ * A rider geyser-ing events can't inflate a zone either.
  */
 export function aggregateCells(
   rows: ActivityRow[],
@@ -153,9 +161,11 @@ export function aggregateCells(
     rows = rows.slice(rows.length - MAX_AGGREGATED_EVENTS);
   }
 
-  // cell → riderId → best weight
-  const cellRiders = new Map<string, Map<string, number>>();
-  const cellPoints = new Map<string, { lat: number; lng: number; w: number }[]>();
+  // riderId → their single strongest (newest on tie) signal for the window.
+  const bestByRider = new Map<
+    string,
+    { weight: number; row: ActivityRow }
+  >();
 
   for (const row of rows) {
     const age = eventAgeMinutes(row.created_at, now);
@@ -165,6 +175,23 @@ export function aggregateCells(
     const riderWeight = (config.activityWeights[row.activity_type] ?? 0) * w;
     if (riderWeight <= 0) continue;
 
+    const prev = bestByRider.get(row.rider_id);
+    if (!prev) {
+      bestByRider.set(row.rider_id, { weight: riderWeight, row });
+    } else if (
+      riderWeight > prev.weight ||
+      (riderWeight === prev.weight &&
+        rowEpochMs(row.created_at) > rowEpochMs(prev.row.created_at))
+    ) {
+      bestByRider.set(row.rider_id, { weight: riderWeight, row });
+    }
+  }
+
+  // cell → riderId → that rider's one contribution
+  const cellRiders = new Map<string, Map<string, number>>();
+  const cellPoints = new Map<string, { lat: number; lng: number; w: number }[]>();
+
+  for (const { weight: riderWeight, row } of bestByRider.values()) {
     let riders = cellRiders.get(row.cell_h3);
     if (!riders) {
       riders = new Map();

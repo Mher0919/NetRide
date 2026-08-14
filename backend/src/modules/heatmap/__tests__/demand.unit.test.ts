@@ -132,6 +132,47 @@ test('aggregateCells: distinct cells are not merged by aggregation', () => {
   assert.equal(cells.length, 2);
 });
 
+test('aggregateCells: one rider across two cells counts once (moved rider → one heat point)', () => {
+  const cells = aggregateCells([
+    row({
+      rider_id: 'u1',
+      activity_type: 'APP_OPEN',
+      cell_h3: 'A',
+      lat: 1,
+      lng: 1,
+      created_at: new Date(NOW.getTime() - 20 * 60_000),
+    }),
+    row({
+      rider_id: 'u1',
+      activity_type: 'APP_OPEN',
+      cell_h3: 'B',
+      lat: 2,
+      lng: 2,
+      created_at: NOW,
+    }),
+  ], cell('A'), NOW);
+  // Newer (fresher = stronger weight) cell wins; the rider never splits.
+  assert.equal(cells.length, 1);
+  assert.equal(cells[0].cell, 'B');
+  assert.equal(cells[0].riders, 1);
+});
+
+test('aggregateCells: same-weight cells tie-break to the NEWEST location', () => {
+  const cells = aggregateCells([
+    row({ rider_id: 'u1', activity_type: 'APP_OPEN', cell_h3: 'A', lat: 1, lng: 1 }),
+    row({
+      rider_id: 'u1',
+      activity_type: 'APP_OPEN',
+      cell_h3: 'B',
+      lat: 2,
+      lng: 2,
+      created_at: new Date(NOW.getTime() + 5 * 60_000),
+    }),
+  ], cell('A'), NOW);
+  assert.equal(cells.length, 1);
+  assert.equal(cells[0].cell, 'B');
+});
+
 test('aggregateCells: centroid is weighted toward stronger points', () => {
   const cells = aggregateCells([
     row({ rider_id: 'u1', activity_type: 'APP_OPEN', cell_h3: 'A', lat: 10, lng: 10 }),

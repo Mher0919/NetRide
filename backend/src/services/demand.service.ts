@@ -71,7 +71,16 @@ export async function recordRiderActivity(
     const cdSeconds = DEMAND_CONFIG.cooldowns[input.type] ?? 0;
     if (cdSeconds > 0 && input.type !== 'RIDE_REQUESTED') {
       const key = cooldownKey(input.riderId, input.type);
-      const fresh = await redis.set(key, '1', 'EX', cdSeconds, 'NX');
+      let fresh: string | null = null;
+      try {
+        fresh = await redis.set(key, '1', 'EX', cdSeconds, 'NX');
+      } catch {
+        // Redis unavailable — fail OPEN and record anyway. Demand signals
+        // are non-critical telemetry; losing the whole heatmap because a
+        // support service flapped is worse than a temporarily unthrottled
+        // insert. The insert below is still bounded by the sweep job.
+        fresh = '1';
+      }
       if (!fresh) return; // still inside the cooldown window — skip
     }
 
