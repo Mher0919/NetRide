@@ -5,7 +5,7 @@ import '../services/user_service.dart';
 
 /// Support contact shown to blocked riders. They may only reach support —
 /// no app functionality is accessible from this screen.
-const String kSupportEmail = 'support@netride.com';
+const String kSupportEmail = 'support@netride.org';
 
 class BlockedAccountScreen extends StatefulWidget {
   final String? reason;

@@ -96,11 +96,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _handleSupport() async {
+    const String supportEmail = 'support@netride.org';
+    final String subject = Uri.encodeComponent('Support Request (Rider)');
     final String body = Uri.encodeComponent('Hello NetRide Support, I am a rider and I need help with...');
-    final Uri smsLaunchUri = Uri.parse('sms:7477245408?body=$body');
+    final Uri emailLaunchUri = Uri.parse('mailto:$supportEmail?subject=$subject&body=$body');
     try {
-      if (!await launchUrl(smsLaunchUri)) {
-        throw 'Could not launch SMS';
+      if (!await launchUrl(emailLaunchUri)) {
+        throw 'Could not launch email';
       }
     } catch (e) {
       if (mounted) {
@@ -108,7 +110,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('Contact Support'),
-            content: const Text('Please send an SMS to:\n\n747-724-5408\n\nSample text:\n"Hello NetRide Support, I need help with..."'),
+            content: const Text('Please email:\n\nsupport@netride.org\n\nSample text:\n"Hello NetRide Support, I need help with..."'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
