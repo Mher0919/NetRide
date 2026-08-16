@@ -534,14 +534,21 @@ export class RideService {
     return updatedTrip;
   }
 
-  static async updateTripStatus(tripId: string, status: any, userId: string): Promise<Trip> {
+  static async updateTripStatus(
+    tripId: string,
+    status: any,
+    userId: string,
+    opts: { bypassDriverGuard?: boolean } = {},
+  ): Promise<Trip> {
     const trip = await RideRepository.findById(tripId);
     if (!trip) throw new Error('Trip not found');
 
-    console.log(`[RIDE] updateTripStatus: tripId=${tripId} status=${status} userId=${userId} trip.driver_id=${trip.driver_id} match=${trip.driver_id === userId}`);
+    console.log(`[RIDE] updateTripStatus: tripId=${tripId} status=${status} userId=${userId} trip.driver_id=${trip.driver_id} match=${trip.driver_id === userId} bypass=${!!opts.bypassDriverGuard}`);
 
-    // Security: Only the assigned driver can update progress
-    if (trip.driver_id !== userId) {
+    // Security: Only the assigned driver (or an authorized operator with
+    // `bypassDriverGuard`, e.g. an admin force-completing a stuck ride)
+    // can update progress.
+    if (trip.driver_id !== userId && !opts.bypassDriverGuard) {
       throw new Error('Unauthorized: You are not the assigned driver for this trip');
     }
 
@@ -806,13 +813,15 @@ export class RideService {
   static async cancelTrip(
     tripId: string,
     userId: string,
-    opts: { reasonCode?: string; reasonText?: string } = {},
+    opts: { reasonCode?: string; reasonText?: string; bypassOwnership?: boolean } = {},
   ): Promise<Trip> {
     const trip = await RideRepository.findById(tripId);
     if (!trip) throw new Error('Trip not found');
 
-    // Security: Only the rider or the assigned driver can cancel
-    if (trip.rider_id !== userId && trip.driver_id !== userId) {
+    // Security: only the rider, the assigned driver (or an authorized
+    // operator with `bypassOwnership`, e.g. an admin dissolving a stuck
+    // ride) can cancel.
+    if (trip.rider_id !== userId && trip.driver_id !== userId && !opts.bypassOwnership) {
       throw new Error('Unauthorized to cancel this trip');
     }
 
@@ -995,6 +1004,84 @@ export class RideService {
       return rematchedTrip;
     }
 
+    // Idempotent terminal transition handled in the shared helper (below):
+    // a concurrent ACCEPT that commits between our read and this update
+    // wins the race — we never overwrite a fresher state.
+    return RideService._terminalCancel(
+      trip,
+      extra.cancelled_by,
+      extra.cancellation_reason_code,
+      extra.cancellation_reason_text,
+    );
+  }
+
+  /**
+   * System-driven terminal cancellation (stale-ride watchdog / boots-time
+   * reconciliation). No human actor: `cancelled_by` stays NULL, no reason
+   * code is required, and there is NO pre-pickup rematch — the ride is
+   * dissolved permanently so neither party's app can keep routing to it.
+   * Idempotent — safe to call repeatedly from every cleanup tick.
+   */
+  static async cancelTripSystem(
+    tripId: string,
+    opts: { reasonText?: string } = {},
+  ): Promise<Trip | null> {
+    const trip = await RideRepository.findById(tripId);
+    if (!trip) return null;
+    if (trip.status === 'CANCELLED') return trip; // idempotent
+    if (trip.status === 'COMPLETED') return trip; // never un-complete
+
+    // Cancel is only valid on cancellable states.
+    if (trip.status !== 'REQUESTED' &&
+        trip.status !== 'ACCEPTED' &&
+        trip.status !== 'DRIVER_ARRIVING' &&
+        trip.status !== 'IN_PROGRESS') {
+      return trip;
+    }
+
+    console.log(`[RIDE] ⚠️ System-cancelling stale ride ${tripId} (status=${trip.status})`);
+
+    // Preserve any captured GPS trajectory and release the driver's
+    // session/lock/navigation state exactly like a party-initiated cancel.
+    if (trip.driver_id) {
+      const trajectory = await LocationsService.getTrajectory(tripId);
+      if (trajectory.length > 0) {
+        await pool.query(`UPDATE rides SET trajectory = $1 WHERE id = $2`, [
+          JSON.stringify(trajectory),
+          tripId,
+        ]);
+      }
+      await redis.del(`driver:${trip.driver_id}:active_trip`);
+      await LocationsService.clearTrajectory(tripId);
+      await NavigationService.clearTrip(tripId);
+    }
+
+    if (trip.status === TripStatus.REQUESTED) {
+      const { DriverOfferService } = await import('../../services/driver-offer.service');
+      await DriverOfferService.cancelRideOffers(tripId);
+    }
+
+    const reasonText = (opts.reasonText ?? 'Ride was resolved by the system (stale ride).')
+      .trim()
+      .slice(0, 300);
+
+    return RideService._terminalCancel(trip, null, null, reasonText);
+  }
+
+  /**
+   * Shared terminal-cancellation core used by party cancels (cancelTrip),
+   * system cancels (cancelTripSystem) and admin cancels. Atomic status
+   * guard + rewards/sponsor teardown + safety/navigation teardown +
+   * authoritative broadcast to both parties and admin monitoring.
+   */
+  private static async _terminalCancel(
+    trip: Trip,
+    cancelledBy: string | null,
+    reasonCode: string | null,
+    reasonText: string | null,
+  ): Promise<Trip> {
+    const tripId = trip.id;
+
     // Atomic transition: the WHERE guard means a concurrent ACCEPT that
     // commits between our read and this update wins the race — we never
     // overwrite a fresher state (accept-vs-cancel race safety).
@@ -1002,18 +1089,19 @@ export class RideService {
       `UPDATE rides
           SET status = $2, cancelled_at = $3, cancelled_by = $4,
               cancellation_reason_code = $5, cancellation_reason_text = $6
-        WHERE id = $1 AND status IN ($7, $8, $9)
+        WHERE id = $1 AND status IN ($7, $8, $9, $10)
         RETURNING id`,
       [
         tripId,
         TripStatus.CANCELLED,
-        extra.cancelled_at,
-        extra.cancelled_by,
-        extra.cancellation_reason_code,
-        extra.cancellation_reason_text,
+        new Date(),
+        cancelledBy,
+        reasonCode,
+        reasonText,
         TripStatus.REQUESTED,
         TripStatus.ACCEPTED,
         TripStatus.IN_PROGRESS,
+        TripStatus.DRIVER_ARRIVING,
       ],
     );
 
@@ -1061,13 +1149,21 @@ export class RideService {
     }
     io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
 
-    // Real phone notification carrying WHO cancelled and WHY.
-    const actorRole: 'rider' | 'driver' =
-      userId === trip.driver_id ? 'driver' : 'rider';
+    // Real phone notification carrying WHO cancelled and WHY. A null actor
+    // (system watchdog) still notifies the rider so they are not stranded
+    // wondering what happened to their pickup.
+    const actorRole: 'rider' | 'driver' | 'system' =
+      cancelledBy === null
+        ? 'system'
+        : cancelledBy === trip.driver_id
+          ? 'driver'
+          : 'rider';
     const notified = trip.driver_id
       ? actorRole === 'driver'
         ? trip.rider_id
-        : trip.driver_id
+        : actorRole === 'rider'
+          ? trip.driver_id
+          : trip.rider_id
       : null;
     if (notified) {
       const recipientRole: 'rider' | 'driver' = actorRole === 'driver' ? 'rider' : 'driver';
@@ -1079,8 +1175,8 @@ export class RideService {
         recipientRole,
         tripId,
         actorRole,
-        opts.reasonCode ? cancellationReasonLabel(cancellerRole, opts.reasonCode) : undefined,
-        opts.reasonText,
+        reasonCode ? cancellationReasonLabel(cancellerRole, reasonCode) : undefined,
+        reasonText ?? undefined,
       ).catch(() => undefined);
     }
 

@@ -18,10 +18,12 @@ import DistanceIcon from '@mui/icons-material/Map';
 import FareIcon from '@mui/icons-material/Payments';
 import AuditIcon from '@mui/icons-material/History';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getRideById, getRideRoutes, getRideLedger } from '../api/admin';
+import { getRideById, getRideRoutes, getRideLedger, cancelRideByAdmin, completeRideByAdmin } from '../api/admin';
 import RideMap from '../components/RideMap';
 import { format } from 'date-fns';
 import { io } from 'socket.io-client';
+import CancelIcon from '@mui/icons-material/Cancel';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000';
 
@@ -38,6 +40,39 @@ const RideDetail: React.FC = () => {
   const [actualRoute, setActualRoute] = useState<[number, number][]>([]);
   const [actualAvailable, setActualAvailable] = useState(false);
   const [ledger, setLedger] = useState<any>(null);
+  const [opsPending, setOpsPending] = useState(false);
+
+  const handleAdminCancel = async () => {
+    if (opsPending) return;
+    const reasonText = window.prompt('Reason for cancelling this ride (shown to the parties):', '');
+    if (reasonText === null) return;
+    if (!window.confirm(`Cancel ride #${ride?.id?.substring(0, 8)}? Both parties will be notified that the ride ended.`)) return;
+    setOpsPending(true);
+    try {
+      await cancelRideByAdmin(id!, reasonText || undefined);
+      const data = await getRideById(id!);
+      setRide(data);
+    } catch (err: any) {
+      alert(err?.response?.data?.error || err?.message || 'Failed to cancel ride');
+    } finally {
+      setOpsPending(false);
+    }
+  };
+
+  const handleAdminComplete = async () => {
+    if (opsPending) return;
+    if (!window.confirm(`Force-complete ride #${ride?.id?.substring(0, 8)}? The full settlement pipeline (wallet, ledger) will run exactly like a driver completion.`)) return;
+    setOpsPending(true);
+    try {
+      await completeRideByAdmin(id!);
+      const data = await getRideById(id!);
+      setRide(data);
+    } catch (err: any) {
+      alert(err?.response?.data?.error || err?.message || 'Failed to complete ride');
+    } finally {
+      setOpsPending(false);
+    }
+  };
 
   useEffect(() => {
     const fetchRide = async () => {
@@ -155,6 +190,30 @@ const RideDetail: React.FC = () => {
           }}
         />
         <Box sx={{ flexGrow: 1 }} />
+        {isActive && (
+          <>
+            <Button
+              variant="outlined"
+              color="success"
+              startIcon={<CheckCircleIcon />}
+              onClick={handleAdminComplete}
+              disabled={opsPending}
+              sx={{ borderRadius: '12px' }}
+            >
+              Force Complete
+            </Button>
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<CancelIcon />}
+              onClick={handleAdminCancel}
+              disabled={opsPending}
+              sx={{ borderRadius: '12px' }}
+            >
+              Cancel Ride
+            </Button>
+          </>
+        )}
         <Button 
           variant="contained" 
           startIcon={<AuditIcon />}

@@ -27,11 +27,22 @@ export const CleanupService = {
       // Redis/BullMQ unavailable — inline run below still covers us.
     }
 
-    await this.cancelStaleRideRequests();
+    // Authoritative stale-ride sweep (REQUESTED timeouts + never-started +
+    // overdue active rides). Runs inline so every deployment resolves
+    // ghost rides even when the BullMQ worker is not present; the queue
+    // enqueue above covers the distributed case.
+    await this.sweepStaleRides();
     await this.cleanupGhostDrivers();
     // Keep heatmap retention alive.
     const { sweepExpiredActivity } = require('./demand.service') as typeof import('./demand.service');
     sweepExpiredActivity().catch(() => undefined);
+  },
+
+  async sweepStaleRides(): Promise<void> {
+    const { sweepStaleActiveRides } = require('../queue/jobs/cleanupStaleRides') as typeof import('../queue/jobs/cleanupStaleRides');
+    await sweepStaleActiveRides(io).catch((err: any) => {
+      console.error('[CLEANUP] Stale ride sweep failed:', err.message);
+    });
   },
 
   async cancelStaleRideRequests() {

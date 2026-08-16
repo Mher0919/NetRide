@@ -53,6 +53,17 @@ import { SpeedingDetector } from './services/speeding_detector';
 import { trajectoryEvents } from './modules/location/locations.service';
 
 const app = express();
+// API responses must never be revalidated from the browser's HTTP cache:
+// Express's default weak ETag + browser revalidation turned every admin
+// dashboard poll into a 304 "not modified" replay of a stale cached ride
+// list — the dashboard kept showing an empty/old state no matter what the
+// DB said. A live operational dashboard reads current truth on every poll.
+app.disable('etag');
+// Belt-and-braces: private, uncacheable for all admin/monitoring responses.
+app.use('/api/admin', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -663,6 +674,20 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
 
     // Initial run
     CleanupService.performMaintenance();
+  });
+
+  // Boot-time stale-ride reconciliation: instantly resolve any rides left
+  // stuck in a non-terminal state from before this deploy (apps killed
+  // mid-trip, abandoned pickups, crashed workers). Without this, a driver
+  // relaunching mid-stale-ride would re-attach to a ride that no longer
+  // exists, and the admin dashboard would keep listing a ghost "active"
+  // ride. Compliments the periodic watchdog in cleanupStaleRides.ts.
+  import('./queue/jobs/cleanupStaleRides').then(({ sweepStaleActiveRides }) => {
+    sweepStaleActiveRides(io)
+      .then((n) => {
+        if (n > 0) console.log(`[BOOT] ✅ Reconciled ${n} stale rides left over from previous runtime`);
+      })
+      .catch((err: any) => console.error(`[BOOT] ⚠️ Stale ride reconciliation failed: ${err.message}`));
   });
 
   // Special redemption hygiene (Every 5 minutes): expire stale validation

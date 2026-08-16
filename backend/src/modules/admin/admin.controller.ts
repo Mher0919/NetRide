@@ -896,6 +896,89 @@ export class AdminController {
     }
   }
 
+  /**
+   * Operator escape hatch: dissolve a stuck ride (e.g. a driver killed the
+   * app mid-trip and the automatic stale-ride watchdog has not yet fired).
+   * Terminates the ride, broadcasts the authoritative CANCELLED payload to
+   * both apps + monitoring, releases the driver lock/navigation state and
+   * writes an audit log entry.
+   */
+  static async cancelRide(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const adminId = req.user!.id;
+    const reasonText = (req.body?.reasonText as string | undefined)?.trim() || null;
+
+    try {
+      const { RideService } = await import('../ride/ride.service');
+      const trip = await RideService.cancelTrip(id, adminId, {
+        reasonCode: 'ADMIN_CANCELLED',
+        reasonText: reasonText ?? 'Cancelled by NetRide operations (admin).',
+        bypassOwnership: true,
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          admin_id: adminId,
+          target_id: id,
+          action: 'RIDE_CANCELLED',
+          details: `Ride ${id} cancelled by admin. ${reasonText ? 'Reason: ' + reasonText : ''}`,
+        },
+      });
+
+      res.json({ success: true, trip: AdminController.toJSON(trip) });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Cancel ride error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Unable to cancel ride.' });
+    }
+  }
+
+  /**
+   * Operator escape hatch: force-complete a stuck ride that reached its
+   * destination (or the rider/driver situation is unambiguous). Runs the
+   * full completion pipeline — wallet credit, financial ledger, rewards,
+   * safety teardown — exactly as a driver-initiated completion would.
+   */
+  static async completeRide(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const adminId = req.user!.id;
+
+    try {
+      const { RideService } = await import('../ride/ride.service');
+      const ride = await prisma.ride.findUnique({
+        where: { id },
+        select: { id: true, status: true, driver_id: true, rider_id: true },
+      });
+      if (!ride) return res.status(404).json({ error: 'Ride not found.' });
+      if (ride.status === 'COMPLETED') {
+        return res.json({ success: true, alreadyCompleted: true });
+      }
+      if (ride.status === 'CANCELLED') {
+        return res.status(400).json({ error: 'Cancelled rides cannot be completed.' });
+      }
+
+      const trip = await RideService.updateTripStatus(
+        id,
+        'COMPLETED',
+        ride.driver_id ?? ride.rider_id ?? adminId,
+        { bypassDriverGuard: true },
+      );
+
+      await prisma.auditLog.create({
+        data: {
+          admin_id: adminId,
+          target_id: id,
+          action: 'RIDE_COMPLETED',
+          details: `Ride ${id} force-completed by admin (bypasses driver completion guard).`,
+        },
+      });
+
+      res.json({ success: true, trip: AdminController.toJSON(trip) });
+    } catch (error: any) {
+      console.error(`[ADMIN] ❌ Complete ride error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Unable to complete ride.' });
+    }
+  }
+
   static async verifyInspection(req: AuthRequest, res: Response) {
     const { vehicleId } = req.params;
     const { status, notes, expiryDate } = req.body;

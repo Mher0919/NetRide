@@ -27,6 +27,16 @@ export const getRideById = async (id: string) => {
   return response.data;
 };
 
+export const cancelRideByAdmin = async (id: string, reasonText?: string) => {
+  const response = await api.post(`/admin/rides/${id}/cancel`, { reasonText });
+  return response.data;
+};
+
+export const completeRideByAdmin = async (id: string) => {
+  const response = await api.post(`/admin/rides/${id}/complete`);
+  return response.data;
+};
+
 export const getRideRoutes = async (id: string) => {
   const response = await api.get(`/admin/rides/${id}/routes`);
   return response.data;

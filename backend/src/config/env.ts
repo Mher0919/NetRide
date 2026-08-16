@@ -58,6 +58,19 @@ const envSchema = z.object({
   DRIVER_PROXIMITY_GRACE_S: z.union([z.string(), z.number()]).transform(Number).default(30),
   // Wait timer: max seconds to wait for rider at pickup before driver can force-start
   DRIVER_WAIT_TIMER_S: z.union([z.string(), z.number()]).transform(Number).default(120),
+  // ---- Stale ride resolution (production watchdog) -------------------------
+  // Accepted rides (driver assigned, rider never picked up) are dissolved
+  // system-side when no `started_at` appears within this many seconds after
+  // acceptance. Covers "driver killed the app" and abandoned pickups.
+  RIDE_ACCEPT_STALL_S: z.union([z.string(), z.number()]).transform(Number).default(900),
+  // Hard ceiling for an in-progress ride: any ACTIVE ride whose journey has
+  // run this long without completing is cancelled system-side (a real trip
+  // never runs this long without a completion packet).
+  RIDE_MAX_DURATION_S: z.union([z.string(), z.number()]).transform(Number).default(28800),
+  // Accepted rides sitting in ACCEPTED/DRIVER_ARRIVING that were never
+  // started but were also never assigned a driver (orphaned REQUESTED rides
+  // are handled by the existing REQUESTED sweep); NOT used for IN_PROGRESS.
+  RIDE_STALL_SWEEP_BATCH: z.union([z.string(), z.number()]).transform(Number).default(50),
 
   // ---- Face verification --------------------------------------------------
   GMAIL_CLIENT_ID: z.string().optional(),

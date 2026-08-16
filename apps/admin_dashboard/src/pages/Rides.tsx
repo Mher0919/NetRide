@@ -58,6 +58,22 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
 
   useEffect(() => {
     fetchRides();
+
+    // Live operational polling: active rides are authoritative and move
+    // every second — poll fast; completed rides settle slowly — poll slower.
+    // Mirrors the socket tripUpdate merge below and guarantees the table
+    // converges even if a socket broadcast is missed (or the browser
+    // previously served a cached 304 ride list).
+    const pollMs = status === 'ACTIVE' ? 10_000 : 30_000;
+    const pollTimer = setInterval(() => {
+      getRides({ status, page: page + 1, limit: rowsPerPage })
+        .then((data) => {
+          setRides(data.rides ?? []);
+          setTotal(data.total ?? 0);
+          setSummary(data.summary ?? null);
+        })
+        .catch(() => undefined);
+    }, pollMs);
     
     const socket = io(API_URL, {
       auth: { token: localStorage.getItem('admin_token') }
@@ -93,6 +109,7 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
     });
 
     return () => {
+      clearInterval(pollTimer);
       socket.disconnect();
     };
   }, [status, page, rowsPerPage]);

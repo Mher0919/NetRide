@@ -280,24 +280,31 @@ export async function notifyRideCancelled(
   recipientId: string,
   role: NotificationRole,
   tripId: string,
-  actorRole: 'rider' | 'driver',
+  actorRole: 'rider' | 'driver' | 'system',
   reasonCode?: string,
   reasonText?: string
 ): Promise<NotifyResult> {
   const isRider = role === 'rider';
   const reasonLabel = reasonCode ?? reasonText ?? null;
-  const body = isRider
+  // System-driven cancellations (stale-ride watchdog / admin ops) must
+  // never pretend a human cancelled — the copy stays neutral and carries
+  // the resolution reason instead.
+  const body = actorRole === 'system'
     ? reasonLabel
-      ? `Your driver cancelled this ride: ${reasonLabel}`
-      : 'Your driver cancelled this ride.'
-    : reasonLabel
-      ? `The rider cancelled this ride: ${reasonLabel}`
-      : 'The rider cancelled this ride.';
+      ? `Your ride was cancelled: ${reasonLabel}`
+      : 'Your ride was cancelled.'
+    : isRider
+      ? reasonLabel
+        ? `Your driver cancelled this ride: ${reasonLabel}`
+        : 'Your driver cancelled this ride.'
+      : reasonLabel
+        ? `The rider cancelled this ride: ${reasonLabel}`
+        : 'The rider cancelled this ride.';
   return notifyUser({
     userId: recipientId,
     role,
     type: 'ride_cancelled',
-    title: isRider ? 'Your driver cancelled' : 'Ride cancelled',
+    title: actorRole === 'system' ? 'Ride cancelled' : isRider ? 'Your driver cancelled' : 'Ride cancelled',
     body,
     data: { tripId, actorRole, reasonCode: reasonCode ?? '', reasonText: reasonText ?? '' },
     eventId: `ride:cancelled:${tripId}`,

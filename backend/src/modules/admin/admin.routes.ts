@@ -26,6 +26,11 @@ router.get('/rides/:id', AdminController.getRideById);
   router.get('/rides/:id/audit', AdminController.getRideAudit);
   router.get('/rides/:id/routes', AdminController.getRideRoutes);
   router.get('/rides/:id/ledger', AdminController.getRideLedger);
+// Operator escape hatches for stuck rides: terminate / force-complete a
+// ride whose lifecycle stalled (production requirement — stale rides must
+// never be visible-but-impossible-to-resolve).
+router.post('/rides/:id/cancel', AdminController.cancelRide);
+router.post('/rides/:id/complete', AdminController.completeRide);
 router.get('/ratings/flagged', AdminController.getFlaggedRatings);
 router.get('/drivers/live', AdminController.getLiveDrivers);
 router.get('/drivers/dangerous', AdminController.getDangerousDrivers);

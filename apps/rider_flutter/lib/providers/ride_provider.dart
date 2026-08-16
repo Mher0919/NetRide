@@ -10,6 +10,12 @@ import '../services/api_service.dart';
 import '../services/sound_service.dart';
 
 class RideProvider with ChangeNotifier {
+  /// Persisted active-trip id. On a COLD app start (process killed), the
+  /// rider side re-attaches to the authoritative server state via
+  /// `getCurrentTrip` — otherwise the rider app would silently "forget"
+  /// an in-flight ride while the driver app (which always resyncs on
+  /// connect) keeps routing to it. Cleared the moment the trip settles.
+  static const _activeTripKey = 'active_trip_id';
   TripStatus _status = TripStatus.IDLE;
   String? _tripId;
   DriverInfo? _driver;
@@ -131,6 +137,10 @@ class RideProvider with ChangeNotifier {
         debugPrint('[RIDE] Resyncing current trip (status=$_status) after reconnect');
         _socket?.emit('getCurrentTrip');
       }
+      // Cold-start restore: the process was killed mid-trip. Re-attach to
+      // the persisted trip so rider and driver sides stay in agreement
+      // instead of the rider silently dropping out of an active journey.
+      _restoreActiveTripAfterRestart();
     });
 
     _socket!.on('currentTripNone', (data) {
@@ -184,6 +194,15 @@ class RideProvider with ChangeNotifier {
       // bubbles surviving the transition.
       if (trip.status == TripStatus.CANCELLED) {
         _messages = [];
+      }
+
+      // Persist the active trip for cold-start restore; drop the marker
+      // the instant the ride reaches a terminal state so a later reboot
+      // stays clean.
+      if (trip.status == TripStatus.CANCELLED || trip.status == TripStatus.COMPLETED) {
+        _persistActiveTrip(null);
+      } else {
+        _persistActiveTrip(trip.id);
       }
 
       if (oldStatus == TripStatus.REQUESTED && trip.status == TripStatus.ACCEPTED) {
@@ -482,7 +501,41 @@ class RideProvider with ChangeNotifier {
     _driverCancelledNotice = null;
     _cancelling = false;
     _nearbyDrivers.clear();
+    _persistActiveTrip(null);
     notifyListeners();
+  }
+
+  /// Cold-start re-attach: a persisted trip id means the app was killed
+  /// mid-ride. Restore a provisional non-IDLE state so the tripUpdate
+  /// handler accepts the authoritative answer, then let the server reply
+  /// (tripUpdate for an active ride, `currentTripNone` → reset if settled).
+  Future<void> _restoreActiveTripAfterRestart() async {
+    if (_status != TripStatus.IDLE || _tripId != null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getString(_activeTripKey);
+      if (stored == null || stored.isEmpty) return;
+      debugPrint('[RIDE] Cold-start restore — re-attaching to trip $stored');
+      _status = TripStatus.REQUESTED;
+      _tripId = stored;
+      notifyListeners();
+      _socket?.emit('getCurrentTrip');
+    } catch (e) {
+      debugPrint('[RIDE] Cold-start restore failed: $e');
+    }
+  }
+
+  /// Fire-and-forget persistence of the active trip id (or its removal).
+  void _persistActiveTrip(String? tripId) {
+    SharedPreferences.getInstance().then((prefs) {
+      if (tripId == null) {
+        prefs.remove(_activeTripKey);
+      } else {
+        prefs.setString(_activeTripKey, tripId);
+      }
+    }).catchError((e) {
+      debugPrint('[RIDE] active_trip_id persistence failed: $e');
+    });
   }
 
   void updateLocation(double lat, double lng) {
