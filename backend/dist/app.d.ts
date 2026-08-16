@@ -6,6 +6,11 @@ declare const io: Server<import("socket.io").DefaultEventsMap, import("socket.io
  * import this module via `io` and must never bind the port — an accidental
  * second `listen` is exactly what produced `EADDRINUSE` and crashed a
  * deployment when a job module pulled in ride.service → app.ts.
+ *
+ * The listener is also crash-proof: an `EADDRINUSE` (e.g. the previous
+ * container instance still draining its port during a Render restart) is
+ * retried with backoff instead of throwing an unhandled 'error' event that
+ * would kill the whole container and start an endless restart loop.
  */
 export declare function startServer(): void;
 export { io };

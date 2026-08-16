@@ -1,5 +1,5 @@
 import { prisma } from './prisma.service';
-import { io } from '../app';
+import { getIo } from '../gateway/io-handle';
 import { env } from '../config/env';
 
 export const SchedulerService = {
@@ -28,7 +28,7 @@ export const SchedulerService = {
         const { matchingService } = await import('./matching.service');
         for (const ride of pendingRides) {
           matchingService.findAndDispatch(
-            io, ride.id, ride.pickup_lat ?? 0, ride.pickup_lng ?? 0, ride.rider_id ?? undefined,
+            getIo(), ride.id, ride.pickup_lat ?? 0, ride.pickup_lng ?? 0, ride.rider_id ?? undefined,
           ).catch((err: any) => console.error(`[SCHEDULER] In-process dispatch failed for ${ride.id}: ${err.message}`));
           console.log(`[SCHEDULER] Dispatched scheduled ride ${ride.id} for user ${ride.rider_id}`);
         }

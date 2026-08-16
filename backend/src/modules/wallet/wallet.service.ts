@@ -15,7 +15,7 @@
 //   ride COMPLETED → no further wallet movement (the charge already posted).
 
 import { pool } from '../../config/database';
-import { io } from '../../app';
+import { getIo } from '../../gateway/io-handle';
 import { computeWalletCharge } from './wallet-cap';
 
 export type WalletTxType =
@@ -42,7 +42,7 @@ export interface WalletResult {
 
 function emitBalanceChange(userId: string, balanceCents: number, deltaCents: number, type: string) {
   try {
-    io.to(`rider:${userId}`).emit('walletBalanceChanged', {
+    getIo().to(`rider:${userId}`).emit('walletBalanceChanged', {
       balance_cents: balanceCents,
       delta_cents: deltaCents,
       type,

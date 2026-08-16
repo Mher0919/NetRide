@@ -5,7 +5,7 @@
 // and as a thin wrapper that enqueues the job.
 import { prisma } from './prisma.service';
 import { TripStatus } from '../types';
-import { io } from '../app';
+import { getIo } from '../gateway/io-handle';
 import { RideRepository } from '../modules/ride/ride.repository';
 import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } from '../config/redis';
 import { cleanupQueue } from '../queue/queue';
@@ -40,7 +40,7 @@ export const CleanupService = {
 
   async sweepStaleRides(): Promise<void> {
     const { sweepStaleActiveRides } = require('../queue/jobs/cleanupStaleRides') as typeof import('../queue/jobs/cleanupStaleRides');
-    await sweepStaleActiveRides(io).catch((err: any) => {
+    await sweepStaleActiveRides(getIo()).catch((err: any) => {
       console.error('[CLEANUP] Stale ride sweep failed:', err.message);
     });
   },
@@ -57,8 +57,8 @@ export const CleanupService = {
         cancelled_at: new Date(),
         cancel_reason: 'Request timed out (no driver accepted or rider disconnected)',
       });
-      io.to(`rider:${ride.rider_id}`).emit('tripUpdate', updatedTrip);
-      io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+      getIo().to(`rider:${ride.rider_id}`).emit('tripUpdate', updatedTrip);
+      getIo().to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
       await redis.del(`dispatch:lock:${ride.id}`);
       // Release any dispatched driver offer so no stale offer can be accepted.
       const { DriverOfferService } = require('./driver-offer.service') as typeof import('./driver-offer.service');

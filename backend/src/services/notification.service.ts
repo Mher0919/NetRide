@@ -23,7 +23,7 @@
 // the ride lifecycle that produced it.
 
 import { pool } from '../config/database';
-import { io } from '../app';
+import { getIo } from '../gateway/io-handle';
 import { redis } from '../config/redis';
 import { logger } from '../observability/logger';
 import { sendPushAll, PushPayload } from './push-notification.service';
@@ -149,7 +149,7 @@ export async function notifyUser(args: NotifyArgs): Promise<NotifyResult> {
   // for every device (covers backgrounded/killed processes).
   let pushed = 0;
   try {
-    io.to(`${role}:${userId}`).emit('notificationReceived', {
+    getIo().to(`${role}:${userId}`).emit('notificationReceived', {
       id: insertedId,
       userId,
       role,

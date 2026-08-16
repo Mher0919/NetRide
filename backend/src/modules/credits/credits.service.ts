@@ -9,7 +9,7 @@
 // - The backend is the ONLY writer; clients only read.
 
 import { pool } from '../../config/database';
-import { io } from '../../app';
+import { getIo } from '../../gateway/io-handle';
 import { computeCreditApplication, roundCents } from './credits-cap';
 
 export type CreditTxType =
@@ -36,7 +36,7 @@ export interface CreditResult {
 
 function emitBalanceChange(userId: string, balanceCents: number, deltaCents: number, type: string) {
   try {
-    io.to(`rider:${userId}`).emit('creditBalanceChanged', {
+    getIo().to(`rider:${userId}`).emit('creditBalanceChanged', {
       balance_cents: balanceCents,
       delta_cents: deltaCents,
       type,

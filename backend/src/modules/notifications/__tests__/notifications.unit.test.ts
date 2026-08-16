@@ -44,8 +44,8 @@ test('fmtMoney: large amounts stay lossless', () => {
 // NOTIFICATION_META — every type must drive a valid channel + route combo
 // ---------------------------------------------------------------------------
 
-const VALID_ROUTES = ['/', '/trip', '/credits'];
-const VALID_CHANNELS = ['ride', 'chat', 'call', 'credits', 'referral', 'promo', 'wallet', 'default'];
+const VALID_ROUTES = ['/', '/trip', '/credits', '/wallet'];
+const VALID_CHANNELS = ['ride', 'chat', 'call', 'credits', 'referral', 'promo', 'wallet', 'special', 'default'];
 
 const ALL_TYPES: NotificationType[] = [
   'ride_accepted',
@@ -59,6 +59,9 @@ const ALL_TYPES: NotificationType[] = [
   'credits_earned',
   'referral_linked',
   'referral_reward',
+  'special_reward_ready',
+  'special_reward_credited',
+  'special_refunded',
 ];
 
 test('meta: covers every notification type exactly once', () => {

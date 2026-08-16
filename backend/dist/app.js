@@ -112,6 +112,7 @@ exports.io = io;
 // conflict with socket message broadcasting.
 const redis_adapter_1 = require("@socket.io/redis-adapter");
 const redisPubSub_1 = require("./config/redisPubSub");
+const io_handle_1 = require("./gateway/io-handle");
 try {
     io.adapter((0, redis_adapter_1.createAdapter)(redisPubSub_1.pubClient, redisPubSub_1.subClient));
 }
@@ -119,6 +120,10 @@ catch (adapterErr) {
     console.warn(`[SERVER] ⚠️ Socket.IO Redis adapter failed (non-fatal): ${adapterErr.message}`);
     console.warn('[SERVER] ⚠️ Multi-instance Socket.IO scaling disabled. Running in single-instance mode.');
 }
+// Publish the authoritative io handle so service modules can depend on a
+// lazy binding instead of importing this file (which would evaluate the
+// whole app — including its HTTP listener — inside worker processes).
+(0, io_handle_1.bindIo)(io);
 app.use((0, cors_1.default)());
 // Trust Render proxy so req.ip resolves individual client IPs
 // instead of the proxy IP. This fixes rate-limit key collisions
@@ -589,9 +594,40 @@ const PORT = process.env.PORT || 3000;
  * import this module via `io` and must never bind the port — an accidental
  * second `listen` is exactly what produced `EADDRINUSE` and crashed a
  * deployment when a job module pulled in ride.service → app.ts.
+ *
+ * The listener is also crash-proof: an `EADDRINUSE` (e.g. the previous
+ * container instance still draining its port during a Render restart) is
+ * retried with backoff instead of throwing an unhandled 'error' event that
+ * would kill the whole container and start an endless restart loop.
  */
 function startServer() {
-    httpServer.listen(Number(PORT), '0.0.0.0', async () => {
+    let attempts = 0;
+    const MAX_LISTEN_ATTEMPTS = 30; // 90s at the backoff schedule below
+    const tryListen = () => {
+        attempts++;
+        httpServer.listen(Number(PORT), '0.0.0.0', onListen);
+    };
+    const onListen = () => {
+        void bootJobs();
+    };
+    httpServer.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            if (attempts >= MAX_LISTEN_ATTEMPTS) {
+                console.error(`[SERVER] 💥 Port ${PORT} stayed occupied for ${MAX_LISTEN_ATTEMPTS} attempts — giving up.`);
+                process.exit(1);
+            }
+            const waitMs = Math.min(1000 * attempts, 15000);
+            console.warn(`[SERVER] ⚠️ Port ${PORT} busy (attempt ${attempts}/${MAX_LISTEN_ATTEMPTS}) — retrying in ${waitMs}ms (stale instance still draining).`);
+            setTimeout(tryListen, waitMs);
+        }
+        else {
+            console.error(`[SERVER] 💥 HTTP server error: ${err.message}`);
+            process.exit(1);
+        }
+    });
+    tryListen();
+    async function bootJobs() {
+        await runMigrations();
         await runMigrations();
         logger_1.logger.info({ port: Number(PORT), env: env_1.env.NODE_ENV }, 'server_listening');
         logger_1.logger.info({ set: !!env_1.env.JWT_SECRET, length: env_1.env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
@@ -700,7 +736,7 @@ function startServer() {
                     .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_weekly_payouts_error'));
             }, 60 * 1000);
         });
-    });
+    }
 }
 // Only the process that literally starts `node dist/app.js` binds the port.
 // Every other consumer (workers importing `io`) stays listener-free.

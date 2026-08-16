@@ -36,7 +36,7 @@
 
 import crypto from 'crypto';
 import { pool } from '../../config/database';
-import { io } from '../../app';
+import { getIo } from '../../gateway/io-handle';
 import { env } from '../../config/env';
 import { centsValue } from '../../services/financial-ledger.service';
 import { AuditEventsService } from '../../services/audit-events.service';
@@ -185,7 +185,7 @@ function hashValidationCode(code: string, redemptionId: string): string {
 function emitRedemptionUpdate(redemption: RedemptionRow | null) {
   if (!redemption) return;
   try {
-    io.to(`rider:${redemption.rider_id}`).emit('specialRedemptionUpdate', {
+    getIo().to(`rider:${redemption.rider_id}`).emit('specialRedemptionUpdate', {
       id: redemption.id,
       status: redemption.status,
       sponsorName: redemption.sponsor_name,

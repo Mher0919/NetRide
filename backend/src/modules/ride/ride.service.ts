@@ -7,7 +7,7 @@ import { GeospatialService } from '../geospatial/geospatial.service';
 import { Trip, Location, UserRole, TripStatus } from '../../types';
 import { PartyRole } from '../reporting/report.reasons';
 import { env } from '../../config/env';
-import { io } from '../../app';
+import { getIo } from '../../gateway/io-handle';
 import { pool } from '../../config/database';
 import { redis } from '../../config/redis';
 import { createPriceSnapshot, computeEstimate, getSnapshotForRide, persistRevenueAllocation, getRevenueAllocationForRide } from '../../services/pricing.service';
@@ -314,7 +314,7 @@ export class RideService {
           // the same DispatchEngine/offer pipeline as the queue handler.
           import('../../services/matching.service').then(({ matchingService }) => {
             matchingService.findAndDispatch(
-              io, trip.id, pickup.lat, pickup.lng, riderId, favoritePriority,
+              getIo(), trip.id, pickup.lat, pickup.lng, riderId, favoritePriority,
             ).catch((err: any) => console.error('[RIDE] In-process dispatch failed:', err.message));
           });
         } else {
@@ -477,7 +477,7 @@ export class RideService {
       const dispatchedDrivers: string[] = JSON.parse(dispatchedJson);
       for (const did of dispatchedDrivers) {
         if (did !== driverId) {
-          io.to(`driver:${did}`).emit('tripUpdate', {
+          getIo().to(`driver:${did}`).emit('tripUpdate', {
             ...trip,
             status: TripStatus.CANCELLED,
             cancelReason: 'Another driver accepted this trip',
@@ -509,19 +509,19 @@ export class RideService {
           [JSON.stringify({ pickup: pickupRoute }), tripId]
         );
         NavigationService.emitStarted(
-          io, tripId, driverId, trip.rider_id, 'pickup', pickupRoute
+          getIo(), tripId, driverId, trip.rider_id, 'pickup', pickupRoute
         );
       } catch (err: any) {
         console.error(`[RIDE] ⚠️ pickup route cache failed: ${err.message}`);
       }
     }
 
-    io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
-    io.to(`driver:${driverId}`).emit('tripUpdate', updatedTrip);
+    getIo().to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
+    getIo().to(`driver:${driverId}`).emit('tripUpdate', updatedTrip);
     dispatchAcceptOutcomeTotal.inc({ outcome: 'accepted' });
 
     // Broadcast to Admin Monitoring
-    io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+    getIo().to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
 
     // Real phone notification: driver accepted the ride. Deduplicated by
     // eventId (ride:accepted:{tripId}) — never blocks the accept path.
@@ -637,7 +637,7 @@ export class RideService {
             [JSON.stringify({ destination: destRoute }), tripId]
           );
           NavigationService.emitLegAdvanced(
-            io, tripId, updatedTrip.driver_id, updatedTrip.rider_id, destRoute
+            getIo(), tripId, updatedTrip.driver_id, updatedTrip.rider_id, destRoute
           );
         }
       } catch (err: any) {
@@ -649,7 +649,7 @@ export class RideService {
     if (status === 'COMPLETED' && updatedTrip.driver_id) {
       await SpeedingDetector.finalizeTrip(updatedTrip.driver_id, tripId);
       NavigationService.emitEnded(
-        io, tripId, updatedTrip.driver_id, updatedTrip.rider_id
+        getIo(), tripId, updatedTrip.driver_id, updatedTrip.rider_id
       );
 
       // Wallet credit: every completed ride deposits fare + tip into the
@@ -787,13 +787,13 @@ export class RideService {
         .catch((err: any) => console.error(`[RIDE] ⚠️ SpecialRedemptionService.onRideCompleted failed: ${err.message}`));
     }
 
-    io.to(`rider:${updatedTrip.rider_id}`).emit('tripUpdate', updatedTrip);
+    getIo().to(`rider:${updatedTrip.rider_id}`).emit('tripUpdate', updatedTrip);
     if (updatedTrip.driver_id) {
-      io.to(`driver:${updatedTrip.driver_id}`).emit('tripUpdate', updatedTrip);
+      getIo().to(`driver:${updatedTrip.driver_id}`).emit('tripUpdate', updatedTrip);
     }
 
     // Broadcast to Admin Monitoring
-    io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+    getIo().to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
 
     // Real phone notifications (fire-and-forget, deduped by eventId):
     if (status === 'IN_PROGRESS' && updatedTrip.driver_id) {
@@ -950,12 +950,12 @@ export class RideService {
 
       // Safety + navigation teardown for the departing driver.
       await SpeedingDetector.finalizeTrip(userId, tripId);
-      NavigationService.emitEnded(io, tripId, userId, trip.rider_id);
+      NavigationService.emitEnded(getIo(), tripId, userId, trip.rider_id);
 
       // The cancelling driver sees THEIR OWN terminal cancel (who + why) so
       // their app settles the confirmation and returns home — never the
       // re-queued REQUESTED state of the ride they abandoned.
-      io.to(`driver:${userId}`).emit('tripUpdate', {
+      getIo().to(`driver:${userId}`).emit('tripUpdate', {
         ...rematchedTrip,
         rider_id: trip.rider_id,
         status: TripStatus.CANCELLED,
@@ -969,21 +969,21 @@ export class RideService {
       // same promo + credits — nothing was recreated) + the apology notice.
       // The rider app pops the apology over the re-activated "finding your
       // driver" sheet; no re-request is needed.
-      io.to(`rider:${trip.rider_id}`).emit('tripUpdate', rematchedTrip);
-      io.to(`rider:${trip.rider_id}`).emit('tripDriverCancelled', {
+      getIo().to(`rider:${trip.rider_id}`).emit('tripUpdate', rematchedTrip);
+      getIo().to(`rider:${trip.rider_id}`).emit('tripDriverCancelled', {
         tripId,
         trip: rematchedTrip,
         reasonCode: opts.reasonCode ?? null,
         reasonText: (opts.reasonText ?? '').trim().slice(0, 300) || null,
       });
-      io.to('monitoring:all_rides').emit('tripUpdate', rematchedTrip);
+      getIo().to('monitoring:all_rides').emit('tripUpdate', rematchedTrip);
 
       // Re-dispatch the SAME ride id through the regular pipeline.
       const pickup = rematchedTrip.pickup;
       if (env.LEGACY_SYNC_MATCHING) {
         import('../../services/matching.service').then(({ matchingService }) => {
           matchingService
-            .findAndDispatch(io, tripId, pickup.lat, pickup.lng, trip.rider_id, false)
+            .findAndDispatch(getIo(), tripId, pickup.lat, pickup.lng, trip.rider_id, false)
             .catch((err: any) =>
               console.error(`[RIDE] Re-dispatch after driver pre-pickup cancel failed: ${err.message}`)
             );
@@ -1137,17 +1137,17 @@ export class RideService {
     if (trip.driver_id) {
       await SpeedingDetector.finalizeTrip(trip.driver_id, tripId);
       NavigationService.emitEnded(
-        io, tripId, trip.driver_id, trip.rider_id
+        getIo(), tripId, trip.driver_id, trip.rider_id
       );
     }
 
     // Authoritative state broadcast — both parties (and monitoring) react
     // to this same CANCELLED payload carrying cancelled_by + reason.
-    io.to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
+    getIo().to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
     if (trip.driver_id) {
-      io.to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
+      getIo().to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
     }
-    io.to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+    getIo().to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
 
     // Real phone notification carrying WHO cancelled and WHY. A null actor
     // (system watchdog) still notifies the rider so they are not stranded

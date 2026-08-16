@@ -40,7 +40,7 @@ const database_1 = require("../../config/database");
 const speeding_detector_1 = require("../../services/speeding_detector");
 const email_service_1 = require("../../services/email.service");
 const storage_service_1 = require("../../services/storage.service");
-const app_1 = require("../../app");
+const io_handle_1 = require("../../gateway/io-handle");
 const pricing_service_1 = require("../../services/pricing.service");
 const report_service_1 = require("../reporting/report.service");
 const report_reasons_1 = require("../reporting/report.reasons");
@@ -1904,7 +1904,7 @@ class AdminController {
             }
             // Notify the driver via socket so the Action Required card appears in real time
             try {
-                app_1.io.to(`driver:${driverId}`).emit('documentRequirementsChanged', {
+                (0, io_handle_1.getIo)().to(`driver:${driverId}`).emit('documentRequirementsChanged', {
                     has_action_required: true,
                 });
             }
@@ -1996,7 +1996,7 @@ class AdminController {
             }
             // Socket notification to driver so the app re-fetches requirements
             try {
-                app_1.io.to(`driver:${driverId}`).emit('documentRequirementsChanged', {});
+                (0, io_handle_1.getIo)().to(`driver:${driverId}`).emit('documentRequirementsChanged', {});
             }
             catch (socketErr) {
                 console.error('❌ [ADMIN] Document review socket error:', socketErr.message);
@@ -2301,7 +2301,7 @@ class AdminController {
             });
             // Notify the driver via socket so the Action Required card appears in real time
             try {
-                app_1.io.to(`driver:${driverId}`).emit('vehicleRequirementsChanged', {
+                (0, io_handle_1.getIo)().to(`driver:${driverId}`).emit('vehicleRequirementsChanged', {
                     has_action_required: true,
                 });
             }

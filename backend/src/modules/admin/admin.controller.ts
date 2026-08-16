@@ -6,7 +6,7 @@ import { pool } from '../../config/database';
 import { SpeedingDetector } from '../../services/speeding_detector';
 import { EmailService } from '../../services/email.service';
 import { StorageService } from '../../services/storage.service';
-import { io } from '../../app';
+import { getIo } from '../../gateway/io-handle';
 import {
   getProfiles,
   getConfig,
@@ -2146,7 +2146,7 @@ export class AdminController {
 
       // Notify the driver via socket so the Action Required card appears in real time
       try {
-        io.to(`driver:${driverId}`).emit('documentRequirementsChanged', {
+        getIo().to(`driver:${driverId}`).emit('documentRequirementsChanged', {
           has_action_required: true,
         });
       } catch (e: any) {
@@ -2274,7 +2274,7 @@ export class AdminController {
 
       // Socket notification to driver so the app re-fetches requirements
       try {
-        io.to(`driver:${driverId}`).emit('documentRequirementsChanged', {});
+        getIo().to(`driver:${driverId}`).emit('documentRequirementsChanged', {});
       } catch (socketErr) {
         console.error('❌ [ADMIN] Document review socket error:', (socketErr as Error).message);
       }
@@ -2673,7 +2673,7 @@ export class AdminController {
 
       // Notify the driver via socket so the Action Required card appears in real time
       try {
-        io.to(`driver:${driverId}`).emit('vehicleRequirementsChanged', {
+        getIo().to(`driver:${driverId}`).emit('vehicleRequirementsChanged', {
           has_action_required: true,
         });
       } catch (e: any) {

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../../services/prisma.service';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { AuthRequest } from '../../middleware/auth.middleware';
-import { io } from '../../app';
+import { getIo } from '../../gateway/io-handle';
 import { isTestEmail } from '../../utils/testUser';
 import { DriverService } from '../driver/driver.service';
 
@@ -54,13 +54,13 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
         // the tip sound and surface a popup. The rider gets the event too
         // so the FAB on their side can play a subtle confirmation tone.
         if (ride.driver_id) {
-            io.to(`driver:${ride.driver_id}`).emit('tipReceived', {
+            getIo().to(`driver:${ride.driver_id}`).emit('tipReceived', {
                 rideId,
                 amount: numericAmount,
                 tipperName,
             });
         }
-        io.to(`rider:${riderId}`).emit('tipReceived', {
+        getIo().to(`rider:${riderId}`).emit('tipReceived', {
             rideId,
             amount: numericAmount,
         });
@@ -155,7 +155,7 @@ router.post('/:rideId/complete-test', authMiddleware, async (req: AuthRequest, r
 
         await SpeedingDetector.finalizeTrip(ride.driver_id, rideId);
         NavigationService.emitEnded(
-            io, rideId, ride.driver_id, ride.rider_id,
+            getIo(), rideId, ride.driver_id, ride.rider_id,
         );
 
         // Wallet credit. Wrap in try/catch so a wallet bug can't block
@@ -174,11 +174,11 @@ router.post('/:rideId/complete-test', authMiddleware, async (req: AuthRequest, r
             console.warn(`[RIDE] ⚠️ complete-test wallet credit failed: ${err.message}`);
         }
 
-        io.to(`rider:${ride.rider_id}`).emit('tripUpdate', updated);
+        getIo().to(`rider:${ride.rider_id}`).emit('tripUpdate', updated);
         if (ride.driver_id) {
-            io.to(`driver:${ride.driver_id}`).emit('tripUpdate', updated);
+            getIo().to(`driver:${ride.driver_id}`).emit('tripUpdate', updated);
         }
-        io.to('monitoring:all_rides').emit('tripUpdate', updated);
+        getIo().to('monitoring:all_rides').emit('tripUpdate', updated);
 
         res.json({ message: 'Test trip completed.', trip: updated });
     } catch (err: any) {

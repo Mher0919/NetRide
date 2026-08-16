@@ -29,7 +29,7 @@
 //   - QR payloads are HMAC-signed with expiry + ownership binding.
 
 import { pool } from '../../config/database';
-import { io } from '../../app';
+import { getIo } from '../../gateway/io-handle';
 import { env } from '../../config/env';
 import { isTestEmail } from '../../utils/testUser';
 import {
@@ -107,7 +107,7 @@ export interface ReferralHistoryEntry {
 
 function emitReferralEvent(userId: string, event: string, data: Record<string, unknown>) {
   try {
-    io.to(`rider:${userId}`).emit(event, { ...data, timestamp: new Date().toISOString() });
+    getIo().to(`rider:${userId}`).emit(event, { ...data, timestamp: new Date().toISOString() });
   } catch (err: any) {
     console.warn(`[REFERRAL] ⚠️ socket emit failed: ${err.message}`);
   }
@@ -700,13 +700,13 @@ export class ReferralService {
       });
       // Announce the balance changes that actually committed.
       try {
-        io.to(`rider:${rel.referrer_id}`).emit('creditBalanceChanged', {
+        getIo().to(`rider:${rel.referrer_id}`).emit('creditBalanceChanged', {
           balance_cents: refTx.balance_cents,
           delta_cents: refTx.delta_cents,
           type: 'REFERRAL_REWARD',
           timestamp: new Date().toISOString(),
         });
-        io.to(`rider:${ride.rider_id}`).emit('creditBalanceChanged', {
+        getIo().to(`rider:${ride.rider_id}`).emit('creditBalanceChanged', {
           balance_cents: redTx.balance_cents,
           delta_cents: redTx.delta_cents,
           type: 'REFERRAL_REWARD',
