@@ -12,6 +12,7 @@ router.get('/users', admin_controller_1.AdminController.getUsers);
 router.get('/users/:id', admin_controller_1.AdminController.getUserById);
 router.get('/users/:id/ride-preferences', admin_controller_1.AdminController.getDriverRidePreferences);
 router.get('/users/:id/speeding', admin_controller_1.AdminController.getDriverSpeeding);
+router.get('/users/:id/earnings', admin_controller_1.AdminController.getDriverEarnings);
 router.patch('/users/:id/verify', admin_controller_1.AdminController.verifyUser);
 router.patch('/users/:id/reject', admin_controller_1.AdminController.rejectUser);
 router.patch('/users/:id/pending', admin_controller_1.AdminController.setPending);
@@ -22,6 +23,13 @@ router.patch('/users/:id/license', admin_controller_1.AdminController.updateLice
 router.get('/rides', admin_controller_1.AdminController.getRides);
 router.get('/rides/:id', admin_controller_1.AdminController.getRideById);
 router.get('/rides/:id/audit', admin_controller_1.AdminController.getRideAudit);
+router.get('/rides/:id/routes', admin_controller_1.AdminController.getRideRoutes);
+router.get('/rides/:id/ledger', admin_controller_1.AdminController.getRideLedger);
+// Operator escape hatches for stuck rides: terminate / force-complete a
+// ride whose lifecycle stalled (production requirement — stale rides must
+// never be visible-but-impossible-to-resolve).
+router.post('/rides/:id/cancel', admin_controller_1.AdminController.cancelRide);
+router.post('/rides/:id/complete', admin_controller_1.AdminController.completeRide);
 router.get('/ratings/flagged', admin_controller_1.AdminController.getFlaggedRatings);
 router.get('/drivers/live', admin_controller_1.AdminController.getLiveDrivers);
 router.get('/drivers/dangerous', admin_controller_1.AdminController.getDangerousDrivers);
@@ -54,5 +62,20 @@ router.post('/vehicles/submissions/:id/approve', admin_controller_1.AdminControl
 router.post('/vehicles/submissions/:id/reject', admin_controller_1.AdminController.rejectVehicleSubmission);
 router.post('/vehicles/submissions/:id/request-changes', admin_controller_1.AdminController.requestVehicleChanges);
 router.post('/users/:id/request-vehicle-resubmission', admin_controller_1.AdminController.requestVehicleResubmission);
+// Fleet partner management + revenue split (041)
+router.get('/fleets', admin_controller_1.AdminController.listFleets);
+router.post('/fleets', admin_controller_1.AdminController.createFleet);
+router.patch('/fleets/:id', admin_controller_1.AdminController.updateFleet);
+router.patch('/drivers/:id/fleet', admin_controller_1.AdminController.assignDriverFleet);
+// Pricing profiles + revenue visibility (041)
+router.get('/pricing', admin_controller_1.AdminController.listPricingProfiles);
+router.patch('/pricing/:code', admin_controller_1.AdminController.updatePricingProfile);
+router.get('/revenue', admin_controller_1.AdminController.getRevenueOverview);
+router.get('/analytics', admin_controller_1.AdminController.getRevenueAnalytics);
+router.get('/regions', admin_controller_1.AdminController.listRegions);
+router.post('/regions', admin_controller_1.AdminController.upsertRegion);
+// Ride reports (042)
+router.get('/reports', admin_controller_1.AdminController.listReports);
+router.post('/reports/:id/resolve', admin_controller_1.AdminController.resolveReport);
 exports.default = router;
 //# sourceMappingURL=admin.routes.js.map

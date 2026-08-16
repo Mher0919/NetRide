@@ -16,6 +16,11 @@ router.post('/estimate', auth_middleware_1.authMiddleware, auth_middleware_1.rid
 router.post('/accept', auth_middleware_1.authMiddleware, auth_middleware_1.driverMiddleware, ride_controller_1.RideController.acceptTrip);
 router.post('/rate', auth_middleware_1.authMiddleware, ride_controller_1.RideController.rateRide);
 router.post('/cancel', auth_middleware_1.authMiddleware, auth_middleware_1.riderMiddleware, ride_controller_1.RideController.cancelCurrentRide);
+// Post-ride party reporting (042) — both parties may report independently.
+router.get('/:id/report', auth_middleware_1.authMiddleware, ride_controller_1.RideController.getReportStatus);
+router.post('/:id/report', auth_middleware_1.authMiddleware, ride_controller_1.RideController.submitReport);
+// Native phone dialing — other party's authoritative phone number (party-only).
+router.get('/:id/party-phone', auth_middleware_1.authMiddleware, ride_controller_1.RideController.getPartyPhone);
 router.get('/history', auth_middleware_1.authMiddleware, ride_controller_1.RideController.getHistory);
 router.get('/current', auth_middleware_1.authMiddleware, ride_controller_1.RideController.getCurrent);
 router.delete('/history/:id', auth_middleware_1.authMiddleware, ride_controller_1.RideController.deleteHistory);

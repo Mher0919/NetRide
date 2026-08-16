@@ -13,13 +13,35 @@ export declare class RideController {
      */
     static getCurrent(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     /**
-     * Idempotent cancel of the rider's current request, by rider identity —
-     * no tripId needed. The Flutter client calls this when the rider hits the
-     * top-right X / Cancel Ride during "searching", where a race can leave the
-     * client without a tripId yet (the socket tripUpdate round-trip). Always
-     * returns 200 when there is nothing active to cancel.
+     * Idempotent cancel of the rider's current request, by rider identity.
+     * Accepts an optional `tripId` so the client can cancel the EXACT ride it
+     * is showing (its socket tripUpdate already carries the id). Without one
+     * (race window before the first tripUpdate), only an inferred REQUESTED
+     * ("searching") ride is cancelled — an ACCEPTED/IN_PROGRESS ride is never
+     * cancelled by inference, which is what previously produced the bogus
+     * "already in progress" 409 after the real request had already been
+     * cancelled through the socket path. Always returns 200 when there is
+     * nothing active to cancel.
      */
     static cancelCurrentRide(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * Can the caller file a report for this ride? Returns the other party's
+     * identity + the role-scoped reason list so the app can render the
+     * report sheet without hardcoding codes.
+     */
+    static getReportStatus(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * File a report against the other ride party. Both parties may report
+     * independently — each gets exactly one report per ride.
+     */
+    static submitReport(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * Return the OTHER ride party's authoritative phone number so the app
+     * can open the native dialer (tel: URI). Party-only + derived from the
+     * users table — the peer can never inject a phone number through ride
+     * payloads. Returns 404 when the other party has no usable number.
+     */
+    static getPartyPhone(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     /**
      * Verify the caller is a party to the trip. Throws nothing — returns
      * a discriminated response shape so the caller can decide between

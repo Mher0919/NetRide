@@ -137,6 +137,20 @@ export declare class DriverService {
      * Idempotent ride-completion wallet credit. Safe to call multiple times
      * for the same ride — the unique index on payouts(ride_id) WHERE
      * method='RIDE_CREDIT' prevents double-counting.
+     *
+     * Revenue split (041): the driver receives the full tip plus their 60%
+     * driver share of the fare. The 40% platform pool is allocated to the
+     * driver's fleet partner (if assigned) with NetRide keeping the remainder —
+     * see pricing.service.ts. The per-ride allocation persisted at accept time
+     * is authoritative; a missing allocation falls back to a live computation.
      */
-    static creditOnRideComplete(driverId: string, fareCents: number, rideId: string): Promise<void>;
+    static creditOnRideComplete(driverId: string, fareCents: number, tipCents: number, rideId: string): Promise<void>;
+    /**
+     * Wallet credit for tips added AFTER the ride completed. The completion
+     * credit only captured the tip that existed at completion time; this
+     * credits the delta separately. Idempotent per ride: the payouts
+     * TIP_CREDIT partial unique index plus delta math prevent double-
+     * counting, so re-running the same tip request is a no-op.
+     */
+    static creditTipAfterComplete(driverId: string, tipCents: number, rideId: string): Promise<void>;
 }

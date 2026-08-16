@@ -62,13 +62,26 @@ const envSchema = zod_1.z.object({
     DRIVER_PROXIMITY_GRACE_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(30),
     // Wait timer: max seconds to wait for rider at pickup before driver can force-start
     DRIVER_WAIT_TIMER_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(120),
+    // ---- Stale ride resolution (production watchdog) -------------------------
+    // Accepted rides (driver assigned, rider never picked up) are dissolved
+    // system-side when no `started_at` appears within this many seconds after
+    // acceptance. Covers "driver killed the app" and abandoned pickups.
+    RIDE_ACCEPT_STALL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(900),
+    // Hard ceiling for an in-progress ride: any ACTIVE ride whose journey has
+    // run this long without completing is cancelled system-side (a real trip
+    // never runs this long without a completion packet).
+    RIDE_MAX_DURATION_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(28800),
+    // Accepted rides sitting in ACCEPTED/DRIVER_ARRIVING that were never
+    // started but were also never assigned a driver (orphaned REQUESTED rides
+    // are handled by the existing REQUESTED sweep); NOT used for IN_PROGRESS.
+    RIDE_STALL_SWEEP_BATCH: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(50),
     // ---- Face verification --------------------------------------------------
     GMAIL_CLIENT_ID: zod_1.z.string().optional(),
     GMAIL_CLIENT_SECRET: zod_1.z.string().optional(),
     GMAIL_REFRESH_TOKEN: zod_1.z.string().optional(),
     GMAIL_USER_EMAIL: zod_1.z.string().optional(),
     EMAIL_FROM: zod_1.z.string().default('NetRide <noreply@netride.com>'),
-    ADMIN_NOTIFY_EMAIL: zod_1.z.string().default('mmkrtumyan29@gmail.com'),
+    ADMIN_NOTIFY_EMAIL: zod_1.z.string().default('support@netride.org'),
     APP_URL: zod_1.z.string().default('http://localhost:3000'),
     ADMIN_URL: zod_1.z.string().default('http://localhost:5173'),
     SUPABASE_URL: zod_1.z.string().optional(),
@@ -131,6 +144,20 @@ const envSchema = zod_1.z.object({
     REFERRAL_REWARD_CENTS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(500),
     // Lifetime of a referral QR payload before the app must refresh it.
     REFERRAL_QR_TTL_DAYS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(365),
+    // ---- Sponsorship / SPECIALS ----------------------------------------------
+    // How long a sponsor validation code stays valid after the ride completes.
+    SPONSOR_CODE_TTL_HOURS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(24),
+    // Max failed validation-code entry attempts before the code is voided.
+    SPONSOR_CODE_MAX_ATTEMPTS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
+    // Radius (meters) around the sponsor location that counts as "visited".
+    SPONSOR_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(100),
+    // Rider credit reward when credits are chosen: D × SPONSOR_CREDIT_BONUS.
+    // Default 1.10 → rider receives 110% of the sponsor-funded amount.
+    SPONSOR_CREDIT_BONUS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(1.10),
+    // Driver share of the sponsor-funded discount (spec: 60% driver / 40% NetRide).
+    SPONSOR_DRIVER_SHARE: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(0.60),
+    // Whether sponsor-ledger writes are enforced strictly (unit tests disable).
+    SPONSOR_LEDGER_ENFORCED: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(1),
 });
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {

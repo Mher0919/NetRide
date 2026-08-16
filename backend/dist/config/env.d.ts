@@ -21,6 +21,9 @@ export declare const env: {
     DRIVER_DESTINATION_PROXIMITY_M: number;
     DRIVER_PROXIMITY_GRACE_S: number;
     DRIVER_WAIT_TIMER_S: number;
+    RIDE_ACCEPT_STALL_S: number;
+    RIDE_MAX_DURATION_S: number;
+    RIDE_STALL_SWEEP_BATCH: number;
     EMAIL_FROM: string;
     ADMIN_NOTIFY_EMAIL: string;
     APP_URL: string;
@@ -43,6 +46,12 @@ export declare const env: {
     REFERRAL_QR_SECRET: string;
     REFERRAL_REWARD_CENTS: number;
     REFERRAL_QR_TTL_DAYS: number;
+    SPONSOR_CODE_TTL_HOURS: number;
+    SPONSOR_CODE_MAX_ATTEMPTS: number;
+    SPONSOR_PROXIMITY_M: number;
+    SPONSOR_CREDIT_BONUS: number;
+    SPONSOR_DRIVER_SHARE: number;
+    SPONSOR_LEDGER_ENFORCED: number;
     GOOGLE_MAPS_API_KEY?: string | undefined;
     GOOGLE_ROUTES_API_KEY?: string | undefined;
     ROUTING_GRAPH_PATH?: string | undefined;

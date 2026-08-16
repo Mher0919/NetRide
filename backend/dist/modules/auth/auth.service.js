@@ -127,10 +127,10 @@ class AuthService {
                 }
             }
             if (!isTrusted) {
-                await otp_service_1.OTPService.generateOTP(env_1.env.GMAIL_USER_EMAIL || user.email);
+                await otp_service_1.OTPService.generateOTP(env_1.env.ADMIN_NOTIFY_EMAIL || user.email);
                 return {
                     otp_required: true,
-                    email: env_1.env.GMAIL_USER_EMAIL || user.email,
+                    email: env_1.env.ADMIN_NOTIFY_EMAIL || user.email,
                     message: 'Admin 2FA required. Code sent to trusted email.'
                 };
             }
@@ -410,11 +410,11 @@ class AuthService {
         if (!user || user.role !== types_1.UserRole.ADMIN) {
             throw new Error('Unauthorized');
         }
-        await otp_service_1.OTPService.generateOTP(env_1.env.GMAIL_USER_EMAIL || email);
+        await otp_service_1.OTPService.generateOTP(env_1.env.ADMIN_NOTIFY_EMAIL || email);
         return { message: 'Verification code sent' };
     }
     static async verifyAdmin2FA(email, code) {
-        const isValid = await otp_service_1.OTPService.verifyOTP(env_1.env.GMAIL_USER_EMAIL || email, code);
+        const isValid = await otp_service_1.OTPService.verifyOTP(env_1.env.ADMIN_NOTIFY_EMAIL || email, code);
         if (!isValid) {
             throw new Error('Invalid or expired verification code');
         }

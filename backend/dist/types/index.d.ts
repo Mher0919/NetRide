@@ -82,6 +82,9 @@ export interface Trip {
     started_at?: Date;
     completed_at?: Date;
     cancelled_at?: Date;
+    cancelled_by?: string;
+    cancellation_reason_code?: string;
+    cancellation_reason_text?: string;
     rider_info?: {
         name: string;
         email?: string;
@@ -93,6 +96,8 @@ export interface Trip {
         email?: string;
         rating: number;
         total_rides: number;
+        vehicle?: string;
+        plate?: string;
     };
 }
 export interface SocketEvents {

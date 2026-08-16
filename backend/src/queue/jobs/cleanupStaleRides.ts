@@ -2,7 +2,6 @@ import { Server } from 'socket.io';
 import { prisma } from '../../services/prisma.service';
 import { TripStatus } from '../../types';
 import { RideRepository } from '../../modules/ride/ride.repository';
-import { RideService } from '../../modules/ride/ride.service';
 import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } from '../../config/redis';
 import { sweepExpiredActivity } from '../../services/demand.service';
 import { env } from '../../config/env';
@@ -73,6 +72,11 @@ export async function sweepStaleActiveRides(io: Server | null): Promise<number> 
     select: { id: true },
     take: env.RIDE_STALL_SWEEP_BATCH,
   });
+
+  // RideService is imported lazily: applying it statically would drag the
+  // whole app.ts graph (incl. the HTTP listener) into the cron worker
+  // process at startup, which previously caused EADDRINUSE crashes.
+  const { RideService } = await import('../../modules/ride/ride.service');
 
   for (const ride of neverStarted) {
     try {

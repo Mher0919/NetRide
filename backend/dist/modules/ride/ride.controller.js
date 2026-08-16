@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RideController = void 0;
 const ride_service_1 = require("./ride.service");
+const ride_repository_1 = require("./ride.repository");
 const zod_1 = require("zod");
 const types_1 = require("../../types");
 const prisma_service_1 = require("../../services/prisma.service");
@@ -11,6 +12,8 @@ const ride_messages_repository_1 = require("./ride_messages.repository");
 const twilio_service_1 = require("../../services/twilio.service");
 const push_notification_service_1 = require("../../services/push-notification.service");
 const database_1 = require("../../config/database");
+const report_service_1 = require("../reporting/report.service");
+const report_reasons_1 = require("../reporting/report.reasons");
 const RequestRideSchema = zod_1.z.object({
     pickup: zod_1.z.object({
         lat: zod_1.z.number(),
@@ -45,6 +48,11 @@ const RateRideSchema = zod_1.z.object({
     rating: zod_1.z.number().int().min(1).max(5),
     review_text: zod_1.z.string().optional(),
     favorite: zod_1.z.boolean().optional(), // Added for favorite logic
+});
+const SubmitReportSchema = zod_1.z.object({
+    reason_code: zod_1.z.string().trim().min(1).max(64),
+    reason_text: zod_1.z.string().trim().max(300).optional(),
+    description: zod_1.z.string().trim().min(10).max(2000),
 });
 class RideController {
     static async requestRide(req, res) {
@@ -197,30 +205,136 @@ class RideController {
         }
     }
     /**
-     * Idempotent cancel of the rider's current request, by rider identity —
-     * no tripId needed. The Flutter client calls this when the rider hits the
-     * top-right X / Cancel Ride during "searching", where a race can leave the
-     * client without a tripId yet (the socket tripUpdate round-trip). Always
-     * returns 200 when there is nothing active to cancel.
+     * Idempotent cancel of the rider's current request, by rider identity.
+     * Accepts an optional `tripId` so the client can cancel the EXACT ride it
+     * is showing (its socket tripUpdate already carries the id). Without one
+     * (race window before the first tripUpdate), only an inferred REQUESTED
+     * ("searching") ride is cancelled — an ACCEPTED/IN_PROGRESS ride is never
+     * cancelled by inference, which is what previously produced the bogus
+     * "already in progress" 409 after the real request had already been
+     * cancelled through the socket path. Always returns 200 when there is
+     * nothing active to cancel.
      */
     static async cancelCurrentRide(req, res) {
         try {
             const userId = req.user?.id;
             if (!userId)
                 return res.status(401).json({ error: 'Unauthorized' });
-            const trip = await ride_service_1.RideService.getCurrentRide(userId, types_1.UserRole.RIDER);
+            const body = req.body ?? {};
+            const requestedTripId = typeof body.tripId === 'string' && body.tripId.trim().length > 0
+                ? body.tripId.trim()
+                : null;
+            let trip = null;
+            if (requestedTripId) {
+                const found = await ride_repository_1.RideRepository.findById(requestedTripId);
+                // Never cancel a ride the caller doesn't own.
+                if (found && found.rider_id === userId)
+                    trip = found;
+            }
+            else {
+                const current = await ride_service_1.RideService.getCurrentRide(userId, types_1.UserRole.RIDER);
+                if (current && current.status === types_1.TripStatus.REQUESTED)
+                    trip = current;
+            }
             if (!trip) {
                 return res.json({ cancelled: false, tripId: null });
             }
-            if (trip.status !== 'REQUESTED' && trip.status !== 'ACCEPTED') {
-                return res.status(409).json({ error: 'This ride is already in progress and cannot be cancelled.' });
+            // Terminal already — the parallel socket path cancelled it first, or a
+            // prior call did. Report success-with-no-op (idempotent).
+            if (trip.status === types_1.TripStatus.CANCELLED || trip.status === types_1.TripStatus.COMPLETED) {
+                return res.json({ cancelled: true, tripId: trip.id });
             }
-            await ride_service_1.RideService.cancelTrip(trip.id, userId);
+            // Requested / accepted / in-progress rides are all cancellable; the
+            // authoritative status guard lives in RideService.cancelTrip (only
+            // COMPLETED rides are terminal). We also allow cancelling a current
+            // (non-REQUESTED) ride explicitly identified by tripId.
+            await ride_service_1.RideService.cancelTrip(trip.id, userId, {
+                reasonCode: body?.reasonCode,
+                reasonText: body?.reasonText,
+            });
             res.json({ cancelled: true, tripId: trip.id });
         }
         catch (error) {
             console.error(`[RIDE] ❌ Cancel current ride error: ${error.message}`);
             res.status(400).json({ error: 'Unable to cancel the ride. Please try again.' });
+        }
+    }
+    // ---- Post-ride party reporting (042) --------------------------------
+    /**
+     * Can the caller file a report for this ride? Returns the other party's
+     * identity + the role-scoped reason list so the app can render the
+     * report sheet without hardcoding codes.
+     */
+    static async getReportStatus(req, res) {
+        try {
+            const userId = req.user?.id;
+            const role = req.user?.role;
+            const rideId = req.params.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const status = await report_service_1.ReportService.getReportStatus(rideId, userId, role);
+            const reporterRole = (role === 'DRIVER' ? 'DRIVER' : 'RIDER');
+            res.json({ ...status, reasons: status.canReport ? report_reasons_1.REPORT_REASONS[reporterRole] : [] });
+        }
+        catch (error) {
+            console.error(`[RIDE] ❌ Report status error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to load report status.' });
+        }
+    }
+    /**
+     * File a report against the other ride party. Both parties may report
+     * independently — each gets exactly one report per ride.
+     */
+    static async submitReport(req, res) {
+        try {
+            const userId = req.user?.id;
+            const role = req.user?.role;
+            const rideId = req.params.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const validatedData = SubmitReportSchema.parse(req.body);
+            const report = await report_service_1.ReportService.submitReport(rideId, userId, role, validatedData);
+            res.status(201).json(report);
+        }
+        catch (error) {
+            console.error(`[RIDE] ❌ Report submission error: ${error.message}`);
+            const status = error?.status ?? 400;
+            res.status(status).json({ error: error?.message || 'Failed to submit report.' });
+        }
+    }
+    // ---- In-trip chat + native phone dialing ----------------------------
+    /**
+     * Return the OTHER ride party's authoritative phone number so the app
+     * can open the native dialer (tel: URI). Party-only + derived from the
+     * users table — the peer can never inject a phone number through ride
+     * payloads. Returns 404 when the other party has no usable number.
+     */
+    static async getPartyPhone(req, res) {
+        try {
+            const userId = req.user?.id;
+            const role = req.user?.role;
+            const rideId = req.params.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const party = await RideController.assertTripParty(rideId, userId, role);
+            if (!party.ok)
+                return res.status(party.code).json({ error: party.error });
+            const trip = party.trip;
+            const otherId = trip.rider_id === userId ? trip.driver_id : trip.rider_id;
+            if (!otherId) {
+                return res.status(409).json({ error: 'The other party is not on this ride anymore.' });
+            }
+            const other = await database_1.pool.query(`SELECT id, full_name, phone_number FROM users WHERE id = $1`, [otherId]);
+            const row = other.rows[0];
+            const phone = row?.phone_number?.toString?.();
+            if (!row || !phone || phone.trim().length === 0) {
+                return res.status(404).json({ error: 'Unable to call this user.' });
+            }
+            res.json({ phone_number: phone.trim(), full_name: row.full_name || '' });
+        }
+        catch (error) {
+            console.error(`[RIDE] ❌ Party phone error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to load the contact number.' });
         }
     }
     // ---- In-trip chat + masked call ---------------------------------------

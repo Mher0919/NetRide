@@ -37,6 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.io = void 0;
+exports.startServer = startServer;
 // backend/src/app.ts
 const express_1 = __importDefault(require("express"));
 const http_1 = require("http");
@@ -78,11 +79,26 @@ const push_routes_1 = __importDefault(require("./modules/push/push.routes"));
 const places_routes_1 = __importDefault(require("./modules/places/places.routes"));
 const notifications_routes_1 = __importDefault(require("./modules/notifications/notifications.routes"));
 const heatmap_routes_1 = __importDefault(require("./modules/heatmap/heatmap.routes"));
+const specials_routes_1 = __importDefault(require("./modules/sponsor/specials.routes"));
+const sponsor_portal_routes_1 = __importDefault(require("./modules/sponsor/sponsor-portal.routes"));
+const admin_sponsor_routes_1 = __importDefault(require("./modules/sponsor/admin-sponsor.routes"));
+const special_redemption_service_1 = require("./modules/sponsor/special-redemption.service");
 const geospatial_service_1 = require("./modules/geospatial/geospatial.service");
 const upload_service_1 = require("./services/upload.service");
 const speeding_detector_1 = require("./services/speeding_detector");
 const locations_service_1 = require("./modules/location/locations.service");
 const app = (0, express_1.default)();
+// API responses must never be revalidated from the browser's HTTP cache:
+// Express's default weak ETag + browser revalidation turned every admin
+// dashboard poll into a 304 "not modified" replay of a stale cached ride
+// list — the dashboard kept showing an empty/old state no matter what the
+// DB said. A live operational dashboard reads current truth on every poll.
+app.disable('etag');
+// Belt-and-braces: private, uncacheable for all admin/monitoring responses.
+app.use('/api/admin', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+});
 const httpServer = (0, http_1.createServer)(app);
 const io = new socket_io_1.Server(httpServer, {
     cors: {
@@ -208,6 +224,9 @@ app.use('/api/push', push_routes_1.default);
 app.use('/api/places', places_routes_1.default);
 app.use('/api/notifications', notifications_routes_1.default);
 app.use('/api/heatmap', heatmap_routes_1.default);
+app.use('/api', specials_routes_1.default);
+app.use('/api', sponsor_portal_routes_1.default);
+app.use('/api/admin', admin_sponsor_routes_1.default);
 app.post('/api/upload', upload_service_1.UploadService.upload);
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -564,92 +583,128 @@ locations_service_1.trajectoryEvents.on('point', (payload) => {
 });
 logger_1.logger.info('[SAFETY] SpeedingDetector subscribed to trajectory events');
 const PORT = process.env.PORT || 3000;
-httpServer.listen(Number(PORT), '0.0.0.0', async () => {
-    await runMigrations();
-    logger_1.logger.info({ port: Number(PORT), env: env_1.env.NODE_ENV }, 'server_listening');
-    logger_1.logger.info({ set: !!env_1.env.JWT_SECRET, length: env_1.env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
-    logger_1.logger.info({
-        googleRoutes: 'SOLE',
-        osrm: '(removed)',
-        ors: '(removed)',
-        astar: '(removed)',
-    }, 'routing_engines');
-    // -----------------------------------------------------------------
-    // Self-keep-alive: ping our own /health/live every 60s so Render
-    // free-tier doesn't spin the service down. Uses Node's http module
-    // because curl isn't available in the Docker image.
-    // -----------------------------------------------------------------
-    const keepAliveUrl = `http://127.0.0.1:${PORT}/health/live`;
-    setInterval(() => {
-        const http = require('http');
-        http.get(keepAliveUrl, (res) => {
-            // consume data to free memory
-            res.resume();
-        }).on('error', () => {
-            // silent — the endpoint may not be ready yet during cold start
-        });
-    }, 60000);
-    // Ping OSRM every 60s to prevent its free-tier service from spinning down.
-    if (env_1.env.OSRM_BASE_URL) {
-        const osrmUrl = `${env_1.env.OSRM_BASE_URL}/health`;
+/**
+ * Boot the HTTP/Socket.IO listener and all background jobs. Deliberately
+ * NOT executed at module load: worker processes (matchWorker, cronWorker)
+ * import this module via `io` and must never bind the port — an accidental
+ * second `listen` is exactly what produced `EADDRINUSE` and crashed a
+ * deployment when a job module pulled in ride.service → app.ts.
+ */
+function startServer() {
+    httpServer.listen(Number(PORT), '0.0.0.0', async () => {
+        await runMigrations();
+        logger_1.logger.info({ port: Number(PORT), env: env_1.env.NODE_ENV }, 'server_listening');
+        logger_1.logger.info({ set: !!env_1.env.JWT_SECRET, length: env_1.env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
+        logger_1.logger.info({
+            googleRoutes: 'SOLE',
+            osrm: '(removed)',
+            ors: '(removed)',
+            astar: '(removed)',
+        }, 'routing_engines');
+        // -----------------------------------------------------------------
+        // Self-keep-alive: ping our own /health/live every 60s so Render
+        // free-tier doesn't spin the service down. Uses Node's http module
+        // because curl isn't available in the Docker image.
+        // -----------------------------------------------------------------
+        const keepAliveUrl = `http://127.0.0.1:${PORT}/health/live`;
         setInterval(() => {
-            const client = osrmUrl.startsWith('https') ? require('https') : require('http');
-            client.get(osrmUrl, (res) => {
+            const http = require('http');
+            http.get(keepAliveUrl, (res) => {
+                // consume data to free memory
                 res.resume();
-            }).on('error', () => { });
-        }, 60000);
-    }
-    // Pre-cache routes for the launch market (Hollywood / UCLA / Beverly Hills
-    // / Westwood). preCacheHotZones computes the full grid — the routing
-    // service caches the results so future identical requests are instant.
-    geospatial_service_1.GeospatialService.preCacheHotZones([
-        [34.0928, -118.3287], // Hollywood
-        [34.0639, -118.4455], // Westwood / UCLA
-        [34.0736, -118.4004], // Beverly Hills
-        [34.1019, -118.3387], // Runyon Canyon
-    ]);
-    // Periodic Maintenance (Every 2 minutes)
-    Promise.resolve().then(() => __importStar(require('./services/cleanup.service'))).then(({ CleanupService }) => {
-        setInterval(() => {
-            CleanupService.performMaintenance();
-        }, 2 * 60 * 1000);
-        // Initial run
-        CleanupService.performMaintenance();
-    });
-    // Scheduled Rides Job (Every 1 minute)
-    Promise.resolve().then(() => __importStar(require('./services/scheduler.service'))).then(({ SchedulerService }) => {
-        setInterval(() => {
-            SchedulerService.checkScheduledRides();
-        }, 60 * 1000);
-    });
-    // Refresh Platform Pricing Market Conditions (Every 5 minutes)
-    Promise.resolve().then(() => __importStar(require('./services/pricing.service'))).then(({ pricingService }) => {
-        const refresh = () => {
-            pricingService.refreshMarketConditions().catch((err) => {
-                console.error(`[PRICING] ❌ Market refresh failed: ${err.message}`);
+            }).on('error', () => {
+                // silent — the endpoint may not be ready yet during cold start
             });
-        };
-        setInterval(refresh, 5 * 60 * 1000);
-        // Initial run on start
-        refresh();
-    });
-    // Vehicle Data Background Sync (Once on start)
-    Promise.resolve().then(() => __importStar(require('./services/vehicleData.service'))).then(({ VehicleDataService }) => {
-        VehicleDataService.syncCommonVehicles();
-    });
-    // Weekly auto-payout sweep — checks once per minute, only fires on
-    // Monday 09:00 UTC. Idempotent via Redis lock + partial UNIQUE INDEX.
-    Promise.resolve().then(() => __importStar(require('./services/weeklyPayouts.service'))).then(({ WeeklyPayoutsService }) => {
-        setInterval(() => {
-            WeeklyPayoutsService.tick()
-                .then((r) => {
-                if (r.fired)
-                    logger_1.logger.info({ processed: r.processed }, 'cron_weekly_payouts_fired');
-                else if (r.skipped.length)
-                    logger_1.logger.info({ skipped: r.skipped }, 'cron_weekly_payouts_skipped');
+        }, 60000);
+        // Ping OSRM every 60s to prevent its free-tier service from spinning down.
+        if (env_1.env.OSRM_BASE_URL) {
+            const osrmUrl = `${env_1.env.OSRM_BASE_URL}/health`;
+            setInterval(() => {
+                const client = osrmUrl.startsWith('https') ? require('https') : require('http');
+                client.get(osrmUrl, (res) => {
+                    res.resume();
+                }).on('error', () => { });
+            }, 60000);
+        }
+        // Pre-cache routes for the launch market (Hollywood / UCLA / Beverly Hills
+        // / Westwood). preCacheHotZones computes the full grid — the routing
+        // service caches the results so future identical requests are instant.
+        geospatial_service_1.GeospatialService.preCacheHotZones([
+            [34.0928, -118.3287], // Hollywood
+            [34.0639, -118.4455], // Westwood / UCLA
+            [34.0736, -118.4004], // Beverly Hills
+            [34.1019, -118.3387], // Runyon Canyon
+        ]);
+        // Periodic Maintenance (Every 2 minutes)
+        Promise.resolve().then(() => __importStar(require('./services/cleanup.service'))).then(({ CleanupService }) => {
+            setInterval(() => {
+                CleanupService.performMaintenance();
+            }, 2 * 60 * 1000);
+            // Initial run
+            CleanupService.performMaintenance();
+        });
+        // Boot-time stale-ride reconciliation: instantly resolve any rides left
+        // stuck in a non-terminal state from before this deploy (apps killed
+        // mid-trip, abandoned pickups, crashed workers). Without this, a driver
+        // relaunching mid-stale-ride would re-attach to a ride that no longer
+        // exists, and the admin dashboard would keep listing a ghost "active"
+        // ride. Compliments the periodic watchdog in cleanupStaleRides.ts.
+        Promise.resolve().then(() => __importStar(require('./queue/jobs/cleanupStaleRides'))).then(({ sweepStaleActiveRides }) => {
+            sweepStaleActiveRides(io)
+                .then((n) => {
+                if (n > 0)
+                    console.log(`[BOOT] ✅ Reconciled ${n} stale rides left over from previous runtime`);
             })
-                .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_weekly_payouts_error'));
-        }, 60 * 1000);
+                .catch((err) => console.error(`[BOOT] ⚠️ Stale ride reconciliation failed: ${err.message}`));
+        });
+        // Special redemption hygiene (Every 5 minutes): expire stale validation
+        // codes and release the reserved budget (spec §28/§69).
+        setInterval(() => {
+            special_redemption_service_1.SpecialRedemptionService.expireStaleRedemptions()
+                .then((n) => { if (n > 0)
+                logger_1.logger.info({ expired: n }, 'cron_special_redemptions_expired'); })
+                .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_special_redemptions_error'));
+        }, 5 * 60 * 1000);
+        // Scheduled Rides Job (Every 1 minute)
+        Promise.resolve().then(() => __importStar(require('./services/scheduler.service'))).then(({ SchedulerService }) => {
+            setInterval(() => {
+                SchedulerService.checkScheduledRides();
+            }, 60 * 1000);
+        });
+        // Refresh Platform Pricing Market Conditions (Every 5 minutes)
+        Promise.resolve().then(() => __importStar(require('./services/pricing.service'))).then(({ pricingService }) => {
+            const refresh = () => {
+                pricingService.refreshMarketConditions().catch((err) => {
+                    console.error(`[PRICING] ❌ Market refresh failed: ${err.message}`);
+                });
+            };
+            setInterval(refresh, 5 * 60 * 1000);
+            // Initial run on start
+            refresh();
+        });
+        // Vehicle Data Background Sync (Once on start)
+        Promise.resolve().then(() => __importStar(require('./services/vehicleData.service'))).then(({ VehicleDataService }) => {
+            VehicleDataService.syncCommonVehicles();
+        });
+        // Weekly auto-payout sweep — checks once per minute, only fires on
+        // Monday 09:00 UTC. Idempotent via Redis lock + partial UNIQUE INDEX.
+        Promise.resolve().then(() => __importStar(require('./services/weeklyPayouts.service'))).then(({ WeeklyPayoutsService }) => {
+            setInterval(() => {
+                WeeklyPayoutsService.tick()
+                    .then((r) => {
+                    if (r.fired)
+                        logger_1.logger.info({ processed: r.processed }, 'cron_weekly_payouts_fired');
+                    else if (r.skipped.length)
+                        logger_1.logger.info({ skipped: r.skipped }, 'cron_weekly_payouts_skipped');
+                })
+                    .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_weekly_payouts_error'));
+            }, 60 * 1000);
+        });
     });
-});
+}
+// Only the process that literally starts `node dist/app.js` binds the port.
+// Every other consumer (workers importing `io`) stays listener-free.
+if (require.main === module) {
+    startServer();
+}
 //# sourceMappingURL=app.js.map

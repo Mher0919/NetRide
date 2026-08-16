@@ -31,10 +31,13 @@ class RideRepository {
         const res = await database_1.pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.id = $1
     `, [id]);
         return res.rows[0] ? this.mapToTrip(res.rows[0]) : null;
@@ -62,6 +65,18 @@ class RideRepository {
             fields.push(`cancelled_at = $${values.length + 1}`);
             values.push(extra.cancelled_at);
         }
+        if (extra.cancelled_by) {
+            fields.push(`cancelled_by = $${values.length + 1}`);
+            values.push(extra.cancelled_by);
+        }
+        if (extra.cancellation_reason_code !== undefined && extra.cancellation_reason_code !== null) {
+            fields.push(`cancellation_reason_code = $${values.length + 1}`);
+            values.push(extra.cancellation_reason_code);
+        }
+        if (extra.cancellation_reason_text !== undefined && extra.cancellation_reason_text !== null) {
+            fields.push(`cancellation_reason_text = $${values.length + 1}`);
+            values.push(extra.cancellation_reason_text);
+        }
         if (extra.trajectory) {
             fields.push(`trajectory = $${values.length + 1}`);
             values.push(extra.trajectory);
@@ -86,14 +101,24 @@ class RideRepository {
             fields.push(`compliance_snapshot = $${values.length + 1}`);
             values.push(extra.compliance_snapshot);
         }
-        await database_1.pool.query(`UPDATE rides SET ${fields.join(', ')} WHERE id = $2`, values);
+        let where = 'WHERE id = $2';
+        if (status === types_1.TripStatus.COMPLETED) {
+            where += ` AND status IN ('ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS')`;
+        }
+        const updateRes = await database_1.pool.query(`UPDATE rides SET ${fields.join(', ')} ${where}`, values);
+        if (status === types_1.TripStatus.COMPLETED && updateRes.rowCount === 0) {
+            throw new Error('Ride cannot be completed from its current state');
+        }
         const res = await database_1.pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.id = $1
     `, [id]);
         return this.mapToTrip(res.rows[0]);
@@ -102,10 +127,13 @@ class RideRepository {
         const res = await database_1.pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.rider_id = $1 
       ORDER BY r.created_at DESC
     `, [riderId]);
@@ -115,11 +143,14 @@ class RideRepository {
         const res = await database_1.pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
-      WHERE r.driver_id = $1 AND r.status IN ('COMPLETED', 'ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
+      WHERE r.driver_id = $1 AND r.status IN ('COMPLETED', 'ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'CANCELLED')
       ORDER BY r.created_at DESC
     `, [driverId]);
         return res.rows.map(row => this.mapToTrip(row));
@@ -128,10 +159,13 @@ class RideRepository {
         const res = await database_1.pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.rider_id = $1 AND r.status NOT IN ($2, $3) 
       ORDER BY r.created_at DESC LIMIT 1
     `, [riderId, types_1.TripStatus.COMPLETED, types_1.TripStatus.CANCELLED]);
@@ -142,10 +176,13 @@ class RideRepository {
         const res = await database_1.pool.query(`
       SELECT r.*,
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides
+             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
+             dv.license_plate_number as driver_vehicle_plate
       FROM rides r
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
+      ${RideRepository.DRIVER_VEHICLE_JOIN}
       WHERE r.driver_id = $1 AND r.status NOT IN ($2, $3)
       ORDER BY r.created_at DESC LIMIT 1
     `, [driverId, types_1.TripStatus.COMPLETED, types_1.TripStatus.CANCELLED]);
@@ -181,6 +218,9 @@ class RideRepository {
             started_at: row.started_at,
             completed_at: row.completed_at,
             cancelled_at: row.cancelled_at,
+            cancelled_by: row.cancelled_by,
+            cancellation_reason_code: row.cancellation_reason_code,
+            cancellation_reason_text: row.cancellation_reason_text,
             distance_km: row.distance_meters ? row.distance_meters / 1000 : undefined,
             fare_amount: row.fare_amount ? parseFloat(row.fare_amount) : undefined,
             tip_amount: row.tip_amount ? parseFloat(row.tip_amount) : undefined,
@@ -194,13 +234,29 @@ class RideRepository {
                 total_rides: row.rider_rides !== null ? parseInt(row.rider_rides) : 0,
             },
             driver_info: row.driver_id ? {
-                name: row.driver_name || 'Driver',
+                name: row.driver_name || '',
                 email: row.driver_email,
                 rating: row.driver_rating !== null ? parseFloat(row.driver_rating) : 5.0,
                 total_rides: row.driver_rides !== null ? parseInt(row.driver_rides) : 0,
+                // Real vehicle identity from the driver's vehicle record — never
+                // fabricated. `vehicle` and `plate` are omitted when the driver has
+                // no vehicle row, and the client hides those fields instead of
+                // inventing "Sedan"/"ABC-123".
+                vehicle: row.driver_vehicle_make || row.driver_vehicle_model
+                    ? [row.driver_vehicle_make, row.driver_vehicle_model].filter(Boolean).join(' ') || undefined
+                    : undefined,
+                plate: row.driver_vehicle_plate || undefined,
             } : undefined,
         };
     }
 }
 exports.RideRepository = RideRepository;
+RideRepository.DRIVER_VEHICLE_JOIN = `
+      LEFT JOIN LATERAL (
+        SELECT make, model, license_plate_number
+        FROM driver_vehicles
+        WHERE driver_id = d.id AND make IS NOT NULL
+        ORDER BY id LIMIT 1
+      ) dv ON true
+  `;
 //# sourceMappingURL=ride.repository.js.map

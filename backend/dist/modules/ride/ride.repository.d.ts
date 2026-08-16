@@ -11,6 +11,7 @@ export declare class RideRepository {
         requested_class?: string;
         snapshot_rider_rating?: number;
     }): Promise<Trip>;
+    private static readonly DRIVER_VEHICLE_JOIN;
     static findById(id: string): Promise<Trip | null>;
     static updateStatus(id: string, status: TripStatus, extra?: any): Promise<Trip>;
     static findByRiderId(riderId: string): Promise<Trip[]>;

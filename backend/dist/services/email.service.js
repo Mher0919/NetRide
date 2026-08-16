@@ -142,7 +142,7 @@ class EmailService {
         try {
             const verifyUrl = `${env_1.env.ADMIN_URL}/users/${data.personalInfo.userId}`;
             await this.sendEmail({
-                to: env_1.env.GMAIL_USER_EMAIL,
+                to: env_1.env.ADMIN_NOTIFY_EMAIL,
                 subject: `New Driver Application: ${data.personalInfo.full_name}`,
                 html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">
@@ -174,7 +174,7 @@ class EmailService {
         try {
             const verifyUrl = `${env_1.env.ADMIN_URL}/users/${user.id}`;
             await this.sendEmail({
-                to: env_1.env.GMAIL_USER_EMAIL,
+                to: env_1.env.ADMIN_NOTIFY_EMAIL,
                 subject: `Rider Verification Request: ${user.full_name}`,
                 html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #eee;">

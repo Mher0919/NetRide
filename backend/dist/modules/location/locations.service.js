@@ -83,6 +83,15 @@ class LocationsService {
         const tripId = await redis_1.redis.get(`driver:${driverId}:active_trip`);
         if (!tripId)
             return;
+        // Route-data validation: reject garbage coordinates before they ever
+        // reach the trajectory (a bad point would corrupt the polyline, the
+        // final snapshot and the admin map). NaN/Infinity or out-of-range
+        // lat/lng points are dropped silently.
+        const valid = isFinite(loc.lat) && isFinite(loc.lng) &&
+            loc.lat >= -90 && loc.lat <= 90 &&
+            loc.lng >= -180 && loc.lng <= 180;
+        if (!valid)
+            return;
         const trajectoryKey = `trip:${tripId}:trajectory`;
         // Throttling: only save if last point was > 5 seconds ago or > 20 meters away
         // For simplicity, let's just do a 5-second throttle using a Redis key

@@ -41,7 +41,25 @@ const speeding_detector_1 = require("../../services/speeding_detector");
 const email_service_1 = require("../../services/email.service");
 const storage_service_1 = require("../../services/storage.service");
 const app_1 = require("../../app");
+const pricing_service_1 = require("../../services/pricing.service");
+const report_service_1 = require("../reporting/report.service");
+const report_reasons_1 = require("../reporting/report.reasons");
+const financial_ledger_service_1 = require("../../services/financial-ledger.service");
+const audit_events_service_1 = require("../../services/audit-events.service");
 class AdminController {
+    static toJSON(value) {
+        if (typeof value === 'bigint')
+            return Number(value);
+        if (Array.isArray(value))
+            return value.map((v) => AdminController.toJSON(v));
+        if (value !== null && typeof value === 'object') {
+            const out = {};
+            for (const [key, val] of Object.entries(value))
+                out[key] = AdminController.toJSON(val);
+            return out;
+        }
+        return value;
+    }
     static async getStats(req, res) {
         try {
             const [totalRiders, totalDrivers, pendingVerifications, verifiedUsers, rejectedUsers, pendingDocumentReviews] = await Promise.all([
@@ -64,6 +82,184 @@ class AdminController {
         catch (error) {
             console.error(`[ADMIN] ❌ Stats error: ${error.message}`);
             res.status(500).json({ error: 'Failed to retrieve administrative statistics.' });
+        }
+    }
+    // ============================================================
+    // Fleet partner management (041) — revenue split configuration
+    // ============================================================
+    static async listFleets(req, res) {
+        try {
+            const fleets = await database_1.pool.query(`SELECT f.*,
+                COUNT(d.user_id)::int AS driver_count,
+                COALESCE(SUM((s.fleet_allocations->0->>'cents')::bigint), 0)::bigint AS fleet_earnings_cents
+         FROM fleet_partners f
+         LEFT JOIN drivers d ON d.fleet_id = f.id
+         LEFT JOIN ride_price_snapshots s ON s.driver_fleet_id = f.id
+         GROUP BY f.id
+         ORDER BY f.name`);
+            res.json({ fleets: fleets.rows });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Fleet list error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to list fleet partners.' });
+        }
+    }
+    static async createFleet(req, res) {
+        const { name, platform_share_percent, contact_name, contact_email, notes } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'Fleet name is required.' });
+        }
+        const share = Number(platform_share_percent ?? 0);
+        if (!Number.isFinite(share) || share < 0 || share > 100) {
+            return res.status(400).json({ error: 'platform_share_percent must be between 0 and 100.' });
+        }
+        try {
+            const ins = await database_1.pool.query(`INSERT INTO fleet_partners (name, platform_share_percent, contact_name, contact_email, notes)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`, [String(name).trim(), share, contact_name ?? null, contact_email ?? null, notes ?? null]);
+            (0, pricing_service_1.invalidateRevenueCache)();
+            res.status(201).json({ fleet: ins.rows[0] });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Fleet create error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to create fleet partner.' });
+        }
+    }
+    static async updateFleet(req, res) {
+        const { id } = req.params;
+        const { name, platform_share_percent, is_active, contact_name, contact_email, notes } = req.body;
+        try {
+            const fields = [];
+            const values = [];
+            let i = 1;
+            if (name !== undefined) {
+                if (!String(name).trim())
+                    return res.status(400).json({ error: 'Fleet name cannot be empty.' });
+                fields.push(`name = $${i++}`);
+                values.push(String(name).trim());
+            }
+            if (platform_share_percent !== undefined) {
+                const share = Number(platform_share_percent);
+                if (!Number.isFinite(share) || share < 0 || share > 100) {
+                    return res.status(400).json({ error: 'platform_share_percent must be between 0 and 100.' });
+                }
+                fields.push(`platform_share_percent = $${i++}`);
+                values.push(share);
+            }
+            if (is_active !== undefined) {
+                fields.push(`is_active = $${i++}`);
+                values.push(is_active === true || is_active === 'true');
+            }
+            if (contact_name !== undefined) {
+                fields.push(`contact_name = $${i++}`);
+                values.push(contact_name ?? null);
+            }
+            if (contact_email !== undefined) {
+                fields.push(`contact_email = $${i++}`);
+                values.push(contact_email ?? null);
+            }
+            if (notes !== undefined) {
+                fields.push(`notes = $${i++}`);
+                values.push(notes ?? null);
+            }
+            if (fields.length === 0)
+                return res.status(400).json({ error: 'No fields to update.' });
+            fields.push(`updated_at = NOW()`);
+            values.push(id);
+            const upd = await database_1.pool.query(`UPDATE fleet_partners SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`, values);
+            if (!upd.rowCount)
+                return res.status(404).json({ error: 'Fleet partner not found.' });
+            (0, pricing_service_1.invalidateRevenueCache)();
+            res.json({ fleet: upd.rows[0] });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Fleet update error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to update fleet partner.' });
+        }
+    }
+    /** Assign (fleet_id) or unassign (null) a driver to/from a fleet. */
+    static async assignDriverFleet(req, res) {
+        const { id } = req.params;
+        const { fleet_id } = req.body;
+        try {
+            if (fleet_id !== null) {
+                const fleet = await database_1.pool.query(`SELECT 1 FROM fleet_partners WHERE id = $1`, [fleet_id]);
+                if (!fleet.rowCount)
+                    return res.status(400).json({ error: 'Unknown fleet partner.' });
+            }
+            const upd = await database_1.pool.query(`UPDATE drivers SET fleet_id = $1 WHERE user_id = $2 RETURNING user_id, fleet_id`, [fleet_id ?? null, id]);
+            if (!upd.rowCount)
+                return res.status(404).json({ error: 'Driver not found.' });
+            res.json({ driver_id: id, fleet_id: upd.rows[0].fleet_id });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Fleet assignment error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to assign driver to fleet.' });
+        }
+    }
+    // ============================================================
+    // Pricing + revenue visibility (041)
+    // ============================================================
+    static async listPricingProfiles(req, res) {
+        try {
+            const profiles = await (0, pricing_service_1.getProfiles)();
+            res.json({ profiles });
+        }
+        catch (error) {
+            res.status(500).json({ error: 'Failed to list pricing profiles.' });
+        }
+    }
+    /** Update a profile's rates; the 60s engine cache is busted immediately. */
+    static async updatePricingProfile(req, res) {
+        const { code } = req.params;
+        const body = req.body;
+        const numberKeys = [
+            'base_fare', 'per_mile_rate', 'per_minute_rate', 'minimum_fare',
+            'booking_fee', 'service_fee_rate', 'tax_rate',
+            'max_demand_multiplier', 'peak_time_multiplier', 'off_peak_multiplier',
+            'weather_multiplier', 'location_multiplier', 'fleet_multiplier',
+        ];
+        const fields = [];
+        const values = [];
+        let i = 1;
+        for (const key of numberKeys) {
+            if (body[key] === undefined)
+                continue;
+            const v = Number(body[key]);
+            if (!Number.isFinite(v) || v < 0) {
+                return res.status(400).json({ error: `${key} must be a non-negative number.` });
+            }
+            fields.push(`${key} = $${i++}`);
+            values.push(v);
+        }
+        if (body.label !== undefined) {
+            fields.push(`label = $${i++}`);
+            values.push(String(body.label));
+        }
+        if (fields.length === 0)
+            return res.status(400).json({ error: 'No fields to update.' });
+        try {
+            fields.push(`updated_at = NOW()`);
+            values.push(String(code).toUpperCase());
+            const upd = await database_1.pool.query(`UPDATE pricing_profiles SET ${fields.join(', ')} WHERE code = $${i} AND active = TRUE RETURNING *`, values);
+            if (!upd.rowCount)
+                return res.status(404).json({ error: 'Pricing profile not found.' });
+            // Bust the in-memory cache so the next estimate uses the new rates.
+            await (0, pricing_service_1.getConfig)(String(code).toUpperCase(), true);
+            res.json({ profile: upd.rows[0] });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Pricing update error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to update pricing profile.' });
+        }
+    }
+    static async getRevenueOverview(req, res) {
+        try {
+            const [config, summary] = await Promise.all([(0, pricing_service_1.getRevenueConfig)(), (0, pricing_service_1.getRevenueSummary)()]);
+            res.json({ revenue_config: config, ...summary });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Revenue overview error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to load revenue overview.' });
         }
     }
     static async getUsers(req, res) {
@@ -145,12 +341,12 @@ class AdminController {
                     }));
                 }
             }
-            res.json({
+            res.json(AdminController.toJSON({
                 users,
                 total,
                 page: Number(page),
                 totalPages: Math.ceil(total / Number(limit)),
-            });
+            }));
         }
         catch (error) {
             console.error(`[ADMIN] ❌ Get users error: ${error.message}`);
@@ -250,7 +446,17 @@ class AdminController {
                 phone_verified: row.phone_verified,
                 has_action_required: row.has_action_required,
                 last_action_required_at: row.last_action_required_at,
+                fleet_id: row.fleet_id ?? null,
+                fleet: null,
             };
+            // Fleet partner assignment (optional) — drives the platform-pool split
+            // for future rides (fleet share comes out of the 40% platform pool,
+            // driver share stays 60%).
+            if (row.fleet_id) {
+                const fleetRes = await database_1.pool.query(`SELECT id, name, platform_share_percent, is_active
+           FROM fleet_partners WHERE id = $1`, [row.fleet_id]);
+                driverProfile.fleet = fleetRes.rows[0] ?? null;
+            }
             // Fetch vehicles with submission info — ordered by status (APPROVED first),
             // then by approval timestamp, then by submission timestamp.
             const vehiclesRes = await database_1.pool.query(`SELECT dv.*, v.make AS catalog_make, v.model AS catalog_model,
@@ -581,12 +787,21 @@ class AdminController {
                 }),
                 prisma_service_1.prisma.ride.count({ where }),
             ]);
-            res.json({
+            // Server-computed financial summary for the page being viewed. Only
+            // the backend may decide these numbers — they come from the
+            // settlement ledger, never from the client. Live/active rides have
+            // no settlement yet, so no summary is attached.
+            let summary = undefined;
+            if (status === 'COMPLETED' && rides.length > 0) {
+                summary = await financial_ledger_service_1.FinancialLedgerService.summarizeRides(rides.map((r) => r.id));
+            }
+            res.json(AdminController.toJSON({
                 rides,
                 total,
                 page: Number(page),
                 totalPages: Math.ceil(total / Number(limit)),
-            });
+                ...(summary ? { summary } : {}),
+            }));
         }
         catch (error) {
             console.error(`[ADMIN] ❌ Get rides error: ${error.message}`);
@@ -617,11 +832,83 @@ class AdminController {
             });
             if (!ride)
                 return res.status(404).json({ error: 'Ride not found.' });
-            res.json(ride);
+            res.json(AdminController.toJSON(ride));
         }
         catch (error) {
             console.error(`[ADMIN] ❌ Get ride detail error: ${error.message}`);
             res.status(500).json({ error: 'Failed to retrieve ride details.' });
+        }
+    }
+    /**
+     * Operator escape hatch: dissolve a stuck ride (e.g. a driver killed the
+     * app mid-trip and the automatic stale-ride watchdog has not yet fired).
+     * Terminates the ride, broadcasts the authoritative CANCELLED payload to
+     * both apps + monitoring, releases the driver lock/navigation state and
+     * writes an audit log entry.
+     */
+    static async cancelRide(req, res) {
+        const { id } = req.params;
+        const adminId = req.user.id;
+        const reasonText = req.body?.reasonText?.trim() || null;
+        try {
+            const { RideService } = await Promise.resolve().then(() => __importStar(require('../ride/ride.service')));
+            const trip = await RideService.cancelTrip(id, adminId, {
+                reasonCode: 'ADMIN_CANCELLED',
+                reasonText: reasonText ?? 'Cancelled by NetRide operations (admin).',
+                bypassOwnership: true,
+            });
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: id,
+                    action: 'RIDE_CANCELLED',
+                    details: `Ride ${id} cancelled by admin. ${reasonText ? 'Reason: ' + reasonText : ''}`,
+                },
+            });
+            res.json({ success: true, trip: AdminController.toJSON(trip) });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Cancel ride error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Unable to cancel ride.' });
+        }
+    }
+    /**
+     * Operator escape hatch: force-complete a stuck ride that reached its
+     * destination (or the rider/driver situation is unambiguous). Runs the
+     * full completion pipeline — wallet credit, financial ledger, rewards,
+     * safety teardown — exactly as a driver-initiated completion would.
+     */
+    static async completeRide(req, res) {
+        const { id } = req.params;
+        const adminId = req.user.id;
+        try {
+            const { RideService } = await Promise.resolve().then(() => __importStar(require('../ride/ride.service')));
+            const ride = await prisma_service_1.prisma.ride.findUnique({
+                where: { id },
+                select: { id: true, status: true, driver_id: true, rider_id: true },
+            });
+            if (!ride)
+                return res.status(404).json({ error: 'Ride not found.' });
+            if (ride.status === 'COMPLETED') {
+                return res.json({ success: true, alreadyCompleted: true });
+            }
+            if (ride.status === 'CANCELLED') {
+                return res.status(400).json({ error: 'Cancelled rides cannot be completed.' });
+            }
+            const trip = await RideService.updateTripStatus(id, 'COMPLETED', ride.driver_id ?? ride.rider_id ?? adminId, { bypassDriverGuard: true });
+            await prisma_service_1.prisma.auditLog.create({
+                data: {
+                    admin_id: adminId,
+                    target_id: id,
+                    action: 'RIDE_COMPLETED',
+                    details: `Ride ${id} force-completed by admin (bypasses driver completion guard).`,
+                },
+            });
+            res.json({ success: true, trip: AdminController.toJSON(trip) });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Complete ride error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Unable to complete ride.' });
         }
     }
     static async verifyInspection(req, res) {
@@ -711,6 +998,407 @@ class AdminController {
         catch (error) {
             console.error(`[ADMIN] ❌ Get ride audit error: ${error.message}`);
             res.status(500).json({ error: 'Failed to retrieve ride audit.' });
+        }
+    }
+    /**
+     * Planned + actually-driven routes for a ride, for admin map rendering.
+     *
+     * planned: per-leg polylines from ride_routes (the rider-generated
+     *   Google/OSRM route stored at request time), with a fallback to the
+     *   destination-leg mirror in rides.route_metadata.
+     * actual:  the GPS samples captured during the trip (Redis trajectory
+     *   buffer, snapshotted into rides.trajectory at completion). Marked
+     *   available only when ≥ 2 valid points exist — a ride with no GPS
+     *   samples reports actualRoute.available = false so the frontend never
+     *   labels the planned route as the driven one.
+     *
+     * Coordinates are returned as [lat, lng] pairs; GeoJSON [lng, lat]
+     * storage is converted here.
+     */
+    static async getRideRoutes(req, res) {
+        const { id } = req.params;
+        try {
+            const rideRes = await database_1.pool.query(`SELECT id, trajectory, route_metadata FROM rides WHERE id = $1`, [id]);
+            const ride = rideRes.rows[0];
+            if (!ride)
+                return res.status(404).json({ error: 'Ride not found.' });
+            const toLatLng = (raw) => {
+                if (!Array.isArray(raw))
+                    return [];
+                return raw
+                    .filter((c) => Array.isArray(c) &&
+                    c.length >= 2 &&
+                    isFinite(Number(c[0])) &&
+                    isFinite(Number(c[1])) &&
+                    Number(c[1]) >= -90 && Number(c[1]) <= 90 &&
+                    Number(c[0]) >= -180 && Number(c[0]) <= 180)
+                    .map((c) => [Number(c[1]), Number(c[0])]);
+            };
+            const plannedLegs = [];
+            const legsRes = await database_1.pool.query(`SELECT leg, distance_meters, duration_seconds, eta_seconds, polyline, engine
+         FROM ride_routes WHERE ride_id = $1 ORDER BY created_at ASC`, [id]);
+            for (const row of legsRes.rows) {
+                let coordinates = [];
+                try {
+                    const raw = Array.isArray(row.polyline)
+                        ? row.polyline
+                        : JSON.parse(row.polyline ?? '[]');
+                    coordinates = toLatLng(raw);
+                }
+                catch {
+                    coordinates = [];
+                }
+                if (coordinates.length >= 2) {
+                    plannedLegs.push({
+                        leg: row.leg,
+                        polyline: coordinates,
+                        distanceMeters: Number(row.distance_meters) || 0,
+                        durationSeconds: Number(row.duration_seconds) || 0,
+                        etaSeconds: row.eta_seconds != null ? Number(row.eta_seconds) : null,
+                        engine: row.engine ?? null,
+                    });
+                }
+            }
+            if (plannedLegs.length === 0) {
+                try {
+                    const meta = typeof ride.route_metadata === 'string'
+                        ? JSON.parse(ride.route_metadata)
+                        : ride.route_metadata;
+                    const dest = meta?.destination;
+                    if (dest?.geometry?.coordinates?.length >= 2) {
+                        plannedLegs.push({
+                            leg: 'destination',
+                            polyline: toLatLng(dest.geometry.coordinates),
+                            distanceMeters: Number(dest.distance ?? 0),
+                            durationSeconds: Number(dest.duration ?? 0),
+                            etaSeconds: null,
+                            engine: dest.engine ?? null,
+                        });
+                    }
+                }
+                catch {
+                    // malformed metadata — planned stays empty
+                }
+            }
+            let actualPoints = [];
+            try {
+                const rawTrajectory = typeof ride.trajectory === 'string'
+                    ? JSON.parse(ride.trajectory)
+                    : ride.trajectory;
+                if (Array.isArray(rawTrajectory)) {
+                    actualPoints = rawTrajectory
+                        .filter((p) => p &&
+                        isFinite(Number(p.lat)) &&
+                        isFinite(Number(p.lng)) &&
+                        Number(p.lat) >= -90 && Number(p.lat) <= 90 &&
+                        Number(p.lng) >= -180 && Number(p.lng) <= 180)
+                        .map((p) => [Number(p.lat), Number(p.lng)]);
+                }
+            }
+            catch {
+                actualPoints = [];
+            }
+            res.json({
+                ride_id: id,
+                planned: {
+                    available: plannedLegs.length > 0,
+                    legs: plannedLegs,
+                },
+                actual: {
+                    available: actualPoints.length >= 2,
+                    polyline: actualPoints,
+                    pointCount: actualPoints.length,
+                },
+            });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Get ride routes error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve ride routes.' });
+        }
+    }
+    /**
+     * Full financial picture for one ride: the settlement ledger row
+     * (financial_transactions), the rider wallet movements and the driver
+     * earnings rows (payouts RIDE_CREDIT / TIP_CREDIT). Money is returned
+     * as numbers (cents). Only the backend decides these amounts.
+     */
+    static async getRideLedger(req, res) {
+        const { id } = req.params;
+        try {
+            const [ledgerRes, walletRes, payoutsRes] = await Promise.all([
+                database_1.pool.query(`SELECT * FROM financial_transactions
+           WHERE ride_id = $1 AND type = 'RIDE_COMPLETION'`, [id]),
+                database_1.pool.query(`SELECT id, amount_cents, type, description, idempotency_key,
+                  balance_after_cents, created_at
+           FROM wallet_transactions WHERE ride_id = $1 ORDER BY created_at DESC`, [id]),
+                database_1.pool.query(`SELECT id, amount_cents, fee_cents, net_cents, status, method,
+                  requested_at, processed_at
+           FROM payouts WHERE ride_id = $1 ORDER BY requested_at DESC`, [id]),
+            ]);
+            res.json({
+                ride_id: id,
+                settlement: ledgerRes.rows[0] ?? null,
+                wallet_transactions: walletRes.rows.map((r) => ({
+                    ...r,
+                    amount_cents: Number(r.amount_cents),
+                    balance_after_cents: Number(r.balance_after_cents),
+                })),
+                payouts: payoutsRes.rows.map((r) => ({
+                    ...r,
+                    amount_cents: Number(r.amount_cents),
+                    fee_cents: Number(r.fee_cents),
+                    net_cents: Number(r.net_cents),
+                })),
+            });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Get ride ledger error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve ride ledger.' });
+        }
+    }
+    /**
+     * Driver earnings from the settlement ledger — the only source the admin
+     * UI may use for driver income. Only SETTLED rows count (a cancelled or
+     * unpaid ride contributes $0). Returns lifetime + range totals, a
+     * server-bucketed time series (UTC buckets) and paginated completed
+     * rides. All money is integer cents.
+     */
+    static async getDriverEarnings(req, res) {
+        const { id } = req.params;
+        const range = String(req.query.range ?? '90d');
+        const period = String(req.query.period ?? 'week');
+        const page = Math.max(Number(req.query.page ?? 1), 1);
+        const limit = Math.min(Math.max(Number(req.query.limit ?? 10), 1), 50);
+        const rangeDays = range === '7d' ? 7 : range === '30d' ? 30 : range === '90d' ? 90 : null;
+        const bucket = period === 'day' ? 'day' : period === 'month' ? 'month' : 'week';
+        try {
+            const rangeWhere = rangeDays
+                ? "AND completed_at >= NOW() - ($2::int * INTERVAL '1 day')"
+                : '';
+            const rangeArgs = rangeDays ? [id, String(rangeDays)] : [id];
+            const seriesSql = `SELECT
+             date_trunc($${rangeDays ? '3' : '2'}::text, completed_at) AS bucket,
+             COALESCE(SUM(driver_share_cents), 0) AS earnings_cents,
+             COALESCE(SUM(tip_cents), 0)          AS tip_cents,
+             COUNT(*)                             AS rides
+           FROM financial_transactions
+           WHERE driver_id = $1 AND status = 'SETTLED' AND type = 'RIDE_COMPLETION'
+             ${rangeWhere}
+           GROUP BY 1 ORDER BY 1 ASC`;
+            const [totalsRes, seriesRes, afterTipsRes, ridesRes, countRes] = await Promise.all([
+                database_1.pool.query(`SELECT
+             COALESCE(SUM(driver_share_cents), 0) AS earnings_cents,
+             COALESCE(SUM(tip_cents), 0)          AS tip_cents,
+             COUNT(*)                             AS rides
+           FROM financial_transactions
+           WHERE driver_id = $1 AND status = 'SETTLED' AND type = 'RIDE_COMPLETION'`, [id]),
+                database_1.pool.query(seriesSql, rangeDays ? [...rangeArgs, bucket] : rangeArgs),
+                database_1.pool.query(`SELECT COALESCE(SUM(amount_cents), 0) AS cents
+           FROM payouts
+           WHERE driver_id = $1 AND method = 'TIP_CREDIT'`, [id]),
+                database_1.pool.query(`SELECT f.ride_id AS id, f.completed_at, f.fare_cents, f.tip_cents,
+                  f.driver_share_cents, f.status,
+                  r.pickup_address, r.destination_address,
+                  u.full_name AS rider_name
+           FROM financial_transactions f
+           JOIN rides r ON r.id = f.ride_id
+           LEFT JOIN users u ON u.id = f.rider_id
+           WHERE f.driver_id = $1 AND f.status = 'SETTLED' AND f.type = 'RIDE_COMPLETION'
+           ORDER BY f.completed_at DESC
+           LIMIT $2 OFFSET $3`, [id, limit, (page - 1) * limit]),
+                database_1.pool.query(`SELECT COUNT(*) AS total
+           FROM financial_transactions
+           WHERE driver_id = $1 AND status = 'SETTLED' AND type = 'RIDE_COMPLETION'`, [id]),
+            ]);
+            const totals = totalsRes.rows[0];
+            res.json({
+                driver_id: id,
+                currency: 'USD',
+                range,
+                period: bucket,
+                dataSource: 'financial_transactions (SETTLED)',
+                lifetime: {
+                    earningsCents: Number(totals.earnings_cents),
+                    tipCents: Number(totals.tip_cents),
+                    rides: Number(totals.rides),
+                    afterTripTipCents: Number(afterTipsRes.rows[0]?.cents ?? 0),
+                },
+                series: seriesRes.rows.map((r) => ({
+                    bucket: r.bucket instanceof Date ? r.bucket.toISOString() : r.bucket,
+                    earningsCents: Number(r.earnings_cents),
+                    tipCents: Number(r.tip_cents),
+                    rides: Number(r.rides),
+                })),
+                rides: {
+                    total: Number(countRes.rows[0]?.total ?? 0),
+                    page,
+                    limit,
+                    rows: ridesRes.rows.map((r) => ({
+                        ...r,
+                        fare_cents: Number(r.fare_cents),
+                        tip_cents: Number(r.tip_cents),
+                        driver_share_cents: Number(r.driver_share_cents),
+                    })),
+                },
+            });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Get driver earnings error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve driver earnings.' });
+        }
+    }
+    /**
+     * Ledger-driven revenue analytics: platform/driver/gross totals plus a
+     * server-bucketed time series and per-ride averages. SETTLED settlements
+     * only — cancelled, unpaid or still-pending rides contribute $0 (the
+     * backend decides, never the client).
+     *
+     * range:  7d | 30d | 90d | all   (completed_at >= NOW() - range)
+     * bucket: day | week | month     (server-side date_trunc, UTC buckets —
+     *                                 the documented analytics convention;
+     *                                 the frontend formats for display)
+     * region: optional region code — filters by pickup-point geofence
+     *         (region_contains on the region center/radius).
+     */
+    static async getRevenueAnalytics(req, res) {
+        const range = String(req.query.range ?? '30d');
+        const bucket = String(req.query.bucket ?? 'day');
+        const region = String(req.query.region ?? '').trim();
+        const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : range === '30d' ? 30 : null;
+        const bucketCol = bucket === 'week' ? 'week' : bucket === 'month' ? 'month' : 'day';
+        try {
+            const joins = ['FROM financial_transactions t JOIN rides r ON r.id = t.ride_id'];
+            const where = [
+                "t.status = 'SETTLED'",
+                "t.type = 'RIDE_COMPLETION'",
+            ];
+            const params = [];
+            if (rangeDays) {
+                params.push(String(rangeDays));
+                where.push('t.completed_at >= NOW() - ($1::int * INTERVAL \'1 day\')');
+            }
+            if (region) {
+                params.push(region);
+                const n = params.length;
+                joins.push(`JOIN regions rg ON rg.code = $${n} AND rg.is_active = TRUE`);
+                where.push(`region_contains(r.pickup_lat, r.pickup_lng, rg.center_lat, rg.center_lng, rg.radius_km)`);
+            }
+            const whereSql = `WHERE ${where.join(' AND ')}`;
+            const paramMarkers = params.map((_, i) => `$${i + 1}`);
+            const [totalsRes, seriesRes] = await Promise.all([
+                database_1.pool.query(`SELECT
+             COUNT(*)                                    AS rides,
+             COALESCE(SUM(t.gross_amount_cents), 0)      AS gross_cents,
+             COALESCE(SUM(t.platform_share_cents), 0)    AS platform_cents,
+             COALESCE(SUM(t.driver_share_cents), 0)      AS driver_cents,
+             COALESCE(SUM(t.tip_cents), 0)               AS tip_cents,
+             COALESCE(SUM(t.promotion_cents), 0)         AS promotion_cents,
+             COALESCE(SUM(t.credits_cents), 0)           AS credits_cents
+           ${joins.join(' ')}
+           ${whereSql}`, params),
+                database_1.pool.query(`SELECT
+             date_trunc('${bucketCol}', t.completed_at) AS bucket,
+             COUNT(*)                                   AS rides,
+             COALESCE(SUM(t.gross_amount_cents), 0)     AS gross_cents,
+             COALESCE(SUM(t.platform_share_cents), 0)   AS platform_cents,
+             COALESCE(SUM(t.driver_share_cents), 0)     AS driver_cents,
+             COALESCE(SUM(t.tip_cents), 0)              AS tip_cents
+           ${joins.join(' ')}
+           ${whereSql}
+           GROUP BY 1 ORDER BY 1 ASC`, params),
+            ]);
+            const totals = totalsRes.rows[0];
+            const rideCount = Number(totals.rides);
+            res.json({
+                range,
+                bucket: bucketCol,
+                region: region || null,
+                timezone: 'UTC (buckets are UTC; display formatting is client-side)',
+                dataSource: 'financial_transactions (SETTLED)',
+                totals: {
+                    rides: rideCount,
+                    grossCents: Number(totals.gross_cents),
+                    platformCents: Number(totals.platform_cents),
+                    driverCents: Number(totals.driver_cents),
+                    tipCents: Number(totals.tip_cents),
+                    promotionCents: Number(totals.promotion_cents),
+                    creditsCents: Number(totals.credits_cents),
+                    avgFarePerRideCents: rideCount > 0 ? Math.round(Number(totals.gross_cents) / rideCount) : 0,
+                    avgPlatformPerRideCents: rideCount > 0 ? Math.round(Number(totals.platform_cents) / rideCount) : 0,
+                },
+                series: seriesRes.rows.map((r) => ({
+                    bucket: r.bucket instanceof Date ? r.bucket.toISOString() : r.bucket,
+                    rides: Number(r.rides),
+                    grossCents: Number(r.gross_cents),
+                    platformCents: Number(r.platform_cents),
+                    driverCents: Number(r.driver_cents),
+                    tipCents: Number(r.tip_cents),
+                })),
+            });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Get revenue analytics error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve revenue analytics.' });
+        }
+    }
+    /** List active regions (used for the analytics region filter). */
+    static async listRegions(req, res) {
+        try {
+            const res0 = await database_1.pool.query(`SELECT code, name, country_code, center_lat, center_lng, radius_km,
+                is_active, created_at
+         FROM regions ORDER BY name ASC`);
+            res.json({ regions: res0.rows });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ List regions error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to retrieve regions.' });
+        }
+    }
+    /** Create / update a region (admin-only). Validated server-side. */
+    static async upsertRegion(req, res) {
+        const { code, name, country_code, center_lat, center_lng, radius_km, is_active } = req.body ?? {};
+        try {
+            const regionCode = String(code ?? '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+            if (!regionCode || !String(name ?? '').trim()) {
+                return res.status(400).json({ error: 'code and name are required.' });
+            }
+            const lat = Number(center_lat);
+            const lng = Number(center_lng);
+            const radius = Number(radius_km ?? 25);
+            if (!isFinite(lat) || lat < -90 || lat > 90) {
+                return res.status(400).json({ error: 'center_lat must be between -90 and 90.' });
+            }
+            if (!isFinite(lng) || lng < -180 || lng > 180) {
+                return res.status(400).json({ error: 'center_lng must be between -180 and 180.' });
+            }
+            if (!isFinite(radius) || radius <= 0 || radius > 500) {
+                return res.status(400).json({ error: 'radius_km must be between 0 and 500.' });
+            }
+            await database_1.pool.query(`INSERT INTO regions (code, name, country_code, center_lat, center_lng, radius_km, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (code) DO UPDATE SET
+           name = EXCLUDED.name,
+           country_code = EXCLUDED.country_code,
+           center_lat = EXCLUDED.center_lat,
+           center_lng = EXCLUDED.center_lng,
+           radius_km = EXCLUDED.radius_km,
+           is_active = EXCLUDED.is_active,
+           updated_at = NOW()`, [regionCode, String(name).trim(), String(country_code ?? 'US').toUpperCase(), lat, lng, radius, is_active !== false]);
+            const adminId = req.user.id;
+            await audit_events_service_1.AuditEventsService.record({
+                actorId: adminId,
+                actorRole: 'ADMIN',
+                action: 'REGION_UPSERT',
+                entityType: 'REGION',
+                entityId: regionCode,
+                details: { radiusKm: radius, lat, lng, countryCode: String(country_code ?? 'US').toUpperCase() },
+            });
+            const res1 = await database_1.pool.query(`SELECT * FROM regions WHERE code = $1`, [regionCode]);
+            res.json({ region: res1.rows[0] });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Upsert region error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to save region.' });
         }
     }
     static async getLiveDrivers(req, res) {
@@ -1758,8 +2446,59 @@ class AdminController {
             res.json({ success: true });
         }
         catch (error) {
-            console.error(`[ADMIN] ❌ Delete document error: ${error.message}`);
+            console.error(`[ADMIN] �?O Delete document error: ${error.message}`);
             res.status(500).json({ error: 'Failed to delete document.' });
+        }
+    }
+    // ============================================================
+    // Ride reports (042) — post-cancellation / post-ride party reporting
+    static async listReports(req, res) {
+        try {
+            const { status, reported_role, q, limit, offset } = req.query;
+            const result = await report_service_1.ReportService.listReports({
+                status: typeof status === 'string' ? status : undefined,
+                reported_role: typeof reported_role === 'string' ? reported_role : undefined,
+                q: typeof q === 'string' ? q : undefined,
+                limit: limit ? parseInt(limit, 10) : 25,
+                offset: offset ? parseInt(offset, 10) : 0,
+            });
+            const rows = result.rows.map((row) => ({
+                ...row,
+                reason_label: (0, report_reasons_1.reportReasonLabel)(row.reported_role, row.reason_code),
+            }));
+            res.json({ total: result.total, rows });
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ List reports error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to list ride reports.' });
+        }
+    }
+    static async resolveReport(req, res) {
+        try {
+            const adminId = req.user?.id;
+            if (!adminId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const { status, action, admin_notes } = req.body ?? {};
+            if (!['IN_REVIEW', 'RESOLVED', 'DISMISSED'].includes(status)) {
+                return res.status(400).json({ error: 'Invalid resolution status.' });
+            }
+            if (status === 'DISMISSED' && action && action !== 'NO_ACTION') {
+                return res.status(400).json({ error: 'A dismissed report cannot carry a penalty action.' });
+            }
+            const report = await report_service_1.ReportService.resolveReport(req.params.id, adminId, {
+                status,
+                action: action ?? 'NO_ACTION',
+                admin_notes,
+            });
+            const withLabel = {
+                ...report,
+                reason_label: (0, report_reasons_1.reportReasonLabel)(report.reported_role, report.reason_code),
+            };
+            res.json(withLabel);
+        }
+        catch (error) {
+            console.error(`[ADMIN] ❌ Resolve report error: ${error.message}`);
+            res.status(error?.status ?? 400).json({ error: error?.message || 'Failed to resolve report.' });
         }
     }
 }

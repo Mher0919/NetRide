@@ -5,6 +5,7 @@ const database_1 = require("../../config/database");
 const email_service_1 = require("../../services/email.service");
 const env_1 = require("../../config/env");
 const card_1 = require("../../utils/card");
+const pricing_service_1 = require("../../services/pricing.service");
 class DriverService {
     static async getProfile(userId) {
         const res = await database_1.pool.query(`SELECT u.*, d.*
@@ -609,7 +610,7 @@ class DriverService {
         const driverName = driverInfo.rows[0]?.full_name ?? 'Driver';
         try {
             await email_service_1.EmailService.sendProfileChangeSubmittedEmail({ email: driverEmail, full_name: driverName }, { id: requestId, requested_changes: sanitizedChanges, card_last4: cardLast4, card_brand: cardBrand });
-            await email_service_1.EmailService.sendProfileChangeNotice({ email: env_1.env.GMAIL_USER_EMAIL || '' }, { id: userId, email: driverEmail, full_name: driverName }, { id: requestId, requested_changes: sanitizedChanges, card_last4: cardLast4, card_brand: cardBrand });
+            await email_service_1.EmailService.sendProfileChangeNotice({ email: env_1.env.ADMIN_NOTIFY_EMAIL || '' }, { id: userId, email: driverEmail, full_name: driverName }, { id: requestId, requested_changes: sanitizedChanges, card_last4: cardLast4, card_brand: cardBrand });
         }
         catch (e) {
             console.warn('[DRIVER] ⚠️ Profile change emails failed:', e.message);
@@ -658,7 +659,7 @@ class DriverService {
         // Notify admin
         try {
             const driverInfo = await database_1.pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [userId]);
-            await email_service_1.EmailService.sendPayoutCardNotice({ email: env_1.env.GMAIL_USER_EMAIL || '' }, { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' }, { id: ins.rows[0].id, brand, last4: l4 });
+            await email_service_1.EmailService.sendPayoutCardNotice({ email: env_1.env.ADMIN_NOTIFY_EMAIL || '' }, { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' }, { id: ins.rows[0].id, brand, last4: l4 });
         }
         catch (e) {
             console.warn('[DRIVER] ⚠️ Payout-card admin notice failed:', e.message);
@@ -730,7 +731,7 @@ class DriverService {
         // Admin notification
         try {
             const driverInfo = await database_1.pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [userId]);
-            await email_service_1.EmailService.sendPayoutRequestedNotice({ email: env_1.env.GMAIL_USER_EMAIL || '' }, { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' }, { id: payoutId, amount_cents: amountCents, fee_cents: fee, net_cents: net, method: 'ON_DEMAND' });
+            await email_service_1.EmailService.sendPayoutRequestedNotice({ email: env_1.env.ADMIN_NOTIFY_EMAIL || '' }, { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' }, { id: payoutId, amount_cents: amountCents, fee_cents: fee, net_cents: net, method: 'ON_DEMAND' });
         }
         catch (e) {
             console.warn('[DRIVER] ⚠️ Payout-request admin notice failed:', e.message);
@@ -993,7 +994,7 @@ class DriverService {
                     // Driver confirmation email
                     email_service_1.EmailService.sendDriverDocumentResubmittedConfirmationEmail({ email: driver.email, full_name: driver.full_name }, { document_types: docTypes });
                     // Admin notification email
-                    email_service_1.EmailService.sendAdminDocumentResubmissionNoticeEmail({ email: env_1.env.GMAIL_USER_EMAIL }, {
+                    email_service_1.EmailService.sendAdminDocumentResubmissionNoticeEmail({ email: env_1.env.ADMIN_NOTIFY_EMAIL }, {
                         id: userId,
                         full_name: driver.full_name,
                         email: driver.email,
@@ -1021,13 +1022,26 @@ class DriverService {
      * Idempotent ride-completion wallet credit. Safe to call multiple times
      * for the same ride — the unique index on payouts(ride_id) WHERE
      * method='RIDE_CREDIT' prevents double-counting.
+     *
+     * Revenue split (041): the driver receives the full tip plus their 60%
+     * driver share of the fare. The 40% platform pool is allocated to the
+     * driver's fleet partner (if assigned) with NetRide keeping the remainder —
+     * see pricing.service.ts. The per-ride allocation persisted at accept time
+     * is authoritative; a missing allocation falls back to a live computation.
      */
-    static async creditOnRideComplete(driverId, fareCents, rideId) {
-        if (!driverId || fareCents <= 0)
+    static async creditOnRideComplete(driverId, fareCents, tipCents, rideId) {
+        if (!driverId)
             return;
-        const platformFeePct = 0.10; // 10% platform fee
-        const driverNetCents = Math.round(fareCents * (1 - platformFeePct));
-        const platformFeeCents = fareCents - driverNetCents;
+        const safeFare = Math.max(0, Math.round(fareCents));
+        const safeTip = Math.max(0, Math.round(tipCents));
+        if (safeFare + safeTip <= 0)
+            return;
+        // Authoritative allocation from the price snapshot (persisted at accept);
+        // fall back to a live computation for legacy rides without one.
+        const allocation = (await (0, pricing_service_1.getRevenueAllocationForRide)(rideId)) ??
+            (await (0, pricing_service_1.computeRevenueAllocation)(safeFare, null).catch(() => null));
+        const driverShareCents = allocation ? allocation.driverShareCents : safeFare;
+        const driverNetCents = safeTip + driverShareCents;
         const client = await database_1.pool.connect();
         try {
             await client.query('BEGIN');
@@ -1038,14 +1052,51 @@ class DriverService {
              updated_at = NOW()
          WHERE driver_id = $2`, [driverNetCents, driverId]);
             await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
-         VALUES ($1, $2, $3, $1, 'PAID', 'RIDE_CREDIT', $4)
-         ON CONFLICT (ride_id) WHERE method = 'RIDE_CREDIT' DO NOTHING`, [driverNetCents, fareCents, platformFeeCents, rideId]);
-            console.log(`[WALLET] 💰 Ride ${rideId}: rider paid $${(fareCents / 100).toFixed(2)}, driver received $${(driverNetCents / 100).toFixed(2)} (90%), platform fee $${(platformFeeCents / 100).toFixed(2)} (10%)`);
+         VALUES ($1, $2, 0, $2, 'PAID', 'RIDE_CREDIT', $3)
+         ON CONFLICT (ride_id) WHERE method = 'RIDE_CREDIT' DO NOTHING`, [driverId, driverNetCents, rideId]);
+            console.log(`[WALLET] 💰 Ride ${rideId}: rider paid $${(safeFare / 100).toFixed(2)}, driver received $${(driverNetCents / 100).toFixed(2)} (fare share $${(driverShareCents / 100).toFixed(2)} + tip $${(safeTip / 100).toFixed(2)})`);
             await client.query('COMMIT');
         }
         catch (err) {
             await client.query('ROLLBACK');
             console.error(`[WALLET] ❌ creditOnRideComplete failed for driver ${driverId}:`, err.message);
+            throw err;
+        }
+        finally {
+            client.release();
+        }
+    }
+    /**
+     * Wallet credit for tips added AFTER the ride completed. The completion
+     * credit only captured the tip that existed at completion time; this
+     * credits the delta separately. Idempotent per ride: the payouts
+     * TIP_CREDIT partial unique index plus delta math prevent double-
+     * counting, so re-running the same tip request is a no-op.
+     */
+    static async creditTipAfterComplete(driverId, tipCents, rideId) {
+        if (!driverId)
+            return;
+        const safeTip = Math.max(0, Math.round(tipCents));
+        if (safeTip <= 0)
+            return;
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query(`INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`, [driverId]);
+            await client.query(`UPDATE driver_wallets
+         SET balance_cents = balance_cents + $1,
+             lifetime_earnings_cents = lifetime_earnings_cents + $1,
+             updated_at = NOW()
+         WHERE driver_id = $2`, [safeTip, driverId]);
+            await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
+         VALUES ($1, $2, 0, $2, 'PAID', 'TIP_CREDIT', $3)
+         ON CONFLICT (ride_id) WHERE method = 'TIP_CREDIT' DO NOTHING`, [driverId, safeTip, rideId]);
+            console.log(`[WALLET] 💰 Ride ${rideId}: after-trip tip of $${(safeTip / 100).toFixed(2)} credited to driver ${driverId}`);
+            await client.query('COMMIT');
+        }
+        catch (err) {
+            await client.query('ROLLBACK');
+            console.error(`[WALLET] ❌ creditTipAfterComplete failed for driver ${driverId}:`, err.message);
             throw err;
         }
         finally {

@@ -68,14 +68,19 @@ const MAX_MESSAGE_BODY = 1000;
 const RATE_LIMIT_PER_MINUTE = 30;
 const RATE_WINDOW_MS = 60 * 1000;
 const SOCKET_RATE_LIMIT_LUA = `
-local cutoff = tonumber(ARGV[3]) - tonumber(ARGV[2])
-redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", cutoff)
+local limit_amt   = tonumber(ARGV[1])
+local window_ms   = tonumber(ARGV[2])
+local now_ms      = tonumber(ARGV[3])
+local member_val  = ARGV[4]
+local cutoff_ms   = now_ms - window_ms
+
+redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", cutoff_ms)
 local count = redis.call("ZCARD", KEYS[1])
-if count >= tonumber(ARGV[1]) then
+if count >= limit_amt then
   return {0, count}
 end
-redis.call("ZADD", KEYS[1], ARGV[3], ARGV[4])
-redis.call("PEXPIRE", KEYS[1], tonumber(ARGV[2]))
+redis.call("ZADD", KEYS[1], now_ms, member_val)
+redis.call("PEXPIRE", KEYS[1], window_ms)
 return {1, count + 1}
 `;
 async function consumeRateBudget(key) {
@@ -272,6 +277,48 @@ function setupSocketGateway(io) {
                 if (validated.data.lat && validated.data.lng) {
                     const gh = await locations_service_1.LocationsService.updateDriverLocation(id, { lat: validated.data.lat, lng: validated.data.lng });
                     updateDriverGeohashRoom(socket, gh);
+                    // When a driver comes online, check for any pending REQUESTED
+                    // rides nearby and trigger re-matching. The dispatch engine
+                    // will find this driver naturally via GEORADIUS once the
+                    // matchRide job runs.
+                    try {
+                        const result = await database_1.pool.query(`
+              SELECT id, pickup_lat, pickup_lng, rider_id
+              FROM rides
+              WHERE status = 'REQUESTED'
+                AND driver_id IS NULL
+                AND pickup_lat IS NOT NULL
+                AND pickup_lng IS NOT NULL
+                AND created_at > NOW() - INTERVAL '10 minutes'
+              ORDER BY created_at ASC
+              LIMIT 5
+            `);
+                        if (result.rows.length > 0) {
+                            if (env_1.env.LEGACY_SYNC_MATCHING) {
+                                const { matchingService } = await Promise.resolve().then(() => __importStar(require('../services/matching.service')));
+                                for (const row of result.rows) {
+                                    matchingService.findAndDispatch(io, row.id, Number(row.pickup_lat), Number(row.pickup_lng), row.rider_id).catch((err) => console.error(`[SOCKET] In-process re-match failed for ${row.id}: ${err.message}`));
+                                    console.log(`[SOCKET] 🔄 Re-triggered matching for pending ride ${row.id} after driver ${id} came online`);
+                                }
+                            }
+                            else {
+                                const { matchQueue } = await Promise.resolve().then(() => __importStar(require('../queue/queue')));
+                                for (const row of result.rows) {
+                                    await matchQueue.add('matchRide', {
+                                        tripId: row.id,
+                                        pickupLat: Number(row.pickup_lat),
+                                        pickupLng: Number(row.pickup_lng),
+                                        riderId: row.rider_id,
+                                        retryCount: 0,
+                                    });
+                                    console.log(`[SOCKET] 🔄 Re-triggered matching for pending ride ${row.id} after driver ${id} came online`);
+                                }
+                            }
+                        }
+                    }
+                    catch (err) {
+                        console.error(`[SOCKET] ❌ Failed to check pending rides on goOnline: ${err.message}`);
+                    }
                 }
             });
             socket.on('goOffline', async () => {
@@ -279,6 +326,24 @@ function setupSocketGateway(io) {
                 socket.isOnline = false;
                 leaveGeohashRoom(socket);
                 await locations_service_1.LocationsService.removeDriverLocation(id);
+            });
+            socket.on('getCurrentTrip', async () => {
+                try {
+                    // Reconnect resync (driver side): after a socket blip the app
+                    // re-asks for the authoritative active trip so an accepted trip
+                    // is never lost to a stale local state.
+                    const currentTrip = await ride_service_1.RideService.getCurrentRide(id, types_1.UserRole.DRIVER);
+                    console.log(`[SOCKET] getCurrentTrip for driver ${id}: ${currentTrip?.id ?? 'none'}`);
+                    if (currentTrip) {
+                        socket.emit('tripUpdate', currentTrip);
+                    }
+                    else {
+                        socket.emit('currentTripNone');
+                    }
+                }
+                catch (err) {
+                    console.error(`[SOCKET] getCurrentTrip failed: ${err.message}`);
+                }
             });
             socket.on('updateLocation', async (loc) => {
                 const validated = (0, socket_validation_1.validate)(socket_validation_1.UpdateLocationSchema, loc, socket, 'updateLocation');
@@ -370,19 +435,18 @@ function setupSocketGateway(io) {
                     return;
                 console.log(`[SOCKET] Driver ${id} accepts trip: ${tripId}${offerId ? ` (offer=${offerId})` : ''}`);
                 try {
-                    if (offerId) {
-                        const { DriverOfferService } = await Promise.resolve().then(() => __importStar(require('../services/driver-offer.service')));
-                        const accepted = await DriverOfferService.acceptOffer(offerId);
-                        if (!accepted) {
-                            socket.emit('error', 'This ride offer is no longer valid. It may have expired or been cancelled.');
-                            return;
-                        }
-                    }
+                    // Single source of truth: RideService.acceptTrip validates the
+                    // offer (SENT + belongs to this driver), atomically accepts it,
+                    // and assigns the trip. The offer MUST NOT be accepted here first:
+                    // RideService re-validates the offer status and would reject an
+                    // already-ACCEPTED offer with "Offer is in state ACCEPTED...",
+                    // failing every legitimate accept. On failure the driver app
+                    // rolls back its optimistic state via the acceptTripFailed event.
                     await ride_service_1.RideService.acceptTrip(tripId, id);
                 }
                 catch (err) {
                     console.error(`[SOCKET] Accept trip failed: ${err.message}`);
-                    socket.emit('error', err.message);
+                    socket.emit('acceptTripFailed', err.message);
                 }
             });
             socket.on('declineTrip', async (payload) => {
@@ -409,34 +473,49 @@ function setupSocketGateway(io) {
                     const { RideRepository } = await Promise.resolve().then(() => __importStar(require('../modules/ride/ride.repository')));
                     const trip = await RideRepository.findById(tripId);
                     if (trip && trip.status === 'REQUESTED') {
-                        const { matchQueue } = await Promise.resolve().then(() => __importStar(require('../queue/queue')));
-                        await matchQueue.add('matchRide', {
-                            tripId,
-                            pickupLat: trip.pickup?.lat ?? 0,
-                            pickupLng: trip.pickup?.lng ?? 0,
-                            riderId: trip.rider_id,
-                            retryCount: 0,
-                        });
+                        if (env_1.env.LEGACY_SYNC_MATCHING) {
+                            const { matchingService } = await Promise.resolve().then(() => __importStar(require('../services/matching.service')));
+                            matchingService.findAndDispatch(io, tripId, trip.pickup?.lat ?? 0, trip.pickup?.lng ?? 0, trip.rider_id).catch((err) => console.error(`[SOCKET] In-process re-match failed for ${tripId}: ${err.message}`));
+                        }
+                        else {
+                            const { matchQueue } = await Promise.resolve().then(() => __importStar(require('../queue/queue')));
+                            await matchQueue.add('matchRide', {
+                                tripId,
+                                pickupLat: trip.pickup?.lat ?? 0,
+                                pickupLng: trip.pickup?.lng ?? 0,
+                                riderId: trip.rider_id,
+                                retryCount: 0,
+                            });
+                        }
                     }
                 }
                 catch (err) {
                     console.error(`[SOCKET] Decline trip failed: ${err.message}`);
                 }
             });
-            socket.on('cancelTrip', async (tripId) => {
-                const validated = (0, socket_validation_1.validate)(socket_validation_1.CancelTripSchema, tripId, socket, 'cancelTrip');
+            socket.on('cancelTrip', async (payload) => {
+                const validated = (0, socket_validation_1.validate)(socket_validation_1.CancelTripSchema, payload, socket, 'cancelTrip');
                 if (!validated.success || !validated.data)
                     return;
-                console.log(`[SOCKET] Trip cancellation from driver ${id} for trip: ${validated.data}`);
+                const tripId = typeof validated.data === 'string' ? validated.data : validated.data.tripId;
+                const cancelOpts = typeof validated.data === 'string'
+                    ? {}
+                    : {
+                        reasonCode: validated.data.reasonCode,
+                        reasonText: validated.data.reasonText,
+                    };
+                console.log(`[SOCKET] Trip cancellation from driver ${id} for trip: ${tripId}`);
                 try {
                     // Release any active offers and clean up
                     const { DriverOfferService } = await Promise.resolve().then(() => __importStar(require('../services/driver-offer.service')));
                     await DriverOfferService.releaseDriver(id);
-                    await ride_service_1.RideService.cancelTrip(validated.data, id);
+                    await ride_service_1.RideService.cancelTrip(tripId, id, cancelOpts);
                 }
                 catch (err) {
                     console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
-                    socket.emit('error', 'Unable to cancel trip. Please try again.');
+                    // Dedicated event so the client can distinguish a REJECTED
+                    // cancellation from a generic socket error (spec §60).
+                    socket.emit('cancelTripFailed', { message: err.message });
                 }
             });
             socket.on('pickUpRider', async (tripId) => {
@@ -594,7 +673,12 @@ function setupSocketGateway(io) {
                 const validated = (0, socket_validation_1.validate)(socket_validation_1.SendMessageSchema, data, socket, 'sendMessage');
                 if (!validated.success || !validated.data)
                     return;
-                await relayChatMessage(io, socket, 'driver', validated.data, { id, role: 'driver' });
+                // relayChatMessage needs the role of the OTHER party: a driver's
+                // counterpart is the rider. Passing 'driver' here emitted the
+                // message back into the driver's OWN room — the sender's app
+                // showed the message twice (optimistic copy + echoed copy) while
+                // the rider never got a live socket delivery.
+                await relayChatMessage(io, socket, 'rider', validated.data, { id, role: 'driver' });
             });
             /**
              * Manual reroute request from the driver app. The driver sends
@@ -739,13 +823,32 @@ function setupSocketGateway(io) {
                 }
                 catch (err) { }
             });
+            socket.on('getCurrentTrip', async () => {
+                try {
+                    // Reconnect resync: after a socket blip, apps ask for the
+                    // authoritative trip (if any) instead of staying stuck in a
+                    // stale local state (e.g. rider stuck on "searching" after a
+                    // missed ACCEPTED tripUpdate).
+                    const currentTrip = await ride_service_1.RideService.getCurrentRide(id, types_1.UserRole.RIDER);
+                    console.log(`[SOCKET] getCurrentTrip for rider ${id}: ${currentTrip?.id ?? 'none'}`);
+                    if (currentTrip) {
+                        socket.emit('tripUpdate', currentTrip);
+                    }
+                    else {
+                        socket.emit('currentTripNone');
+                    }
+                }
+                catch (err) {
+                    console.error(`[SOCKET] getCurrentTrip failed: ${err.message}`);
+                }
+            });
             socket.on('requestRide', async (data) => {
                 const validated = (0, socket_validation_1.validate)(socket_validation_1.RequestRideSchema, data, socket, 'requestRide');
                 if (!validated.success || !validated.data)
                     return;
-                console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address} favorite=${!!validated.data.favoritePriority}`);
+                console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address} favorite=${!!validated.data.favoritePriority} special=${validated.data.specialRedemptionId ?? 'none'}`);
                 try {
-                    const trip = await ride_service_1.RideService.requestRide(id, data.pickup, data.destination, undefined, false, data.idempotencyKey, { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents }, validated.data.favoritePriority);
+                    const trip = await ride_service_1.RideService.requestRide(id, data.pickup, data.destination, undefined, false, data.idempotencyKey, { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents, specialRedemptionId: data.specialRedemptionId }, validated.data.favoritePriority);
                     socket.emit('tripUpdate', trip);
                     // Demand heatmap signal: a REAL ride request — the strongest
                     // demand marker on the platform.
@@ -762,11 +865,18 @@ function setupSocketGateway(io) {
                     socket.emit('error', err.message);
                 }
             });
-            socket.on('cancelTrip', async (tripId) => {
-                const validated = (0, socket_validation_1.validate)(socket_validation_1.CancelTripSchema, tripId, socket, 'cancelTrip');
+            socket.on('cancelTrip', async (payload) => {
+                const validated = (0, socket_validation_1.validate)(socket_validation_1.CancelTripSchema, payload, socket, 'cancelTrip');
                 if (!validated.success || !validated.data)
                     return;
-                console.log(`[SOCKET] Trip cancellation from rider ${id} for trip: ${validated.data}`);
+                const tripId = typeof validated.data === 'string' ? validated.data : validated.data.tripId;
+                const cancelOpts = typeof validated.data === 'string'
+                    ? {}
+                    : {
+                        reasonCode: validated.data.reasonCode,
+                        reasonText: validated.data.reasonText,
+                    };
+                console.log(`[SOCKET] Trip cancellation from rider ${id} for trip: ${tripId}`);
                 try {
                     // Clean up any active driver offer before cancelling
                     const { DriverOfferService } = await Promise.resolve().then(() => __importStar(require('../services/driver-offer.service')));
@@ -774,11 +884,13 @@ function setupSocketGateway(io) {
                     if (releasedDriver) {
                         console.log(`[SOCKET] Released driver ${releasedDriver} from cancelled ride ${tripId}`);
                     }
-                    await ride_service_1.RideService.cancelTrip(tripId, id);
+                    await ride_service_1.RideService.cancelTrip(tripId, id, cancelOpts);
                 }
                 catch (err) {
                     console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
-                    socket.emit('error', 'Unable to cancel trip. Please try again.');
+                    // Dedicated event so the client can distinguish a REJECTED
+                    // cancellation from a generic socket error (spec §60).
+                    socket.emit('cancelTripFailed', { message: err.message });
                 }
             });
             socket.on('sendMessage', async (data) => {

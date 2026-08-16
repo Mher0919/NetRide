@@ -616,6 +616,15 @@ trajectoryEvents.on('point', (payload) => {
 logger.info('[SAFETY] SpeedingDetector subscribed to trajectory events');
 
 const PORT = process.env.PORT || 3000;
+
+/**
+ * Boot the HTTP/Socket.IO listener and all background jobs. Deliberately
+ * NOT executed at module load: worker processes (matchWorker, cronWorker)
+ * import this module via `io` and must never bind the port — an accidental
+ * second `listen` is exactly what produced `EADDRINUSE` and crashed a
+ * deployment when a job module pulled in ride.service → app.ts.
+ */
+export function startServer(): void {
 httpServer.listen(Number(PORT), '0.0.0.0', async () => {
   await runMigrations();
   logger.info({ port: Number(PORT), env: env.NODE_ENV }, 'server_listening');
@@ -736,5 +745,12 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
     }, 60 * 1000);
   });
 });
+}
+
+// Only the process that literally starts `node dist/app.js` binds the port.
+// Every other consumer (workers importing `io`) stays listener-free.
+if (require.main === module) {
+  startServer();
+}
 
 export { io };
