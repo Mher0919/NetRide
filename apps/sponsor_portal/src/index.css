@@ -1,0 +1,11 @@
+:root {
+  font-family: 'Inter', 'Plus Jakarta Sans', 'Roboto', sans-serif;
+  line-height: 1.5;
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #f4f7f6;
+}

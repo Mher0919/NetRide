@@ -34,6 +34,7 @@ import TagIcon from '@mui/icons-material/LocalOffer';
 import ShareIcon from '@mui/icons-material/Share';
 import StarsIcon from '@mui/icons-material/Stars';
 import GroupsIcon from '@mui/icons-material/Groups';
+import StorefrontIcon from '@mui/icons-material/Storefront';
 import PriceChangeIcon from '@mui/icons-material/PriceChange';
 import PaidIcon from '@mui/icons-material/Paid';
 import FlagIcon from '@mui/icons-material/Flag';
@@ -114,6 +115,7 @@ const MainLayout: React.FC = () => {
     { text: 'Referrals', icon: <ShareIcon />, path: '/referrals' },
     { text: 'Ride Credits', icon: <StarsIcon />, path: '/credits' },
     { text: 'Fleet Partners', icon: <GroupsIcon />, path: '/fleets' },
+    { text: 'Sponsors', icon: <StorefrontIcon />, path: '/sponsors' },
     { text: 'Pricing', icon: <PriceChangeIcon />, path: '/pricing' },
     { text: 'Revenue', icon: <PaidIcon />, path: '/revenue' },
     { text: 'Reports', icon: <FlagIcon />, path: '/reports' },

@@ -25,6 +25,7 @@ require('./src/modules/notifications/__tests__/notifications.unit.test.ts');
 require('./src/services/__tests__/pricing.unit.test.ts');
 require('./src/services/__tests__/financial-ledger.unit.test.ts');
 require('./src/modules/reporting/__tests__/report-reasons.unit.test.ts');
+require('./src/modules/sponsor/__tests__/sponsor-discount.unit.test.ts');
 
 // ioredis keeps the event loop alive while retrying a dead host; force a
 // clean exit once the test run finishes.

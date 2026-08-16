@@ -921,11 +921,11 @@ export function setupSocketGateway(io: Server) {
         }
       });
 
-      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; favoritePriority?: boolean; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean; creditUseCents?: number }) => {
+      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; favoritePriority?: boolean; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean; creditUseCents?: number; specialRedemptionId?: string }) => {
         const validated = validate(RequestRideSchema, data, socket, 'requestRide');
         if (!validated.success || !validated.data) return;
         
-        console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address} favorite=${!!validated.data.favoritePriority}`);
+        console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address} favorite=${!!validated.data.favoritePriority} special=${validated.data.specialRedemptionId ?? 'none'}`);
         try {
           const trip = await RideService.requestRide(
             id, 
@@ -934,7 +934,7 @@ export function setupSocketGateway(io: Server) {
             undefined,
             false,
             data.idempotencyKey,
-            { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents },
+            { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents, specialRedemptionId: data.specialRedemptionId },
             validated.data.favoritePriority
           );
           socket.emit('tripUpdate', trip);

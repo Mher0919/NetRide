@@ -43,6 +43,10 @@ import pushRoutes from './modules/push/push.routes';
 import placesRoutes from './modules/places/places.routes';
 import notificationsRoutes from './modules/notifications/notifications.routes';
 import heatmapRoutes from './modules/heatmap/heatmap.routes';
+import specialsRoutes from './modules/sponsor/specials.routes';
+import sponsorPortalRoutes from './modules/sponsor/sponsor-portal.routes';
+import adminSponsorRoutes from './modules/sponsor/admin-sponsor.routes';
+import { SpecialRedemptionService } from './modules/sponsor/special-redemption.service';
 import { GeospatialService } from './modules/geospatial/geospatial.service';
 import { UploadService } from './services/upload.service';
 import { SpeedingDetector } from './services/speeding_detector';
@@ -184,6 +188,9 @@ app.use('/api/push', pushRoutes);
 app.use('/api/places', placesRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/heatmap', heatmapRoutes);
+app.use('/api', specialsRoutes);
+app.use('/api', sponsorPortalRoutes);
+app.use('/api/admin', adminSponsorRoutes);
 app.post('/api/upload', UploadService.upload);
 
 // Global Error Handler
@@ -657,6 +664,14 @@ httpServer.listen(Number(PORT), '0.0.0.0', async () => {
     // Initial run
     CleanupService.performMaintenance();
   });
+
+  // Special redemption hygiene (Every 5 minutes): expire stale validation
+  // codes and release the reserved budget (spec §28/§69).
+  setInterval(() => {
+    SpecialRedemptionService.expireStaleRedemptions()
+      .then((n) => { if (n > 0) logger.info({ expired: n }, 'cron_special_redemptions_expired'); })
+      .catch((err: any) => logger.error({ err: err.message }, 'cron_special_redemptions_error'));
+  }, 5 * 60 * 1000);
 
   // Scheduled Rides Job (Every 1 minute)
   import('./services/scheduler.service').then(({ SchedulerService }) => {

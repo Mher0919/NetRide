@@ -22,7 +22,8 @@ export type WalletTxType =
   | 'ADMIN_GRANT'
   | 'RIDE_PAYMENT'
   | 'RIDE_REFUND'
-  | 'ADJUSTMENT';
+  | 'ADJUSTMENT'
+  | 'SPONSOR_REWARD';
 
 export interface WalletAccount {
   user_id: string;

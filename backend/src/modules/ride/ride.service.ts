@@ -22,6 +22,7 @@ import { traceAsync, getCurrentTraceId } from '../../utils/tracing';
 import { RewardEngine } from '../../services/reward-engine.service';
 import { WalletService } from '../wallet/wallet.service';
 import { FinancialLedgerService, centsValue } from '../../services/financial-ledger.service';
+import { SpecialRedemptionService } from '../sponsor/special-redemption.service';
 import {
   notifyRideAccepted,
   notifyRideStarted,
@@ -39,6 +40,35 @@ async function fetchDisplayName(userId: string): Promise<string> {
   } catch {
     return 'Your driver';
   }
+}
+
+// Star penalty (out of 5) applied when a driver cancels AFTER accepting a
+// ride but BEFORE picking the rider up. Applies to every driver-initiated
+// pre-pickup cancellation regardless of the reason given. The penalty is a
+// direct decrement of the driver's rating (both users + drivers mirrors),
+// clamped at the 1.0 floor — it is not a rider review and never touches
+// the ratings table or the review-based moving average.
+const DRIVER_PRE_PICKUP_CANCEL_STAR_PENALTY = 0.3;
+
+function applyDriverPrePickupCancelPenalty(userId: string): void {
+  pool
+    .query(
+      `UPDATE users
+          SET rating = GREATEST(1.0, ROUND((rating - $1)::numeric, 2))
+        WHERE id = $2`,
+      [DRIVER_PRE_PICKUP_CANCEL_STAR_PENALTY, userId],
+    )
+    .then(() =>
+      pool.query(
+        `UPDATE drivers
+            SET rating = GREATEST(1.0, ROUND((rating - $1)::numeric, 2))
+          WHERE user_id = $2`,
+        [DRIVER_PRE_PICKUP_CANCEL_STAR_PENALTY, userId],
+      ),
+    )
+    .catch((err: any) =>
+      console.error(`[RIDE] ⚠️ Failed to apply driver pre-pickup cancel star penalty: ${err.message}`),
+    );
 }
 
 export class RideService {
@@ -141,7 +171,7 @@ export class RideService {
     scheduledAt?: Date,
     isScheduled: boolean = false,
     idempotencyKey?: string,
-    rewards: { promoCode?: string; applyCredits?: boolean; creditUseCents?: number } = {},
+    rewards: { promoCode?: string; applyCredits?: boolean; creditUseCents?: number; specialRedemptionId?: string } = {},
     favoritePriority: boolean = false
   ): Promise<Trip> {
     return traceAsync('RideService.requestRide', async () => {
@@ -228,6 +258,18 @@ export class RideService {
           applyCredits: rewards.applyCredits,
           creditUseCents: rewards.creditUseCents,
         });
+
+        // Sponsorship/SPECIALS: attach the redemption + snapshot the discount
+        // INSIDE this transaction. Throws abort the whole request (invalid/
+        // unavailable special → no ride created).
+        if (rewards.specialRedemptionId) {
+          await SpecialRedemptionService.attachToRideRequest(client, {
+            riderId,
+            rideId: tripId,
+            fareCents: Math.round(breakdown.totalFare * 100),
+            specialRedemptionId: rewards.specialRedemptionId,
+          });
+        }
 
         await client.query('COMMIT');
       } catch (err) {
@@ -720,7 +762,7 @@ export class RideService {
         );
       }
 
-      // Rewards ecosystem: finalize promo usage + partner commission and
+// Rewards ecosystem: finalize promo usage + partner commission and
       // grant any referral rewards. Non-blocking — must never block the
       // trip end. Fully idempotent (unique guards on every table).
       RewardEngine.onRideCompleted({
@@ -730,6 +772,12 @@ export class RideService {
         fare_amount: (updatedTrip as any).fare_amount ?? null,
         status: 'COMPLETED',
       }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCompleted failed: ${err.message}`));
+
+      // Sponsorship/SPECIALS: the completed special ride now issues the
+      // one-time validation code (hash-only, TTL). Non-blocking + idempotent;
+      // no-op for regular rides (no redemption attached).
+      SpecialRedemptionService.onRideCompleted(tripId, updatedTrip.rider_id)
+        .catch((err: any) => console.error(`[RIDE] ⚠️ SpecialRedemptionService.onRideCompleted failed: ${err.message}`));
     }
 
     io.to(`rider:${updatedTrip.rider_id}`).emit('tripUpdate', updatedTrip);
@@ -777,29 +825,38 @@ export class RideService {
     }
 
     // Cancellation is allowed while searching (REQUESTED), before pickup
-    // (ACCEPTED), and DURING the ride (IN_PROGRESS — the rider may change
-    // their mind mid-trip and the trip dissolves without a charge since
-    // payment only settles at completion). Only COMPLETED rides are final.
+    // (ACCEPTED / DRIVER_ARRIVING), and DURING the ride (IN_PROGRESS — the
+    // rider may change their mind mid-trip and the trip dissolves without
+    // a charge since payment only settles at completion). Only COMPLETED
+    // rides are final.
     if (trip.status !== 'REQUESTED' &&
         trip.status !== 'ACCEPTED' &&
+        trip.status !== 'DRIVER_ARRIVING' &&
         trip.status !== 'IN_PROGRESS') {
       throw new Error('Cannot cancel a ride that is already completed');
     }
 
-    // Required cancellation reasons (042): an ACCEPTED or IN_PROGRESS ride
-    // may only be dissolved by a human party with a reason code. System
-    // timeouts and searching-phase cancels (REQUESTED) stay reason-free.
-    if ((trip.status === 'ACCEPTED' || trip.status === 'IN_PROGRESS') && !opts.reasonCode) {
+    // Required cancellation reasons (042): an ACCEPTED/DRIVER_ARRIVING or
+    // IN_PROGRESS ride may only be dissolved by a human party with a reason
+    // code. System timeouts and searching-phase cancels (REQUESTED) stay
+    // reason-free.
+    if ((trip.status === 'ACCEPTED' || trip.status === 'DRIVER_ARRIVING' || trip.status === 'IN_PROGRESS') && !opts.reasonCode) {
       throw new Error('Please select a reason for cancelling this ride.');
     }
 
-    // Accepted-ride cancellation by the DRIVER is a terminal cancellation
-    // (not a "release + re-match"): per the harness spec, accepted → cancelled
-    // counts as an accepted-ride cancellation, both parties see the terminal
-    // state, and both may report each other afterwards. The driver stays on
-    // the ride row so history + reporting work.
-    const isDriverCancelledAcceptedRide =
-      userId === trip.driver_id && trip.status === 'ACCEPTED';
+    // Driver cancelling AFTER accepting but BEFORE picking the rider up is
+    // NOT a terminal cancellation: the SAME ride (same fare quote, promo +
+    // credits untouched) is released back to the pool and re-dispatched, and
+    // the rider gets an apology. The driver still earns a star penalty +
+    // the accepted-cancellation counter, reason or no reason.
+    const isDriverPrePickupCancel =
+      userId === trip.driver_id &&
+      (trip.status === TripStatus.ACCEPTED || trip.status === TripStatus.DRIVER_ARRIVING);
+
+    // Accepted-ride cancellation by the DRIVER mid-trip (IN_PROGRESS) is a
+    // terminal cancellation (not a "release + re-match"): both parties see
+    // the terminal state, and both may report each other afterwards. The
+    // driver stays on the ride row so history + reporting work.
 
     // Audit trail: who initiated the cancel and why. Null for system
     // cancels (cleanup/timeouts), which never pass through here.
@@ -813,7 +870,11 @@ export class RideService {
     // If driver was assigned, cleanup trajectory
     if (trip.driver_id) {
       const trajectory = await LocationsService.getTrajectory(tripId);
-      if (trajectory.length > 0) {
+      // For a pre-pickup release the partial approach trajectory of the
+      // departing driver is discarded — the ride will be driven fresh by
+      // the next driver, and this GPS data must never leak into the final
+      // ride's "actual route" (admin maps).
+      if (trajectory.length > 0 && !isDriverPrePickupCancel) {
         extra.trajectory = JSON.stringify(trajectory);
       }
       await redis.del(`driver:${trip.driver_id}:active_trip`);
@@ -827,6 +888,111 @@ export class RideService {
     if (trip.status === TripStatus.REQUESTED) {
       const { DriverOfferService } = await import('../../services/driver-offer.service');
       await DriverOfferService.cancelRideOffers(tripId);
+    }
+
+    // ------------------------------------------------------------------
+    // DRIVER PRE-PICKUP CANCEL → release + re-match the same ride
+    // ------------------------------------------------------------------
+    if (isDriverPrePickupCancel) {
+      const releaseRes = await pool.query(
+        `UPDATE rides
+            SET status = $3,
+                driver_id = NULL,
+                cancelled_at = NULL,
+                cancelled_by = NULL,
+                cancellation_reason_code = NULL,
+                cancellation_reason_text = NULL
+          WHERE id = $1 AND driver_id = $2 AND status IN ($4, $5)
+          RETURNING id`,
+        [
+          tripId,
+          userId,
+          TripStatus.REQUESTED,
+          TripStatus.ACCEPTED,
+          TripStatus.DRIVER_ARRIVING,
+        ],
+      );
+
+      if ((releaseRes.rowCount ?? 0) === 0) {
+        // The ride already flipped (duplicate emit, or another actor took
+        // it over) — answer with the latest authoritative state. No second
+        // penalty, no state clobber.
+        const latest = await RideRepository.findById(tripId);
+        return latest ?? trip;
+      }
+
+      // Star penalty + accepted-cancellation counter for every driver
+      // pre-pickup cancel, reason given or not.
+      applyDriverPrePickupCancelPenalty(userId);
+      pool
+        .query(
+          `UPDATE drivers
+              SET cancellation_count = COALESCE(cancellation_count, 0) + 1,
+                  last_cancellation_at = NOW()
+            WHERE user_id = $1`,
+          [userId],
+        )
+        .catch((err: any) =>
+          console.error(`[RIDE] ⚠️ Failed to increment driver cancellation counter: ${err.message}`)
+        );
+
+      const rematchedTrip = await RideRepository.findById(tripId);
+      if (!rematchedTrip) throw new Error('Failed to load released trip');
+
+      // Safety + navigation teardown for the departing driver.
+      await SpeedingDetector.finalizeTrip(userId, tripId);
+      NavigationService.emitEnded(io, tripId, userId, trip.rider_id);
+
+      // The cancelling driver sees THEIR OWN terminal cancel (who + why) so
+      // their app settles the confirmation and returns home — never the
+      // re-queued REQUESTED state of the ride they abandoned.
+      io.to(`driver:${userId}`).emit('tripUpdate', {
+        ...rematchedTrip,
+        rider_id: trip.rider_id,
+        status: TripStatus.CANCELLED,
+        cancelled_by: userId,
+        cancelled_at: new Date(),
+        cancellation_reason_code: opts.reasonCode ?? null,
+        cancellation_reason_text: (opts.reasonText ?? '').trim().slice(0, 300) || null,
+      });
+
+      // Rider: authoritative REQUESTED state (same ride, same fare quote,
+      // same promo + credits — nothing was recreated) + the apology notice.
+      // The rider app pops the apology over the re-activated "finding your
+      // driver" sheet; no re-request is needed.
+      io.to(`rider:${trip.rider_id}`).emit('tripUpdate', rematchedTrip);
+      io.to(`rider:${trip.rider_id}`).emit('tripDriverCancelled', {
+        tripId,
+        trip: rematchedTrip,
+        reasonCode: opts.reasonCode ?? null,
+        reasonText: (opts.reasonText ?? '').trim().slice(0, 300) || null,
+      });
+      io.to('monitoring:all_rides').emit('tripUpdate', rematchedTrip);
+
+      // Re-dispatch the SAME ride id through the regular pipeline.
+      const pickup = rematchedTrip.pickup;
+      if (env.LEGACY_SYNC_MATCHING) {
+        import('../../services/matching.service').then(({ matchingService }) => {
+          matchingService
+            .findAndDispatch(io, tripId, pickup.lat, pickup.lng, trip.rider_id, false)
+            .catch((err: any) =>
+              console.error(`[RIDE] Re-dispatch after driver pre-pickup cancel failed: ${err.message}`)
+            );
+        });
+      } else {
+        matchQueue
+          .add('matchRide', {
+            tripId,
+            pickupLat: pickup.lat,
+            pickupLng: pickup.lng,
+            riderId: trip.rider_id,
+            favoritePriority: false,
+          })
+          .catch((err) => console.error('[RIDE] Failed to enqueue re-match job:', err.message));
+        matchJobsTotal.inc({ outcome: 'enqueued' });
+      }
+
+      return rematchedTrip;
     }
 
     // Atomic transition: the WHERE guard means a concurrent ACCEPT that
@@ -862,22 +1028,6 @@ export class RideService {
     const updatedTrip = await RideRepository.findById(tripId);
     if (!updatedTrip) throw new Error('Failed to load cancelled trip');
 
-    // Accepted-ride cancellation counters (spec §25: only accepted → cancelled
-    // counts as an accepted-ride cancellation; declines/searching cancels don't).
-    if (isDriverCancelledAcceptedRide) {
-      pool
-        .query(
-          `UPDATE drivers
-              SET cancellation_count = COALESCE(cancellation_count, 0) + 1,
-                  last_cancellation_at = NOW()
-            WHERE user_id = $1`,
-          [userId],
-        )
-        .catch((err: any) =>
-          console.error(`[RIDE] ⚠️ Failed to increment driver cancellation counter: ${err.message}`)
-        );
-    }
-
     // Rewards ecosystem: void promo usage + refund applied credits.
     RewardEngine.onRideCancelled({
       id: tripId,
@@ -886,6 +1036,14 @@ export class RideService {
       fare_amount: (trip as any).fare_amount ?? null,
       status: 'CANCELLED',
     }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCancelled failed: ${err.message}`));
+
+    // Sponsorship/SPECIALS: a TERMINAL cancellation voids any attached
+    // redemption AND releases the reserved budget (spec §69 — a cancelled
+    // ride never consumes sponsor funding). No-op for regular rides and for
+    // driver pre-pickup rematches (the ride keeps REQUESTED and the special
+    // stays intact for the next driver).
+    SpecialRedemptionService.onRideCancelled(tripId)
+      .catch((err: any) => console.error(`[RIDE] ⚠️ SpecialRedemptionService.onRideCancelled failed: ${err.message}`));
 
     // Safety + navigation teardown on cancel.
     if (trip.driver_id) {

@@ -1,0 +1,133 @@
+import React from 'react';
+import {
+  Box,
+  Drawer,
+  AppBar,
+  Toolbar,
+  List,
+  Typography,
+  Divider,
+  IconButton,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Avatar,
+  Menu,
+  MenuItem,
+} from '@mui/material';
+import StorefrontIcon from '@mui/icons-material/Storefront';
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import ValidationIcon from '@mui/icons-material/VerifiedUser';
+import CustomersIcon from '@mui/icons-material/People';
+import SettingsIcon from '@mui/icons-material/Settings';
+import LogoutIcon from '@mui/icons-material/Logout';
+import { useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+const drawerWidth = 240;
+
+const MainLayout: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { session, logout } = useAuth();
+  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+
+  const menuItems = [
+    { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
+    { text: 'Validations', icon: <ValidationIcon />, path: '/validations' },
+    { text: 'Customers', icon: <CustomersIcon />, path: '/customers' },
+    { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
+  ];
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  return (
+    <Box sx={{ display: 'flex' }}>
+      <AppBar
+        position="fixed"
+        sx={{ zIndex: (theme) => theme.zIndex.drawer + 1, boxShadow: 'none', backgroundColor: 'rgba(255, 255, 255, 0.9)', borderBottom: '1px solid rgba(0, 0, 0, 0.06)' }}
+      >
+        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 2, sm: 4 } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ width: 36, height: 36, bgcolor: 'primary.main', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', mr: 2 }}>
+              <StorefrontIcon sx={{ color: 'white', fontSize: 20 }} />
+            </Box>
+            <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 800, letterSpacing: '-0.03em', fontSize: '1.25rem' }}>
+              NetRide <Typography component="span" sx={{ fontWeight: 400, color: 'text.secondary', ml: 0.5 }}>Sponsor</Typography>
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, mr: 1, display: { xs: 'none', sm: 'block' } }}>
+              {session?.sponsor.businessName}
+            </Typography>
+            <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} sx={{ p: 0.5 }}>
+              <Avatar sx={{ width: 34, height: 34, bgcolor: 'secondary.main', fontSize: 14, fontWeight: 700 }}>
+                {session?.sponsor.businessName?.charAt(0) || 'S'}
+              </Avatar>
+            </IconButton>
+            <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+              <MenuItem disabled sx={{ py: 1.5 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{session?.sponsor.businessName}</Typography>
+                  <Typography variant="caption" color="text.secondary">{session?.sponsor.email}</Typography>
+                </Box>
+              </MenuItem>
+              <Divider />
+              <MenuItem onClick={handleLogout} sx={{ py: 1.2, borderRadius: 2, mx: 1, color: 'error.main' }}>
+                <ListItemIcon><LogoutIcon style={{ fontSize: 20, color: 'inherit' }} /></ListItemIcon>
+                <ListItemText primary="Logout" />
+              </MenuItem>
+            </Menu>
+          </Box>
+        </Toolbar>
+      </AppBar>
+      <Drawer
+        variant="permanent"
+        sx={{ width: drawerWidth, flexShrink: 0, [`& .MuiDrawer-paper`]: { width: drawerWidth, boxSizing: 'border-box', pt: 2 } }}
+      >
+        <Toolbar />
+        <Box sx={{ overflow: 'auto', px: 2 }}>
+          <List>
+            {menuItems.map((item) => (
+              <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
+                <ListItemButton
+                  selected={location.pathname === item.path}
+                  onClick={() => navigate(item.path)}
+                  sx={{
+                    py: 1.2,
+                    px: 2,
+                    borderRadius: '12px',
+                    '&.Mui-selected': {
+                      backgroundColor: 'primary.main',
+                      color: 'white',
+                      '& .MuiListItemIcon-root': { color: 'white' },
+                      '&:hover': { backgroundColor: 'primary.main' },
+                    },
+                    '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' },
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
+                    {React.cloneElement(item.icon, { style: { fontSize: 20 } })}
+                  </ListItemIcon>
+                  <ListItemText primary={item.text} />
+                </ListItemButton>
+              </ListItem>
+            ))}
+          </List>
+        </Box>
+      </Drawer>
+      <Box component="main" sx={{ flexGrow: 1, p: { xs: 3, sm: 6 }, backgroundColor: 'background.default', minHeight: '100vh' }}>
+        <Toolbar />
+        <Box sx={{ maxWidth: '100%', mx: 'auto' }}>
+          <Outlet />
+        </Box>
+      </Box>
+    </Box>
+  );
+};
+
+export default MainLayout;

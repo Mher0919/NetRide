@@ -133,6 +133,21 @@ const envSchema = z.object({
   REFERRAL_REWARD_CENTS: z.union([z.string(), z.number()]).transform(Number).default(500),
   // Lifetime of a referral QR payload before the app must refresh it.
   REFERRAL_QR_TTL_DAYS: z.union([z.string(), z.number()]).transform(Number).default(365),
+
+  // ---- Sponsorship / SPECIALS ----------------------------------------------
+  // How long a sponsor validation code stays valid after the ride completes.
+  SPONSOR_CODE_TTL_HOURS: z.union([z.string(), z.number()]).transform(Number).default(24),
+  // Max failed validation-code entry attempts before the code is voided.
+  SPONSOR_CODE_MAX_ATTEMPTS: z.union([z.string(), z.number()]).transform(Number).default(5),
+  // Radius (meters) around the sponsor location that counts as "visited".
+  SPONSOR_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(100),
+  // Rider credit reward when credits are chosen: D × SPONSOR_CREDIT_BONUS.
+  // Default 1.10 → rider receives 110% of the sponsor-funded amount.
+  SPONSOR_CREDIT_BONUS: z.union([z.string(), z.number()]).transform(Number).default(1.10),
+  // Driver share of the sponsor-funded discount (spec: 60% driver / 40% NetRide).
+  SPONSOR_DRIVER_SHARE: z.union([z.string(), z.number()]).transform(Number).default(0.60),
+  // Whether sponsor-ledger writes are enforced strictly (unit tests disable).
+  SPONSOR_LEDGER_ENFORCED: z.union([z.string(), z.number()]).transform(Number).default(1),
 });
 
 const parsed = envSchema.safeParse(process.env);

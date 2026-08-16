@@ -9,6 +9,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/ride_provider.dart';
+import '../providers/specials_provider.dart';
+import '../models/special_models.dart';
 import '../models/trip_models.dart' as models;
 import '../services/routing_service.dart';
 import '../services/user_service.dart';
@@ -23,6 +25,7 @@ import 'address_search_delegate.dart';
 import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/animated_price.dart';
+import '../components/driver_cancelled_dialog.dart';
 import 'wallet_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -56,6 +59,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   double _estimateDurationSeconds = 0.0;
   bool _hasNavigatedToTrip = false;
 
+  /// Trip id that already got its pre-pickup driver-cancel apology dialog.
+  /// One dialog per driver cancellation (a fresh trip id pops it again),
+  /// while a repeated cancel inside the SAME rematch must not.
+  String? _driverCancelNotifiedTripId;
+
   // Rewards options at checkout (promo code + ride credits + payment).
   final TextEditingController _promoCodeController = TextEditingController();
   bool _applyCredits = false;
@@ -74,6 +82,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   // Part 6 — Favorite Driver toggle state
   bool _favoriteDriverEnabled = false;
+
+  // Part — SPECIALS: an active (CREATED / RIDE_PENDING) special redemption
+  // discovered by the rider. Sent with the ride request so the backend
+  // applies the sponsor discount inside the pricing transaction.
+  String? _specialRedemptionId;
 
   // Zero-balance feedback: tapping the disabled Ride Credits toggle shakes
   // the row and flashes a red "no credits" hint (pulse).
@@ -649,6 +662,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   void _confirmRide() {
     if (_pickup == null || _destination == null) return;
+    // SPECIALS: attach the rider's CREATED redemption (if any) so the
+    // backend applies the sponsor discount inside the pricing transaction.
+    final specials = Provider.of<SpecialsProvider>(context, listen: false);
+    _specialRedemptionId = specials.canAttachToRide ? specials.current!.id : null;
     setState(() => _requesting = true);
     Provider.of<RideProvider>(
       context,
@@ -660,6 +677,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       promoCode: _promoApplied ? _promoCodeController.text : null,
       applyCredits: _creditsToUseCents > 0,
       creditUseCents: _creditsToUseCents > 0 ? _creditsToUseCents : null,
+      specialRedemptionId: _specialRedemptionId,
     );
   }
 
@@ -734,6 +752,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       return;
     }
     await _closePanel(cancelIfRequesting: false);
+  }
+
+  void _showDriverCancelledDialog() {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const DriverCancelledDialog(),
+    );
   }
 
   /// Ride Credits toggle with a zero balance: shake + red pulse so the
@@ -823,6 +849,21 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _hasNavigatedToTrip = true; // prevent re-entry
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _closePanel(cancelIfRequesting: false);
+      });
+    }
+
+    // Driver cancelled pre-pickup: the backend released the SAME ride back
+    // to REQUESTED and keeps re-dispatching it at the same price — the
+    // searching sheet stays up ("Finding your driver…"). Pop the apology
+    // dialog exactly once per cancellation.
+    if (_requesting &&
+        rideProvider.status == models.TripStatus.REQUESTED &&
+        rideProvider.driverCancelledNotice != null &&
+        rideProvider.tripId != _driverCancelNotifiedTripId) {
+      _driverCancelNotifiedTripId = rideProvider.tripId;
+      rideProvider.consumeDriverCancelledNotice();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showDriverCancelledDialog();
       });
     }
 
@@ -1502,7 +1543,47 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
           ),
-        if (!_loadingEstimates && !searching)
+        if (!_loadingEstimates && !searching) ...[
+          // SPECIALS: when the rider has a CREATED redemption, the checkout
+          // advertises the applied special right above the confirm button.
+          Builder(builder: (context) {
+            final attachable = context
+                .select<SpecialsProvider, SpecialRedemption?>(
+                    (s) => s.canAttachToRide ? s.current : null);
+            if (attachable == null) return const SizedBox.shrink();
+            return Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5B7760).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: const Color(0xFF5B7760)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.storefront_rounded,
+                        size: 16, color: Color(0xFF5B7760)),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'SPECIAL at ${attachable.sponsorName} — '
+                        '${attachable.discountLabel.isEmpty ? 'save on this ride' : attachable.discountLabel}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF5B7760),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
           Padding(
             padding: EdgeInsets.fromLTRB(20, 0, 20, 18 + bottomInset),
             child: SizedBox(
@@ -1532,6 +1613,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
           ),
+        ],
       ],
     );
   }

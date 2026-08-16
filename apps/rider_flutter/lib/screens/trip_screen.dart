@@ -15,6 +15,7 @@ import '../services/api_service.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/state_container.dart';
 import '../components/tip_fab.dart';
+import '../components/driver_cancelled_dialog.dart';
 import 'rating_screen.dart';
 import 'chat_sheet.dart';
 import 'report_sheet.dart';
@@ -35,6 +36,10 @@ class _TripScreenState extends State<TripScreen> {
 
   /// Guard: exactly one cancelled dialog + one exit per ride (spec §40).
   bool _cancelledHandled = false;
+
+  /// Guard: the pre-pickup driver-cancel apology dialog renders exactly
+  /// once; the rematch card stays up until the next driver accepts.
+  bool _rematchHandled = false;
 
   @override
   void initState() {
@@ -121,6 +126,97 @@ class _TripScreenState extends State<TripScreen> {
     }
   }
 
+  void _showDriverCancelledDialog() {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const DriverCancelledDialog(),
+    );
+  }
+
+  /// Rider aborts the automatic re-dispatch (same ride back in REQUESTED).
+  /// No reason is required while searching; the server's CANCELLED
+  /// tripUpdate then runs the existing "you cancelled this ride" flow.
+  Future<void> _cancelRematchSearch() async {
+    final rideProvider = Provider.of<RideProvider>(context, listen: false);
+    try {
+      final error = await rideProvider.cancelRide();
+      if (error != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } catch (e) {
+      debugPrint('[TRIP] Rematch cancel error: $e');
+    }
+  }
+
+  Widget _buildRematchCard(RideProvider rideProvider, ThemeData theme) {
+    final fare = rideProvider.estimatedFare ?? rideProvider.currentTrip?.fareAmount;
+    final pickupAddress = rideProvider.currentTrip?.pickup.address;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 10)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(color: Color(0xFF5B7760)),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Finding you a new driver…',
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Your driver couldn't approach for some reasons. The same trip is being re-matched — same price, no extra request needed.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600, height: 1.5),
+                  ),
+                  if (fare != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Same price — \$${fare.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF5B7760)),
+                    ),
+                  ],
+                  if (pickupAddress != null && pickupAddress.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      pickupAddress,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: () => _cancelRematchSearch(),
+                    child: const Text(
+                      'Cancel search',
+                      style: TextStyle(color: Color(0xFFC65A5A), fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showCancelDialog(BuildContext context, RideProvider rideProvider) {
     showDialog(
       context: context,
@@ -205,6 +301,25 @@ class _TripScreenState extends State<TripScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _handleRideCancelled(currentTrip);
       });
+    }
+
+    // Driver cancelled pre-pickup: the backend released the SAME ride back
+    // to REQUESTED (same fare quote / promo / credits) and re-dispatched
+    // it. Pop the apology dialog once, then this screen swaps to the
+    // "finding you a new driver" card until the next driver accepts.
+    if (rideProvider.status == models.TripStatus.REQUESTED && !_rematchHandled) {
+      _rematchHandled = true;
+      rideProvider.consumeDriverCancelledNotice();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showDriverCancelledDialog();
+      });
+    }
+
+    // Rematch state (same ride, still searching): the active-trip UI is
+    // replaced by a searching card — a new driver is being matched at the
+    // same price and the apology was already shown above.
+    if (rideProvider.status == models.TripStatus.REQUESTED) {
+      return _buildRematchCard(rideProvider, theme);
     }
 
     if (driver == null) {

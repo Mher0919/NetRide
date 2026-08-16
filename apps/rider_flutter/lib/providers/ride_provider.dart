@@ -32,6 +32,15 @@ class RideProvider with ChangeNotifier {
       StreamController<void>.broadcast();
   Stream<void> get notificationPing => _notificationPing.stream;
 
+  /// Live SPECIALS redemption updates pushed by the backend
+  /// (`specialRedemptionUpdate`). The SPECIALS screen listens to re-render
+  /// the active redemption card the instant the sponsor validates the code
+  /// or the reward is processed.
+  final StreamController<Map<String, dynamic>> _specialRedemptionUpdates =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get specialRedemptionUpdates =>
+      _specialRedemptionUpdates.stream;
+
   /// Authoritative route pushed by the backend (navigationStarted /
   /// navigationRerouteRequested). Rendering this — instead of calling
   /// the routing API from the trip screen — keeps the rider map in sync
@@ -64,6 +73,23 @@ class RideProvider with ChangeNotifier {
   /// the rest of the ride flow uses. Returns null if the socket hasn't
   /// been initialised yet (e.g. user is still on the splash screen).
   IO.Socket? get socket => _socket;
+
+  /// Server notice that the assigned driver cancelled AFTER accepting but
+  /// BEFORE pickup (pre-pickup release): the backend already flipped the
+  /// SAME ride (same fare quote, promo + credits) back to REQUESTED and
+  /// re-dispatched it, so the rider keeps searching at the same price.
+  /// Holds the apology payload until the active screen consumes and
+  /// renders it exactly once.
+  Map<String, dynamic>? _driverCancelledNotice;
+  Map<String, dynamic>? get driverCancelledNotice => _driverCancelledNotice;
+
+  /// Consumed by whichever screen is in front (map sheet or trip screen)
+  /// so the apology popup appears exactly once per driver cancellation.
+  Map<String, dynamic>? consumeDriverCancelledNotice() {
+    final notice = _driverCancelledNotice;
+    _driverCancelledNotice = null;
+    return notice;
+  }
 
   void subscribeToNearbyDrivers(Location loc) {
     _socket?.emit('subscribeToNearbyDrivers', loc.toJson());
@@ -202,6 +228,21 @@ class RideProvider with ChangeNotifier {
       notifyListeners();
     });
 
+    // Driver cancelled after accepting but BEFORE pickup: the backend
+    // releases the SAME ride (same fare quote / promo / credits) back to
+    // REQUESTED, re-dispatches it, and sends this apology notice. Forget
+    // the departing driver so the next ACCEPTED builds fresh identity,
+    // and let the active screen pop the apology dialog once.
+    _socket!.on('tripDriverCancelled', (data) {
+      debugPrint('[RIDE] tripDriverCancelled → ride released + rematch (same price)');
+      if (data is! Map<String, dynamic>) return;
+      _driver = null;
+      _navigationRoute = null;
+      _navigationEtaSeconds = null;
+      _driverCancelledNotice = data;
+      notifyListeners();
+    });
+
     _socket!.on('driverLocationUpdate', (data) {
       final driverId = data['driverId'];
       final loc = Location.fromJson(data);
@@ -270,6 +311,14 @@ class RideProvider with ChangeNotifier {
       if (!_notificationPing.isClosed) _notificationPing.add(null);
     });
 
+    // Sponsorship/SPECIALS: the backend pushes a live card whenever the
+    // redemption transitions (ride pending → code issued → sponsor
+    // validated → reward processed). The SPECIALS screen refetches state.
+    _socket!.on('specialRedemptionUpdate', (data) {
+      debugPrint('[RIDE] specialRedemptionUpdate → ${data is Map ? data['status'] : data}');
+      if (data is Map<String, dynamic>) _specialRedemptionUpdates.add(data);
+    });
+
     _socket!.on('error', (data) => print('Socket Error: $data'));
 
     // Cancellation rejected server-side (e.g. missing reason / not in a
@@ -304,6 +353,7 @@ class RideProvider with ChangeNotifier {
     String? promoCode,
     bool applyCredits = false,
     int? creditUseCents,
+    String? specialRedemptionId,
   }) {
     debugPrint('[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}');
     if (_socket == null) {
@@ -326,6 +376,7 @@ class RideProvider with ChangeNotifier {
       if (cleanedPromo != null && cleanedPromo.isNotEmpty) 'promoCode': cleanedPromo.toUpperCase(),
       'applyCredits': applyCredits,
       if (creditUseCents != null && creditUseCents > 0) 'creditUseCents': creditUseCents,
+      if (specialRedemptionId != null && specialRedemptionId.isNotEmpty) 'specialRedemptionId': specialRedemptionId,
     });
     
     if (!isScheduled) {
@@ -428,6 +479,7 @@ class RideProvider with ChangeNotifier {
     _navigationEtaSeconds = null;
     _driverEtaSeconds = null;
     _driverRemainingMeters = null;
+    _driverCancelledNotice = null;
     _cancelling = false;
     _nearbyDrivers.clear();
     notifyListeners();

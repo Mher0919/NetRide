@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/ride_provider.dart';
+import 'providers/specials_provider.dart';
 import 'services/communication_service.dart';
 import 'screens/map_screen.dart';
 import 'screens/trip_screen.dart';
@@ -23,6 +24,8 @@ import 'services/user_service.dart';
 import 'services/sound_service.dart';
 import 'services/notification_service.dart';
 import 'screens/credits_screen.dart';
+import 'screens/special_detail_screen.dart';
+import 'screens/special_redemption_screen.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -40,6 +43,14 @@ String? kInitialBlockedReason;
 void _routeFromNotification(NetRideNotification notification) {
   final nav = ApiService.navigatorKey.currentState;
   if (nav == null) return;
+  // SPECIALS: the "your code is ready" push hops straight to the redemption
+  // card with the one-time code carried in the push payload (delivered only
+  // to this rider; never stored, spec §99).
+  if (notification.type == 'special_reward_ready') {
+    nav.pushNamed('/special-redemption',
+        arguments: {'code': notification.data['code']});
+    return;
+  }
   switch (notification.route) {
     case '/trip':
       nav.pushNamed('/trip');
@@ -174,6 +185,12 @@ void main() async {
             // trip is active so it doesn't burn listeners on the splash
             // screen or login flow.
             ChangeNotifierProvider(create: (_) => CommunicationService()),
+            // SPECIALS state. It subscribes to RideProvider's socket relay
+            // so live redemption transitions re-render without polling.
+            ChangeNotifierProvider(
+              create: (ctx) =>
+                  SpecialsProvider(ride: ctx.read<RideProvider>()),
+            ),
           ],
           child: const NetRideRider(),
         ),
@@ -313,6 +330,16 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
               case '/reset-password':
                 final args = settings.arguments as Map<String, dynamic>?;
                 page = ResetPasswordScreen(token: args?['token']);
+                break;
+              case '/special-detail':
+                final args = settings.arguments as Map<String, dynamic>?;
+                page = SpecialDetailScreen(
+                    sponsorId: args?['id'] as String? ?? '');
+                break;
+              case '/special-redemption':
+                final args = settings.arguments as Map<String, dynamic>?;
+                page = SpecialRedemptionScreen(
+                    code: args?['code'] as String?);
                 break;
               default:
                 page = const MapScreen();

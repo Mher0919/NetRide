@@ -441,3 +441,70 @@ export const resolveReport = async (id: string, data: { status: string; action: 
   const response = await api.post(`/admin/reports/${id}/resolve`, data);
   return response.data as any;
 };
+
+// ----- Sponsors / SPECIALS (046) -------------------------------------------
+
+export const listSponsors = async (params: { search?: string; status?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/sponsors', { params });
+  return response.data as { sponsors: Array<Record<string, unknown>>; total: number };
+};
+
+export const createSponsor = async (data: Record<string, unknown>) => {
+  const response = await api.post('/admin/sponsors', data);
+  return response.data as { sponsor: Record<string, unknown> };
+};
+
+export const getSponsor = async (id: string) => {
+  const response = await api.get(`/admin/sponsors/${id}`);
+  return response.data;
+};
+
+export const updateSponsor = async (id: string, data: Record<string, unknown>) => {
+  const response = await api.patch(`/admin/sponsors/${id}`, data);
+  return response.data as { sponsor: Record<string, unknown> };
+};
+
+export const setSponsorStatus = async (id: string, status: string) => {
+  const response = await api.post(`/admin/sponsors/${id}/status/${status}`);
+  return response.data as { sponsor: Record<string, unknown> };
+};
+
+export const adjustSponsorBudget = async (id: string, amountCents: number, reason: string, direction: 'CREDIT' | 'DEBIT' = 'CREDIT') => {
+  const response = await api.post(`/admin/sponsors/${id}/budget/adjust`, { amount_cents: amountCents, reason, direction });
+  return response.data;
+};
+
+export const getSponsorLedger = async (id: string) => {
+  const response = await api.get(`/admin/sponsors/${id}/ledger`);
+  return response.data as { entries: Array<Record<string, unknown>> };
+};
+
+export const getSponsorFinancialHistory = async (id: string) => {
+  const response = await api.get(`/admin/sponsors/${id}/financial-history`);
+  return response.data as { rows: Array<Record<string, unknown>> };
+};
+
+export const getSponsorAnalytics = async (id: string) => {
+  const response = await api.get(`/admin/sponsors/${id}/analytics`);
+  return response.data;
+};
+
+export const listSponsorRedemptions = async (params: { status?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/sponsors/redemptions', { params });
+  return response.data as { redemptions: Array<Record<string, unknown>>; total: number };
+};
+
+export const createSponsorPortalAccount = async (id: string, email: string) => {
+  const response = await api.post(`/admin/sponsors/${id}/portal-account`, { email });
+  return response.data;
+};
+
+export const resetSponsorPortalPassword = async (id: string) => {
+  const response = await api.post(`/admin/sponsors/${id}/portal-account/reset-password`);
+  return response.data;
+};
+
+export const disableSponsorPortalAccount = async (id: string) => {
+  const response = await api.post(`/admin/sponsors/${id}/portal-account/disable`);
+  return response.data;
+};

@@ -17,7 +17,8 @@ export type CreditTxType =
   | 'ADMIN_GRANT'
   | 'RIDE_APPLIED'
   | 'RIDE_REFUND'
-  | 'ADJUSTMENT';
+  | 'ADJUSTMENT'
+  | 'SPONSOR_REWARD';
 
 export interface CreditAccount {
   user_id: string;

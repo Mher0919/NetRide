@@ -13,6 +13,7 @@ enum UserRole {
   RIDER
   DRIVER
   ADMIN
+  SPONSOR
 
   @@map("user_role")
 }

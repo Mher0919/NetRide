@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/ride_provider.dart';
+import '../providers/specials_provider.dart';
 import 'map_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
+import 'specials_screen.dart';
 
 class MainWrapper extends StatefulWidget {
   const MainWrapper({super.key});
@@ -19,6 +21,7 @@ class _MainWrapperState extends State<MainWrapper> {
 
   final List<Widget> _screens = [
     const MapScreen(),
+    const SpecialsScreen(),
     const ActivityScreen(),
     const ProfileScreen(),
   ];
@@ -92,18 +95,23 @@ class _MainWrapperState extends State<MainWrapper> {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: BottomNavigationBar(
-              items: const <BottomNavigationBarItem>[
-                BottomNavigationBarItem(
+              items: <BottomNavigationBarItem>[
+                const BottomNavigationBarItem(
                   icon: Icon(Icons.explore_outlined, size: 24),
                   activeIcon: Icon(Icons.explore, size: 24),
                   label: 'Explore',
                 ),
                 BottomNavigationBarItem(
+                  icon: _SpecialsTabIcon(),
+                  activeIcon: _SpecialsTabIcon(active: true),
+                  label: 'Specials',
+                ),
+                const BottomNavigationBarItem(
                   icon: Icon(Icons.receipt_long_outlined, size: 24),
                   activeIcon: Icon(Icons.receipt_long, size: 24),
                   label: 'Activity',
                 ),
-                BottomNavigationBarItem(
+                const BottomNavigationBarItem(
                   icon: Icon(Icons.person_outline_rounded, size: 24),
                   activeIcon: Icon(Icons.person_rounded, size: 24),
                   label: 'Account',
@@ -131,6 +139,32 @@ class _MainWrapperState extends State<MainWrapper> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// SPECIALS tab icon with an availability badge (eligible sponsor count from
+/// the provider; the tab is hidden-appearance neutral when count is 0).
+class _SpecialsTabIcon extends StatelessWidget {
+  const _SpecialsTabIcon({this.active = false});
+
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SpecialsProvider>(
+      builder: (context, specials, _) {
+        final count = specials.count;
+        return Badge(
+          isLabelVisible: count > 0,
+          label: Text('$count'),
+          backgroundColor: const Color(0xFFC65A5A),
+          child: Icon(
+            active ? Icons.storefront_rounded : Icons.storefront_outlined,
+            size: 24,
+          ),
+        );
+      },
     );
   }
 }

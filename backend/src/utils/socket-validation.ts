@@ -87,6 +87,10 @@ export const RequestRideSchema = z.object({
   promoCode: z.string().trim().min(2).max(32).optional(),
   applyCredits: z.boolean().optional(),
   creditUseCents: z.number().int().min(1).optional(),
+  // Sponsorship/SPECIALS: the redemption the rider created by picking a
+  // sponsor on the SPECIALS page. Attaches this ride to the redemption and
+  // snapshots/reserves the discount server-side only.
+  specialRedemptionId: z.string().uuid().optional(),
 });
 
 export const RiderDestinationChangedSchema = z.object({
