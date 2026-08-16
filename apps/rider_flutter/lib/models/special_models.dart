@@ -43,6 +43,7 @@ class SponsorSpecial {
   final String? logoUrl;
   final String? coverImageUrl;
   final SponsorDiscount discount;
+  final double? kmAway;
   final String status;
 
   const SponsorSpecial({
@@ -58,6 +59,7 @@ class SponsorSpecial {
     this.logoUrl,
     this.coverImageUrl,
     required this.discount,
+    this.kmAway,
     required this.status,
   });
 
@@ -76,6 +78,7 @@ class SponsorSpecial {
         coverImageUrl: json['coverImageUrl'] as String?,
         discount: SponsorDiscount.fromJson(
             (json['discount'] as Map<String, dynamic>?) ?? const {}),
+        kmAway: (json['kmAway'] as num?)?.toDouble(),
         status: json['status'] as String? ?? '',
       );
 }

@@ -8,6 +8,7 @@ import { dispatchAcceptOutcomeTotal } from '../../observability/metrics';
 import { ScoredDriver } from '../../services/dispatch.service';
 import { TripStatus } from '../../types';
 import { DriverOfferService } from '../../services/driver-offer.service';
+import { RideRejectionService } from '../../services/ride-rejection.service';
 
 interface DispatchOfferJobData {
   tripId: string;
@@ -29,7 +30,19 @@ export async function handleDispatchOffer(io: Server) {
       return;
     }
 
-    for (const driver of drivers) {
+    // Apply the same authoritative driver-rejection exclusion as the main
+    // dispatch engine: drivers who already declined this ride must never
+    // be re-offered it, even on this legacy fan-out path.
+    const rejected = await RideRejectionService.rejectedDriverIds(tripId);
+    const offerTargets = RideRejectionService.excludeRejected(drivers, rejected);
+    if (offerTargets.length !== drivers.length) {
+      console.log(
+        `[DISPATCH] Excluded ${drivers.length - offerTargets.length} driver(s) for trip ${tripId} ` +
+        `(previously rejected this ride)`,
+      );
+    }
+
+    for (const driver of offerTargets) {
       const driverId = driver.id;
 
       const offer = await DriverOfferService.createOffer(tripId, driverId);
@@ -74,11 +87,11 @@ export async function handleDispatchOffer(io: Server) {
       console.log(`[DISPATCH] Sent offer ${offer.offerId} to driver ${driverId} for trip ${tripId}`);
     }
 
-    if (drivers.length > 0) {
+    if (offerTargets.length > 0) {
       setTimeout(async () => {
         const t = await RideRepository.findById(tripId);
         if (t && t.status === 'REQUESTED') {
-          const offers = drivers.map(d => DriverOfferService.getOfferForRide(tripId));
+          const offers = offerTargets.map(d => DriverOfferService.getOfferForRide(tripId));
           const activeOffer = (await Promise.all(offers)).find(o => o !== null);
           if (!activeOffer) {
             console.log(`[DISPATCH] No driver accepted trip ${tripId}, re-enqueueing`);

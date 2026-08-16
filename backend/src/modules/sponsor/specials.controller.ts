@@ -14,6 +14,7 @@ function publicSponsor(sponsor: any) {
           state, latitude, longitude, logo_url, cover_image_url,
           discount_type, discount_percent, max_discount_percent,
           discount_fixed_amount_cents, status } = sponsor;
+  const kmAway = sponsor.km_away != null ? Number(sponsor.km_away) : null;
   return {
     id, businessName: business_name, businessType: business_type,
     businessDescription: business_description, address, city, state,
@@ -25,6 +26,7 @@ function publicSponsor(sponsor: any) {
       fixedAmountCents: discount_fixed_amount_cents,
       label: discountLabelFor(sponsor),
     },
+    kmAway,
     status,
   };
 }

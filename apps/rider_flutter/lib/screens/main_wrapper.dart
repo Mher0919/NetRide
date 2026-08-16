@@ -6,7 +6,6 @@ import '../providers/specials_provider.dart';
 import 'map_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
-import 'specials_screen.dart';
 
 class MainWrapper extends StatefulWidget {
   const MainWrapper({super.key});
@@ -19,9 +18,10 @@ class _MainWrapperState extends State<MainWrapper> {
   int _selectedIndex = 0;
   bool _isChecking = true;
 
+  // SPECI-489: SPECIALS is no longer a top-level destination — it lives
+  // INSIDE Explore. Navigation stays exactly: Explore / Activity / Account.
   final List<Widget> _screens = [
     const MapScreen(),
-    const SpecialsScreen(),
     const ActivityScreen(),
     const ProfileScreen(),
   ];
@@ -51,6 +51,13 @@ class _MainWrapperState extends State<MainWrapper> {
     setState(() {
       _selectedIndex = index;
     });
+    // Returning to Explore re-queries the backend for currently active
+    // specials (SPECIALS section + sponsor markers). During a session the
+    // admin may deactivate/reactivate sponsors — Explore must reflect the
+    // backend's decision each time the rider looks at it.
+    if (index == 0) {
+      context.read<SpecialsProvider>().refresh();
+    }
   }
 
   @override
@@ -101,11 +108,6 @@ class _MainWrapperState extends State<MainWrapper> {
                   activeIcon: Icon(Icons.explore, size: 24),
                   label: 'Explore',
                 ),
-                BottomNavigationBarItem(
-                  icon: _SpecialsTabIcon(),
-                  activeIcon: _SpecialsTabIcon(active: true),
-                  label: 'Specials',
-                ),
                 const BottomNavigationBarItem(
                   icon: Icon(Icons.receipt_long_outlined, size: 24),
                   activeIcon: Icon(Icons.receipt_long, size: 24),
@@ -139,32 +141,6 @@ class _MainWrapperState extends State<MainWrapper> {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// SPECIALS tab icon with an availability badge (eligible sponsor count from
-/// the provider; the tab is hidden-appearance neutral when count is 0).
-class _SpecialsTabIcon extends StatelessWidget {
-  const _SpecialsTabIcon({this.active = false});
-
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<SpecialsProvider>(
-      builder: (context, specials, _) {
-        final count = specials.count;
-        return Badge(
-          isLabelVisible: count > 0,
-          label: Text('$count'),
-          backgroundColor: const Color(0xFFC65A5A),
-          child: Icon(
-            active ? Icons.storefront_rounded : Icons.storefront_outlined,
-            size: 24,
-          ),
-        );
-      },
     );
   }
 }

@@ -52,10 +52,11 @@ export class DispatchEngine {
     radiusKm: number,
     riderId?: string,
     favoritePriority: boolean = false,
+    rideId?: string,
   ): Promise<ScoredDriver[]> {
     const scored = await DispatchService.getWeightedDrivers(pickup, radiusKm, riderId, favoritePriority);
     if (scored.length === 0) return [];
-    const eligibleIds = await DriverEligibilityService.filterEligible(scored.map(d => d.id));
+    const eligibleIds = await DriverEligibilityService.filterEligible(scored.map(d => d.id), rideId);
     const eligible = scored.filter(d => eligibleIds.includes(d.id));
     if (eligible.length === 0) {
       // Nearby drivers existed but every one was ruled out — surface that
@@ -86,7 +87,7 @@ export class DispatchEngine {
       console.log(`[DISPATCH] Stage ${stage}: radius=${radius}km ride=${rideId}`);
 
       const candidates = await DispatchEngine.findCandidates(
-        { lat: pickupLat, lng: pickupLng }, radius, riderId, favoritePriority,
+        { lat: pickupLat, lng: pickupLng }, radius, riderId, favoritePriority, rideId,
       );
       if (candidates.length === 0) {
         console.log(`[DISPATCH] No candidates stage ${stage} (${radius}km) ride=${rideId}`);
@@ -133,7 +134,11 @@ export class DispatchEngine {
     io: Server, rideId: string, driver: ScoredDriver, trip: any,
   ): Promise<'accepted' | 'declined' | 'timeout' | 'ride_cancelled'> {
     const driverId = driver.id;
-    const eligibility = await DriverEligibilityService.checkEligibility(driverId);
+    // Re-validate right before the offer — including the persistent
+    // "driver rejected this ride" exclusion. The ride lock serializes
+    // matchers, so even a concurrently re-enqueued match job cannot leak
+    // an offer to a driver who already declined this ride.
+    const eligibility = await DriverEligibilityService.checkEligibility(driverId, rideId);
     if (!eligibility.eligible) {
       console.log(`[DISPATCH] Driver ${driverId} not eligible: ${eligibility.reason}`);
       return 'declined';

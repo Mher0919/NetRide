@@ -57,14 +57,26 @@ class SpecialsProvider extends ChangeNotifier {
     _lastCode = code;
   }
 
+  /// Last known rider position (km-ordered discovery). Once set, EVERY
+  /// refresh keeps using it so the Explore SPECIALS section and the map
+  /// sponsor markers always read the same eligible list (same query, same
+  /// ordering — no drift between the two surfaces).
+  double? _geoLat;
+  double? _geoLng;
+
   /// Full refresh: count + discovery + intro state + resumable redemption.
-  Future<void> refresh() async {
+  /// When [lat]/[lng] are provided they become the persistent geo origin.
+  Future<void> refresh({double? lat, double? lng}) async {
+    if (lat != null && lng != null) {
+      _geoLat = lat;
+      _geoLng = lng;
+    }
     _loading = true;
     _error = null;
     notifyListeners();
     try {
       final results = await Future.wait([
-        SpecialsService.list(),
+        SpecialsService.list(lat: _geoLat, lng: _geoLng),
         SpecialsService.count(),
         _introChecked
             ? Future.value(_introSeen)

@@ -4,6 +4,7 @@ import { prisma } from '../services/prisma.service';
 import { RideRepository } from '../modules/ride/ride.repository';
 import { TripStatus } from '../types';
 import { LocationsService } from '../modules/location/locations.service';
+import { RideRejectionService } from './ride-rejection.service';
 
 export interface DriverEligibility {
   eligible: boolean;
@@ -13,6 +14,7 @@ export interface DriverEligibility {
   hasActiveOffer: boolean;
   isOnline: boolean;
   isActive: boolean;
+  rejectedRide: boolean;
 }
 
 const DRIVER_HEARTBEAT_PREFIX = 'driver:heartbeat:';
@@ -28,11 +30,13 @@ export class DriverEligibilityService {
    *  - The driver does NOT have an active trip (no driver:{id}:active_trip)
    *  - The driver does NOT have an active offer (no driver:offer:{id})
    *  - The driver's location in Redis is fresh
+   *  - (when a rideId is given) the driver has NOT rejected this ride
+   *    (persistent `ride_driver_rejections` exclusion)
    *
    * Returns a structured result so callers can understand WHY a driver
    * was rejected and log meaningful diagnostics.
    */
-  static async checkEligibility(driverId: string): Promise<DriverEligibility> {
+  static async checkEligibility(driverId: string, rideId?: string): Promise<DriverEligibility> {
     const [heartbeat, activeTripKey, activeOffer, driverDb] = await Promise.all([
       redis.get(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`),
       redis.get(`driver:${driverId}:active_trip`),
@@ -98,7 +102,18 @@ export class DriverEligibilityService {
     const hasActiveOffer = activeOffer !== null;
     const locationFresh = await DriverEligibilityService.isLocationFresh(driverId);
 
-    const eligible = isOnline && isActive && !hasActiveTrip && !hasActiveOffer && locationFresh;
+    // Driver-specific ride exclusion: if this driver already rejected this
+    // ride, they must never receive it again — regardless of how many times
+    // matching restarts (engine retry, decline re-enqueue, app restart).
+    // Rides rejected by one driver stay offerable to every other driver;
+    // this table is scoped to the (ride, driver) pair only.
+    let rejectedRide = false;
+    if (rideId) {
+      rejectedRide = await RideRejectionService.hasRejected(rideId, driverId);
+    }
+
+    const eligible =
+      isOnline && isActive && !hasActiveTrip && !hasActiveOffer && locationFresh && !rejectedRide;
 
     const reasons: string[] = [];
     if (!isOnline) reasons.push('offline');
@@ -106,6 +121,7 @@ export class DriverEligibilityService {
     if (hasActiveTrip) reasons.push('has_active_trip');
     if (hasActiveOffer) reasons.push('has_active_offer');
     if (!locationFresh) reasons.push('stale_location');
+    if (rejectedRide) reasons.push('rejected_ride');
 
     return {
       eligible,
@@ -115,6 +131,7 @@ export class DriverEligibilityService {
       hasActiveOffer,
       isActive,
       locationFresh,
+      rejectedRide,
     };
   }
 
@@ -196,28 +213,42 @@ export class DriverEligibilityService {
    * Batch eligibility filter — efficiently filters a list of driver IDs
    * to only those who are eligible. Returns the eligible subset.
    *
+   * When a rideId is given, drivers who already rejected that ride are
+   * excluded FIRST (one query for the whole batch) — the enforcement point
+   * of the persistent driver-rejection rule. Every dispatch path funnels
+   * through this filter, so the exclusion lives in exactly one place.
+   *
    * Skipped drivers are logged with their reasons — a silent empty result
    * here reads as "no candidates" in the dispatch pipeline, which hid the
    * real cause (e.g. a stuck active-trip key) for far too long.
    */
-  static async filterEligible(driverIds: string[]): Promise<string[]> {
+  static async filterEligible(driverIds: string[], rideId?: string): Promise<string[]> {
     if (driverIds.length === 0) return [];
 
+    const remainingIds = rideId
+      ? RideRejectionService.excludeRejected(
+          driverIds.map(id => ({ id })),
+          await RideRejectionService.rejectedDriverIds(rideId),
+        ).map(d => d.id)
+      : driverIds;
+
+    if (remainingIds.length === 0) return [];
+
     const results = await Promise.allSettled(
-      driverIds.map(id => DriverEligibilityService.checkEligibility(id)),
+      remainingIds.map(id => DriverEligibilityService.checkEligibility(id)),
     );
 
     const eligible: string[] = [];
-    for (let i = 0; i < driverIds.length; i++) {
+    for (let i = 0; i < remainingIds.length; i++) {
       const r = results[i];
       if (r.status === 'fulfilled' && r.value.eligible) {
-        eligible.push(driverIds[i]);
+        eligible.push(remainingIds[i]);
       } else {
         const reason =
           r.status === 'fulfilled'
             ? (r.value.reason ?? 'unknown')
             : `check_failed: ${r.reason?.message ?? 'error'}`;
-        console.log(`[DISPATCH] Skipping driver ${driverIds[i]}: ${reason}`);
+        console.log(`[DISPATCH] Skipping driver ${remainingIds[i]}: ${reason}`);
       }
     }
 

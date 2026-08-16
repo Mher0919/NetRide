@@ -26,6 +26,7 @@ import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/animated_price.dart';
 import '../components/driver_cancelled_dialog.dart';
+import '../widgets/explore_specials_section.dart';
 import 'wallet_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -35,7 +36,8 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
+class _MapScreenState extends State<MapScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   final MapController _mapController = MapController();
   final RoutingService _routingService = RoutingService();
   LatLng? _userPosition;
@@ -120,9 +122,25 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   // address-search delegate reads inside the search screen).
   List<SearchResult> _recentSearches = [];
 
+  /// Periodic active-special refreshes while Explore is the visible tab
+  /// (TickerMode is disabled by the IndexedStack for hidden tabs). The
+  /// backend has no realtime sponsor-status stream, so a short-interval
+  /// refresh is what makes an admin deactivation disappear from an already
+  /// OPEN Explore screen without permanent stale cards. 3 minutes keeps it
+  /// far below "excessive polling" and only ONE endpoint behind the scene.
+  Timer? _specialsRefreshTimer;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _specialsRefreshTimer = Timer.periodic(const Duration(minutes: 3), (_) {
+      if (!mounted || !TickerMode.of(context)) return;
+      context.read<SpecialsProvider>().refresh(
+            lat: _smoothedPosition?.latitude,
+            lng: _smoothedPosition?.longitude,
+          );
+    });
     _sheetController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -137,6 +155,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _startGeohashUpdates();
     _loadRecentSearches();
     _loadRewardsOptions();
+    // Explore asks the backend for the currently active specials the moment
+    // it opens — the section and the sponsor markers render from that
+    // response, so a zero-active specials backend shows ZERO SPECIALS UI.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final specials = context.read<SpecialsProvider>();
+      if (!specials.loaded) specials.refresh();
+    });
   }
 
   Future<void> _loadRecentSearches() async {
@@ -218,7 +243,21 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Admin deactivation while the app is backgrounded must reach Explore:
+    // re-query the authoritative active-special list on every foreground.
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<SpecialsProvider>().refresh(
+            lat: _smoothedPosition?.latitude,
+            lng: _smoothedPosition?.longitude,
+          );
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _specialsRefreshTimer?.cancel();
     _positionSubscription?.cancel();
     _geohashTimer?.cancel();
     _cameraFitTimer?.cancel();
@@ -276,6 +315,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _userPosition = LatLng(position.latitude, position.longitude);
       _smoothedPosition = _userPosition;
       _updateUserLocation(position);
+      // Once we know where the rider is, re-query the active specials from
+      // the backend distance-ordered (cards show real distances, markers use
+      // the same eligible list).
+      context.read<SpecialsProvider>().refresh(
+        lat: position.latitude,
+        lng: position.longitude,
+      );
 
       _positionSubscription =
           Geolocator.getPositionStream(
@@ -830,6 +876,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     final rideProvider = Provider.of<RideProvider>(context);
     final theme = Theme.of(context);
 
+    // Eligible active specials — the single authoritative list shared by
+    // the Explore SPECIALS section and these map markers. Zero active
+    // specials ⇒ zero markers (hidden, not placeholders).
+    final eligibleSponsors = context.select<SpecialsProvider, List<SponsorSpecial>>(
+      (s) => s.sponsors
+          .where((x) => x.latitude != null && x.longitude != null)
+          .toList(),
+    );
+
     // When a driver accepts, leave the map and go to the active trip screen.
     if (rideProvider.status == models.TripStatus.ACCEPTED &&
         !_hasNavigatedToTrip &&
@@ -951,6 +1006,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   const SizedBox(height: 14),
                                   _buildRecentSearches(theme),
                                 ],
+                                // SPECIALS — conditional section living INSIDE
+                                // Explore. Renders nothing when the backend
+                                // reports zero eligible active specials (the
+                                // widget's own visibility rule), so Explore
+                                // stays clean in both cases.
+                                const ExploreSpecialsSection(),
                               ],
                             ),
                           ),
@@ -1119,6 +1180,22 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   child: _buildPinMarker(
                                     const Color(0xFF2F3A32),
                                     isPickup: false,
+                                  ),
+                                ),
+                              // SPECIALS sponsor markers (eligible active
+                              // specials only — deactivated sponsors drop
+                              // out of the list on the next refresh, so zero
+                              // active specials means zero markers).
+                              for (final s in eligibleSponsors)
+                                Marker(
+                                  point: LatLng(s.latitude!, s.longitude!),
+                                  width: 36,
+                                  height: 36,
+                                  child: GestureDetector(
+                                    onTap: () => Navigator.of(context)
+                                        .pushNamed('/special-detail',
+                                            arguments: {'id': s.id}),
+                                    child: _buildSponsorMarker(s),
                                   ),
                                 ),
                             ],
@@ -2672,6 +2749,35 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           ),
         ),
       ],
+    );
+  }
+
+  /// Specials sponsor map pin. Rendered ONLY for sponsors present in the
+  /// backend's eligible active-specials list — the same list as the Explore
+  /// SPECIALS section, so zero active specials means zero markers.
+  Widget _buildSponsorMarker(SponsorSpecial s) {
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: BoxDecoration(
+        color: const Color(0xFF5B7760),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 8,
+            color: Colors.black.withOpacity(0.25),
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Icon(
+          specialTypeIcon(s.businessType),
+          color: Colors.white,
+          size: 15,
+        ),
+      ),
     );
   }
 }

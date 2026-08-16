@@ -16,9 +16,19 @@ import '../models/special_models.dart';
 import 'api_service.dart';
 
 class SpecialsService {
-  static Future<List<SponsorSpecial>> list({int limit = 50}) async {
+  /// Active eligible specials from the backend (the single authoritative
+  /// source for the Explore SPECIALS section AND the map sponsor markers).
+  /// Pass [lat]/[lng] to get them ordered by distance (each row then carries
+  /// a server-computed `kmAway`).
+  static Future<List<SponsorSpecial>> list({
+    int limit = 50,
+    double? lat,
+    double? lng,
+  }) async {
     final res = await ApiService.dio.get('specials', queryParameters: {
       'limit': limit,
+      if (lat != null) 'lat': lat,
+      if (lng != null) 'lng': lng,
     });
     final raw = (res.data as Map<String, dynamic>)['sponsors'] as List? ?? [];
     return raw
