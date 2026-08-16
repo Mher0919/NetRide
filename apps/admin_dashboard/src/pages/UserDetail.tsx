@@ -27,6 +27,7 @@ import {
   TableRow,
   Snackbar,
   Alert,
+  MenuItem,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
@@ -48,8 +49,12 @@ import {
   blockUser,
   unblockUser,
   getDriverRidePreferences,
+  listFleets,
+  assignDriverFleet,
 } from '../api/admin';
 import { SpeedingBadge } from '../components/SpeedingBadge';
+import EarningsPanel from '../components/EarningsPanel';
+import GroupIcon from '@mui/icons-material/Groups';
 import { format } from 'date-fns';
 
 const UserDetail: React.FC = () => {
@@ -79,6 +84,9 @@ const UserDetail: React.FC = () => {
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({ open: false, message: '' });
   const [erroredDocs, setErroredDocs] = useState<Record<string, boolean>>({});
   const [profileImgError, setProfileImgError] = useState(false);
+  const [fleets, setFleets] = useState<any[]>([]);
+  const [selectedFleetId, setSelectedFleetId] = useState<string>('');
+  const [fleetSaving, setFleetSaving] = useState(false);
   const hasDriverProfile = !!user?.driver_profile;
   // When opened from a specific section, scope the view to that role even if
   // the account has both rider and driver profiles.
@@ -113,6 +121,7 @@ const UserDetail: React.FC = () => {
         setLicenseExpiry(dp?.license_expiry_date
           ? format(new Date(dp.license_expiry_date), 'yyyy-MM-dd')
           : '');
+        setSelectedFleetId(dp?.fleet_id ?? '');
         // Ride eligibility vs. preferences (clearly separated for admin).
         try {
           const rp = await getDriverRidePreferences(id);
@@ -120,6 +129,13 @@ const UserDetail: React.FC = () => {
         } catch (err) {
           console.error('Failed to fetch driver ride preferences', err);
           setRidePrefs(null);
+        }
+        try {
+          const fl = await listFleets();
+          setFleets(fl?.fleets ?? []);
+        } catch (err) {
+          console.error('Failed to fetch fleet partners', err);
+          setFleets([]);
         }
       }
     } catch (error) {
@@ -312,6 +328,28 @@ const UserDetail: React.FC = () => {
     }
   };
 
+  const handleSaveFleet = async () => {
+    if (!id) return;
+    setFleetSaving(true);
+    try {
+      const fleetId = selectedFleetId || null;
+      await assignDriverFleet(id, fleetId);
+      const fleet = fleetId ? fleets.find((f: any) => f.id === fleetId) : null;
+      setSnackbar({
+        open: true,
+        message: fleet
+          ? `Assigned to ${fleet.name}. Fleet earns ${fleet.platform_share_percent}% of the 40% platform pool on future rides.`
+          : 'Fleet assignment removed. NetRide keeps the full platform pool on future rides.',
+      });
+      fetchUser();
+    } catch (error: any) {
+      console.error('Failed to save fleet assignment', error);
+      setSnackbar({ open: true, message: error?.response?.data?.error || 'Failed to save fleet assignment.' });
+    } finally {
+      setFleetSaving(false);
+    }
+  };
+
   const handleDeleteDocument = async (field: string) => {
     if (!id) return;
     if (!window.confirm(`Are you sure you want to remove this document?`)) return;
@@ -491,6 +529,72 @@ const UserDetail: React.FC = () => {
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {isDriver && hasDriverProfile && (
               <>
+                <EarningsPanel userId={id} />
+                <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                      Fleet Partner
+                    </Typography>
+                    {user.driver_profile?.fleet ? (
+                      <Chip
+                        icon={<GroupIcon sx={{ fontSize: 14 }} />}
+                        label={`${user.driver_profile.fleet.name} · ${user.driver_profile.fleet.platform_share_percent}% of platform pool`}
+                        size="small"
+                        color="success"
+                        variant="outlined"
+                        sx={{ fontWeight: 800, height: 24, fontSize: '0.7rem' }}
+                      />
+                    ) : (
+                      <Chip
+                        label="NO FLEET"
+                        size="small"
+                        variant="outlined"
+                        sx={{ fontWeight: 800, height: 24, fontSize: '0.7rem' }}
+                      />
+                    )}
+                  </Box>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                    Optional: assign this driver to a fleet partner. The fleet earns its configured
+                    share of the 40% platform pool on <strong>future rides</strong> (driver share stays
+                    60%). Without a fleet, NetRide keeps the full platform pool.
+                  </Typography>
+                  <Grid container spacing={2} alignItems="flex-end" {...({ component: 'div' } as any)}>
+                    <Grid item xs={12} sm={7} {...({ component: 'div' } as any)}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                        FLEET PARTNER
+                      </Typography>
+                      <TextField
+                        select
+                        fullWidth
+                        size="small"
+                        variant="outlined"
+                        value={selectedFleetId}
+                        onChange={(e) => setSelectedFleetId(e.target.value)}
+                        sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      >
+                        <MenuItem value="">
+                          <em>None — NetRide keeps the platform pool</em>
+                        </MenuItem>
+                        {fleets.map((f: any) => (
+                          <MenuItem key={f.id} value={f.id}>
+                            {f.name} ({f.platform_share_percent}% of platform pool)
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </Grid>
+                    <Grid item xs={12} sm={5} {...({ component: 'div' } as any)}>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        onClick={handleSaveFleet}
+                        disabled={fleetSaving || selectedFleetId === (user.driver_profile?.fleet_id ?? '')}
+                        sx={{ borderRadius: '10px', fontWeight: 700, px: 3 }}
+                      >
+                        {fleetSaving ? <CircularProgress size={16} color="inherit" /> : 'Save Fleet Assignment'}
+                      </Button>
+                    </Grid>
+                  </Grid>
+                </Paper>
                 <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>

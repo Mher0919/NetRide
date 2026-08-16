@@ -18,12 +18,14 @@ import DistanceIcon from '@mui/icons-material/Map';
 import FareIcon from '@mui/icons-material/Payments';
 import AuditIcon from '@mui/icons-material/History';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getRideById } from '../api/admin';
+import { getRideById, getRideRoutes, getRideLedger } from '../api/admin';
 import RideMap from '../components/RideMap';
 import { format } from 'date-fns';
 import { io } from 'socket.io-client';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000';
+
+const fmtUSD = (cents: any) => '$' + (Number(cents ?? 0) / 100).toFixed(2);
 
 const RideDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -32,6 +34,10 @@ const RideDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [trajectory, setTrajectory] = useState<any[]>([]);
   const [driverLocation, setDriverLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [plannedRoute, setPlannedRoute] = useState<[number, number][]>([]);
+  const [actualRoute, setActualRoute] = useState<[number, number][]>([]);
+  const [actualAvailable, setActualAvailable] = useState(false);
+  const [ledger, setLedger] = useState<any>(null);
 
   useEffect(() => {
     const fetchRide = async () => {
@@ -48,7 +54,34 @@ const RideDetail: React.FC = () => {
       }
     };
 
+    const fetchRoutes = async () => {
+      try {
+        const routes = await getRideRoutes(id!);
+        if (routes.planned?.available) {
+          const legs = routes.planned.legs ?? [];
+          setPlannedRoute(legs.flatMap((leg: any) => leg.polyline ?? []));
+        }
+        if (routes.actual?.available) {
+          setActualRoute(routes.actual.polyline ?? []);
+          setActualAvailable(true);
+        }
+      } catch (error) {
+        console.error('Failed to fetch ride routes:', error);
+      }
+    };
+
+    const fetchLedger = async () => {
+      try {
+        const data = await getRideLedger(id!);
+        setLedger(data);
+      } catch (error) {
+        console.error('Failed to fetch ride ledger:', error);
+      }
+    };
+
     fetchRide();
+    fetchRoutes();
+    fetchLedger();
 
     const socket = io(API_URL, {
       auth: { token: localStorage.getItem('admin_token') }
@@ -134,12 +167,28 @@ const RideDetail: React.FC = () => {
 
       <Grid container spacing={3} {...({ component: 'div' } as any)}>
         <Grid item xs={12} lg={8} {...({ component: 'div' } as any)}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Box sx={{ width: 28, height: 0, borderTop: '4px dashed #3f51b5' }} />
+              <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary' }}>PLANNED ROUTE</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Box sx={{ width: 28, height: 0, borderTop: '4px solid #ff9800' }} />
+              <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary' }}>ACTUAL GPS</Typography>
+            </Box>
+            {!isActive && !actualAvailable && (
+              <Chip size="small" color="warning" sx={{ fontWeight: 700, fontSize: '0.65rem', height: 22 }}
+                label="Actual route unavailable — no GPS samples captured" />
+            )}
+          </Box>
           <Paper sx={{ height: 650, p: 0, borderRadius: 4, overflow: 'hidden', border: 'none' }}>
             <RideMap 
               pickup={{ lat: ride.pickup_lat, lng: ride.pickup_lng, address: ride.pickup_address }}
               destination={{ lat: ride.destination_lat, lng: ride.destination_lng, address: ride.destination_address }}
               driverLocation={driverLocation || (isActive ? { lat: ride.pickup_lat, lng: ride.pickup_lng } : undefined)}
-              trajectory={trajectory}
+              trajectory={isActive ? trajectory : []}
+              plannedRoute={plannedRoute.length > 1 ? plannedRoute : undefined}
+              actualRoute={actualAvailable && actualRoute.length > 1 ? actualRoute : undefined}
               live={isActive}
             />
           </Paper>
@@ -187,6 +236,71 @@ const RideDetail: React.FC = () => {
                   </Box>
                 </Box>
               </Box>
+            </Paper>
+
+            <Paper sx={{ p: 3, borderRadius: 4, border: 'none' }}>
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 700, mb: 3 }}>
+                Financial Settlement
+              </Typography>
+              {ledger?.settlement ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>STATUS</Typography>
+                    <Chip
+                      size="small"
+                      label={ledger.settlement.status}
+                      sx={{ fontWeight: 800, fontSize: '0.65rem', height: 22,
+                        bgcolor: ledger.settlement.status === 'SETTLED' ? 'success.main' : 'warning.main',
+                        color: 'white' }}
+                    />
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>FARE</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmtUSD(ledger.settlement.fare_cents)}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PROMO / CREDITS</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      −{fmtUSD(ledger.settlement.promotion_cents + ledger.settlement.credits_cents)}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>TIP</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmtUSD(ledger.settlement.tip_cents)}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>WALLET PAID</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmtUSD(ledger.settlement.wallet_payment_cents)}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>DRIVER (60%)</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmtUSD(ledger.settlement.driver_share_cents)}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PLATFORM</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmtUSD(ledger.settlement.platform_share_cents)}</Typography>
+                  </Box>
+                  {Number(ledger.settlement.amount_owed_cents) > 0 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="caption" color="warning.main" sx={{ fontWeight: 700 }}>AMOUNT OWED</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: 'warning.main' }}>{fmtUSD(ledger.settlement.amount_owed_cents)}</Typography>
+                    </Box>
+                  )}
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>SETTLEMENT</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: isActive ? 'primary.main' : 'text.disabled' }}>
+                      {isActive ? 'Pending completion' : 'Not recorded'}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>DRIVER EARNINGS</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmtUSD(ride.driver_earnings_cents)}</Typography>
+                  </Box>
+                </Box>
+              )}
             </Paper>
 
             <Paper sx={{ p: 3, borderRadius: 4, border: 'none' }}>

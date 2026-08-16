@@ -21,6 +21,7 @@ import { matchJobsTotal, dispatchAcceptOutcomeTotal } from '../../observability/
 import { traceAsync, getCurrentTraceId } from '../../utils/tracing';
 import { RewardEngine } from '../../services/reward-engine.service';
 import { WalletService } from '../wallet/wallet.service';
+import { FinancialLedgerService, centsValue } from '../../services/financial-ledger.service';
 import {
   notifyRideAccepted,
   notifyRideStarted,
@@ -502,6 +503,15 @@ export class RideService {
       throw new Error('Unauthorized: You are not the assigned driver for this trip');
     }
 
+    // State machine guard: a terminal ride (COMPLETED/CANCELLED) can never
+    // transition again, and only an active in-progress ride may complete.
+    if (status === 'COMPLETED' && trip.status !== 'ACCEPTED' && trip.status !== 'DRIVER_ARRIVING' && trip.status !== 'IN_PROGRESS') {
+      throw new Error(`Ride cannot be completed from its current state (${trip.status})`);
+    }
+    if (status === 'IN_PROGRESS' && trip.status !== 'ACCEPTED' && trip.status !== 'DRIVER_ARRIVING') {
+      throw new Error(`Ride cannot be started from its current state (${trip.status})`);
+    }
+
     const extra: any = {};
     if (status === 'IN_PROGRESS') extra.started_at = new Date();
 
@@ -639,19 +649,20 @@ export class RideService {
       // Rider payment: the wallet is charged ONLY when the ride completes
       // successfully — never at request (a cancelled ride costs nothing).
       // Settles the amount reserved at request time (final_payment_cents =
-      // fare after promo + credits). Idempotent via the wallet ledger's
-      // unique idempotency key (wallet-charge:{rideId}); non-blocking so a
-      // wallet issue can never strand an already-completed trip.
+      // fare after promo + credits, stored as integer cents). Idempotent via
+      // the wallet ledger's unique idempotency key (wallet-charge:{rideId});
+      // non-blocking so a wallet issue can never strand an already-completed
+      // trip.
+      let walletChargeCents = 0;
+      const dueCents = centsValue((updatedTrip as any).final_payment_cents);
       try {
-        const dueCents = Math.round(
-          parseFloat((updatedTrip as any).final_payment_cents ?? '0') * 100
-        );
         if (dueCents > 0) {
           const charged = await WalletService.chargeForRide(
             updatedTrip.rider_id,
             tripId,
             dueCents,
           );
+          walletChargeCents = charged.walletChargeCents;
           if (charged.walletChargeCents > 0) {
             await pool.query(
               `UPDATE rides SET wallet_payment_cents = $1 WHERE id = $2`,
@@ -675,6 +686,38 @@ export class RideService {
       const allocation = await getRevenueAllocationForRide(tripId);
       if (allocation) {
         (updatedTrip as any).driver_earnings_cents = allocation.driverShareCents;
+      }
+
+      // Financial settlement: exactly one ledger row per completed ride.
+      // Idempotent (ride_completion:{rideId} idempotency key + partial unique
+      // index on ride_id). Settled only when the full amount due is covered;
+      // a shortfall is recorded as PENDING_CAPTURE with the outstanding
+      // cents so failed/short payments stay explicit.
+      try {
+        const tipCents = Math.round(
+          parseFloat((updatedTrip as any).tip_amount ?? '0') * 100
+        );
+        await FinancialLedgerService.recordRideCompletion({
+          rideId: tripId,
+          riderId: updatedTrip.rider_id,
+          driverId: updatedTrip.driver_id,
+          fareCents: dueCents,
+          promotionCents: centsValue((updatedTrip as any).promo_discount_cents),
+          creditsCents: centsValue((updatedTrip as any).credits_applied_cents),
+          tipCents,
+          walletPaymentCents: walletChargeCents,
+          amountOwedCents: Math.max(0, dueCents - walletChargeCents),
+          driverShareCents: allocation?.driverShareCents ?? 0,
+          platformShareCents: allocation?.platformShareCents ?? 0,
+          netrideShareCents: allocation?.netrideShareCents ?? 0,
+          paymentProvider: 'wallet',
+          paymentReference: tripId,
+          completedAt: updatedTrip.completed_at ? new Date(updatedTrip.completed_at) : new Date(),
+        });
+      } catch (err: any) {
+        console.warn(
+          `[RIDE] ⚠️ Financial ledger write failed (non-blocking) for trip ${tripId}: ${err.message}`
+        );
       }
 
       // Rewards ecosystem: finalize promo usage + partner commission and

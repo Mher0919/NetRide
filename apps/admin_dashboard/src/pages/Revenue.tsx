@@ -17,6 +17,7 @@ import {
   Card,
 } from '@mui/material';
 import { getRevenueOverview } from '../api/admin';
+import RevenueAnalytics from '../components/RevenueAnalytics';
 
 const fmtUSD = (cents: number | null | undefined) =>
   ((cents ?? 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -160,6 +161,8 @@ const Revenue: React.FC = () => {
           </Paper>
         </>
       )}
+
+      <RevenueAnalytics />
 
       <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack({ ...snack, open: false })}>
         <Alert severity={snack.severity} variant="filled" onClose={() => setSnack({ ...snack, open: false })}>

@@ -35,6 +35,9 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<any>(null);
+
+  const fmtUSD = (cents: any) => '$' + (Number(cents ?? 0) / 100).toFixed(2);
 
   const fetchRides = async () => {
     setLoading(true);
@@ -43,6 +46,7 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
       const data = await getRides({ status, page: page + 1, limit: rowsPerPage });
       setRides(data.rides ?? []);
       setTotal(data.total ?? 0);
+      setSummary(data.summary ?? null);
     } catch (err: any) {
       const msg = err?.response?.data?.error || err?.message || 'Failed to fetch rides';
       setError(msg);
@@ -150,6 +154,39 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
         </Button>
       </Box>
 
+      {status === 'COMPLETED' && summary && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+          <Paper sx={{ px: 2.5, py: 1.5, borderRadius: '12px' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.65rem' }}>Gross (page)</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(summary.totalGrossCents)}</Typography>
+          </Paper>
+          <Paper sx={{ px: 2.5, py: 1.5, borderRadius: '12px' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.65rem' }}>Driver (60%)</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(summary.totalDriverCents)}</Typography>
+          </Paper>
+          <Paper sx={{ px: 2.5, py: 1.5, borderRadius: '12px' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.65rem' }}>Platform</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(summary.totalPlatformCents)}</Typography>
+          </Paper>
+          <Paper sx={{ px: 2.5, py: 1.5, borderRadius: '12px' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.65rem' }}>Promotions</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(summary.totalPromotionCents)}</Typography>
+          </Paper>
+          <Paper sx={{ px: 2.5, py: 1.5, borderRadius: '12px' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.65rem' }}>Credits</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(summary.totalCreditsCents)}</Typography>
+          </Paper>
+          <Paper sx={{ px: 2.5, py: 1.5, borderRadius: '12px' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.65rem' }}>Tips</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(summary.totalTipCents)}</Typography>
+          </Paper>
+          <Paper sx={{ px: 2.5, py: 1.5, borderRadius: '12px' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.65rem' }}>Settlement</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>{summary.settledCount} settled · {summary.pendingCount} pending</Typography>
+          </Paper>
+        </Box>
+      )}
+
       <Paper sx={{ width: '100%', mb: 2, border: 'none', overflow: 'hidden' }}>
         <TableContainer>
           <Table sx={{ minWidth: 750 }}>
@@ -158,6 +195,7 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
                 <TableCell sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem', color: 'text.secondary', py: 2 }}>ID</TableCell>
                 <TableCell sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem', color: 'text.secondary', py: 2 }}>Participants</TableCell>
                 <TableCell sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem', color: 'text.secondary', py: 2 }}>Route</TableCell>
+                <TableCell sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem', color: 'text.secondary', py: 2 }}>Fare</TableCell>
                 <TableCell sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem', color: 'text.secondary', py: 2 }}>Status</TableCell>
                 <TableCell sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem', color: 'text.secondary', py: 2 }}>Timestamp</TableCell>
                 <TableCell sx={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem', color: 'text.secondary', py: 2, textAlign: 'right' }}>Actions</TableCell>
@@ -198,6 +236,18 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
                     </Box>
                   </TableCell>
                   <TableCell>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      {status === 'COMPLETED'
+                        ? fmtUSD(ride.final_payment_cents)
+                        : <Box component="span" sx={{ color: 'text.disabled', fontWeight: 500 }}>—</Box>}
+                    </Typography>
+                    {status === 'COMPLETED' && (
+                      <Typography variant="caption" color="text.secondary">
+                        + {fmtUSD(ride.tip_amount ? Number(ride.tip_amount) * 100 : 0)} tip
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     {getStatusChip(ride.status)}
                   </TableCell>
                   <TableCell>
@@ -223,7 +273,7 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
               ))}
               {error && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 10 }}>
+                  <TableCell colSpan={7} align="center" sx={{ py: 10 }}>
                     <Box sx={{ opacity: 0.7 }}>
                       <RefreshIcon sx={{ fontSize: 48, mb: 2, color: 'error.main' }} />
                       <Typography variant="h6" color="error" gutterBottom>Unable to load rides</Typography>
@@ -235,7 +285,7 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
               )}
               {!error && rides.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 10 }}>
+                  <TableCell colSpan={7} align="center" sx={{ py: 10 }}>
                     <Box sx={{ opacity: 0.5 }}>
                       <RefreshIcon sx={{ fontSize: 48, mb: 2 }} />
                       <Typography variant="h6">No ride records found</Typography>

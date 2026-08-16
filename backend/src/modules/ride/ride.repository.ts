@@ -125,10 +125,19 @@ export class RideRepository {
       values.push(extra.compliance_snapshot);
     }
 
-    await pool.query(
-      `UPDATE rides SET ${fields.join(', ')} WHERE id = $2`,
+    let where = 'WHERE id = $2';
+    if (status === TripStatus.COMPLETED) {
+      where += ` AND status IN ('ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS')`;
+    }
+
+    const updateRes = await pool.query(
+      `UPDATE rides SET ${fields.join(', ')} ${where}`,
       values
     );
+
+    if (status === TripStatus.COMPLETED && updateRes.rowCount === 0) {
+      throw new Error('Ride cannot be completed from its current state');
+    }
 
     const res = await pool.query(`
       SELECT r.*, 

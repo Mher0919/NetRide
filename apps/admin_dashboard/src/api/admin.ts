@@ -27,6 +27,16 @@ export const getRideById = async (id: string) => {
   return response.data;
 };
 
+export const getRideRoutes = async (id: string) => {
+  const response = await api.get(`/admin/rides/${id}/routes`);
+  return response.data;
+};
+
+export const getRideLedger = async (id: string) => {
+  const response = await api.get(`/admin/rides/${id}/ledger`);
+  return response.data;
+};
+
 export const getLiveDrivers = async () => {
   const response = await api.get('/admin/drivers/live');
   return response.data;
@@ -77,6 +87,11 @@ export const getSpeedingViolations = async (params?: { dangerousOnly?: boolean; 
 export const getDriverSpeeding = async (id: string, params?: { limit?: number }) => {
   const response = await api.get(`/admin/users/${id}/speeding`, { params });
   return response.data as { violations: any[]; count: number };
+};
+
+export const getDriverEarnings = async (id: string, params?: any) => {
+  const response = await api.get(`/admin/users/${id}/earnings`, { params });
+  return response.data;
 };
 
 export const getDangerousDrivers = async () => {
@@ -397,7 +412,22 @@ export const updatePricingProfile = async (code: string, data: Record<string, un
 
 export const getRevenueOverview = async () => {
   const response = await api.get('/admin/revenue');
-  return response.data as { revenue_config: any; global: any; per_fleet: any[] };
+  return response.data;
+};
+
+export const getRevenueAnalytics = async (params?: any) => {
+  const response = await api.get('/admin/analytics', { params });
+  return response.data;
+};
+
+export const getRegions = async () => {
+  const response = await api.get('/admin/regions');
+  return response.data;
+};
+
+export const upsertRegion = async (body: any) => {
+  const response = await api.post('/admin/regions', body);
+  return response.data;
 };
 
 // ----- Ride reports (042) ---------------------------------------------------

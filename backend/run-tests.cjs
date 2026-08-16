@@ -23,6 +23,7 @@ require('./src/modules/wallet/__tests__/wallet-cap.unit.test.ts');
 require('./src/modules/heatmap/__tests__/demand.unit.test.ts');
 require('./src/modules/notifications/__tests__/notifications.unit.test.ts');
 require('./src/services/__tests__/pricing.unit.test.ts');
+require('./src/services/__tests__/financial-ledger.unit.test.ts');
 require('./src/modules/reporting/__tests__/report-reasons.unit.test.ts');
 
 // ioredis keeps the event loop alive while retrying a dead host; force a

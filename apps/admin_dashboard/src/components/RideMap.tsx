@@ -27,6 +27,8 @@ interface RideMapProps {
   destination?: { lat: number; lng: number; address?: string };
   driverLocation?: { lat: number; lng: number };
   trajectory?: { lat: number; lng: number; t?: string }[];
+  plannedRoute?: [number, number][];
+  actualRoute?: [number, number][];
   live?: boolean;
 }
 
@@ -40,7 +42,7 @@ const FitBounds: React.FC<{ bounds: L.LatLngBoundsExpression }> = ({ bounds }) =
   return null;
 };
 
-const RideMap: React.FC<RideMapProps> = ({ pickup, destination, driverLocation, trajectory = [], live = false }) => {
+const RideMap: React.FC<RideMapProps> = ({ pickup, destination, driverLocation, trajectory = [], plannedRoute, actualRoute, live = false }) => {
   const [bounds, setBounds] = useState<L.LatLngBoundsExpression | null>(null);
 
   useEffect(() => {
@@ -51,12 +53,14 @@ const RideMap: React.FC<RideMapProps> = ({ pickup, destination, driverLocation, 
     if (trajectory.length > 0) {
       trajectory.forEach(p => points.push([p.lat, p.lng]));
     }
+    (plannedRoute ?? []).forEach(p => points.push(p));
+    (actualRoute ?? []).forEach(p => points.push(p));
 
     if (points.length > 0) {
       const b = L.latLngBounds(points);
       setBounds(b.pad(0.1) as any);
     }
-  }, [pickup, destination, driverLocation, trajectory.length]);
+  }, [pickup, destination, driverLocation, trajectory.length, plannedRoute, actualRoute]);
 
   const polylinePoints = trajectory.map(p => [p.lat, p.lng] as [number, number]);
 
@@ -96,6 +100,25 @@ const RideMap: React.FC<RideMapProps> = ({ pickup, destination, driverLocation, 
           weight={4} 
           opacity={0.7} 
           dashArray={live ? "5, 10" : undefined}
+        />
+      )}
+
+      {plannedRoute && plannedRoute.length > 1 && (
+        <Polyline
+          positions={plannedRoute}
+          color="#3f51b5"
+          weight={5}
+          opacity={0.8}
+          dashArray="8, 8"
+        />
+      )}
+
+      {actualRoute && actualRoute.length > 1 && (
+        <Polyline
+          positions={actualRoute}
+          color="#ff9800"
+          weight={4}
+          opacity={0.9}
         />
       )}
 
