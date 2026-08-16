@@ -65,7 +65,8 @@ router.get('/favorites', authMiddleware, async (req: AuthRequest, res) => {
                                 full_name: true,
                                 profile_image_url: true,
                                 rating: true,
-                                rating_count: true
+                                rating_count: true,
+                                phone_number: true
                             }
                         }
                     }

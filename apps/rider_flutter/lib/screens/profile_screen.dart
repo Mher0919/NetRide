@@ -487,7 +487,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 24),
               _buildSectionCard(
-                title: 'Settings',
+                title: 'Favorites',
                 children: [
                   _buildMenuTile(
                     icon: Icons.favorite_outline_rounded,
@@ -497,7 +497,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       MaterialPageRoute(builder: (context) => const FavoriteDriversScreen()),
                     ),
                   ),
-                  const Divider(height: 32),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _buildSectionCard(
+                title: 'Settings',
+                children: [
                   _buildMenuTile(
                     icon: Icons.notifications_outlined,
                     title: 'Notifications',

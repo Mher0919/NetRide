@@ -223,6 +223,22 @@ class _FavoriteDriversScreenState extends State<FavoriteDriversScreen> {
                     ),
                   ],
                 ),
+                if (driver.phoneNumber != null && driver.phoneNumber!.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      const Icon(Icons.phone_outlined, size: 13, color: Color(0xFF5B7760)),
+                      const SizedBox(width: 4),
+                      Text(
+                        driver.phoneNumber!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
