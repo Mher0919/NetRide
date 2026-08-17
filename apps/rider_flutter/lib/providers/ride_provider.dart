@@ -82,12 +82,25 @@ class RideProvider with ChangeNotifier {
 
   /// Server notice that the assigned driver cancelled AFTER accepting but
   /// BEFORE pickup (pre-pickup release): the backend already flipped the
-  /// SAME ride (same fare quote, promo + credits) back to REQUESTED and
+  /// SAME ride (same fare quote, promo + credits) back to searching and
   /// re-dispatched it, so the rider keeps searching at the same price.
   /// Holds the apology payload until the active screen consumes and
   /// renders it exactly once.
   Map<String, dynamic>? _driverCancelledNotice;
   Map<String, dynamic>? get driverCancelledNotice => _driverCancelledNotice;
+
+  /// Monotonic id per received notice so screens can pop one apology per
+  /// driver cancellation even when the same trip is released repeatedly
+  /// (no UI re-entry, but a fresh apology every time).
+  int _driverCancelledNoticeSeq = 0;
+  int get driverCancelledNoticeSeq => _driverCancelledNoticeSeq;
+
+  /// True while the rider has an active ride request that the backend is
+  /// still matching (initial request OR re-match after a driver cancel).
+  /// The ONE predicate the map screen uses to keep the existing search UI
+  /// alive across both flows.
+  bool get isSearchingForDriver =>
+      _status == TripStatus.REQUESTED && _tripId != null;
 
   /// Consumed by whichever screen is in front (map sheet or trip screen)
   /// so the apology popup appears exactly once per driver cancellation.
@@ -190,6 +203,17 @@ class RideProvider with ChangeNotifier {
       _status = trip.status;
       _tripId = trip.id;
 
+      // Back to searching (driver released / rider's request still being
+      // matched): the departing driver's identity and route context are
+      // gone — the riding side rebuilds them on the next ACCEPTED.
+      if (trip.status == TripStatus.REQUESTED && _driver != null) {
+        _driver = null;
+        _navigationRoute = null;
+        _navigationEtaSeconds = null;
+        _driverEtaSeconds = null;
+        _driverRemainingMeters = null;
+      }
+
       // Chat dies with the ride (spec §16): no new messages, no stale
       // bubbles surviving the transition.
       if (trip.status == TripStatus.CANCELLED) {
@@ -253,12 +277,18 @@ class RideProvider with ChangeNotifier {
     // the departing driver so the next ACCEPTED builds fresh identity,
     // and let the active screen pop the apology dialog once.
     _socket!.on('tripDriverCancelled', (data) {
-      debugPrint('[RIDE] tripDriverCancelled → ride released + rematch (same price)');
+      debugPrint('[RIDE] tripDriverCancelled → ride released + re-matching (same ride)');
       if (data is! Map<String, dynamic>) return;
       _driver = null;
       _navigationRoute = null;
       _navigationEtaSeconds = null;
-      _driverCancelledNotice = data;
+      _driverEtaSeconds = null;
+      _driverRemainingMeters = null;
+      _driverCancelledNoticeSeq += 1;
+      _driverCancelledNotice = {
+        ...data,
+        'noticeId': _driverCancelledNoticeSeq,
+      };
       notifyListeners();
     });
 

@@ -469,6 +469,17 @@ function setupSocketGateway(io) {
                         await DriverOfferService.declineOffer(offerId);
                         await DriverOfferService.releaseDriver(id);
                     }
+                    // Persist the driver-specific rejection (ride_driver_rejections).
+                    // This is what keeps the declined request from ever coming back to
+                    // THIS driver — across engine retries, re-enqueues, listener
+                    // refreshes, app restarts, and offline/online cycles. It is a
+                    // per-driver exclusion, NOT a ride-wide cancellation: the same
+                    // ride stays offerable to every other eligible driver. The pair
+                    // primary key makes the write idempotent (double tap / retry safe).
+                    const { RideRejectionService } = await Promise.resolve().then(() => __importStar(require('../services/ride-rejection.service')));
+                    await RideRejectionService.recordRejection(tripId, id).catch((err) => {
+                        console.error(`[SOCKET] Failed to persist rejection for ${tripId}/${id}: ${err.message}`);
+                    });
                     // Re-enqueue matching so the system progresses to the next candidate
                     const { RideRepository } = await Promise.resolve().then(() => __importStar(require('../modules/ride/ride.repository')));
                     const trip = await RideRepository.findById(tripId);

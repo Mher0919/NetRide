@@ -3,6 +3,41 @@ console.log('[REPO_INIT] ride.repository.ts loaded from', __filename);
 import { pool } from '../../config/database';
 import { Trip, TripStatus } from '../../types';
 
+/**
+ * DRIVER PRE-PICKUP RELEASE (Scenario B, ACCEPTED → SEARCHING).
+ *
+ * Exported SQL contract (asserted in ride-cancellation.unit.test.ts): the
+ * atomic guard `AND driver_id = $2 AND status IN (...)` is what makes the
+ * release safe against stale/delayed driver actions — a cancel from a
+ * driver who is no longer assigned, or for a ride that already flipped,
+ * matches zero rows and cannot clobber a fresher assignment (spec §16/§17).
+ */
+export const RELEASE_DRIVER_PRE_PICKUP_SQL = `UPDATE rides
+      SET status = $3,
+          driver_id = NULL,
+          cancelled_at = NULL,
+          cancelled_by = NULL,
+          cancellation_reason_code = NULL,
+          cancellation_reason_text = NULL
+    WHERE id = $1 AND driver_id = $2 AND status IN ($4, $5)
+    RETURNING id`;
+
+/**
+ * Driver-specific interaction history upsert (shared by the REJECTED and
+ * ACCEPTED_THEN_CANCELLED paths). Kept beside the ride SQL so the release
+ * transaction stays one file.
+ */
+export const UPSERT_DRIVER_RIDE_INTERACTION_SQL = `INSERT INTO ride_driver_rejections
+     (ride_id, driver_id, status, interaction_type, reason_code, reason_text, rejected_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     ON CONFLICT (ride_id, driver_id)
+     DO UPDATE SET
+       status = EXCLUDED.status,
+       interaction_type = EXCLUDED.interaction_type,
+       reason_code = COALESCE(EXCLUDED.reason_code, ride_driver_rejections.reason_code),
+       reason_text = COALESCE(EXCLUDED.reason_text, ride_driver_rejections.reason_text),
+       rejected_at = NOW()`;
+
 export class RideRepository {
   static async create(data: {
     rider_id: string;

@@ -61,10 +61,16 @@ class _MapScreenState extends State<MapScreen>
   double _estimateDurationSeconds = 0.0;
   bool _hasNavigatedToTrip = false;
 
-  /// Trip id that already got its pre-pickup driver-cancel apology dialog.
-  /// One dialog per driver cancellation (a fresh trip id pops it again),
-  /// while a repeated cancel inside the SAME rematch must not.
-  String? _driverCancelNotifiedTripId;
+  /// Notice id that already got its pre-pickup driver-cancel apology
+  /// dialog. One dialog per driver cancellation (a fresh notice id pops it
+  /// again), while a repeated rebuild must not.
+  int? _driverCancelNotifiedNoticeId;
+
+  /// Trip id this map instance resumed searching for after a driver
+  /// cancellation (or cold-start re-attach). Set when the existing search
+  /// sheet auto-opens for an already-searchable ride; guards re-entry and
+  /// drives cancellation/close cleanup without a local "request" flag.
+  String? _resumedSearchTripId;
 
   // Rewards options at checkout (promo code + ride credits + payment).
   final TextEditingController _promoCodeController = TextEditingController();
@@ -728,9 +734,14 @@ class _MapScreenState extends State<MapScreen>
   }
 
   Future<void> _closePanel({bool cancelIfRequesting = true}) async {
-    if (cancelIfRequesting && _requesting) {
-      final error = await Provider.of<RideProvider>(context, listen: false)
-          .cancelRide();
+    final rideProvider = Provider.of<RideProvider>(context, listen: false);
+    // Any open "searching" sheet — initial request OR a resumed search
+    // after a driver cancellation — cancels the pending ride on close,
+    // exactly like the sheet's own Cancel Ride button.
+    final hasActiveSearch =
+        _requesting || rideProvider.isSearchingForDriver;
+    if (cancelIfRequesting && hasActiveSearch) {
+      final error = await rideProvider.cancelRide();
       if (!mounted) return;
       if (error != null) {
         // Keep the sheet open so the rider can retry; surface why.
@@ -747,6 +758,7 @@ class _MapScreenState extends State<MapScreen>
     setState(() {
       _panelOpen = false;
       _requesting = false;
+      _resumedSearchTripId = null;
       _mapExpanded = false;
       _destination = null;
       _routePoints = [];
@@ -800,12 +812,10 @@ class _MapScreenState extends State<MapScreen>
     await _closePanel(cancelIfRequesting: false);
   }
 
-  void _showDriverCancelledDialog() {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const DriverCancelledDialog(),
-    );
+  /// Polished, temporary apology ("We're Sorry … finding you another
+  /// driver") — auto-dismisses, then the same search sheet keeps working.
+  void _showDriverCancelledApology() {
+    showDriverCancelledApology(context);
   }
 
   /// Ride Credits toggle with a zero balance: shake + red pulse so the
@@ -885,40 +895,72 @@ class _MapScreenState extends State<MapScreen>
           .toList(),
     );
 
-    // When a driver accepts, leave the map and go to the active trip screen.
-    if (rideProvider.status == models.TripStatus.ACCEPTED &&
-        !_hasNavigatedToTrip &&
-        _requesting) {
+    // When a driver accepts, leave the map and go to the active trip
+    // screen. Covers BOTH the initial request (`_requesting`) and a resumed
+    // search after a driver cancellation (`_resumedSearchTripId` engaged):
+    // the ride staying on this map is only ever a SEARCHING state. The
+    // sheet being open is the single requirement — a ride accepted for
+    // this rider while this sheet is up always lands on the trip screen.
+    final acceptedByMapFlow =
+        _panelOpen &&
+        rideProvider.tripId != null &&
+        rideProvider.status == models.TripStatus.ACCEPTED;
+    if (acceptedByMapFlow && !_hasNavigatedToTrip) {
       _hasNavigatedToTrip = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.pushReplacementNamed(context, '/trip');
       });
     }
 
-    // Auto-close the ride panel when the ride status returns to IDLE
-    // after a cancellation that originated from the TripScreen (not from
-    // MapScreen's own _requestCancel / _closePanel flow).
-    if (_panelOpen && _requesting &&
-        rideProvider.status == models.TripStatus.IDLE &&
-        !_hasNavigatedToTrip) {
+    // Re-attach to an already-searchable ride (backend REQUESTED with a
+    // known trip id): the SAME search sheet used for the initial request
+    // takes over — driver-cancel recovery, cold-start re-attach, or the
+    // rider returning to Explore mid-search all funnel into this one state.
+    if (rideProvider.isSearchingForDriver) {
+      if (rideProvider.tripId != _resumedSearchTripId) {
+        _resumedSearchTripId = rideProvider.tripId;
+        if (_panelOpen) {
+          // Sheet already open (initial request flow) — nothing to do.
+        } else {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            setState(() => _panelOpen = true);
+          });
+        }
+      }
+      if (_hasNavigatedToTrip) {
+        // We came back from the trip screen (the accepted driver cancelled
+        // and released the ride, or the rider aborted there) — this map
+        // re-owns the same ride's search, so the next ACCEPTED may
+        // navigate to the trip screen again.
+        _hasNavigatedToTrip = false;
+      }
+    }
+
+    // Auto-close the ride panel when the ride status returns to IDLE after
+    // a cancellation — whether the search was locally initiated, resumed
+    // after a driver cancel, or cancelled from the TripScreen.
+    if (_panelOpen &&
+        (_requesting || _resumedSearchTripId != null) &&
+        rideProvider.status == models.TripStatus.IDLE) {
       _hasNavigatedToTrip = true; // prevent re-entry
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _closePanel(cancelIfRequesting: false);
       });
     }
 
-    // Driver cancelled pre-pickup: the backend released the SAME ride back
-    // to REQUESTED and keeps re-dispatching it at the same price — the
-    // searching sheet stays up ("Finding your driver…"). Pop the apology
-    // dialog exactly once per cancellation.
-    if (_requesting &&
-        rideProvider.status == models.TripStatus.REQUESTED &&
-        rideProvider.driverCancelledNotice != null &&
-        rideProvider.tripId != _driverCancelNotifiedTripId) {
-      _driverCancelNotifiedTripId = rideProvider.tripId;
+    // Driver cancelled after acceptance: the backend released the SAME ride
+    // back to searching and keeps re-dispatching it — the searching sheet
+    // stays up ("Finding your driver…"). Pop the apology dialog exactly
+    // once per driver cancellation (notice id is monotonic).
+    final pendingNotice = rideProvider.driverCancelledNotice;
+    if (pendingNotice != null &&
+        rideProvider.isSearchingForDriver &&
+        rideProvider.driverCancelledNoticeSeq != _driverCancelNotifiedNoticeId) {
+      _driverCancelNotifiedNoticeId = rideProvider.driverCancelledNoticeSeq;
       rideProvider.consumeDriverCancelledNotice();
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showDriverCancelledDialog();
+        if (mounted) _showDriverCancelledApology();
       });
     }
 
@@ -1300,8 +1342,15 @@ class _MapScreenState extends State<MapScreen>
             AnimatedBuilder(
               animation: _sheetController,
               builder: (context, _) {
+                // The sheet also renders for an on-going backend search even
+                // when the local pickup/destination are gone (fresh Explore
+                // after a driver-cancel recovery re-attaches to the ride).
+                final searchingOnMap =
+                    _requesting || rideProvider.isSearchingForDriver;
                 final sheetOpen =
-                    _panelOpen && _pickup != null && _destination != null;
+                    _panelOpen &&
+                    (searchingOnMap ||
+                        (_pickup != null && _destination != null));
                 final sheetHeight =
                     sheetOpen ? _sheetHeightForFraction(_sheetController.value) : 0.0;
                 return Positioned(
@@ -1327,7 +1376,9 @@ class _MapScreenState extends State<MapScreen>
               },
             ),
 
-            if (_panelOpen && _pickup != null && _destination != null)
+            if (_panelOpen &&
+                (_pickup != null && _destination != null ||
+                    _requesting || rideProvider.isSearchingForDriver))
               _buildRideSheet(theme)
             else if (_pickup != null && _destination != null)
               Positioned(
@@ -1357,8 +1408,12 @@ class _MapScreenState extends State<MapScreen>
   /// card with animated price reduction, promo + credits panel, confirm CTA.
   Widget _buildRideSheet(ThemeData theme) {
     final rideProvider = Provider.of<RideProvider>(context);
+    // ONE searching predicate for the sheet: the initial request
+    // (optimistic local flag until the backend confirms) OR any ride the
+    // backend is still matching (initial + resumed after driver cancel).
     final searching =
-        _requesting && rideProvider.status == models.TripStatus.REQUESTED;
+        rideProvider.status == models.TripStatus.REQUESTED &&
+            (_requesting || rideProvider.isSearchingForDriver);
 
     return Positioned(
       bottom: 0,

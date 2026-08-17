@@ -309,6 +309,16 @@ class RideService {
         }
         if (trip.status !== 'REQUESTED')
             throw new Error('Trip already taken or cancelled');
+        // Driver-specific exclusion (spec §16/§12): a driver who rejected this
+        // ride BEFORE accepting, or ACCEPTED then CANCELLED it, must never be
+        // assigned again — even if a stale accept emit arrives late (old offer
+        // id, listener replay, double tap around the release). The dispatch
+        // pipeline already excludes these drivers; this is the authoritative
+        // per-accept guard so no stale client action can resurrect them.
+        const { RideRejectionService } = await Promise.resolve().then(() => __importStar(require('../../services/ride-rejection.service')));
+        if (await RideRejectionService.hasRejected(tripId, driverId)) {
+            throw new Error('You have already declined or cancelled this ride.');
+        }
         // Security: Ensure driver doesn't have another active trip. A stale
         // Redis key from a prior run (e.g. previous smoke test that crashed
         // before pickup) would otherwise block this driver permanently.
@@ -744,21 +754,46 @@ class RideService {
         // DRIVER PRE-PICKUP CANCEL → release + re-match the same ride
         // ------------------------------------------------------------------
         if (isDriverPrePickupCancel) {
-            const releaseRes = await database_1.pool.query(`UPDATE rides
-            SET status = $3,
-                driver_id = NULL,
-                cancelled_at = NULL,
-                cancelled_by = NULL,
-                cancellation_reason_code = NULL,
-                cancellation_reason_text = NULL
-          WHERE id = $1 AND driver_id = $2 AND status IN ($4, $5)
-          RETURNING id`, [
-                tripId,
-                userId,
-                types_1.TripStatus.REQUESTED,
-                types_1.TripStatus.ACCEPTED,
-                types_1.TripStatus.DRIVER_ARRIVING,
-            ]);
+            // Atomic release: the transaction verifies (a) this driver is STILL
+            // the assigned driver and (b) the ride is still in a pre-pickup
+            // state — a stale/delayed cancel from a previous driver can never
+            // clobber a newer assignment (spec §16/§17), and a rider cancel that
+            // commits first wins deterministically. The same transaction then
+            // persists the ACCEPTED_THEN_CANCELLED exclusion so the departing
+            // driver can never be offered this ride again on the re-match.
+            const client = await database_1.pool.connect();
+            let releaseRes;
+            try {
+                await client.query('BEGIN');
+                releaseRes = await client.query(ride_repository_1.RELEASE_DRIVER_PRE_PICKUP_SQL, [
+                    tripId,
+                    userId,
+                    types_1.TripStatus.REQUESTED,
+                    types_1.TripStatus.ACCEPTED,
+                    types_1.TripStatus.DRIVER_ARRIVING,
+                ]);
+                if ((releaseRes.rowCount ?? 0) > 0) {
+                    await client.query(ride_repository_1.UPSERT_DRIVER_RIDE_INTERACTION_SQL, [
+                        tripId,
+                        userId,
+                        'ACCEPTED_THEN_CANCELLED',
+                        'ACCEPTED_THEN_CANCELLED',
+                        opts.reasonCode ?? null,
+                        (opts.reasonText ?? '').trim().slice(0, 300) || null,
+                    ]);
+                }
+                await client.query('COMMIT');
+            }
+            catch (err) {
+                try {
+                    await client.query('ROLLBACK');
+                }
+                catch { /* noop */ }
+                throw err;
+            }
+            finally {
+                client.release();
+            }
             if ((releaseRes.rowCount ?? 0) === 0) {
                 // The ride already flipped (duplicate emit, or another actor took
                 // it over) — answer with the latest authoritative state. No second
@@ -766,6 +801,19 @@ class RideService {
                 const latest = await ride_repository_1.RideRepository.findById(tripId);
                 return latest ?? trip;
             }
+            // Clear the previous assignment's dispatch residue so the fresh
+            // matching pass starts clean: winner marker, dispatched-offer list,
+            // and the departing driver's offer slot (the old offer must never be
+            // re-read or answered by a stale tap). The ride-level match lock is
+            // deliberately NOT deleted here — it serializes matchers; a live
+            // in-flight matcher still holding it must not be joined by a second
+            // dispatcher (it unwinds and releases it as soon as it observes the
+            // non-REQUESTED → REQUESTED transition; orphans expire via TTL).
+            await Promise.all([
+                redis_1.redis.del(`dispatch:winners:${tripId}`),
+                redis_1.redis.del(`dispatch:${tripId}`),
+                redis_1.redis.del(`ride:offer:${tripId}`),
+            ]);
             // Star penalty + accepted-cancellation counter for every driver
             // pre-pickup cancel, reason given or not.
             applyDriverPrePickupCancelPenalty(userId);
