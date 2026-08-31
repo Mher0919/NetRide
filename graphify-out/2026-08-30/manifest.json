@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "backend/run-tests.cjs": {
-    "mtime": 1786923678.5243628,
-    "ast_hash": "5598e4881ed561d5dc55e80b04e643a4",
+    "mtime": 1787898106.898046,
+    "ast_hash": "800fe3faf33d8cb654928439285f1049",
     "semantic_hash": ""
   },
   "backend/scripts/build-osrm.sh": {
@@ -1215,8 +1215,8 @@
     "semantic_hash": ""
   },
   "backend/src/app.ts": {
-    "mtime": 1786914892.0608432,
-    "ast_hash": "dc526a35ea136fbf0f61163265e2ba22",
+    "mtime": 1787897334.84435,
+    "ast_hash": "d837250b2861eeac2516b5196de182f1",
     "semantic_hash": ""
   },
   "backend/src/benchmark_routing.ts": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "backend/src/config/env.ts": {
-    "mtime": 1786910166.3299656,
-    "ast_hash": "686d1f5f63f2f6ddf5a474b24f4a39ac",
+    "mtime": 1787897226.6846254,
+    "ast_hash": "f25da00c8e28fd066d3af58a60da22b2",
     "semantic_hash": ""
   },
   "backend/src/config/redis.ts": {
@@ -1285,8 +1285,8 @@
     "semantic_hash": ""
   },
   "backend/src/middleware/rateLimitConfig.ts": {
-    "mtime": 1786145555.4966562,
-    "ast_hash": "abc4d1af72ee45de1a49ac076e699ca3",
+    "mtime": 1787897044.6642113,
+    "ast_hash": "19b8803dabfa13029b4797a3edf64e77",
     "semantic_hash": ""
   },
   "backend/src/middleware/resolveFileUrls.middleware.ts": {
@@ -1325,8 +1325,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/auth/otp.service.ts": {
-    "mtime": 1778376521.6436923,
-    "ast_hash": "821aaadbf8829b52a854aea19c636fa3",
+    "mtime": 1787896579.044802,
+    "ast_hash": "2e8558589ce9ecb9cfdd69be75b7eb47",
     "semantic_hash": ""
   },
   "backend/src/modules/driver/driver.controller.ts": {
@@ -3240,8 +3240,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Sponsors.tsx": {
-    "mtime": 1786862242.1020367,
-    "ast_hash": "be8ed790160eec356d453f3948035095",
+    "mtime": 1787896290.8470297,
+    "ast_hash": "cf7dac2532cc6ff352e986db7e1dad91",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/driver_cancelled_dialog.dart": {
@@ -3285,18 +3285,18 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/App.tsx": {
-    "mtime": 1786861923.9813104,
-    "ast_hash": "6a3c5d003881c301d502f9d75ed211c5",
+    "mtime": 1787896423.7346983,
+    "ast_hash": "d1fede96ed35f3e69839a66c9c40128f",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/api/index.ts": {
-    "mtime": 1786861817.0411754,
-    "ast_hash": "540d5f46fa886fd1a4216ca084aa55aa",
+    "mtime": 1787897558.9484615,
+    "ast_hash": "2ddc1db1372ce3e75cec0f9843db0dc4",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/api/sponsor.ts": {
-    "mtime": 1786863163.2258854,
-    "ast_hash": "b71c4530b4adea96e2389b2a19e060e2",
+    "mtime": 1787897538.0079012,
+    "ast_hash": "8e0c46148b5e0d94ef1f27b59c9a242e",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/components/MainLayout.tsx": {
@@ -3305,8 +3305,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/context/AuthContext.tsx": {
-    "mtime": 1786863308.9250703,
-    "ast_hash": "8a1479271e4af7a66dafcb1831d11fd5",
+    "mtime": 1787897577.6158223,
+    "ast_hash": "4e04a24b546af26b3e116d4dacbe4b50",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/main.tsx": {
@@ -3315,8 +3315,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/ChangePassword.tsx": {
-    "mtime": 1786863232.924705,
-    "ast_hash": "92c68a622998f2949abe5dbb07073753",
+    "mtime": 1787896071.5146892,
+    "ast_hash": "5ff36fb8100e7a15f1c1d870e2079990",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Customers.tsx": {
@@ -3330,18 +3330,18 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Login.tsx": {
-    "mtime": 1786863224.450673,
-    "ast_hash": "f6607e7958bf84c509c09626cd87a401",
+    "mtime": 1787896557.8392386,
+    "ast_hash": "43c8ce562868fe02947c2c243a1e59d4",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Settings.tsx": {
-    "mtime": 1786863271.7962468,
-    "ast_hash": "9892d5456bbe4f65cddc5d7212c0fdb4",
+    "mtime": 1787897656.6331766,
+    "ast_hash": "640d0dd0d7292d8ec3da2c65fc88f306",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Validations.tsx": {
-    "mtime": 1786863197.5582771,
-    "ast_hash": "2cbbc1454bfd3665c211263a6cfca137",
+    "mtime": 1787896001.8481426,
+    "ast_hash": "c5c8d84dd5c0a9de4608a1c3011b3402",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/theme/index.ts": {
@@ -3385,8 +3385,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/admin-sponsor.controller.ts": {
-    "mtime": 1786861283.503089,
-    "ast_hash": "c1169937fd4207c69dfdc62e1ac43070",
+    "mtime": 1787896049.6810987,
+    "ast_hash": "5cbaebb48103e2e9a9713fbf6d8398ae",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/admin-sponsor.routes.ts": {
@@ -3415,18 +3415,18 @@
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor-auth.service.ts": {
-    "mtime": 1786860970.4312115,
-    "ast_hash": "de084d842bb206f0e4b04dde17971fbe",
+    "mtime": 1787897424.4396524,
+    "ast_hash": "17cb1df5d5e58b0cdc51c38b0718c1e7",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor-portal.controller.ts": {
-    "mtime": 1786861020.820136,
-    "ast_hash": "fdad4b383c3a0b5b5f5864d02a500bc4",
+    "mtime": 1787897436.7047875,
+    "ast_hash": "75dd66e228543ea3d71d6f4f3ece31e9",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor-portal.routes.ts": {
-    "mtime": 1786861028.5893362,
-    "ast_hash": "457bfdacc7b129b7314767ceda0c6564",
+    "mtime": 1787897460.845246,
+    "ast_hash": "14ff3354ad3df34c32e16111bfacdedb",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor.service.ts": {
@@ -3537,6 +3537,26 @@
   "backend/scripts/run-migrations.cjs": {
     "mtime": 1786940894.2530587,
     "ast_hash": "50f23b123ae0dc7dee1b7d63d434d75d",
+    "semantic_hash": ""
+  },
+  "apps/sponsor_portal/src/pages/ForgotPassword.tsx": {
+    "mtime": 1787896403.238969,
+    "ast_hash": "c61cc4c8a4c3560c126fce9d37299689",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/auth/__tests__/otp.unit.test.ts": {
+    "mtime": 1787898236.9203982,
+    "ast_hash": "0e7330e568b88100b0d0375960f2500e",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/sponsor/__tests__/forgot-password.unit.test.ts": {
+    "mtime": 1787898247.9109862,
+    "ast_hash": "d7d6632870e428e26f1725575d6fe0da",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/sponsor/__tests__/sponsor-auth.unit.test.ts": {
+    "mtime": 1787898021.4112785,
+    "ast_hash": "34a1b7b27b32da38a666ecd1163ac512",
     "semantic_hash": ""
   }
 }
