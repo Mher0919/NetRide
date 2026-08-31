@@ -18,11 +18,13 @@ const PartnerCreateSchema = z.object({
   contact_name: z.string().trim().max(200).optional().nullable(),
   contact_phone: z.string().trim().max(30).optional().nullable(),
   contact_email: z.string().trim().email().optional().nullable(),
+  email: z.string().trim().email(),
+  password: z.string().min(8),
   commission_rate: z.number().min(0).max(1).default(0.10),
   notes: z.string().max(2000).optional().nullable(),
 });
 
-const PartnerUpdateSchema = PartnerCreateSchema.partial();
+const PartnerUpdateSchema = PartnerCreateSchema.partial().partial();
 
 const PromoCreateSchema = z.object({
   code: z.string().trim().min(2).max(32).transform((v) => v.toUpperCase()),

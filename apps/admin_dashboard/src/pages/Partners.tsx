@@ -64,6 +64,8 @@ const Partners: React.FC = () => {
     contact_name: '',
     contact_phone: '',
     contact_email: '',
+    email: '', // partner login email
+    password: '', // partner login password
     commission_rate: '10',
     notes: '',
   });
@@ -103,6 +105,12 @@ const Partners: React.FC = () => {
   }, [fetchData]);
 
   React.useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  React.useEffect(() => {
     if (!selected) return;
     let cancelled = false;
     setDetailLoading(true);
@@ -133,7 +141,7 @@ const Partners: React.FC = () => {
   };
 
   const handleCreate = async () => {
-    if (!form.name.trim() || !form.business_type.trim()) return;
+    if (!form.name.trim() || !form.business_type.trim() || !form.email.trim() || !form.password.trim()) return;
     setSaving(true);
     try {
       await createPartner({
@@ -143,11 +151,13 @@ const Partners: React.FC = () => {
         contact_name: form.contact_name.trim() || null,
         contact_phone: form.contact_phone.trim() || null,
         contact_email: form.contact_email.trim() || null,
+        email: form.email.trim(),
+        password: form.password.trim(),
         commission_rate: (Number(form.commission_rate) || 0) / 100,
         notes: form.notes.trim() || null,
       });
       setCreateOpen(false);
-      setForm({ name: '', business_type: '', address: '', contact_name: '', contact_phone: '', contact_email: '', commission_rate: '10', notes: '' });
+      setForm({ name: '', business_type: '', address: '', contact_name: '', contact_phone: '', contact_email: '', email: '', password: '', commission_rate: '10', notes: '' });
       setSnack({ open: true, message: 'Partner created', severity: 'success' });
       fetchData();
     } catch (err: any) {
@@ -338,6 +348,11 @@ const Partners: React.FC = () => {
             <Stack direction="row" spacing={2}>
               <TextField label="Contact name" fullWidth value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} />
               <TextField label="Contact phone" fullWidth value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} />
+            </Stack>
+            <TextField label="Contact email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
+            <Stack direction="row" spacing={2}>
+              <TextField label="Partner login email" fullWidth value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              <TextField label="Partner login password" fullWidth type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
             </Stack>
             <TextField label="Contact email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
             <TextField

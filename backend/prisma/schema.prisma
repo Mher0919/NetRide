@@ -14,6 +14,7 @@ enum UserRole {
   DRIVER
   ADMIN
   SPONSOR
+  PARTNER
 
   @@map("user_role")
 }

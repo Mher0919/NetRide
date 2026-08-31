@@ -41,7 +41,12 @@ const Dashboard: React.FC = () => {
         setLoading(false);
       }
     };
+
     fetchStats();
+
+    // Poll stats every 30 seconds to keep dashboard data current
+    const pollTimer = setInterval(fetchStats, 30_000);
+    return () => clearInterval(pollTimer);
   }, []);
 
   if (loading) {

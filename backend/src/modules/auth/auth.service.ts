@@ -10,6 +10,7 @@ import { EmailService } from '../../services/email.service';
 import { SmsService } from '../../services/sms.service';
 import { OTPService } from './otp.service';
 import { UserRole } from '../../types';
+import { PartnerService } from '../partner/partner.service';
 
 export class AuthService {
   static async requestPhoneOTP(userId: string, phoneNumber: string, role?: string) {

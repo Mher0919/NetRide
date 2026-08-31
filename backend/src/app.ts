@@ -46,6 +46,7 @@ import heatmapRoutes from './modules/heatmap/heatmap.routes';
 import specialsRoutes from './modules/sponsor/specials.routes';
 import sponsorPortalRoutes from './modules/sponsor/sponsor-portal.routes';
 import adminSponsorRoutes from './modules/sponsor/admin-sponsor.routes';
+import partnerPortalRoutes from './modules/partner/partner-portal.routes';
 import { SpecialRedemptionService } from './modules/sponsor/special-redemption.service';
 import { GeospatialService } from './modules/geospatial/geospatial.service';
 import { UploadService } from './services/upload.service';
@@ -222,6 +223,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/heatmap', heatmapRoutes);
 app.use('/api', specialsRoutes);
 app.use('/api', sponsorPortalRoutes);
+app.use('/api/partner', partnerPortalRoutes);
 app.use('/api/admin', adminSponsorRoutes);
 app.post('/api/upload', UploadService.upload);
 

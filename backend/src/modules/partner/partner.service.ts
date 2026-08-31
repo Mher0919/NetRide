@@ -11,6 +11,8 @@
 // transaction as the ledger row.
 
 import { pool } from '../../config/database';
+import bcrypt from 'bcryptjs';
+import { UserRole } from '../../types';
 import { AuditEventsService } from '../../services/audit-events.service';
 
 export const PARTNER_STATUSES = ['ACTIVE', 'INACTIVE', 'ARCHIVED'] as const;
@@ -23,6 +25,8 @@ export interface PartnerInput {
   contact_name?: string | null;
   contact_phone?: string | null;
   contact_email?: string | null;
+  email: string; // partner login email
+  password: string; // partner login password (will be hashed)
   commission_rate: number; // fraction, e.g. 0.10
   notes?: string | null;
 }
@@ -62,38 +66,71 @@ export class PartnerService {
     return res.rows.length ? normalizePartner(res.rows[0]) : null;
   }
 
-  static async create(input: PartnerInput, adminId: string) {
-    const res = await pool.query(
-      `INSERT INTO partners
-         (name, business_type, address, contact_name, contact_phone, contact_email, commission_rate, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [
-        input.name.trim(),
-        input.business_type.trim(),
-        input.address?.trim() ?? null,
-        input.contact_name?.trim() ?? null,
-        input.contact_phone?.trim() ?? null,
-        input.contact_email?.trim() ?? null,
-        Math.max(0, Math.min(1, Number(input.commission_rate))),
-        input.notes?.trim() ?? null,
-      ],
-    );
-    await AuditEventsService.record({
-      actorId: adminId,
-      actorRole: 'ADMIN',
-      action: 'PARTNER_CREATED',
-      entityType: 'PARTNER',
-      entityId: res.rows[0].id,
-      details: { name: input.name, business_type: input.business_type },
-    });
-    return normalizePartner(res.rows[0]);
+static async create(input: PartnerInput, adminId: string) {
+    // Check if a user with this email already exists
+    const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [input.email]);
+    if (existingUser.rows.length > 0) {
+      throw new Error('A user with this email already exists. Use a unique partner email.');
+    }
+
+    // Hash the password securely
+    const passwordHash = await bcrypt.hash(input.password, 10);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Create the user account with PARTNER role and hashed password
+      const userRes = await client.query(
+        `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         RETURNING *`,
+        [input.email, input.name.trim(), passwordHash, UserRole.PARTNER, false, true],
+      );
+      const user = userRes.rows[0];
+
+      // Create the partner record linked to the user
+      const partnerRes = await client.query(
+        `INSERT INTO partners
+           (name, business_type, address, contact_name, contact_phone, contact_email, commission_rate, notes, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE')
+         RETURNING *`,
+        [
+          input.name.trim(),
+          input.business_type.trim(),
+          input.address?.trim() ?? null,
+          input.contact_name?.trim() ?? null,
+          input.contact_phone?.trim() ?? null,
+          input.contact_email?.trim() ?? null,
+          Math.max(0, Math.min(1, Number(input.commission_rate))),
+          input.notes?.trim() ?? null,
+          'ACTIVE',
+        ],
+      );
+      const partner = partnerRes.rows[0];
+
+      await client.query('COMMIT');
+
+      await AuditEventsService.record({
+        actorId: adminId,
+        actorRole: 'ADMIN',
+        action: 'PARTNER_CREATED',
+        entityType: 'PARTNER',
+        entityId: partner.id,
+        details: { name: input.name, email: input.email, business_type: input.business_type },
+      });
+      return normalizePartner(partner);
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   static async update(id: string, input: Partial<PartnerInput>, adminId: string) {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Partner not found');
-    if (existing.status === 'ARCHIVED') throw new Error('Archived partners cannot be edited');
 
     const merged = {
       name: (input.name ?? existing.name).trim(),

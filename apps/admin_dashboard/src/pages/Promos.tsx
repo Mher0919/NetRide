@@ -109,6 +109,12 @@ const Promos: React.FC = () => {
   }, [fetchData]);
 
   React.useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  React.useEffect(() => {
     (async () => {
       try {
         const data = await listPartners({ status: 'ACTIVE' });
