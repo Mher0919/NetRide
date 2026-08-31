@@ -77,7 +77,14 @@ const Login: React.FC = () => {
       login(user, token);
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Authentication failed. Please check your credentials.');
+      const apiError = err.response?.data?.error;
+      if (apiError) {
+        setError(apiError);
+      } else if (!err.response) {
+        setError('Unable to reach the server. Please verify the backend is running, then try again.');
+      } else {
+        setError('Authentication failed. Please check your credentials.');
+      }
     } finally {
       setLoading(false);
     }

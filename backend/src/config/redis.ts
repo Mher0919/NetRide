@@ -8,14 +8,20 @@ const redisUrl = env.REDIS_URL.replace('localhost', '127.0.0.1');
 export const redis = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
   connectTimeout: 5000, // 5 seconds
+  // Reject commands immediately while disconnected instead of queueing
+  // them. Callers (rate limiter, caches) are written to fail open, so a
+  // queued command would hang the request forever — an offline-queueing
+  // client turns a Redis outage into a full app outage.
+  enableOfflineQueue: false,
   // Don't open a socket until the first command — avoids a connection
   // attempt (and its error spam) at import time, and keeps the process
   // from crashing if Redis is briefly unavailable during boot.
   lazyConnect: true,
   // Bound the reconnect backoff so a downed Redis can never pin the event
   // loop forever (which would block graceful shutdown / test exits). After
-  // ~10s of failures we stop retrying; the app stays up and the routing
-  // cache degrades to cache-miss automatically.
+  // ~10s of failures we stop retrying; commands reject fast (fail-open),
+  // the app stays up, and the routing cache degrades to cache-miss
+  // automatically until Redis returns.
   retryStrategy: (times: number) => (times > 10 ? null : Math.min(times * 200, 2000)),
 });
 

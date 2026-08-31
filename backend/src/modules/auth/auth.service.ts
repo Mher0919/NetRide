@@ -165,11 +165,15 @@ export class AuthService {
       }
 
       if (!isTrusted) {
-        await OTPService.generateOTP(env.ADMIN_NOTIFY_EMAIL || user.email);
-        return { 
-          otp_required: true, 
-          email: env.ADMIN_NOTIFY_EMAIL || user.email,
-          message: 'Admin 2FA required. Code sent to trusted email.' 
+        // Send the 2FA code to the admin's OWN email — the person at the
+        // dashboard is the one typing it. (ADMIN_NOTIFY_EMAIL still drives
+        // other admin notifications, but routing the login code to an
+        // unreachable support inbox makes admin login impossible.)
+        await OTPService.generateOTP(user.email);
+        return {
+          otp_required: true,
+          email: user.email,
+          message: 'Admin 2FA required. Code sent to your email.',
         };
       }
     }
@@ -515,12 +519,12 @@ export class AuthService {
       throw new Error('Unauthorized');
     }
 
-    await OTPService.generateOTP(env.ADMIN_NOTIFY_EMAIL || email);
+    await OTPService.generateOTP(email);
     return { message: 'Verification code sent' };
   }
 
   static async verifyAdmin2FA(email: string, code: string) {
-    const isValid = await OTPService.verifyOTP(env.ADMIN_NOTIFY_EMAIL || email, code);
+    const isValid = await OTPService.verifyOTP(email, code);
     if (!isValid) {
       throw new Error('Invalid or expired verification code');
     }

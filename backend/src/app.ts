@@ -24,6 +24,14 @@ import { register } from './observability/metrics';
 // import time so it can capture those errors.
 initSentry();
 
+// Safety net: a stray rejected promise (e.g. a queued Redis command when
+// Redis is down at boot) must never take down the whole API. Log it and
+// keep serving — the affected subsystem degrades and recovers on its own.
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  console.error(`[PROCESS] ⚠️ Unhandled promise rejection (non-fatal): ${message}`);
+});
+
 // Route Imports
 import authRoutes from './modules/auth/auth.routes';
 import userRoutes from './modules/user/user.routes';
@@ -69,9 +77,27 @@ const httpServer = createServer(app);
 const allowedOrigins = env.CORS_ORIGINS
   ? env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
   : [env.APP_URL, env.ADMIN_URL, env.SPONSOR_PORTAL_URL].filter(Boolean) as string[];
+// In development, any localhost/127.0.0.1 origin is trusted regardless of
+// port — the admin dashboard / portals routinely run on ephemeral ports
+// (vite picks 5173..5175) and are opened via either hostname.
+const isAllowedOrigin = (origin: string): boolean => {
+  if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return true;
+  if (env.NODE_ENV === 'development') {
+    try {
+      const host = new URL(origin).hostname;
+      return host === 'localhost' || host === '127.0.0.1';
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
+    origin: (origin, callback) => {
+      if (!origin || isAllowedOrigin(origin)) callback(null, true);
+      else callback(new Error('Not allowed by CORS'));
+    },
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -97,7 +123,7 @@ bindIo(io);
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+    if (!origin || isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));

@@ -6,6 +6,9 @@ const redisUrl = env.REDIS_URL.replace('localhost', '127.0.0.1');
 const redisOptions = {
   maxRetriesPerRequest: null,
   connectTimeout: 5000,
+  // Reject commands immediately while disconnected (see redis.ts — these
+  // clients are best-effort pub/sub fan-out and must fail fast, not queue).
+  enableOfflineQueue: false,
   // Don't open a socket until the first command — avoids a connection
   // attempt at import time and prevents the process from crashing when
   // Redis is briefly unavailable during boot.
