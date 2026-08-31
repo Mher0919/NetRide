@@ -175,8 +175,11 @@ export class AdminSponsorController {
 
   static async adjustBudget(req: AdminReq, res: Response) {
     try {
-      const deltaCents = Math.round(Number(req.body?.deltaCents ?? 0));
-      const reason = String(req.body?.reason ?? '');
+      const body = req.body ?? {};
+      const amountCents = Math.round(Number(body.amount_cents ?? body.deltaCents ?? 0));
+      const direction = String(body.direction ?? 'CREDIT').toUpperCase();
+      const deltaCents = direction === 'DEBIT' ? -Math.abs(amountCents) : Math.abs(amountCents);
+      const reason = String(body.reason ?? '');
       const sponsor = await SponsorService.adjustBudget(req.params.id, deltaCents, reason, { id: req.user!.id, role: 'ADMIN' });
       res.json({ sponsor });
     } catch (err: any) {
@@ -223,8 +226,10 @@ export class AdminSponsorController {
 
   static async createPortalAccount(req: AdminReq, res: Response) {
     try {
-      const { email, password } = req.body ?? {};
-      if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+      const { email } = req.body ?? {};
+      if (!email) return res.status(400).json({ error: 'Email is required' });
+      const crypto = await import('crypto');
+      const password = crypto.randomBytes(12).toString('base64url').slice(0, 12);
       const result = await SponsorService.createPortalAccount(
         req.params.id,
         email,
@@ -239,7 +244,8 @@ export class AdminSponsorController {
 
   static async resetPortalPassword(req: AdminReq, res: Response) {
     try {
-      const password = String(req.body?.password ?? '');
+      const crypto = await import('crypto');
+      const password = String(req.body?.password ?? crypto.randomBytes(12).toString('base64url').slice(0, 12));
       const result = await SponsorService.resetPortalPassword(req.params.id, password, { id: req.user!.id, role: 'ADMIN' });
       res.json({ message: 'Password reset', temporaryPassword: result.password });
     } catch (err: any) {

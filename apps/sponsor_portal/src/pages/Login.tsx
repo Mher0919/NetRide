@@ -8,9 +8,10 @@ import {
   Snackbar,
   Alert,
   CircularProgress,
+  Link,
 } from '@mui/material';
 import StorefrontIcon from '@mui/icons-material/Storefront';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { sponsorLogin } from '../api/sponsor';
 
@@ -67,8 +68,13 @@ const Login: React.FC = () => {
             onChange={(e) => setPassword(e.target.value)}
             fullWidth
             required
-            sx={{ mb: 3 }}
+            sx={{ mb: 1 }}
           />
+          <Box sx={{ textAlign: 'right', mb: 3 }}>
+            <Link component={RouterLink} to="/forgot-password" variant="body2" sx={{ fontWeight: 600 }}>
+              Forgot password?
+            </Link>
+          </Box>
           <Button type="submit" variant="contained" fullWidth size="large" disabled={loading}>
             {loading ? <CircularProgress size={22} color="inherit" /> : 'Sign in'}
           </Button>

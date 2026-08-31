@@ -1,12 +1,16 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OTPService = void 0;
 // backend/src/modules/auth/otp.service.ts
+const crypto_1 = __importDefault(require("crypto"));
 const database_1 = require("../../config/database");
 const email_service_1 = require("../../services/email.service");
 class OTPService {
     static async generateOTP(email) {
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const code = crypto_1.default.randomInt(100000, 999999).toString();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
         // Clean up old codes for this email
         await database_1.pool.query('DELETE FROM verification_codes WHERE email = $1', [email]);

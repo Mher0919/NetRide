@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { SponsorSession } from '../api/sponsor';
+import { sponsorLogout } from '../api/sponsor';
 
 interface AuthContextType {
   session: SponsorSession | null;
@@ -15,11 +16,16 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const readSession = (): SponsorSession | null => {
   try {
     const token = localStorage.getItem('sponsor_token');
+    const refreshToken = localStorage.getItem('sponsor_refresh_token');
     const saved = localStorage.getItem('sponsor_user');
-    if (token && saved) return { token, sponsor: JSON.parse(saved) };
+    if (token && refreshToken && saved) {
+      const sponsor = JSON.parse(saved);
+      return { token, refreshToken, sponsor };
+    }
   } catch {
     localStorage.removeItem('sponsor_token');
     localStorage.removeItem('sponsor_user');
+    localStorage.removeItem('sponsor_refresh_token');
   }
   return null;
 };
@@ -38,13 +44,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = (s: SponsorSession) => {
     setSession(s);
     localStorage.setItem('sponsor_token', s.token);
+    localStorage.setItem('sponsor_refresh_token', s.refreshToken);
     localStorage.setItem('sponsor_user', JSON.stringify(s.sponsor));
   };
 
   const logout = () => {
+    const refreshToken = session?.refreshToken;
     setSession(null);
     localStorage.removeItem('sponsor_token');
     localStorage.removeItem('sponsor_user');
+    localStorage.removeItem('sponsor_refresh_token');
+    if (refreshToken) sponsorLogout(refreshToken);
   };
 
   return (

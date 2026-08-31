@@ -12,6 +12,11 @@ const router = Router();
 
 // ---- Auth (public) -----------------------------------------------------
 router.post('/sponsor/auth/login', SponsorPortalController.login);
+router.post('/sponsor/auth/refresh', SponsorPortalController.refresh);
+router.post('/sponsor/auth/logout', SponsorPortalController.logout);
+router.post('/sponsor/auth/forgot-password', SponsorPortalController.forgotPassword);
+router.post('/sponsor/auth/verify-reset-otp', SponsorPortalController.verifyResetOTP);
+router.post('/sponsor/auth/reset-password', SponsorPortalController.resetPassword);
 router.post('/sponsor/auth/change-password', authMiddleware, sponsorMiddleware, SponsorPortalController.changePassword);
 
 // ---- Authed portal API --------------------------------------------------

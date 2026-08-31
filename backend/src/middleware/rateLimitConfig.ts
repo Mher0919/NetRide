@@ -32,6 +32,20 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     ip: { max: 5, windowMs: MINUTE },
   },
 
+  // Sponsor portal auth — strict limits (anti-brute-force)
+  'POST /api/sponsor/auth/login': {
+    ip: { max: 10, windowMs: MINUTE },
+  },
+  'POST /api/sponsor/auth/forgot-password': {
+    ip: { max: 3, windowMs: MINUTE },
+  },
+  'POST /api/sponsor/auth/verify-reset-otp': {
+    ip: { max: 5, windowMs: MINUTE },
+  },
+  'POST /api/sponsor/auth/reset-password': {
+    ip: { max: 3, windowMs: MINUTE },
+  },
+
   // Ride endpoints — moderate limits
   'POST /api/ride/request': {
     user: { max: 30, windowMs: MINUTE },

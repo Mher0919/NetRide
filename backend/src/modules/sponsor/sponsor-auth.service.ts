@@ -13,12 +13,18 @@
 
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { pool } from '../../config/database';
 import { env } from '../../config/env';
+import { redis } from '../../config/redis';
 import { AuditEventsService } from '../../services/audit-events.service';
+
+const ACCESS_TOKEN_TTL = '15m';
+const REFRESH_TOKEN_TTL_DAYS = 30;
 
 export interface SponsorPortalSession {
   token: string;
+  refreshToken: string;
   sponsor: {
     id: string;
     businessName: string;
@@ -67,7 +73,15 @@ export class SponsorAuthService {
     const token = jwt.sign(
       { id: user.id, role: 'SPONSOR', email: user.email, sponsorId: account.sponsor_id },
       env.JWT_SECRET,
-      { expiresIn: '30d', algorithm: 'HS256' },
+      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256' },
+    );
+
+    const refreshToken = crypto.randomUUID();
+    await redis.set(
+      `sponsor_refresh:${refreshToken}`,
+      JSON.stringify({ userId: user.id, sponsorId: account.sponsor_id, email: user.email, mustChangePassword: account.must_change_password }),
+      'EX',
+      REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60,
     );
 
     await pool.query(
@@ -86,6 +100,7 @@ export class SponsorAuthService {
 
     return {
       token,
+      refreshToken,
       sponsor: {
         id: account.sponsor_id,
         businessName: user.full_name,
@@ -93,6 +108,58 @@ export class SponsorAuthService {
         mustChangePassword: account.must_change_password,
       },
     };
+  }
+
+  /** Refresh an expired access token using a valid refresh token. */
+  static async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }> {
+    const data = await redis.get(`sponsor_refresh:${refreshToken}`);
+    if (!data) throw new Error('Invalid or expired refresh token');
+
+    const parsed = JSON.parse(data);
+
+    const userRes = await pool.query(
+      `SELECT id, email, is_active FROM users WHERE id = $1 AND role = 'SPONSOR'`,
+      [parsed.userId],
+    );
+    const user = userRes.rows[0];
+    if (!user || !user.is_active) {
+      await redis.del(`sponsor_refresh:${refreshToken}`);
+      throw new Error('Account is disabled');
+    }
+
+    const accountRes = await pool.query(
+      `SELECT spa.sponsor_id, spa.is_active, spa.must_change_password
+       FROM sponsor_portal_accounts spa
+       WHERE spa.user_id = $1 AND spa.is_active = TRUE`,
+      [user.id],
+    );
+    const account = accountRes.rows[0];
+    if (!account) {
+      await redis.del(`sponsor_refresh:${refreshToken}`);
+      throw new Error('Portal account is disabled');
+    }
+
+    const newToken = jwt.sign(
+      { id: user.id, role: 'SPONSOR', email: user.email, sponsorId: account.sponsor_id },
+      env.JWT_SECRET,
+      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256' },
+    );
+
+    const newRefreshToken = crypto.randomUUID();
+    await redis.del(`sponsor_refresh:${refreshToken}`);
+    await redis.set(
+      `sponsor_refresh:${newRefreshToken}`,
+      JSON.stringify({ userId: user.id, sponsorId: account.sponsor_id, email: user.email, mustChangePassword: account.must_change_password }),
+      'EX',
+      REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60,
+    );
+
+    return { token: newToken, refreshToken: newRefreshToken };
+  }
+
+  /** Invalidate a refresh token (used on logout). */
+  static async invalidateRefreshToken(refreshToken: string): Promise<void> {
+    await redis.del(`sponsor_refresh:${refreshToken}`);
   }
 
   /** First-login / forced password change. Sets password_changed_at + clears the flag. */

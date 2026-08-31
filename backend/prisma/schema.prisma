@@ -136,6 +136,9 @@ model User {
   reports_filed     RideReport[] @relation("ReportsFiled")
   reports_against   RideReport[] @relation("ReportsAgainst")
 
+  portal_account    SponsorPortalAccount?
+  redemptions_as_rider SpecialRedemption[] @relation("RiderRedemptions")
+
   @@map("users")
 }
 
@@ -872,4 +875,154 @@ model UserDevice {
   @@unique([user_id, device_id])
   @@index([device_id])
   @@map("user_devices")
+}
+
+// ---------------------------------------------------------------------------
+// 046: Sponsor-funded ride discount marketplace (SPECIALS)
+// ---------------------------------------------------------------------------
+
+model Sponsor {
+  id                       String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  business_name            String
+  business_type            String   @default("OTHER")
+  business_description     String?
+  manager_name             String?
+  phone                    String?
+  email                    String?
+  other_contact_info       String?
+  address                  String?
+  city                     String?
+  state                    String?
+  postal_code              String?
+  country                  String?
+  latitude                 Float?
+  longitude                Float?
+  logo_url                 String?
+  cover_image_url          String?
+
+  discount_type            String   @default("PERCENTAGE")
+  discount_percent         Float?
+  max_discount_percent     Float   @default(90)
+  discount_fixed_amount_cents BigInt?
+
+  initial_budget_cents     BigInt   @default(0)
+  remaining_budget_cents   BigInt   @default(0)
+  reserved_budget_cents    BigInt   @default(0)
+  used_budget_cents        BigInt   @default(0)
+
+  status                   String   @default("INACTIVE")
+  specials_enabled         Boolean  @default(true)
+  map_listing_enabled      Boolean  @default(true)
+
+  created_at               DateTime @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime @default(now()) @db.Timestamptz(6)
+
+  portal_account           SponsorPortalAccount?
+  ledger_entries           SponsorLedgerEntry[]
+  redemptions              SpecialRedemption[]
+
+  @@index([status])
+  @@index([business_type])
+  @@index([latitude, longitude])
+  @@map("sponsors")
+}
+
+model SponsorPortalAccount {
+  id                    String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sponsor_id            String   @unique @db.Uuid
+  user_id               String   @unique @db.Uuid
+  is_active             Boolean  @default(true)
+  must_change_password  Boolean  @default(true)
+  created_by_admin_id   String?  @db.Uuid
+  last_login_at         DateTime? @db.Timestamptz(6)
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  sponsor Sponsor @relation(fields: [sponsor_id], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("sponsor_portal_accounts")
+}
+
+model SponsorLedgerEntry {
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sponsor_id          String   @db.Uuid
+  type                String
+  amount_cents        BigInt
+  direction           String   @default("CREDIT")
+  reference_type      String?
+  reference_id        String?  @db.Uuid
+  reason              String?
+  actor_user_id       String?  @db.Uuid
+  actor_role          String?
+  balance_after_cents BigInt
+  idempotency_key     String?  @unique
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  sponsor Sponsor @relation(fields: [sponsor_id], references: [id], onDelete: Cascade)
+
+  @@index([sponsor_id, created_at(sort: Desc)])
+  @@map("sponsor_ledger_entries")
+}
+
+model SpecialRedemption {
+  id                        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sponsor_id                String   @db.Uuid
+  rider_id                  String   @db.Uuid
+  driver_id                 String?  @db.Uuid
+  ride_id                   String?  @unique @db.Uuid
+
+  sponsor_name              String
+  sponsor_business_type     String
+  sponsor_latitude          Float?
+  sponsor_longitude         Float?
+  sponsor_address           String?
+  discount_type             String
+  discount_percent          Float?
+  discount_fixed_amount_cents BigInt?
+  discount_label            String
+  calculated_discount_cents BigInt   @default(0)
+
+  validation_code_hash      String?
+  validation_expires_at     DateTime? @db.Timestamptz(6)
+  validation_attempts       Int      @default(0)
+  max_validation_attempts   Int      @default(5)
+
+  status                    String   @default("CREATED")
+
+  ride_requested_at         DateTime? @db.Timestamptz(6)
+  ride_completed_at         DateTime? @db.Timestamptz(6)
+
+  sponsor_validated_at      DateTime? @db.Timestamptz(6)
+  sponsor_validated_by      String?  @db.Uuid
+
+  cancelled_by              String?  @db.Uuid
+  cancelled_at              DateTime? @db.Timestamptz(6)
+  cancellation_reason_code  String?
+  cancellation_reason_text  String?
+
+  reward_choice             String?
+  reward_amount_cents       BigInt?
+  sponsor_funded_cents      BigInt?
+  driver_allocation_cents   BigInt?
+  netride_allocation_cents  BigInt?
+  netride_bonus_cents       BigInt?
+  wallet_transaction_id     String?  @db.Uuid
+  credit_transaction_id     String?  @db.Uuid
+
+  sponsor_settled_at        DateTime? @db.Timestamptz(6)
+  reward_processed_at       DateTime? @db.Timestamptz(6)
+  reward_failed_reason      String?
+
+  created_at                DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime @default(now()) @db.Timestamptz(6)
+
+  sponsor Sponsor @relation(fields: [sponsor_id], references: [id])
+  rider   User    @relation("RiderRedemptions", fields: [rider_id], references: [id])
+
+  @@index([rider_id, status])
+  @@index([sponsor_id, created_at(sort: Desc)])
+  @@index([sponsor_id, status, created_at(sort: Desc)])
+  @@index([status, created_at(sort: Desc)])
+  @@map("special_redemptions")
 }

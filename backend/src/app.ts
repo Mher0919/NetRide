@@ -65,10 +65,14 @@ app.use('/api/admin', (_req, res, next) => {
   next();
 });
 const httpServer = createServer(app);
+const allowedOrigins = env.CORS_ORIGINS
+  ? env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+  : [env.APP_URL, env.ADMIN_URL, env.SPONSOR_PORTAL_URL].filter(Boolean) as string[];
 const io = new Server(httpServer, {
   cors: {
-    origin: '*',
+    origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 });
 
@@ -90,7 +94,18 @@ try {
 // whole app — including its HTTP listener — inside worker processes).
 bindIo(io);
 
-app.use(cors());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 // Trust Render proxy so req.ip resolves individual client IPs
 // instead of the proxy IP. This fixes rate-limit key collisions
 // where all users share one rate-limit bucket behind Render.
@@ -664,7 +679,6 @@ export function startServer(): void {
   tryListen();
 
   async function bootJobs(): Promise<void> {
-  await runMigrations();
   await runMigrations();
   logger.info({ port: Number(PORT), env: env.NODE_ENV }, 'server_listening');
 

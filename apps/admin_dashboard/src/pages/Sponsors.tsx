@@ -37,6 +37,7 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import {
   listSponsors,
   createSponsor,
+  updateSponsor,
   getSponsor,
   setSponsorStatus,
   adjustSponsorBudget,
@@ -119,6 +120,10 @@ const Sponsors: React.FC = () => {
   const [portalForm, setPortalForm] = React.useState({ email: '' });
   const [newPassword, setNewPassword] = React.useState<string | null>(null);
 
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editSaving, setEditSaving] = React.useState(false);
+  const [editForm, setEditForm] = React.useState(emptyForm);
+
   const [snack, setSnack] = React.useState<SnackState>({
     open: false,
     message: '',
@@ -162,9 +167,17 @@ const Sponsors: React.FC = () => {
   React.useEffect(() => {
     if (!selected) return;
     let cancelled = false;
+    setDetailLoading(true);
     (async () => {
-      const d = await getSponsor(selected.id as string);
-      if (!cancelled) setDetail(d);
+      try {
+        const d = await getSponsor(selected.id as string);
+        if (!cancelled) setDetail(d);
+      } catch (err) {
+        console.error('Failed to load sponsor detail', err);
+        if (!cancelled) notify('Failed to load sponsor detail', 'error');
+      } finally {
+        if (!cancelled) setDetailLoading(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -180,6 +193,23 @@ const Sponsors: React.FC = () => {
     if (!form.businessName.trim()) {
       notify('Business name is required', 'error');
       return;
+    }
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      notify('Invalid email format', 'error');
+      return;
+    }
+    if (form.discountType === 'PERCENTAGE') {
+      const pct = Number(form.discountPercent);
+      if (!(pct > 0 && pct <= 100)) {
+        notify('Discount percent must be > 0 and <= 100', 'error');
+        return;
+      }
+    } else {
+      const cents = Math.round(Number(form.discountFixedAmountCents));
+      if (!(cents > 0)) {
+        notify('Fixed discount must be > $0', 'error');
+        return;
+      }
     }
     if (!(Number(form.initialBudgetCents) >= 0)) {
       notify('Initial budget must be >= $0', 'error');
@@ -283,6 +313,84 @@ const Sponsors: React.FC = () => {
       loadDetail(selected.id);
     } catch (err: unknown) {
       notify(errMsg(err, 'Disable failed'), 'error');
+    }
+  };
+
+  const openEdit = () => {
+    if (!sponsor) return;
+    setEditForm({
+      businessName: sponsor.business_name ?? '',
+      businessType: sponsor.business_type ?? 'RESTAURANT',
+      businessDescription: sponsor.business_description ?? '',
+      managerName: sponsor.manager_name ?? '',
+      phone: sponsor.phone ?? '',
+      email: sponsor.email ?? '',
+      address: sponsor.address ?? '',
+      city: sponsor.city ?? '',
+      state: sponsor.state ?? '',
+      postalCode: sponsor.postal_code ?? '',
+      country: sponsor.country ?? '',
+      discountType: sponsor.discount_type ?? 'PERCENTAGE',
+      discountPercent: String(sponsor.discount_percent ?? 25),
+      maxDiscountPercent: String(sponsor.max_discount_percent ?? 25),
+      discountFixedAmountCents: String(sponsor.discount_fixed_amount_cents ?? 500),
+      initialBudgetCents: String(sponsor.initial_budget_cents ?? 0),
+      specialsEnabled: sponsor.specials_enabled ?? true,
+    });
+    setEditOpen(true);
+  };
+
+  const handleEdit = async () => {
+    if (!selected) return;
+    if (!editForm.businessName.trim()) {
+      notify('Business name is required', 'error');
+      return;
+    }
+    if (editForm.discountType === 'PERCENTAGE') {
+      const pct = Number(editForm.discountPercent);
+      if (!(pct > 0 && pct <= 100)) {
+        notify('Discount percent must be > 0 and <= 100', 'error');
+        return;
+      }
+      const maxPct = Number(editForm.maxDiscountPercent);
+      if (!(maxPct > 0 && maxPct <= 100)) {
+        notify('Max discount percent must be > 0 and <= 100', 'error');
+        return;
+      }
+    } else {
+      const cents = Math.round(Number(editForm.discountFixedAmountCents));
+      if (!(cents > 0)) {
+        notify('Fixed discount must be > $0', 'error');
+        return;
+      }
+    }
+    setEditSaving(true);
+    try {
+      await updateSponsor(selected.id as string, {
+        businessName: editForm.businessName,
+        businessType: editForm.businessType,
+        businessDescription: editForm.businessDescription || undefined,
+        managerName: editForm.managerName || undefined,
+        phone: editForm.phone || undefined,
+        email: editForm.email || undefined,
+        address: editForm.address || undefined,
+        city: editForm.city || undefined,
+        state: editForm.state || undefined,
+        postalCode: editForm.postalCode || undefined,
+        country: editForm.country || undefined,
+        discountType: editForm.discountType,
+        discountPercent: editForm.discountType === 'PERCENTAGE' ? Number(editForm.discountPercent) : undefined,
+        maxDiscountPercent: editForm.discountType === 'PERCENTAGE' ? Number(editForm.maxDiscountPercent) : undefined,
+        discountFixedAmountCents: editForm.discountType === 'FIXED_AMOUNT' ? Math.round(Number(editForm.discountFixedAmountCents)) : undefined,
+      });
+      notify('Sponsor updated');
+      setEditOpen(false);
+      fetchData();
+      loadDetail(selected.id as string);
+    } catch (err: unknown) {
+      notify(errMsg(err, 'Failed to update sponsor'), 'error');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -586,6 +694,9 @@ const Sponsors: React.FC = () => {
                         {' — '}{sponsor.discountLabel}
                       </Typography>
                       <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                        <Button size="small" variant="contained" onClick={openEdit}>
+                          Edit Sponsor
+                        </Button>
                         <Button size="small" variant="contained" startIcon={<AccountBalanceWalletIcon />} onClick={() => { setAdjustForm({ direction: 'CREDIT', amountCents: '', reason: '' }); setAdjustOpen(true); }}>
                           Adjust Budget
                         </Button>
@@ -795,6 +906,90 @@ const Sponsors: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setNewPassword(null)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit sponsor dialog */}
+      <Dialog open={editOpen} onClose={() => !editSaving && setEditOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800 }}>Edit Sponsor</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField label="Business name *" value={editForm.businessName} onChange={(e) => setEditForm({ ...editForm, businessName: e.target.value })} fullWidth />
+            <TextField
+              label="Business type"
+              select
+              value={editForm.businessType}
+              onChange={(e) => setEditForm({ ...editForm, businessType: e.target.value })}
+              fullWidth
+              SelectProps={{ native: true }}
+            >
+              {['RESTAURANT', 'CAFE', 'RETAIL', 'BAR', 'SERVICES', 'MEDICAL', 'AUTO', 'OTHER'].map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </TextField>
+            <TextField label="Description" value={editForm.businessDescription} onChange={(e) => setEditForm({ ...editForm, businessDescription: e.target.value })} fullWidth multiline minRows={2} />
+            <Grid container spacing={2}>
+              <Grid item xs={6}><TextField label="Manager name" value={editForm.managerName} onChange={(e) => setEditForm({ ...editForm, managerName: e.target.value })} fullWidth /></Grid>
+              <Grid item xs={6}><TextField label="Phone" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} fullWidth /></Grid>
+              <Grid item xs={6}><TextField label="Email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} fullWidth /></Grid>
+              <Grid item xs={6}><TextField label="City" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} fullWidth /></Grid>
+              <Grid item xs={6}><TextField label="State" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} fullWidth /></Grid>
+              <Grid item xs={6}><TextField label="Postal code" value={editForm.postalCode} onChange={(e) => setEditForm({ ...editForm, postalCode: e.target.value })} fullWidth /></Grid>
+              <Grid item xs={12}><TextField label="Address" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} fullWidth /></Grid>
+              <Grid item xs={12}><TextField label="Country" value={editForm.country} onChange={(e) => setEditForm({ ...editForm, country: e.target.value })} fullWidth /></Grid>
+            </Grid>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Discount</Typography>
+            <TextField
+              label="Discount type"
+              select
+              value={editForm.discountType}
+              onChange={(e) => setEditForm({ ...editForm, discountType: e.target.value as 'PERCENTAGE' | 'FIXED_AMOUNT' })}
+              fullWidth
+              SelectProps={{ native: true }}
+            >
+              <option value="PERCENTAGE">Percentage off</option>
+              <option value="FIXED_AMOUNT">Fixed amount off</option>
+            </TextField>
+            {editForm.discountType === 'PERCENTAGE' ? (
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <TextField
+                    label="Discount % (of fare)"
+                    type="number"
+                    value={editForm.discountPercent}
+                    onChange={(e) => setEditForm({ ...editForm, discountPercent: e.target.value })}
+                    fullWidth
+                    InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                  />
+                </Grid>
+                <Grid item xs={6}>
+                  <TextField
+                    label="Max % of fare"
+                    type="number"
+                    value={editForm.maxDiscountPercent}
+                    onChange={(e) => setEditForm({ ...editForm, maxDiscountPercent: e.target.value })}
+                    fullWidth
+                    InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                  />
+                </Grid>
+              </Grid>
+            ) : (
+              <TextField
+                label="Fixed discount (cents)"
+                type="number"
+                value={editForm.discountFixedAmountCents}
+                onChange={(e) => setEditForm({ ...editForm, discountFixedAmountCents: e.target.value })}
+                fullWidth
+              />
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditOpen(false)} disabled={editSaving}>Cancel</Button>
+          <Button variant="contained" disabled={editSaving} onClick={handleEdit}>
+            {editSaving ? 'Saving…' : 'Save Changes'}
+          </Button>
         </DialogActions>
       </Dialog>
 

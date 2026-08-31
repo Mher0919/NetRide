@@ -71,35 +71,38 @@ const Settings: React.FC = () => {
 
       <Paper sx={{ p: 3, borderRadius: 3 }}>
         <Grid container spacing={2}>
-          <Grid item xs={12}>
+          <Grid size={12}>
             <TextField label="Business name" value={settings.businessName ?? ''} disabled fullWidth helperText="Contact NetRide to change your business name" />
           </Grid>
-          <Grid item xs={12}>
+          <Grid size={12}>
             <TextField label="Description" value={settings.business_description ?? ''} onChange={(e) => set('business_description', e.target.value)} fullWidth multiline minRows={2} />
           </Grid>
-          <Grid item xs={6}>
+          <Grid size={6}>
             <TextField label="Manager name" value={settings.manager_name ?? ''} onChange={(e) => set('manager_name', e.target.value)} fullWidth />
           </Grid>
-          <Grid item xs={6}>
+          <Grid size={6}>
             <TextField label="Phone" value={settings.phone ?? ''} onChange={(e) => set('phone', e.target.value)} fullWidth />
           </Grid>
-          <Grid item xs={12}>
+          <Grid size={12}>
             <TextField label="Email" value={settings.email ?? ''} onChange={(e) => set('email', e.target.value)} fullWidth />
           </Grid>
-          <Grid item xs={12}>
+          <Grid size={12}>
             <TextField label="Other contact info" value={settings.other_contact_info ?? ''} onChange={(e) => set('other_contact_info', e.target.value)} fullWidth />
           </Grid>
-          <Grid item xs={12}>
+          <Grid size={12}>
             <TextField label="Address" value={settings.address ?? ''} onChange={(e) => set('address', e.target.value)} fullWidth />
           </Grid>
-          <Grid item xs={6}>
+          <Grid size={6}>
             <TextField label="City" value={settings.city ?? ''} onChange={(e) => set('city', e.target.value)} fullWidth />
           </Grid>
-          <Grid item xs={3}>
+          <Grid size={3}>
             <TextField label="State" value={settings.state ?? ''} onChange={(e) => set('state', e.target.value)} fullWidth />
           </Grid>
-          <Grid item xs={3}>
+          <Grid size={3}>
             <TextField label="Postal code" value={settings.postal_code ?? ''} onChange={(e) => set('postal_code', e.target.value)} fullWidth />
+          </Grid>
+          <Grid size={12}>
+            <TextField label="Country" value={settings.country ?? ''} onChange={(e) => set('country', e.target.value)} fullWidth />
           </Grid>
         </Grid>
         <Stack direction="row" alignItems="center" spacing={2} sx={{ mt: 3 }}>

@@ -19,6 +19,7 @@ import {
   DialogActions,
   Snackbar,
   Alert,
+  Stack,
 } from '@mui/material';
 import { listPortalValidations, portalValidate, portalCancelValidation } from '../api/sponsor';
 

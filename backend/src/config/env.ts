@@ -161,6 +161,8 @@ const envSchema = z.object({
   SPONSOR_DRIVER_SHARE: z.union([z.string(), z.number()]).transform(Number).default(0.60),
   // Whether sponsor-ledger writes are enforced strictly (unit tests disable).
   SPONSOR_LEDGER_ENFORCED: z.union([z.string(), z.number()]).transform(Number).default(1),
+  CORS_ORIGINS: z.string().optional(),
+  SPONSOR_PORTAL_URL: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

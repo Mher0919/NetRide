@@ -5,6 +5,7 @@ import { theme } from './theme';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 import Login from './pages/Login';
+import ForgotPassword from './pages/ForgotPassword';
 import ChangePassword from './pages/ChangePassword';
 import Dashboard from './pages/Dashboard';
 import Validations from './pages/Validations';
@@ -38,6 +39,7 @@ const App: React.FC = () => {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route
               path="/change-password"
               element={

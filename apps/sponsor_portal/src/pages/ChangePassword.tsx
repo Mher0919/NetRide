@@ -11,10 +11,12 @@ import {
 } from '@mui/material';
 import LockResetIcon from '@mui/icons-material/LockReset';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { sponsorChangePassword } from '../api/sponsor';
 
 const ChangePassword: React.FC = () => {
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const [password, setPassword] = React.useState('');
   const [confirm, setConfirm] = React.useState('');
   const [loading, setLoading] = React.useState(false);
@@ -34,8 +36,7 @@ const ChangePassword: React.FC = () => {
     try {
       await sponsorChangePassword(password);
       setSnack({ open: true, message: 'Password updated. Please log in again.', severity: 'success' });
-      localStorage.removeItem('sponsor_token');
-      localStorage.removeItem('sponsor_user');
+      logout();
       window.setTimeout(() => navigate('/login'), 1200);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Update failed';

@@ -1,10 +1,11 @@
 // backend/src/modules/auth/otp.service.ts
+import crypto from 'crypto';
 import { pool } from '../../config/database';
 import { EmailService } from '../../services/email.service';
 
 export class OTPService {
   static async generateOTP(email: string): Promise<string> {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = crypto.randomInt(100000, 999999).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
     // Clean up old codes for this email

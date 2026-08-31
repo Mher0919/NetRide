@@ -628,7 +628,6 @@ function startServer() {
     tryListen();
     async function bootJobs() {
         await runMigrations();
-        await runMigrations();
         logger_1.logger.info({ port: Number(PORT), env: env_1.env.NODE_ENV }, 'server_listening');
         logger_1.logger.info({ set: !!env_1.env.JWT_SECRET, length: env_1.env.JWT_SECRET?.length ?? 0 }, 'jwt_secret_status');
         logger_1.logger.info({
