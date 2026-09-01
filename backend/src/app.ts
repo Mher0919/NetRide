@@ -74,17 +74,18 @@ app.use('/api/admin', (_req, res, next) => {
   next();
 });
 const httpServer = createServer(app);
-const allowedOrigins = env.CORS_ORIGINS
+// Explicit allowlist ONLY when the operator configures CORS_ORIGINS.
+// Without it, all origins are accepted — the pre-regression behavior that
+// the deployed dashboards (admin-dashboard.netride.org, sponsor portal,
+// local dev on any port) depend on. Auth is bearer-token based
+// (localStorage), never cookies, so an open CORS policy does not expose
+// credentials to third-party origins.
+const corsOrigins = env.CORS_ORIGINS
   ? env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
-  : [env.APP_URL, env.ADMIN_URL, env.SPONSOR_PORTAL_URL].filter(Boolean) as string[];
-// In development, any localhost/127.0.0.1 origin is trusted regardless of
-// port — the admin dashboard / portals routinely run on ephemeral ports
-// (vite picks 5173..5175) and are opened via either hostname. Localhost
-// origins stay trusted in production too: the dashboard is commonly run
-// locally and pointed at the hosted API, and auth is bearer-token based
-// (localStorage), so a local browser origin carries no extra risk.
+  : [];
 const isAllowedOrigin = (origin: string): boolean => {
-  if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return true;
+  if (corsOrigins.length === 0 || corsOrigins.includes(origin)) return true;
+  // Local dev origins stay usable even against a strictly-configured backend.
   try {
     const host = new URL(origin).hostname;
     if (host === 'localhost' || host === '127.0.0.1') return true;

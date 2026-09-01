@@ -57,9 +57,6 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
-      # Admin notification / 2FA inbox — OTP login codes are delivered here.
-      - key: ADMIN_NOTIFY_EMAIL
-        value: "netride.rides@gmail.com"
       - key: APP_URL
         sync: false
       - key: SUPABASE_URL
