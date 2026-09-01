@@ -1,10 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { SponsorSession } from '../api/sponsor';
-import { sponsorLogout } from '../api/sponsor';
+import type { PortalSession } from '../api/portal';
+import { portalLogout } from '../api/portal';
 
 interface AuthContextType {
-  session: SponsorSession | null;
-  login: (session: SponsorSession) => void;
+  session: PortalSession | null;
+  login: (session: PortalSession) => void;
   logout: () => void;
   isAuthenticated: boolean;
   loading: boolean;
@@ -13,25 +13,25 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /** Restores the persisted session lazily (runs before first render). */
-const readSession = (): SponsorSession | null => {
+const readSession = (): PortalSession | null => {
   try {
-    const token = localStorage.getItem('sponsor_token');
-    const refreshToken = localStorage.getItem('sponsor_refresh_token');
-    const saved = localStorage.getItem('sponsor_user');
+    const token = localStorage.getItem('portal_token');
+    const refreshToken = localStorage.getItem('portal_refresh_token');
+    const saved = localStorage.getItem('portal_user');
     if (token && refreshToken && saved) {
-      const sponsor = JSON.parse(saved);
-      return { token, refreshToken, sponsor };
+      const portal = JSON.parse(saved);
+      return { token, refreshToken, portal };
     }
   } catch {
-    localStorage.removeItem('sponsor_token');
-    localStorage.removeItem('sponsor_user');
-    localStorage.removeItem('sponsor_refresh_token');
+    localStorage.removeItem('portal_token');
+    localStorage.removeItem('portal_user');
+    localStorage.removeItem('portal_refresh_token');
   }
   return null;
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [session, setSession] = useState<SponsorSession | null>(() => readSession());
+  const [session, setSession] = useState<PortalSession | null>(() => readSession());
   const [loading, setLoading] = useState(true);
 
   // Deferred past the current render so the loading flip never cascades
@@ -41,20 +41,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => window.clearTimeout(t);
   }, []);
 
-  const login = (s: SponsorSession) => {
+  const login = (s: PortalSession) => {
     setSession(s);
-    localStorage.setItem('sponsor_token', s.token);
-    localStorage.setItem('sponsor_refresh_token', s.refreshToken);
-    localStorage.setItem('sponsor_user', JSON.stringify(s.sponsor));
+    localStorage.setItem('portal_token', s.token);
+    localStorage.setItem('portal_refresh_token', s.refreshToken);
+    localStorage.setItem('portal_user', JSON.stringify(s.portal));
   };
 
   const logout = () => {
     const refreshToken = session?.refreshToken;
     setSession(null);
-    localStorage.removeItem('sponsor_token');
-    localStorage.removeItem('sponsor_user');
-    localStorage.removeItem('sponsor_refresh_token');
-    if (refreshToken) sponsorLogout(refreshToken);
+    localStorage.removeItem('portal_token');
+    localStorage.removeItem('portal_user');
+    localStorage.removeItem('portal_refresh_token');
+    if (refreshToken) portalLogout(refreshToken);
   };
 
   return (

@@ -25,7 +25,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   }
 
   if (!isAuthenticated) return <Navigate to="/login" />;
-  if (session?.sponsor.mustChangePassword && window.location.pathname !== '/change-password') {
+  if (session?.portal.mustChangePassword && window.location.pathname !== '/change-password') {
     return <Navigate to="/change-password" />;
   }
   return <>{children}</>;

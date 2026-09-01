@@ -408,6 +408,23 @@ export const assignDriverFleet = async (driverId: string, fleetId: string | null
   return response.data as { driver_id: string; fleet_id: string | null };
 };
 
+// ----- Fleet portal accounts (unified partner portal) ----------------------
+
+export const createFleetPortalAccount = async (fleetId: string, email: string) => {
+  const response = await api.post(`/admin/fleets/${fleetId}/portal-account`, { email });
+  return response.data as { message: string; email: string; temporaryPassword: string };
+};
+
+export const resetFleetPortalPassword = async (fleetId: string) => {
+  const response = await api.post(`/admin/fleets/${fleetId}/portal-account/reset-password`);
+  return response.data as { message: string; temporaryPassword: string };
+};
+
+export const disableFleetPortalAccount = async (fleetId: string) => {
+  const response = await api.post(`/admin/fleets/${fleetId}/portal-account/disable`);
+  return response.data as { message: string };
+};
+
 // ----- Pricing + revenue (041) ----------------------------------------------
 
 export const listPricingProfiles = async () => {

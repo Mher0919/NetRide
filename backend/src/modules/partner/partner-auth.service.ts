@@ -63,19 +63,17 @@ export class PartnerAuthService {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) throw new Error('Invalid email or password');
 
-    // partner_portal_accounts equivalent: the user row itself is the account.
-    // The partner is active as long as their partner row exists and is ACTIVE.
+    // Resolve the partner row via the user link (created together) with a
+    // contact-email fallback for pre-link legacy rows.
     const partnerRes = await pool.query(
-      `SELECT p.id, p.name, p.status, p.contact_email
+      `SELECT p.id, p.name, p.status, p.contact_email, p.must_change_password
        FROM partners p
-       WHERE p.id::text = $1 OR p.contact_email = $1`,
-      [user.id],  // partner_id may match user.id if created in pair, or we match by email
+       WHERE p.user_id = $1 OR p.contact_email ILIKE $2`,
+      [user.id, normalizedEmail],
     );
-    // Actually, let's check if the partner exists and is active.
-    // The user.id IS the partner.id since they were created together.
     const partner = partnerRes.rows[0];
     if (!partner) throw new Error('Partner account not found. Ask an admin to create your partner account.');
-    if (partner.status !== 'ACTIVE') throw new Error('Your partner account is archived or inactive. Contact an admin.');
+    if (!partner.must_change_password && partner.status !== 'ACTIVE') throw new Error('Your partner account is archived or inactive. Contact an admin.');
 
     // Send 6-digit OTP to partner email
     await OTPService.generateOTP(normalizedEmail);

@@ -262,6 +262,46 @@ export class AdminSponsorController {
     }
   }
 
+  // ------------------------------------------------------- fleet portal accounts
+
+  static async createFleetPortalAccount(req: AdminReq, res: Response) {
+    try {
+      const { email } = req.body ?? {};
+      if (!email || !String(email).trim()) return res.status(400).json({ error: 'Email is required' });
+      const crypto = await import('crypto');
+      const password = crypto.randomBytes(12).toString('base64url').slice(0, 12);
+      const result = await SponsorService.createFleetPortalAccount(
+        req.params.id,
+        String(email).trim().toLowerCase(),
+        password,
+        { id: req.user!.id, role: 'ADMIN' },
+      );
+      res.status(201).json({ message: 'Fleet portal account ready', email, temporaryPassword: result.password });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  static async resetFleetPortalPassword(req: AdminReq, res: Response) {
+    try {
+      const crypto = await import('crypto');
+      const password = String(req.body?.password ?? crypto.randomBytes(12).toString('base64url').slice(0, 12));
+      const result = await SponsorService.resetFleetPortalPassword(req.params.id, password, { id: req.user!.id, role: 'ADMIN' });
+      res.json({ message: 'Password reset', temporaryPassword: result.password });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  static async disableFleetPortalAccount(req: AdminReq, res: Response) {
+    try {
+      await SponsorService.disableFleetPortalAccount(req.params.id, { id: req.user!.id, role: 'ADMIN' });
+      res.json({ message: 'Fleet portal account disabled' });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
   // ------------------------------------------------------------- redemptions
 
   static async listRedemptions(req: AdminReq, res: Response) {

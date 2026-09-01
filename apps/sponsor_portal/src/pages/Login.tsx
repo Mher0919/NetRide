@@ -13,7 +13,7 @@ import {
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { sponsorLogin } from '../api/sponsor';
+import { portalLogin } from '../api/portal';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -27,9 +27,9 @@ const Login: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const session = await sponsorLogin(email, password);
+      const session = await portalLogin(email, password);
       login(session);
-      navigate(session.sponsor.mustChangePassword ? '/change-password' : '/');
+      navigate(session.portal.mustChangePassword ? '/change-password' : '/');
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Login failed';
       setSnack({ open: true, message: msg });
@@ -46,8 +46,8 @@ const Login: React.FC = () => {
             <StorefrontIcon />
           </Box>
           <Box>
-            <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>NetRide Sponsor</Typography>
-            <Typography variant="caption" color="text.secondary">Partner portal sign in</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>NetRide Partner</Typography>
+            <Typography variant="caption" color="text.secondary">Sponsor · Partner · Fleet portal sign in</Typography>
           </Box>
         </Box>
         <form onSubmit={handleSubmit}>

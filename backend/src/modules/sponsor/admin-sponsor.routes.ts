@@ -25,4 +25,9 @@ router.post('/sponsors/:id/portal-account', AdminSponsorController.createPortalA
 router.post('/sponsors/:id/portal-account/reset-password', AdminSponsorController.resetPortalPassword);
 router.post('/sponsors/:id/portal-account/disable', AdminSponsorController.disablePortalAccount);
 
+// Fleet partner portal accounts — same first-login password flow as sponsors.
+router.post('/fleets/:id/portal-account', AdminSponsorController.createFleetPortalAccount);
+router.post('/fleets/:id/portal-account/reset-password', AdminSponsorController.resetFleetPortalPassword);
+router.post('/fleets/:id/portal-account/disable', AdminSponsorController.disableFleetPortalAccount);
+
 export default router;

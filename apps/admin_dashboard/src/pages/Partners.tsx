@@ -31,6 +31,7 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import {
   listPartners,
   createPartner,
+  updatePartner,
   getPartner,
   setPartnerStatus,
   getPartnerCommissions,
@@ -66,6 +67,21 @@ const Partners: React.FC = () => {
     contact_email: '',
     email: '', // partner login email
     password: '', // partner login password
+    commission_rate: '10',
+    notes: '',
+  });
+
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editTarget, setEditTarget] = React.useState<any>(null);
+  const [editForm, setEditForm] = React.useState({
+    name: '',
+    business_type: '',
+    address: '',
+    contact_name: '',
+    contact_phone: '',
+    contact_email: '',
+    email: '',
+    password: '',
     commission_rate: '10',
     notes: '',
   });
@@ -174,6 +190,52 @@ const Partners: React.FC = () => {
       fetchData();
     } catch (err: any) {
       setSnack({ open: true, message: err?.response?.data?.error || 'Status change failed', severity: 'error' });
+    }
+  };
+
+  const openEdit = (p: any) => {
+    setEditTarget(p);
+    setEditForm({
+      name: p.name ?? '',
+      business_type: p.business_type ?? '',
+      address: p.address ?? '',
+      contact_name: p.contact_name ?? '',
+      contact_phone: p.contact_phone ?? '',
+      contact_email: p.contact_email ?? '',
+      email: p.email ?? '',
+      password: '',
+      commission_rate: ((Number(p.commission_rate) || 0) * 100).toFixed(1),
+      notes: p.notes ?? '',
+    });
+    setEditOpen(true);
+  };
+
+  const handleEdit = async () => {
+    if (!editTarget || !editForm.name.trim() || !editForm.business_type.trim()) return;
+    setSaving(true);
+    try {
+      await updatePartner(editTarget.id, {
+        name: editForm.name.trim(),
+        business_type: editForm.business_type.trim(),
+        address: editForm.address.trim() || null,
+        contact_name: editForm.contact_name.trim() || null,
+        contact_phone: editForm.contact_phone.trim() || null,
+        contact_email: editForm.contact_email.trim() || null,
+        email: editForm.email.trim(),
+        ...(editForm.password.trim() ? { password: editForm.password.trim() } : {}),
+        commission_rate: (Number(editForm.commission_rate) || 0) / 100,
+        notes: editForm.notes.trim() || null,
+      });
+      setEditOpen(false);
+      setSnack({ open: true, message: 'Partner updated', severity: 'success' });
+      fetchData();
+      if (selected && selected.id === editTarget.id) {
+        setSelected({ ...selected, name: editForm.name.trim(), business_type: editForm.business_type.trim(), commission_rate: (Number(editForm.commission_rate) || 0) / 100 });
+      }
+    } catch (err: any) {
+      setSnack({ open: true, message: err?.response?.data?.error || 'Failed to update partner', severity: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -312,6 +374,9 @@ const Partners: React.FC = () => {
                       <TableCell>{fmtUSD(Number(p.lifetime_earnings_cents) || 0)}</TableCell>
                       <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                         <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                          <Button size="small" sx={{ color: '#5B7760' }} onClick={() => openEdit(p)}>
+                            Edit
+                          </Button>
                           {p.status === 'ACTIVE' && (
                             <Button size="small" color="warning" onClick={() => handleStatusChange(p, 'INACTIVE')}>
                               Deactivate
@@ -349,12 +414,11 @@ const Partners: React.FC = () => {
               <TextField label="Contact name" fullWidth value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} />
               <TextField label="Contact phone" fullWidth value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} />
             </Stack>
-            <TextField label="Contact email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
             <Stack direction="row" spacing={2}>
+              <TextField label="Contact email" fullWidth value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
               <TextField label="Partner login email" fullWidth value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-              <TextField label="Partner login password" fullWidth type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
             </Stack>
-            <TextField label="Contact email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
+            <TextField label="Partner login password" fullWidth type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
             <TextField
               label="Commission rate (%)"
               type="number"
@@ -374,6 +438,52 @@ const Partners: React.FC = () => {
             sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none' }}
           >
             {saving ? <CircularProgress size={20} color="inherit" /> : 'Create Partner'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit dialog */}
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Edit Partner</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} mt={1}>
+            <TextField label="Business name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+            <TextField label="Business type" placeholder="Restaurant, Gym, Retail…" value={editForm.business_type} onChange={(e) => setEditForm({ ...editForm, business_type: e.target.value })} />
+            <TextField label="Address" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
+            <Stack direction="row" spacing={2}>
+              <TextField label="Contact name" fullWidth value={editForm.contact_name} onChange={(e) => setEditForm({ ...editForm, contact_name: e.target.value })} />
+              <TextField label="Contact phone" fullWidth value={editForm.contact_phone} onChange={(e) => setEditForm({ ...editForm, contact_phone: e.target.value })} />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField label="Contact email" fullWidth value={editForm.contact_email} onChange={(e) => setEditForm({ ...editForm, contact_email: e.target.value })} />
+              <TextField label="Partner login email" fullWidth value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
+            </Stack>
+            <TextField
+              label="New password (leave blank to keep current)"
+              fullWidth
+              type="password"
+              value={editForm.password}
+              onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+            />
+            <TextField
+              label="Commission rate (%)"
+              type="number"
+              value={editForm.commission_rate}
+              onChange={(e) => setEditForm({ ...editForm, commission_rate: e.target.value })}
+              InputProps={{ inputProps: { min: 0, max: 100, step: 0.5 } }}
+            />
+            <TextField label="Notes" multiline minRows={2} value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditOpen(false)} sx={{ textTransform: 'none' }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleEdit}
+            disabled={saving || !editForm.name.trim() || !editForm.business_type.trim()}
+            sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none' }}
+          >
+            {saving ? <CircularProgress size={20} color="inherit" /> : 'Save Changes'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -417,6 +527,9 @@ const Partners: React.FC = () => {
                 <Stack direction="row" gap={1} mt={3}>
                   <Button size="small" variant="outlined" startIcon={<FileDownloadIcon />} onClick={handleExportRides} sx={{ textTransform: 'none' }}>
                     Export rides
+                  </Button>
+                  <Button size="small" variant="outlined" onClick={() => openEdit(selected)} sx={{ textTransform: 'none' }}>
+                    Edit partner
                   </Button>
                 </Stack>
 

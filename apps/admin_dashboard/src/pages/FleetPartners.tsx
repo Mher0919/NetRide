@@ -29,12 +29,16 @@ import PowerIcon from '@mui/icons-material/PowerSettingsNew';
 import GroupsIcon from '@mui/icons-material/Groups';
 import SearchIcon from '@mui/icons-material/Search';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
 import {
   listFleets,
   createFleet,
   updateFleet,
   assignDriverFleet,
   getUsers,
+  createFleetPortalAccount,
+  resetFleetPortalPassword,
+  disableFleetPortalAccount,
 } from '../api/admin';
 
 const fmtUSD = (cents: number | null | undefined) =>
@@ -62,6 +66,11 @@ const FleetPartners: React.FC = () => {
   const [drivers, setDrivers] = React.useState<any[]>([]);
   const [driverLoading, setDriverLoading] = React.useState(false);
   const [assigning, setAssigning] = React.useState(false);
+
+  const [portalTarget, setPortalTarget] = React.useState<any>(null);
+  const [portalEmail, setPortalEmail] = React.useState('');
+  const [portalResult, setPortalResult] = React.useState<{ email: string; temporaryPassword: string } | null>(null);
+  const [portalLoading, setPortalLoading] = React.useState(false);
 
   const [snack, setSnack] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
@@ -194,6 +203,54 @@ const FleetPartners: React.FC = () => {
     }
   };
 
+  const openPortal = (f: any) => {
+    setPortalTarget(f);
+    setPortalEmail(f.contact_email ?? '');
+    setPortalResult(null);
+  };
+
+  const handleCreatePortal = async () => {
+    if (!portalTarget || !portalEmail.trim()) return;
+    setPortalLoading(true);
+    try {
+      const result = await createFleetPortalAccount(portalTarget.id, portalEmail.trim());
+      setPortalResult(result);
+      setSnack({ open: true, message: 'Fleet portal account created', severity: 'success' });
+    } catch (err: any) {
+      setSnack({ open: true, message: err?.response?.data?.error || 'Failed to create portal account', severity: 'error' });
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleResetPortalPassword = async () => {
+    if (!portalTarget) return;
+    setPortalLoading(true);
+    try {
+      const result = await resetFleetPortalPassword(portalTarget.id);
+      setPortalResult({ email: '', temporaryPassword: result.temporaryPassword });
+      setSnack({ open: true, message: 'Fleet portal password reset', severity: 'success' });
+    } catch (err: any) {
+      setSnack({ open: true, message: err?.response?.data?.error || 'Failed to reset password', severity: 'error' });
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleDisablePortal = async () => {
+    if (!portalTarget) return;
+    setPortalLoading(true);
+    try {
+      await disableFleetPortalAccount(portalTarget.id);
+      setPortalResult(null);
+      setSnack({ open: true, message: 'Fleet portal account disabled', severity: 'success' });
+    } catch (err: any) {
+      setSnack({ open: true, message: err?.response?.data?.error || 'Failed to disable portal account', severity: 'error' });
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
@@ -276,6 +333,9 @@ const FleetPartners: React.FC = () => {
                     </TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                        <IconButton size="small" title="Portal account" onClick={() => openPortal(f)}>
+                          <VpnKeyIcon fontSize="small" sx={{ color: '#5B7760' }} />
+                        </IconButton>
                         <IconButton size="small" title="Assign drivers" onClick={() => openAssign(f)}>
                           <PersonAddIcon fontSize="small" />
                         </IconButton>
@@ -409,6 +469,73 @@ const FleetPartners: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAssignTarget(null)} sx={{ textTransform: 'none' }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Portal account dialog */}
+      <Dialog open={!!portalTarget} onClose={() => setPortalTarget(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Fleet Portal Account · {portalTarget?.name}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} mt={1}>
+            <Typography variant="body2" color="text.secondary">
+              The fleet logs into the NetRide Partner Portal to track its earnings. A temporary
+              password is generated below — the fleet must change it on first login.
+            </Typography>
+            {!portalResult ? (
+              <>
+                <TextField
+                  label="Portal login email"
+                  value={portalEmail}
+                  onChange={(e) => setPortalEmail(e.target.value)}
+                  fullWidth
+                  placeholder="fleet@example.com"
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleCreatePortal}
+                  disabled={portalLoading || !portalEmail.trim()}
+                  sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none' }}
+                >
+                  {portalLoading ? <CircularProgress size={20} color="inherit" /> : 'Create account'}
+                </Button>
+              </>
+            ) : (
+              <Alert severity="info" variant="outlined">
+                <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Temporary password</Typography>
+                <Typography
+                  sx={{ fontFamily: 'monospace', fontSize: '1.15rem', fontWeight: 800, my: 1, userSelect: 'all' }}
+                >
+                  {portalResult.temporaryPassword}
+                </Typography>
+                <Typography variant="caption">
+                  {portalResult.email ? `Login: ${portalResult.email}` : 'Password reset — share it with the fleet operator.'}
+                  {' '}They will be required to change it on first login.
+                </Typography>
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            size="small"
+            color="error"
+            disabled={portalLoading}
+            onClick={handleDisablePortal}
+            sx={{ textTransform: 'none', mr: 'auto' }}
+          >
+            Disable account
+          </Button>
+          {portalResult && (
+            <Button
+              size="small"
+              disabled={portalLoading}
+              onClick={handleResetPortalPassword}
+              sx={{ textTransform: 'none' }}
+            >
+              Reset password
+            </Button>
+          )}
+          <Button onClick={() => setPortalTarget(null)} sx={{ textTransform: 'none' }}>Close</Button>
         </DialogActions>
       </Dialog>
 

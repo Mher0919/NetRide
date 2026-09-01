@@ -11,7 +11,7 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('sponsor_token');
+    const token = localStorage.getItem('portal_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -40,12 +40,12 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {
-      const refreshToken = localStorage.getItem('sponsor_refresh_token');
+      const refreshToken = localStorage.getItem('portal_refresh_token');
 
       if (!refreshToken) {
-        localStorage.removeItem('sponsor_token');
-        localStorage.removeItem('sponsor_user');
-        localStorage.removeItem('sponsor_refresh_token');
+        localStorage.removeItem('portal_token');
+        localStorage.removeItem('portal_user');
+        localStorage.removeItem('portal_refresh_token');
         window.location.href = '/login';
         return Promise.reject(error);
       }
@@ -63,11 +63,11 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const response = await axios.post(`${API_URL}/sponsor/auth/refresh`, { refreshToken });
+        const response = await axios.post(`${API_URL}/portal/auth/refresh`, { refreshToken });
         const { token: newToken, refreshToken: newRefreshToken } = response.data;
 
-        localStorage.setItem('sponsor_token', newToken);
-        localStorage.setItem('sponsor_refresh_token', newRefreshToken);
+        localStorage.setItem('portal_token', newToken);
+        localStorage.setItem('portal_refresh_token', newRefreshToken);
 
         api.defaults.headers.common.Authorization = `Bearer ${newToken}`;
         processQueue(null, newToken);
@@ -76,9 +76,9 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
-        localStorage.removeItem('sponsor_token');
-        localStorage.removeItem('sponsor_user');
-        localStorage.removeItem('sponsor_refresh_token');
+        localStorage.removeItem('portal_token');
+        localStorage.removeItem('portal_user');
+        localStorage.removeItem('portal_refresh_token');
         window.location.href = '/login';
         return Promise.reject(refreshError);
       } finally {

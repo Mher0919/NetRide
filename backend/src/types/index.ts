@@ -4,7 +4,8 @@ export enum UserRole {
   RIDER = 'RIDER',
   DRIVER = 'DRIVER',
   ADMIN = 'ADMIN',
-  PARTNER = 'PARTNER'
+  PARTNER = 'PARTNER',
+  FLEET = 'FLEET'
 }
 export enum TripStatus {
   REQUESTED = 'REQUESTED',

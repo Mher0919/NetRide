@@ -691,10 +691,24 @@ export class SponsorService {
     if (newPassword.length < 8) throw new Error('Password must be at least 8 characters');
     const bcrypt = await import('bcryptjs');
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query(
-      `UPDATE users SET password_hash = $1, must_change_password = TRUE WHERE id = $2`,
-      [hash, account.user_id],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE users SET password_hash = $1 WHERE id = $2`,
+        [hash, account.user_id],
+      );
+      await client.query(
+        `UPDATE sponsor_portal_accounts SET must_change_password = TRUE, updated_at = NOW() WHERE sponsor_id = $1`,
+        [sponsorId],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
     AuditEventsService.record({
       actorId: actor?.id ?? null,
       actorRole: actor?.role ?? 'ADMIN',
@@ -719,6 +733,131 @@ export class SponsorService {
       action: 'sponsor_portal_account_disabled',
       entityType: 'sponsor',
       entityId: sponsorId,
+    }).catch(() => undefined);
+  }
+
+  // ================================================================
+  // FLEET PORTAL ACCOUNTS (unified partner portal)
+  // ================================================================
+
+  static async getFleetPortalAccountForFleet(fleetId: string) {
+    const r = await pool.query(
+      `SELECT fpa.id, fpa.fleet_id, fpa.is_active, fpa.must_change_password,
+              u.email, u.full_name, u.is_active AS user_active
+       FROM fleet_portal_accounts fpa
+       JOIN users u ON u.id = fpa.user_id
+       WHERE fpa.fleet_id = $1`,
+      [fleetId],
+    );
+    return r.rows[0] ?? null;
+  }
+
+  /** Creates (or resets) the fleet's portal login. Role FLEET, bcrypt hash. */
+  static async createFleetPortalAccount(
+    fleetId: string,
+    email: string,
+    password: string,
+    actor?: { id?: string; role?: string },
+  ): Promise<{ password: string }> {
+    const fleet = await pool.query(`SELECT id, name FROM fleet_partners WHERE id = $1`, [fleetId]);
+    if (!fleet.rows[0]) throw new Error('Fleet partner not found');
+    if (email.length < 5 || !email.includes('@')) throw new Error('A valid email is required');
+    if (password.length < 8) throw new Error('Password must be at least 8 characters');
+
+    const bcrypt = await import('bcryptjs');
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const existing = await client.query(
+        `SELECT fpa.id, fpa.user_id FROM fleet_portal_accounts fpa WHERE fpa.fleet_id = $1`,
+        [fleetId],
+      );
+      let userId: string | null = existing.rows[0]?.user_id ?? null;
+      if (userId) {
+        await client.query(
+          `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
+          [passwordHash, userId],
+        );
+      } else {
+        const userRes = await client.query(
+          `INSERT INTO users (email, password_hash, full_name, role, is_active)
+           VALUES ($1, $2, $3, 'FLEET', TRUE)
+           ON CONFLICT (email) DO UPDATE SET password_hash = $2, role = 'FLEET',
+             is_active = TRUE
+           RETURNING id`,
+          [email.trim().toLowerCase(), passwordHash, fleet.rows[0].name],
+        );
+        userId = userRes.rows[0].id;
+      }
+      await client.query(
+        `INSERT INTO fleet_portal_accounts
+           (fleet_id, user_id, must_change_password, is_active, created_by_admin_id)
+         VALUES ($1, $2, TRUE, TRUE, $3)
+         ON CONFLICT (fleet_id) DO UPDATE SET
+           user_id = EXCLUDED.user_id, must_change_password = TRUE,
+           is_active = TRUE, updated_at = NOW()`,
+        [fleetId, userId, actor?.id ?? null],
+      );
+      await client.query('COMMIT');
+
+      AuditEventsService.record({
+        actorId: actor?.id ?? null,
+        actorRole: actor?.role ?? 'ADMIN',
+        action: 'fleet_portal_account_created',
+        entityType: 'fleet',
+        entityId: fleetId,
+        details: { email: email.trim().toLowerCase() },
+      }).catch(() => undefined);
+
+      return { password };
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  static async resetFleetPortalPassword(fleetId: string, newPassword: string, actor?: { id?: string; role?: string }) {
+    const account = await this.getFleetPortalAccountForFleet(fleetId);
+    if (!account) throw new Error('No portal account exists for this fleet');
+    if (newPassword.length < 8) throw new Error('Password must be at least 8 characters');
+    const bcrypt = await import('bcryptjs');
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool.query(
+      `UPDATE users SET password_hash = $1 WHERE id = $2`,
+      [hash, account.user_id],
+    );
+    await pool.query(
+      `UPDATE fleet_portal_accounts SET must_change_password = TRUE, updated_at = NOW() WHERE fleet_id = $1`,
+      [fleetId],
+    );
+    AuditEventsService.record({
+      actorId: actor?.id ?? null,
+      actorRole: actor?.role ?? 'ADMIN',
+      action: 'fleet_portal_password_reset',
+      entityType: 'fleet',
+      entityId: fleetId,
+    }).catch(() => undefined);
+    return { password: newPassword };
+  }
+
+  static async disableFleetPortalAccount(fleetId: string, actor?: { id?: string; role?: string }) {
+    const account = await this.getFleetPortalAccountForFleet(fleetId);
+    if (!account) return;
+    await pool.query(
+      `UPDATE fleet_portal_accounts SET is_active = FALSE, updated_at = NOW() WHERE fleet_id = $1`,
+      [fleetId],
+    );
+    await pool.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [account.user_id]);
+    AuditEventsService.record({
+      actorId: actor?.id ?? null,
+      actorRole: actor?.role ?? 'ADMIN',
+      action: 'fleet_portal_account_disabled',
+      entityType: 'fleet',
+      entityId: fleetId,
     }).catch(() => undefined);
   }
 }

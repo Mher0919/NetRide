@@ -12,7 +12,7 @@ import {
 import LockResetIcon from '@mui/icons-material/LockReset';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { sponsorChangePassword } from '../api/sponsor';
+import { portalChangePassword } from '../api/portal';
 
 const ChangePassword: React.FC = () => {
   const navigate = useNavigate();
@@ -34,7 +34,7 @@ const ChangePassword: React.FC = () => {
     }
     setLoading(true);
     try {
-      await sponsorChangePassword(password);
+      await portalChangePassword(password);
       setSnack({ open: true, message: 'Password updated. Please log in again.', severity: 'success' });
       logout();
       window.setTimeout(() => navigate('/login'), 1200);

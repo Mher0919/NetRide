@@ -92,8 +92,8 @@ static async create(input: PartnerInput, adminId: string) {
       // Create the partner record linked to the user
       const partnerRes = await client.query(
         `INSERT INTO partners
-           (name, business_type, address, contact_name, contact_phone, contact_email, commission_rate, notes, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE')
+           (name, business_type, address, contact_name, contact_phone, contact_email, commission_rate, notes, status, user_id, must_change_password)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', $9, TRUE)
          RETURNING *`,
         [
           input.name.trim(),
@@ -104,7 +104,7 @@ static async create(input: PartnerInput, adminId: string) {
           input.contact_email?.trim() ?? null,
           Math.max(0, Math.min(1, Number(input.commission_rate))),
           input.notes?.trim() ?? null,
-          'ACTIVE',
+          user.id,
         ],
       );
       const partner = partnerRes.rows[0];
@@ -128,7 +128,7 @@ static async create(input: PartnerInput, adminId: string) {
     }
   }
 
-  static async update(id: string, input: Partial<PartnerInput>, adminId: string) {
+  static async update(id: string, input: Partial<PartnerInput> & { email?: string; password?: string }, adminId: string) {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Partner not found');
 
@@ -143,19 +143,60 @@ static async create(input: PartnerInput, adminId: string) {
       notes: input.notes !== undefined ? input.notes?.trim() ?? null : existing.notes,
     };
 
-    const res = await pool.query(
-      `UPDATE partners SET
-         name = $1, business_type = $2, address = $3, contact_name = $4,
-         contact_phone = $5, contact_email = $6, commission_rate = $7,
-         notes = $8, updated_at = NOW()
-       WHERE id = $9
-       RETURNING *`,
-      [
-        merged.name, merged.business_type, merged.address, merged.contact_name,
-        merged.contact_phone, merged.contact_email, merged.commission_rate,
-        merged.notes, id,
-      ],
-    );
+    const client = await pool.connect();
+    let updatedRow: any = null;
+    try {
+      await client.query('BEGIN');
+
+      const res = await client.query(
+        `UPDATE partners SET
+           name = $1, business_type = $2, address = $3, contact_name = $4,
+           contact_phone = $5, contact_email = $6, commission_rate = $7,
+           notes = $8, updated_at = NOW()
+         WHERE id = $9
+         RETURNING *`,
+        [
+          merged.name, merged.business_type, merged.address, merged.contact_name,
+          merged.contact_phone, merged.contact_email, merged.commission_rate,
+          merged.notes, id,
+        ],
+      );
+      updatedRow = res.rows[0];
+
+      // Sync the linked portal login (users row): email / display name /
+      // password are updated here when the admin edits them.
+      const linkRes = await client.query(
+        `SELECT u.id FROM users u JOIN partners p ON p.user_id = u.id WHERE p.id = $1`,
+        [id],
+      );
+      if (linkRes.rows.length > 0) {
+        const userId = linkRes.rows[0].id;
+        if (input.email && input.email.trim().toLowerCase() !== existing.email?.toLowerCase()) {
+          const clash = await client.query(`SELECT 1 FROM users WHERE email = $1 AND id <> $2`, [input.email.trim().toLowerCase(), userId]);
+          if (clash.rows.length > 0) throw new Error('That email is already in use by another account.');
+          await client.query(`UPDATE users SET email = $1 WHERE id = $2`, [input.email.trim().toLowerCase(), userId]);
+        }
+        if (input.name && input.name.trim() !== existing.name) {
+          await client.query(`UPDATE users SET full_name = $1 WHERE id = $2`, [merged.name, userId]);
+        }
+        if (input.password) {
+          if (String(input.password).length < 8) throw new Error('Password must be at least 8 characters.');
+          const passwordHash = await bcrypt.hash(input.password, 10);
+          await client.query(
+            `UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2`,
+            [passwordHash, userId],
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+
     await AuditEventsService.record({
       actorId: adminId,
       actorRole: 'ADMIN',
@@ -164,7 +205,7 @@ static async create(input: PartnerInput, adminId: string) {
       entityId: id,
       details: { changed: Object.keys(input) },
     });
-    return normalizePartner(res.rows[0]);
+    return normalizePartner(updatedRow);
   }
 
   static async setStatus(id: string, status: PartnerStatus, adminId: string) {

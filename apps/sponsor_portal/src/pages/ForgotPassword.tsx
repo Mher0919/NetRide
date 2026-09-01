@@ -14,7 +14,7 @@ import {
 } from '@mui/material';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import { useNavigate } from 'react-router-dom';
-import { sponsorForgotPassword, sponsorVerifyResetOTP, sponsorResetPassword } from '../api/sponsor';
+import { portalForgotPassword, portalVerifyResetOTP, portalResetPassword } from '../api/portal';
 
 const steps = ['Enter email', 'Verify code', 'Set new password'];
 
@@ -37,7 +37,7 @@ const ForgotPassword: React.FC = () => {
     }
     setLoading(true);
     try {
-      await sponsorForgotPassword(email.trim());
+      await portalForgotPassword(email.trim());
       setSnack({ open: true, message: 'Verification code sent to your email', severity: 'success' });
       setActiveStep(1);
     } catch (err: unknown) {
@@ -56,7 +56,7 @@ const ForgotPassword: React.FC = () => {
     }
     setLoading(true);
     try {
-      const res = await sponsorVerifyResetOTP(email.trim(), code);
+      const res = await portalVerifyResetOTP(email.trim(), code);
       setResetToken(res.resetToken);
       setActiveStep(2);
     } catch (err: unknown) {
@@ -79,7 +79,7 @@ const ForgotPassword: React.FC = () => {
     }
     setLoading(true);
     try {
-      await sponsorResetPassword(resetToken, newPassword);
+      await portalResetPassword(resetToken, newPassword);
       setSnack({ open: true, message: 'Password reset successful. Redirecting to login...', severity: 'success' });
       window.setTimeout(() => navigate('/login'), 2000);
     } catch (err: unknown) {

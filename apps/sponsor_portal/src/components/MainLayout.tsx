@@ -27,17 +27,28 @@ import { useAuth } from '../context/AuthContext';
 
 const drawerWidth = 240;
 
+const typeLabel: Record<string, string> = {
+  SPONSOR: 'Sponsor',
+  PARTNER: 'Partner',
+  FLEET: 'Fleet',
+};
+
 const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { session, logout } = useAuth();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
 
+  const type = session?.portal.type ?? 'SPONSOR';
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
-    { text: 'Validations', icon: <ValidationIcon />, path: '/validations' },
-    { text: 'Customers', icon: <CustomersIcon />, path: '/customers' },
-    { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
+    ...(type === 'SPONSOR'
+      ? [
+          { text: 'Validations', icon: <ValidationIcon />, path: '/validations' },
+          { text: 'Customers', icon: <CustomersIcon />, path: '/customers' },
+          { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
+        ]
+      : []),
   ];
 
   const handleLogout = () => {
@@ -57,23 +68,23 @@ const MainLayout: React.FC = () => {
               <StorefrontIcon sx={{ color: 'white', fontSize: 20 }} />
             </Box>
             <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 800, letterSpacing: '-0.03em', fontSize: '1.25rem' }}>
-              NetRide <Typography component="span" sx={{ fontWeight: 400, color: 'text.secondary', ml: 0.5 }}>Sponsor</Typography>
+              NetRide <Typography component="span" sx={{ fontWeight: 400, color: 'text.secondary', ml: 0.5 }}>{typeLabel[type]}</Typography>
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="body2" sx={{ fontWeight: 600, mr: 1, display: { xs: 'none', sm: 'block' } }}>
-              {session?.sponsor.businessName}
+              {session?.portal.name}
             </Typography>
             <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} sx={{ p: 0.5 }}>
               <Avatar sx={{ width: 34, height: 34, bgcolor: 'secondary.main', fontSize: 14, fontWeight: 700 }}>
-                {session?.sponsor.businessName?.charAt(0) || 'S'}
+                {session?.portal.name?.charAt(0) || 'N'}
               </Avatar>
             </IconButton>
             <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
               <MenuItem disabled sx={{ py: 1.5 }}>
                 <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{session?.sponsor.businessName}</Typography>
-                  <Typography variant="caption" color="text.secondary">{session?.sponsor.email}</Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{session?.portal.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{session?.portal.email}</Typography>
                 </Box>
               </MenuItem>
               <Divider />

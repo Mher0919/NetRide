@@ -76,3 +76,44 @@ services:
         value: "12"
       - key: FACE_LOCATION_JUMP_MILES
         value: "5"
+
+  # --------------------------------------------------------------------------
+  # Unified Partner Portal (sponsor + partner + fleet dashboards)
+  # --------------------------------------------------------------------------
+  - type: web
+    name: netride-partner-portal
+    runtime: node
+    rootDir: apps/sponsor_portal
+    plan: free
+    healthCheckPath: /
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      # API the portal talks to (the backend service).
+      - key: VITE_API_URL
+        value: "https://netride.onrender.com"
+
+  # --------------------------------------------------------------------------
+  # Admin Dashboard
+  # --------------------------------------------------------------------------
+  - type: web
+    name: netride-admin-dashboard
+    runtime: node
+    rootDir: apps/admin_dashboard
+    plan: free
+    healthCheckPath: /
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: VITE_API_URL
+        value: "https://netride.onrender.com"

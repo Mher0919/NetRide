@@ -48,7 +48,11 @@ export const adminMiddleware = (req: AuthRequest, res: Response, next: NextFunct
  * portal queries are scoped by req.sponsor.id below.)
  */
 export const sponsorMiddleware = async (req: any, res: Response, next: NextFunction) => {
-  if (!req.user || req.user.role !== 'SPONSOR' || !req.user.sponsorId) {
+  // Accept both the legacy `sponsorId` claim and the unified portal claims
+  // (portalType = SPONSOR + portalId) so portal-issued JWTs can use the
+  // /sponsor/* endpoints.
+  const sponsorId = req.user?.sponsorId ?? (req.user?.portalType === 'SPONSOR' ? req.user?.portalId : null);
+  if (!req.user || req.user.role !== 'SPONSOR' || !sponsorId) {
     return res.status(403).json({ error: 'Access denied. Sponsor account required.' });
   }
   try {
@@ -57,12 +61,12 @@ export const sponsorMiddleware = async (req: any, res: Response, next: NextFunct
        JOIN sponsors s ON s.id = spa.sponsor_id
        WHERE spa.sponsor_id = $1 AND spa.is_active = TRUE
          AND s.status <> 'SUSPENDED'`,
-      [req.user.sponsorId],
+      [sponsorId],
     );
     if (resq.rows.length === 0) {
       return res.status(403).json({ error: 'Your sponsor account is inactive or suspended.' });
     }
-    req.sponsor = { id: req.user.sponsorId, userId: req.user.id, email: req.user.email };
+    req.sponsor = { id: sponsorId, userId: req.user.id, email: req.user.email };
     next();
   } catch (err) {
     next(err);
@@ -90,6 +94,33 @@ export const driverMiddleware = async (req: AuthRequest, res: Response, next: Ne
       return next();
     }
     return res.status(403).json({ error: 'Access denied. Driver account required.' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * PARTNER portal guard (legacy /partner/* API). Resolves the partner row
+ * from the authenticated user at request time — the JWT only carries the
+ * PARTNER role, the partner link lives on partners.user_id.
+ */
+export const partnerMiddleware = async (req: AuthRequest & { partner?: any }, res: Response, next: NextFunction) => {
+  if (!req.user || req.user.role !== 'PARTNER') {
+    return res.status(403).json({ error: 'Access denied. Partner account required.' });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT p.id, p.name, p.status
+       FROM partners p
+       WHERE p.user_id = $1 OR p.contact_email ILIKE $2
+       LIMIT 1`,
+      [req.user.id, req.user.email],
+    );
+    if (result.rows.length === 0) {
+      return res.status(403).json({ error: 'Partner account not found.' });
+    }
+    req.partner = { id: result.rows[0].id, name: result.rows[0].name, status: result.rows[0].status };
+    next();
   } catch (err) {
     next(err);
   }

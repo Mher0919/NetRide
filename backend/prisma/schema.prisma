@@ -15,6 +15,7 @@ enum UserRole {
   ADMIN
   SPONSOR
   PARTNER
+  FLEET
 
   @@map("user_role")
 }
@@ -138,6 +139,8 @@ model User {
   reports_against   RideReport[] @relation("ReportsAgainst")
 
   portal_account    SponsorPortalAccount?
+  fleet_portal_account FleetPortalAccount?
+  partner_profile   Partner?
   redemptions_as_rider SpecialRedemption[] @relation("RiderRedemptions")
 
   @@map("users")
@@ -467,10 +470,28 @@ model FleetPartner {
   created_at             DateTime   @default(now()) @db.Timestamptz(6)
   updated_at             DateTime   @default(now()) @db.Timestamptz(6)
 
-  drivers Driver[]
+  drivers       Driver[]
+  portalAccount FleetPortalAccount?
 
   @@index([is_active])
   @@map("fleet_partners")
+}
+
+model FleetPortalAccount {
+  id                    String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  fleet_id              String   @unique @db.Uuid
+  user_id               String   @unique @db.Uuid
+  is_active             Boolean  @default(true)
+  must_change_password  Boolean  @default(true)
+  created_by_admin_id   String?  @db.Uuid
+  last_login_at         DateTime? @db.Timestamptz(6)
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  fleet FleetPartner @relation(fields: [fleet_id], references: [id], onDelete: Cascade)
+  user  User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("fleet_portal_accounts")
 }
 
 /// 041: Global revenue split singleton (id = 1). Currently locked at
@@ -650,6 +671,8 @@ model Partner {
   contact_email           String?
   commission_rate         Decimal  @default(0.10) @db.Decimal(5, 4)
   status                  String   @default("ACTIVE")
+  user_id                 String?  @unique @db.Uuid
+  must_change_password    Boolean  @default(true)
   lifetime_earnings_cents BigInt   @default(0)
   pending_earnings_cents  BigInt   @default(0)
   paid_earnings_cents     BigInt   @default(0)
@@ -658,10 +681,12 @@ model Partner {
   created_at              DateTime @default(now()) @db.Timestamptz(6)
   updated_at              DateTime @default(now()) @db.Timestamptz(6)
 
+  user        User?          @relation(fields: [user_id], references: [id], onDelete: SetNull)
   promos      PromoCode[]
   commissions PartnerCommission[]
 
   @@index([status])
+  @@index([user_id])
   @@map("partners")
 }
 
