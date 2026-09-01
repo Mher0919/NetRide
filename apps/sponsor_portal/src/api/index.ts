@@ -15,6 +15,13 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // The active dashboard type (one login can own sponsor + partner +
+    // fleet accounts) — the backend validates it against the user's
+    // accounts on every request.
+    const portalType = localStorage.getItem('portal_type');
+    if (portalType) {
+      config.headers['x-portal-type'] = portalType;
+    }
     return config;
   },
   (error) => Promise.reject(error)

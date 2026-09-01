@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { PortalSession } from '../api/portal';
+import type { PortalSession, PortalInfo } from '../api/portal';
 import { portalLogout } from '../api/portal';
 
 interface AuthContextType {
   session: PortalSession | null;
   login: (session: PortalSession) => void;
+  setActivePortal: (type: string) => PortalInfo | null;
   logout: () => void;
   isAuthenticated: boolean;
   loading: boolean;
@@ -19,13 +20,17 @@ const readSession = (): PortalSession | null => {
     const refreshToken = localStorage.getItem('portal_refresh_token');
     const saved = localStorage.getItem('portal_user');
     if (token && refreshToken && saved) {
-      const portal = JSON.parse(saved);
-      return { token, refreshToken, portal };
+      const parsed = JSON.parse(saved);
+      const portals = parsed.portals ?? (parsed.type ? [parsed] : []);
+      const activeType = localStorage.getItem('portal_type');
+      const portal = portals.find((p: PortalInfo) => p.type === activeType) ?? portals[0];
+      return { token, refreshToken, portals, portal };
     }
   } catch {
     localStorage.removeItem('portal_token');
     localStorage.removeItem('portal_user');
     localStorage.removeItem('portal_refresh_token');
+    localStorage.removeItem('portal_type');
   }
   return null;
 };
@@ -45,7 +50,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSession(s);
     localStorage.setItem('portal_token', s.token);
     localStorage.setItem('portal_refresh_token', s.refreshToken);
-    localStorage.setItem('portal_user', JSON.stringify(s.portal));
+    localStorage.setItem('portal_user', JSON.stringify({ portals: s.portals, portal: s.portal }));
+    localStorage.setItem('portal_type', s.portal.type);
+  };
+
+  /** Switch the visible dashboard between the account's portal types. */
+  const setActivePortal = (type: string): PortalInfo | null => {
+    if (!session) return null;
+    const next = session.portals.find((p) => p.type === type) ?? null;
+    if (!next) return null;
+    setSession({ ...session, portal: next });
+    localStorage.setItem('portal_type', next.type);
+    localStorage.setItem('portal_user', JSON.stringify({ portals: session.portals, portal: next }));
+    return next;
   };
 
   const logout = () => {
@@ -54,11 +71,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('portal_token');
     localStorage.removeItem('portal_user');
     localStorage.removeItem('portal_refresh_token');
+    localStorage.removeItem('portal_type');
     if (refreshToken) portalLogout(refreshToken);
   };
 
   return (
-    <AuthContext.Provider value={{ session, login, logout, isAuthenticated: !!session, loading }}>
+    <AuthContext.Provider value={{ session, login, setActivePortal, logout, isAuthenticated: !!session, loading }}>
       {children}
     </AuthContext.Provider>
   );

@@ -67,11 +67,11 @@ export class PartnerService {
   }
 
 static async create(input: PartnerInput, adminId: string) {
-    // Check if a user with this email already exists
+    // Attach to an existing account if the email is already a portal login
+    // (a sponsor or fleet user who now also partners) — the same person owns
+    // multiple dashboards under one login.
     const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [input.email]);
-    if (existingUser.rows.length > 0) {
-      throw new Error('A user with this email already exists. Use a unique partner email.');
-    }
+    const existingUserId = existingUser.rows[0]?.id ?? null;
 
     // Hash the password securely
     const passwordHash = await bcrypt.hash(input.password, 10);
@@ -80,14 +80,24 @@ static async create(input: PartnerInput, adminId: string) {
     try {
       await client.query('BEGIN');
 
-      // Create the user account with PARTNER role and hashed password
-      const userRes = await client.query(
-        `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
-         RETURNING *`,
-        [input.email, input.name.trim(), passwordHash, UserRole.PARTNER, false, true],
-      );
-      const user = userRes.rows[0];
+      // Create the user account with PARTNER role and hashed password, or
+      // attach to the existing account (role/name untouched).
+      let userId: string;
+      if (existingUserId) {
+        await client.query(
+          `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
+          [passwordHash, existingUserId],
+        );
+        userId = existingUserId;
+      } else {
+        const userRes = await client.query(
+          `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+           RETURNING *`,
+          [input.email, input.name.trim(), passwordHash, UserRole.PARTNER, false, true],
+        );
+        userId = userRes.rows[0].id;
+      }
 
       // Create the partner record linked to the user
       const partnerRes = await client.query(
@@ -104,7 +114,7 @@ static async create(input: PartnerInput, adminId: string) {
           input.contact_email?.trim() ?? null,
           Math.max(0, Math.min(1, Number(input.commission_rate))),
           input.notes?.trim() ?? null,
-          user.id,
+          userId,
         ],
       );
       const partner = partnerRes.rows[0];
@@ -117,7 +127,7 @@ static async create(input: PartnerInput, adminId: string) {
         action: 'PARTNER_CREATED',
         entityType: 'PARTNER',
         entityId: partner.id,
-        details: { name: input.name, email: input.email, business_type: input.business_type },
+        details: { name: input.name, email: input.email, business_type: input.business_type, attachedToExisting: !!existingUserId },
       });
       return normalizePartner(partner);
     } catch (err) {

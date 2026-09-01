@@ -1,11 +1,16 @@
 // backend/src/modules/portal/portal-auth.service.ts
 //
 // UNIFIED PORTAL AUTH — one credential login for every portal account type:
-//   SPONSOR  → sponsor_portal_accounts  (must_change_password on the account)
-//   PARTNER  → partners                 (must_change_password on the partner row)
-//   FLEET    → fleet_portal_accounts    (must_change_password on the account)
-// The JWT carries role + portalType + portalId claims; every request is
-// re-validated by portalMiddleware.
+//   SPONSOR  → sponsor_portal_accounts
+//   PARTNER  → partners (linked via partners.user_id)
+//   FLEET    → fleet_portal_accounts
+//
+// A single identity (email) can own ANY combination of account types — e.g.
+// a business partner who also sponsors rides logs in once and switches
+// between dashboards. Portal access is resolved from the account tables by
+// user_id (never from users.role, which is a single legacy column). The JWT
+// carries identity only; the ACTIVE portal type is chosen per request via
+// the x-portal-type header (validated by portalMiddleware).
 
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
@@ -20,93 +25,69 @@ const REFRESH_TOKEN_TTL_DAYS = 30;
 
 export type PortalType = 'SPONSOR' | 'PARTNER' | 'FLEET';
 
+export interface PortalInfo {
+  type: PortalType;
+  id: string;
+  name: string;
+  email: string;
+  mustChangePassword: boolean;
+}
+
 export interface PortalSession {
   token: string;
   refreshToken: string;
-  portal: {
-    type: PortalType;
-    id: string;
-    name: string;
-    email: string;
-    mustChangePassword: boolean;
-  };
+  portals: PortalInfo[];
+  /** Default / previously active portal — kept for backward compat. */
+  portal: PortalInfo;
 }
 
-interface AccountInfo {
-  portalId: string;
-  name: string;
-  mustChangePassword: boolean;
-  disabled: boolean;
-  disabledMessage: string;
-}
+const PORTAL_PRIORITY: PortalType[] = ['SPONSOR', 'PARTNER', 'FLEET'];
 
-async function resolveAccount(user: any): Promise<AccountInfo> {
-  if (user.role === 'SPONSOR') {
-    const r = await pool.query(
-      `SELECT spa.sponsor_id, spa.is_active, spa.must_change_password,
-              s.status AS sponsor_status, u.full_name
+/**
+ * All portal accounts attached to a user. Row-level status rules:
+ *  - SPONSOR: portal account must be active; SUSPENDED sponsor blocks
+ *    access unless the password still has to be changed.
+ *  - PARTNER: partner must be ACTIVE unless must_change_password.
+ *  - FLEET: portal account + fleet must be active unless must_change_password.
+ */
+async function resolvePortals(userId: string, email: string): Promise<PortalInfo[]> {
+  const res = await pool.query(
+    `SELECT type, id, name, must_change_password, blocked
+     FROM (
+       SELECT 'SPONSOR'::text AS type, spa.sponsor_id::text AS id, u.full_name AS name,
+              spa.must_change_password,
+              (s.status = 'SUSPENDED' AND NOT spa.must_change_password) AS blocked
        FROM sponsor_portal_accounts spa
        JOIN sponsors s ON s.id = spa.sponsor_id
-       JOIN users u ON u.id = $1
-       WHERE spa.user_id = $1`,
-      [user.id],
-    );
-    const row = r.rows[0];
-    if (!row || !row.is_active) {
-      return { portalId: '', name: '', mustChangePassword: false, disabled: true, disabledMessage: 'Your portal account is disabled. Contact NetRide support.' };
-    }
-    if (!row.must_change_password && row.sponsor_status === 'SUSPENDED') {
-      return { portalId: '', name: '', mustChangePassword: false, disabled: true, disabledMessage: 'Your sponsor account is suspended. Contact NetRide support.' };
-    }
-    return { portalId: row.sponsor_id, name: row.full_name, mustChangePassword: row.must_change_password, disabled: false, disabledMessage: '' };
-  }
-
-  if (user.role === 'PARTNER') {
-    const r = await pool.query(
-      `SELECT id, name, status, must_change_password, user_id
-       FROM partners
-       WHERE user_id = $1 OR contact_email ILIKE $2`,
-      [user.id, user.email],
-    );
-    const row = r.rows[0];
-    if (!row) {
-      return { portalId: '', name: '', mustChangePassword: false, disabled: true, disabledMessage: 'Partner account not found. Contact NetRide support.' };
-    }
-    if (!row.must_change_password && row.status !== 'ACTIVE') {
-      return { portalId: '', name: '', mustChangePassword: false, disabled: true, disabledMessage: 'Your partner account is not active. Contact NetRide support.' };
-    }
-    return { portalId: row.id, name: row.name, mustChangePassword: row.must_change_password, disabled: false, disabledMessage: '' };
-  }
-
-  if (user.role === 'FLEET') {
-    const r = await pool.query(
-      `SELECT fpa.fleet_id, fpa.is_active, fpa.must_change_password,
-              f.is_active AS fleet_active, f.name
+       JOIN users u ON u.id = spa.user_id
+       WHERE spa.user_id = $1 AND spa.is_active = TRUE
+       UNION ALL
+       SELECT 'PARTNER'::text AS type, p.id::text AS id, p.name AS name,
+              p.must_change_password,
+              (p.status <> 'ACTIVE' AND NOT p.must_change_password) AS blocked
+       FROM partners p
+       WHERE p.user_id = $1
+       UNION ALL
+       SELECT 'FLEET'::text AS type, fpa.fleet_id::text AS id, f.name AS name,
+              fpa.must_change_password,
+              ((NOT fpa.is_active OR NOT f.is_active) AND NOT fpa.must_change_password) AS blocked
        FROM fleet_portal_accounts fpa
        JOIN fleet_partners f ON f.id = fpa.fleet_id
-       WHERE fpa.user_id = $1`,
-      [user.id],
-    );
-    const row = r.rows[0];
-    if (!row || !row.is_active) {
-      return { portalId: '', name: '', mustChangePassword: false, disabled: true, disabledMessage: 'Your fleet portal account is inactive. Contact NetRide support.' };
-    }
-    // An inactive fleet may still log in to change its password on first login.
-    if (!row.must_change_password && !row.fleet_active) {
-      return { portalId: '', name: '', mustChangePassword: false, disabled: true, disabledMessage: 'Your fleet is disabled. Contact NetRide support.' };
-    }
-    return { portalId: row.fleet_id, name: row.name, mustChangePassword: row.must_change_password, disabled: false, disabledMessage: '' };
-  }
+       WHERE fpa.user_id = $1
+     ) t
+     ORDER BY CASE t.type WHEN 'SPONSOR' THEN 1 WHEN 'PARTNER' THEN 2 ELSE 3 END`,
+    [userId],
+  );
 
-  return { portalId: '', name: '', mustChangePassword: false, disabled: true, disabledMessage: 'Portal access is not enabled for this account.' };
-}
-
-async function updateLastLogin(type: PortalType, userId: string) {
-  if (type === 'SPONSOR') {
-    await pool.query(`UPDATE sponsor_portal_accounts SET last_login_at = NOW(), updated_at = NOW() WHERE user_id = $1`, [userId]);
-  } else if (type === 'FLEET') {
-    await pool.query(`UPDATE fleet_portal_accounts SET last_login_at = NOW(), updated_at = NOW() WHERE user_id = $1`, [userId]);
-  }
+  return res.rows
+    .filter((r: any) => !r.blocked)
+    .map((r: any) => ({
+      type: r.type as PortalType,
+      id: r.id,
+      name: r.name,
+      email,
+      mustChangePassword: r.must_change_password,
+    }));
 }
 
 export class PortalAuthService {
@@ -115,25 +96,23 @@ export class PortalAuthService {
     if (!normalizedEmail || !password) throw new Error('Email and password are required');
 
     const userRes = await pool.query(
-      `SELECT id, email, password_hash, is_active, full_name, role FROM users WHERE email = $1`,
+      `SELECT id, email, password_hash, is_active, role FROM users WHERE email = $1`,
       [normalizedEmail],
     );
     const user = userRes.rows[0];
     if (!user || !user.password_hash) throw new Error('Invalid email or password');
-    if (!['SPONSOR', 'PARTNER', 'FLEET'].includes(user.role)) {
-      throw new Error('Invalid email or password');
-    }
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) throw new Error('Invalid email or password');
     if (!user.is_active) throw new Error('Your account is disabled. Contact NetRide support.');
 
-    const account = await resolveAccount(user);
-    if (account.disabled) throw new Error(account.disabledMessage);
+    const portals = await resolvePortals(user.id, user.email);
+    if (portals.length === 0) {
+      throw new Error('Portal access is not enabled for this account. Contact NetRide support.');
+    }
 
-    const portalType = user.role as PortalType;
     const token = jwt.sign(
-      { id: user.id, role: user.role, email: user.email, portalType, portalId: account.portalId },
+      { id: user.id, role: user.role, email: user.email },
       env.JWT_SECRET,
       { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256' },
     );
@@ -141,36 +120,26 @@ export class PortalAuthService {
     const refreshToken = crypto.randomUUID();
     await redis.set(
       `portal_refresh:${refreshToken}`,
-      JSON.stringify({ userId: user.id, email: user.email, portalType, portalId: account.portalId, mustChangePassword: account.mustChangePassword }),
+      JSON.stringify({ userId: user.id, email: user.email }),
       'EX',
       REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60,
     );
 
-    await updateLastLogin(portalType, user.id);
+    const portal = portals.find((p) => p.type === 'SPONSOR') ?? portals[0];
 
     AuditEventsService.record({
       actorId: user.id,
       actorRole: user.role,
       action: 'portal_login',
-      entityType: portalType.toLowerCase(),
-      entityId: account.portalId,
-      details: { email: user.email, portalType },
+      entityType: 'portal',
+      entityId: user.id,
+      details: { email: user.email, types: portals.map((p) => p.type) },
     }).catch(() => undefined);
 
-    return {
-      token,
-      refreshToken,
-      portal: {
-        type: portalType,
-        id: account.portalId,
-        name: account.name,
-        email: user.email,
-        mustChangePassword: account.mustChangePassword,
-      },
-    };
+    return { token, refreshToken, portals, portal };
   }
 
-  static async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }> {
+  static async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string; portals: PortalInfo[]; portal: PortalInfo }> {
     const data = await redis.get(`portal_refresh:${refreshToken}`);
     if (!data) throw new Error('Invalid or expired refresh token');
 
@@ -186,15 +155,14 @@ export class PortalAuthService {
       throw new Error('Account is disabled');
     }
 
-    const account = await resolveAccount(user);
-    if (account.disabled) {
+    const portals = await resolvePortals(user.id, user.email);
+    if (portals.length === 0) {
       await redis.del(`portal_refresh:${refreshToken}`);
-      throw new Error(account.disabledMessage);
+      throw new Error('Portal access is not enabled for this account.');
     }
-    const portalType = user.role as PortalType;
 
     const newToken = jwt.sign(
-      { id: user.id, role: user.role, email: user.email, portalType, portalId: account.portalId },
+      { id: user.id, role: user.role, email: user.email },
       env.JWT_SECRET,
       { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256' },
     );
@@ -203,62 +171,61 @@ export class PortalAuthService {
     await redis.del(`portal_refresh:${refreshToken}`);
     await redis.set(
       `portal_refresh:${newRefreshToken}`,
-      JSON.stringify({ userId: user.id, email: user.email, portalType, portalId: account.portalId, mustChangePassword: account.mustChangePassword }),
+      JSON.stringify({ userId: user.id, email: user.email }),
       'EX',
       REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60,
     );
 
-    return { token: newToken, refreshToken: newRefreshToken };
+    return {
+      token: newToken,
+      refreshToken: newRefreshToken,
+      portals,
+      portal: portals.find((p) => p.type === 'SPONSOR') ?? portals[0],
+    };
   }
 
   static async invalidateRefreshToken(refreshToken: string): Promise<void> {
     await redis.del(`portal_refresh:${refreshToken}`);
   }
 
-  /** First-login / forced password change. Clears the flag on the right account. */
+  /** First-login / forced password change. Clears the flag on ALL of the user's portal accounts. */
   static async changePassword(userId: string, newPassword: string): Promise<void> {
     if (!newPassword || newPassword.length < 8) {
       throw new Error('Password must be at least 8 characters');
     }
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query(
-      `UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2`,
-      [hash, userId],
-    );
-
-    const sponsor = await pool.query(`SELECT sponsor_id FROM sponsor_portal_accounts WHERE user_id = $1`, [userId]);
-    if (sponsor.rows.length > 0) {
-      await pool.query(
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2`,
+        [hash, userId],
+      );
+      await client.query(
         `UPDATE sponsor_portal_accounts SET must_change_password = FALSE, updated_at = NOW() WHERE user_id = $1`,
         [userId],
       );
-      AuditEventsService.record({
-        actorId: userId, actorRole: 'SPONSOR', action: 'portal_password_changed',
-        entityType: 'sponsor', entityId: sponsor.rows[0].sponsor_id,
-      }).catch(() => undefined);
-      return;
-    }
-
-    const fleet = await pool.query(`SELECT fleet_id FROM fleet_portal_accounts WHERE user_id = $1`, [userId]);
-    if (fleet.rows.length > 0) {
-      await pool.query(
+      await client.query(
         `UPDATE fleet_portal_accounts SET must_change_password = FALSE, updated_at = NOW() WHERE user_id = $1`,
         [userId],
       );
-      AuditEventsService.record({
-        actorId: userId, actorRole: 'FLEET', action: 'portal_password_changed',
-        entityType: 'fleet', entityId: fleet.rows[0].fleet_id,
-      }).catch(() => undefined);
-      return;
+      await client.query(
+        `UPDATE partners SET must_change_password = FALSE, updated_at = NOW() WHERE user_id = $1`,
+        [userId],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
     }
-
-    const partner = await pool.query(`SELECT id FROM partners WHERE user_id = $1`, [userId]);
-    if (partner.rows.length > 0) {
-      await pool.query(`UPDATE partners SET must_change_password = FALSE, updated_at = NOW() WHERE user_id = $1`, [userId]);
-      AuditEventsService.record({
-        actorId: userId, actorRole: 'PARTNER', action: 'portal_password_changed',
-        entityType: 'partner', entityId: partner.rows[0].id,
-      }).catch(() => undefined);
-    }
+    AuditEventsService.record({
+      actorId: userId,
+      actorRole: 'PORTAL',
+      action: 'portal_password_changed',
+      entityType: 'portal',
+      entityId: userId,
+    }).catch(() => undefined);
   }
 }

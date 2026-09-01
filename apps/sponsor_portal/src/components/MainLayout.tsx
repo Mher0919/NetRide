@@ -15,6 +15,7 @@ import {
   Avatar,
   Menu,
   MenuItem,
+  Button,
 } from '@mui/material';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -22,6 +23,7 @@ import ValidationIcon from '@mui/icons-material/VerifiedUser';
 import CustomersIcon from '@mui/icons-material/People';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LogoutIcon from '@mui/icons-material/Logout';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -36,8 +38,9 @@ const typeLabel: Record<string, string> = {
 const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { session, logout } = useAuth();
+  const { session, setActivePortal, logout } = useAuth();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [switchEl, setSwitchEl] = React.useState<null | HTMLElement>(null);
 
   const type = session?.portal.type ?? 'SPONSOR';
   const menuItems = [
@@ -56,6 +59,16 @@ const MainLayout: React.FC = () => {
     navigate('/login');
   };
 
+  const handleSwitch = (portalType: string) => {
+    const next = setActivePortal(portalType);
+    setSwitchEl(null);
+    if (next?.mustChangePassword) {
+      navigate('/change-password');
+    } else {
+      navigate('/');
+    }
+  };
+
   return (
     <Box sx={{ display: 'flex' }}>
       <AppBar
@@ -72,6 +85,37 @@ const MainLayout: React.FC = () => {
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {/* Dashboard switcher — one login can own sponsor + partner + fleet accounts */}
+            {session && session.portals.length > 1 && (
+              <>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<SwapHorizIcon />}
+                  onClick={(e) => setSwitchEl(e.currentTarget)}
+                  sx={{ textTransform: 'none', borderRadius: 8, mr: 1 }}
+                >
+                  {typeLabel[type]}
+                </Button>
+                <Menu anchorEl={switchEl} open={Boolean(switchEl)} onClose={() => setSwitchEl(null)}>
+                  <MenuItem disabled sx={{ py: 1 }}>
+                    <Typography variant="caption" color="text.secondary">Switch dashboard</Typography>
+                  </MenuItem>
+                  {session.portals.map((p) => (
+                    <MenuItem
+                      key={p.type}
+                      selected={p.type === type}
+                      onClick={() => handleSwitch(p.type)}
+                      sx={{ py: 1, borderRadius: 2, mx: 1 }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: p.type === type ? 800 : 600 }}>
+                        {p.name} · {typeLabel[p.type]}
+                      </Typography>
+                    </MenuItem>
+                  ))}
+                </Menu>
+              </>
+            )}
             <Typography variant="body2" sx={{ fontWeight: 600, mr: 1, display: { xs: 'none', sm: 'block' } }}>
               {session?.portal.name}
             </Typography>

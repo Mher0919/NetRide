@@ -48,25 +48,24 @@ export const adminMiddleware = (req: AuthRequest, res: Response, next: NextFunct
  * portal queries are scoped by req.sponsor.id below.)
  */
 export const sponsorMiddleware = async (req: any, res: Response, next: NextFunction) => {
-  // Accept both the legacy `sponsorId` claim and the unified portal claims
-  // (portalType = SPONSOR + portalId) so portal-issued JWTs can use the
-  // /sponsor/* endpoints.
-  const sponsorId = req.user?.sponsorId ?? (req.user?.portalType === 'SPONSOR' ? req.user?.portalId : null);
-  if (!req.user || req.user.role !== 'SPONSOR' || !sponsorId) {
+  if (!req.user) {
     return res.status(403).json({ error: 'Access denied. Sponsor account required.' });
   }
   try {
+    // A single login may own multiple portal types (sponsor + partner +
+    // fleet), so the sponsor account is resolved by user_id — never from
+    // the users.role column.
     const resq = await pool.query(
-      `SELECT spa.id FROM sponsor_portal_accounts spa
+      `SELECT spa.sponsor_id FROM sponsor_portal_accounts spa
        JOIN sponsors s ON s.id = spa.sponsor_id
-       WHERE spa.sponsor_id = $1 AND spa.is_active = TRUE
+       WHERE spa.user_id = $1 AND spa.is_active = TRUE
          AND s.status <> 'SUSPENDED'`,
-      [sponsorId],
+      [req.user.id],
     );
     if (resq.rows.length === 0) {
       return res.status(403).json({ error: 'Your sponsor account is inactive or suspended.' });
     }
-    req.sponsor = { id: sponsorId, userId: req.user.id, email: req.user.email };
+    req.sponsor = { id: resq.rows[0].sponsor_id, userId: req.user.id, email: req.user.email };
     next();
   } catch (err) {
     next(err);
@@ -101,11 +100,12 @@ export const driverMiddleware = async (req: AuthRequest, res: Response, next: Ne
 
 /**
  * PARTNER portal guard (legacy /partner/* API). Resolves the partner row
- * from the authenticated user at request time — the JWT only carries the
- * PARTNER role, the partner link lives on partners.user_id.
+ * from the authenticated user at request time — a single login may own
+ * multiple portal types, so the link lives on partners.user_id and the
+ * users.role column is never consulted.
  */
 export const partnerMiddleware = async (req: AuthRequest & { partner?: any }, res: Response, next: NextFunction) => {
-  if (!req.user || req.user.role !== 'PARTNER') {
+  if (!req.user) {
     return res.status(403).json({ error: 'Access denied. Partner account required.' });
   }
   try {

@@ -646,15 +646,25 @@ export class SponsorService {
           [passwordHash, userId],
         );
       } else {
-        const userRes = await client.query(
-          `INSERT INTO users (email, password_hash, full_name, role, is_active)
-           VALUES ($1, $2, $3, 'SPONSOR', TRUE)
-           ON CONFLICT (email) DO UPDATE SET password_hash = $2, role = 'SPONSOR',
-             is_active = TRUE
-           RETURNING id`,
-          [email.trim().toLowerCase(), passwordHash, sponsor.business_name],
-        );
-        userId = userRes.rows[0].id;
+        // Attach to an existing account if the email is already a portal
+        // login (a partner or fleet user who now also sponsors) — never
+        // overwrite their role or display name.
+        const byEmail = await client.query(`SELECT id FROM users WHERE email = $1`, [email.trim().toLowerCase()]);
+        if (byEmail.rows.length > 0) {
+          userId = byEmail.rows[0].id;
+          await client.query(
+            `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
+            [passwordHash, userId],
+          );
+        } else {
+          const userRes = await client.query(
+            `INSERT INTO users (email, password_hash, full_name, role, is_active)
+             VALUES ($1, $2, $3, 'SPONSOR', TRUE)
+             RETURNING id`,
+            [email.trim().toLowerCase(), passwordHash, sponsor.business_name],
+          );
+          userId = userRes.rows[0].id;
+        }
       }
       await client.query(
         `INSERT INTO sponsor_portal_accounts
@@ -781,15 +791,25 @@ export class SponsorService {
           [passwordHash, userId],
         );
       } else {
-        const userRes = await client.query(
-          `INSERT INTO users (email, password_hash, full_name, role, is_active)
-           VALUES ($1, $2, $3, 'FLEET', TRUE)
-           ON CONFLICT (email) DO UPDATE SET password_hash = $2, role = 'FLEET',
-             is_active = TRUE
-           RETURNING id`,
-          [email.trim().toLowerCase(), passwordHash, fleet.rows[0].name],
-        );
-        userId = userRes.rows[0].id;
+        // Attach to an existing account if the email is already a portal
+        // login (a partner or sponsor user who now also operates a fleet) —
+        // never overwrite their role or display name.
+        const byEmail = await client.query(`SELECT id FROM users WHERE email = $1`, [email.trim().toLowerCase()]);
+        if (byEmail.rows.length > 0) {
+          userId = byEmail.rows[0].id;
+          await client.query(
+            `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
+            [passwordHash, userId],
+          );
+        } else {
+          const userRes = await client.query(
+            `INSERT INTO users (email, password_hash, full_name, role, is_active)
+             VALUES ($1, $2, $3, 'FLEET', TRUE)
+             RETURNING id`,
+            [email.trim().toLowerCase(), passwordHash, fleet.rows[0].name],
+          );
+          userId = userRes.rows[0].id;
+        }
       }
       await client.query(
         `INSERT INTO fleet_portal_accounts

@@ -5,16 +5,21 @@ import api from './index';
 
 export type PortalType = 'SPONSOR' | 'PARTNER' | 'FLEET';
 
+export interface PortalInfo {
+  type: PortalType;
+  id: string;
+  name: string;
+  email: string;
+  mustChangePassword: boolean;
+}
+
 export interface PortalSession {
   token: string;
   refreshToken: string;
-  portal: {
-    type: PortalType;
-    id: string;
-    name: string;
-    email: string;
-    mustChangePassword: boolean;
-  };
+  /** Every dashboard the account can open (one login, many roles). */
+  portals: PortalInfo[];
+  /** Default / previously active dashboard. */
+  portal: PortalInfo;
 }
 
 export const portalLogin = async (email: string, password: string) => {

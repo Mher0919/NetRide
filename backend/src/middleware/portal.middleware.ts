@@ -1,10 +1,11 @@
 // backend/src/middleware/portal.middleware.ts
 //
 // UNIFIED PORTAL GUARD — one guard for sponsor / partner / fleet accounts.
-// The JWT carries a `portalType` claim (SPONSOR | PARTNER | FLEET) plus the
-// owning entity id (`portalId`). Every request re-validates the underlying
-// account row so disabled/suspended accounts are rejected instantly, then
-// exposes `req.portal` for type-scoped queries.
+// Portal access is resolved from the account tables by user_id (a single
+// login can own ANY combination of account types). The ACTIVE dashboard is
+// chosen per request via the `x-portal-type` header; without it, the
+// highest-priority available type is used. Disabled/suspended accounts are
+// rejected instantly, then `req.portal` is exposed for type-scoped queries.
 
 import { Request, Response, NextFunction } from 'express';
 import { pool } from '../config/database';
@@ -19,61 +20,64 @@ export interface PortalRequest extends Request {
 }
 
 const PORTAL_TYPES = ['SPONSOR', 'PARTNER', 'FLEET'];
+const PRIORITY: Record<string, number> = { SPONSOR: 1, PARTNER: 2, FLEET: 3 };
+
+/** Every portal account attached to the user, with access-blocking flags. */
+async function resolveAccounts(userId: string): Promise<Array<{ type: string; id: string; blocked: boolean }>> {
+  const res = await pool.query(
+    `SELECT type, id, blocked
+     FROM (
+       SELECT 'SPONSOR'::text AS type, spa.sponsor_id::text AS id,
+              (s.status = 'SUSPENDED' AND NOT spa.must_change_password) AS blocked
+       FROM sponsor_portal_accounts spa
+       JOIN sponsors s ON s.id = spa.sponsor_id
+       WHERE spa.user_id = $1 AND spa.is_active = TRUE
+       UNION ALL
+       SELECT 'PARTNER'::text AS type, p.id::text AS id,
+              (p.status <> 'ACTIVE' AND NOT p.must_change_password) AS blocked
+       FROM partners p WHERE p.user_id = $1
+       UNION ALL
+       SELECT 'FLEET'::text AS type, fpa.fleet_id::text AS id,
+              ((NOT fpa.is_active OR NOT f.is_active) AND NOT fpa.must_change_password) AS blocked
+       FROM fleet_portal_accounts fpa
+       JOIN fleet_partners f ON f.id = fpa.fleet_id
+       WHERE fpa.user_id = $1
+     ) t`,
+    [userId],
+  );
+  return res.rows;
+}
 
 export const portalMiddleware = async (req: PortalRequest, res: Response, next: NextFunction) => {
   const user = (req as any).user;
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-  const { role, portalType, portalId } = user;
-  if (!PORTAL_TYPES.includes(portalType) || !portalId) {
-    return res.status(403).json({ error: 'Access denied. Portal account required.' });
-  }
-
   try {
-    if (portalType === 'SPONSOR') {
-      const r = await pool.query(
-        `SELECT spa.sponsor_id, spa.is_active, spa.must_change_password, s.status
-         FROM sponsor_portal_accounts spa
-         JOIN sponsors s ON s.id = spa.sponsor_id
-         WHERE spa.sponsor_id = $1 AND spa.user_id = $2`,
-        [portalId, user.id],
-      );
-      const row = r.rows[0];
-      if (!row || !row.is_active) {
-        return res.status(403).json({ error: 'Your sponsor portal account is inactive.' });
-      }
-      if (!row.must_change_password && row.status === 'SUSPENDED') {
-        return res.status(403).json({ error: 'Your sponsor account is suspended.' });
-      }
-    } else if (portalType === 'PARTNER') {
-      const r = await pool.query(
-        `SELECT id, status, must_change_password FROM partners
-         WHERE id = $1 AND ($2::uuid IS NULL OR user_id = $2)`,
-        [portalId, user.id],
-      );
-      const row = r.rows[0];
-      if (!row) return res.status(403).json({ error: 'Partner account not found.' });
-      if (!row.must_change_password && row.status !== 'ACTIVE') {
-        return res.status(403).json({ error: 'Your partner account is not active.' });
-      }
-    } else {
-      const r = await pool.query(
-        `SELECT fpa.fleet_id, fpa.is_active, fpa.must_change_password, f.is_active AS fleet_active
-         FROM fleet_portal_accounts fpa
-         JOIN fleet_partners f ON f.id = fpa.fleet_id
-         WHERE fpa.fleet_id = $1 AND fpa.user_id = $2`,
-        [portalId, user.id],
-      );
-      const row = r.rows[0];
-      if (!row || !row.is_active) {
-        return res.status(403).json({ error: 'Your fleet portal account is inactive.' });
-      }
-      if (!row.must_change_password && !row.fleet_active) {
-        return res.status(403).json({ error: 'Your fleet is disabled.' });
-      }
+    const accounts = await resolveAccounts(user.id);
+    if (accounts.length === 0) {
+      return res.status(403).json({ error: 'Access denied. Portal account required.' });
     }
 
-    req.portal = { type: portalType, id: portalId, userId: user.id, email: user.email };
+    const requested = String(req.headers['x-portal-type'] ?? '').toUpperCase();
+    let active: { type: string; id: string; blocked: boolean };
+    if (requested && PORTAL_TYPES.includes(requested)) {
+      const target = accounts.find((a) => a.type === requested);
+      if (!target) {
+        return res.status(403).json({ error: 'You do not have access to this dashboard type.' });
+      }
+      active = target;
+    } else {
+      active = accounts.reduce((best, a) =>
+        !best || PRIORITY[a.type] < PRIORITY[best.type] ? a : best,
+        accounts[0],
+      );
+    }
+
+    if (active.blocked) {
+      return res.status(403).json({ error: 'This account type is disabled. Contact NetRide support.' });
+    }
+
+    req.portal = { type: active.type as any, id: active.id, userId: user.id, email: user.email };
     next();
   } catch (err) {
     next(err);
