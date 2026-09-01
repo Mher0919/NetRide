@@ -79,16 +79,17 @@ const allowedOrigins = env.CORS_ORIGINS
   : [env.APP_URL, env.ADMIN_URL, env.SPONSOR_PORTAL_URL].filter(Boolean) as string[];
 // In development, any localhost/127.0.0.1 origin is trusted regardless of
 // port — the admin dashboard / portals routinely run on ephemeral ports
-// (vite picks 5173..5175) and are opened via either hostname.
+// (vite picks 5173..5175) and are opened via either hostname. Localhost
+// origins stay trusted in production too: the dashboard is commonly run
+// locally and pointed at the hosted API, and auth is bearer-token based
+// (localStorage), so a local browser origin carries no extra risk.
 const isAllowedOrigin = (origin: string): boolean => {
   if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return true;
-  if (env.NODE_ENV === 'development') {
-    try {
-      const host = new URL(origin).hostname;
-      return host === 'localhost' || host === '127.0.0.1';
-    } catch {
-      return false;
-    }
+  try {
+    const host = new URL(origin).hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return true;
+  } catch {
+    return false;
   }
   return false;
 };

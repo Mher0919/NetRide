@@ -78,7 +78,10 @@ const envSchema = z.object({
   GMAIL_REFRESH_TOKEN: z.string().optional(),
   GMAIL_USER_EMAIL: z.string().optional(),
   EMAIL_FROM: z.string().default('NetRide <noreply@netride.com>'),
-  ADMIN_NOTIFY_EMAIL: z.string().default('support@netride.org'),
+  // Inbox for admin notifications + admin 2FA codes. Leave unset to fall
+  // back to the admin's own email ('' default — a placeholder value here
+  // would silently route login codes to an unreachable mailbox).
+  ADMIN_NOTIFY_EMAIL: z.string().default(''),
   APP_URL: z.string().default('http://localhost:3000'),
   ADMIN_URL: z.string().default('http://localhost:5173'),
   SUPABASE_URL: z.string().optional(),
