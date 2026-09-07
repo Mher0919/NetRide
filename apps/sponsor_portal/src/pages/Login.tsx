@@ -80,7 +80,7 @@ const Login: React.FC = () => {
           </Button>
         </form>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3, textAlign: 'center' }}>
-          Credentials are issued by NetRide. Contact support at <a href="mailto:support@netride.app">support@netride.app</a>.
+          Credentials are issued by NetRide. Contact support at <a href="mailto:support@netride.org">support@netride.org</a>.
         </Typography>
       </Paper>
       <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack({ open: false, message: '' })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>

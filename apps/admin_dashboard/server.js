@@ -7,16 +7,28 @@ const app = express();
 const PORT = process.env.PORT || 5173;
 const DIST_DIR = path.join(__dirname, 'dist');
 
-// Cache-control for static assets (fingerprinted by Vite — safe to cache long)
+// Fingerprinted Vite assets are safe to cache long. index.html is NOT
+// fingerprinted, so it must never be cached — otherwise a deploy would leave
+// browsers on a stale shell that references deleted hashed assets.
 app.use(express.static(DIST_DIR, {
   maxAge: '1y',
   immutable: true,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
 }));
 
-// SPA fallback — any request for an unknown path returns index.html.
-// Must come AFTER express.static so actual files are served first.
-// Catches all HTTP methods, not just GET, to handle any future non-GET routes.
-app.use((req, res) => {
+// SPA fallback — client-side routes (/, /login, /rides/active, ...) return
+// index.html so React Router renders them on refresh/direct access instead of
+// Render answering "Not Found". Only GET/HEAD HTML navigation is rewritten;
+// API calls and static asset paths are never intercepted.
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (req.path.startsWith('/api/')) return next();
+  if (path.extname(req.path)) return next();
+  if (!req.accepts('html')) return next();
   res.sendFile(path.join(DIST_DIR, 'index.html'), {
     headers: { 'Cache-Control': 'no-cache' },
   });

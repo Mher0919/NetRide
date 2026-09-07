@@ -3559,21 +3559,6 @@
     "ast_hash": "34a1b7b27b32da38a666ecd1163ac512",
     "semantic_hash": ""
   },
-  "apps/partner_portal/src/api/partner.ts": {
-    "mtime": 1788143070.308975,
-    "ast_hash": "4a5dd7e5fd4311fcb8826d913eba35c7",
-    "semantic_hash": ""
-  },
-  "apps/partner_portal/src/pages/Dashboard.tsx": {
-    "mtime": 1788143139.8076797,
-    "ast_hash": "648e2f27f275b431a888422014bb5817",
-    "semantic_hash": ""
-  },
-  "apps/partner_portal/src/pages/auth/Login.tsx": {
-    "mtime": 1788143180.7277586,
-    "ast_hash": "de23a079cb8fe7972871bb79b740f0fc",
-    "semantic_hash": ""
-  },
   "backend/src/modules/partner/__tests__/partner-auth.unit.test.ts": {
     "mtime": 1788144006.1365714,
     "ast_hash": "9dab01cb90a8c4a7c9f66396d9be428b",
