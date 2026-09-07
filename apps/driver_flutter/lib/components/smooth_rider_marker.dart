@@ -2,39 +2,32 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
-/// Smoothly animated driver marker.
+/// Smoothly animated rider marker for the driver's map.
 ///
-/// Unlike a fixed-duration tween, the animation length adapts to the
-/// ACTUAL update cadence (matches ~1 Hz socket updates), so the marker
-/// arrives at the latest fix just as the next one lands — no backlog,
-/// no perceived lag. When a new fix arrives mid-tween, interpolation
-/// resumes from the marker's current position instead of snapping back,
-/// which keeps motion continuous at any update rate.
-class SmoothDriverMarker extends StatefulWidget {
+/// Same adaptive-tween technique as the rider app's driver marker: the
+/// animation length tracks the ACTUAL incoming update cadence (~1 Hz
+/// socket pushes) and mid-tween updates resume from the marker's
+/// current position, so the pin glides continuously instead of
+/// snapping or lagging behind.
+class SmoothRiderMarker extends StatefulWidget {
   final LatLng position;
-  final double heading;
-  final String driverId;
 
-  const SmoothDriverMarker({
+  const SmoothRiderMarker({
     super.key,
     required this.position,
-    this.heading = 0,
-    required this.driverId,
   });
 
   @override
-  State<SmoothDriverMarker> createState() => _SmoothDriverMarkerState();
+  State<SmoothRiderMarker> createState() => _SmoothRiderMarkerState();
 }
 
-class _SmoothDriverMarkerState extends State<SmoothDriverMarker>
+class _SmoothRiderMarkerState extends State<SmoothRiderMarker>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _latAnimation;
   late Animation<double> _lngAnimation;
-  late Animation<double> _headingAnimation;
 
   LatLng _oldPosition = const LatLng(0, 0);
-  double _oldHeading = 0;
   DateTime? _lastUpdateAt;
 
   /// Tween length tuned to the observed update interval, clamped so a
@@ -48,19 +41,10 @@ class _SmoothDriverMarkerState extends State<SmoothDriverMarker>
     return Duration(milliseconds: ms);
   }
 
-  /// Signed shortest rotation between two compass bearings (deg).
-  static double _shortestAngleDelta(double from, double to) {
-    var delta = (to - from) % 360;
-    if (delta > 180) delta -= 360;
-    if (delta < -180) delta += 360;
-    return delta;
-  }
-
   @override
   void initState() {
     super.initState();
     _oldPosition = widget.position;
-    _oldHeading = widget.heading;
     _lastUpdateAt = DateTime.now();
 
     _controller = AnimationController(
@@ -80,21 +64,15 @@ class _SmoothDriverMarkerState extends State<SmoothDriverMarker>
       begin: _oldPosition.longitude,
       end: widget.position.longitude,
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.linear));
-    _headingAnimation = Tween<double>(
-      begin: _oldHeading,
-      end: _oldHeading + _shortestAngleDelta(_oldHeading, widget.heading),
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
   }
 
   @override
-  void didUpdateWidget(SmoothDriverMarker oldWidget) {
+  void didUpdateWidget(SmoothRiderMarker oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.position != widget.position ||
-        oldWidget.heading != widget.heading) {
+    if (oldWidget.position != widget.position) {
       // Resume from the CURRENT interpolated position so a mid-tween
       // update never snaps the marker backwards.
       _oldPosition = LatLng(_latAnimation.value, _lngAnimation.value);
-      _oldHeading = _headingAnimation.value;
       _lastUpdateAt = DateTime.now();
 
       _controller.duration = _durationFor();
@@ -122,17 +100,25 @@ class _SmoothDriverMarkerState extends State<SmoothDriverMarker>
               point: currentPos,
               width: 40,
               height: 40,
-              child: Transform.rotate(
-                angle: (_headingAnimation.value * (3.14159 / 180)),
-                child: Container(
-                  decoration: BoxDecoration(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5B7760).withOpacity(0.2),
+                  shape: BoxShape.circle,
+                  border: Border.all(
                     color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4),
-                    ],
+                    width: 2,
                   ),
-                  child: const Icon(Icons.navigation, color: Color(0xFF2F3A32), size: 24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.15),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.person_pin_circle,
+                  color: Color(0xFF5B7760),
+                  size: 30,
                 ),
               ),
             ),

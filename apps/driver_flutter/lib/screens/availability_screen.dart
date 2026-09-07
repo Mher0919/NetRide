@@ -15,6 +15,7 @@ import '../components/state_container.dart';
 import '../components/driver_status_card.dart';
 import '../services/sound_service.dart';
 import '../services/heatmap_service.dart';
+import '../services/location_reporter.dart';
 import '../models/demand_zone.dart';
 import 'trip_screen.dart';
 
@@ -44,6 +45,16 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   String _firstName = "";
   String? _lastIncomingRequestId;
   bool _isTogglingOnline = false;
+
+  /// Smart location sender: max 1 report/s, skips stationary fixes
+  /// (10 m / 15° gates) and self-heartbeats every 10 s. This is what
+  /// keeps the socket at a steady ~1 Hz while moving and ~0.1 Hz while
+  /// parked — the backend never drops updates (which previously made
+  /// the rider's marker jitter) and never gets flooded.
+  late final LocationReporter _locationReporter;
+
+  /// Last known good heading (geolocator reports NaN before a fix).
+  double _lastHeading = 0;
 
   // Weekly earnings (computed client-side from /ride/history).
   bool _earningsLoading = true;
@@ -579,6 +590,15 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   }
 
   void _startTracking(DriverProvider provider) {
+    _locationReporter = LocationReporter(
+      minDistanceM: 10,
+      minHeadingDeltaDeg: 15,
+      onReport: (lat, lng, {heading = 0}) {
+        if (!mounted) return;
+        provider.updateLocation(lat, lng, heading: heading);
+      },
+    );
+
     _positionSubscription?.cancel();
     _positionSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
@@ -590,7 +610,14 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       setState(() => _lastPosition = position);
 
       if (provider.status != models.DriverStatus.offline) {
-        provider.updateLocation(position.latitude, position.longitude);
+        final rawHeading = position.heading;
+        final heading = rawHeading.isNaN ? _lastHeading : rawHeading;
+        if (!rawHeading.isNaN) _lastHeading = heading;
+        _locationReporter.report(
+          position.latitude,
+          position.longitude,
+          heading: heading,
+        );
       }
       
       if (_shouldFollowUser && _isMapReady) {
@@ -602,11 +629,18 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       }
     });
 
+    // Presence heartbeat: the reporter only forwards it when nothing
+    // has been sent for >10 s, so a moving driver sends 1 Hz and a
+    // parked driver ~1 per 10 s.
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (_lastPosition != null && provider.status != models.DriverStatus.offline) {
-        provider.updateLocation(_lastPosition!.latitude, _lastPosition!.longitude);
-      }
+      final pos = _lastPosition;
+      if (pos == null || provider.status == models.DriverStatus.offline) return;
+      _locationReporter.report(
+        pos.latitude,
+        pos.longitude,
+        heading: pos.heading.isNaN ? _lastHeading : pos.heading,
+      );
     });
   }
 

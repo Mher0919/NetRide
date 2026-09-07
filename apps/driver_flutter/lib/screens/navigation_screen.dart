@@ -5,6 +5,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/driver_provider.dart';
+import '../components/smooth_rider_marker.dart';
 import '../components/navigation/bottom_sheet_card.dart';
 import '../components/navigation/lane_guidance.dart';
 import '../components/navigation/routing_options_bar.dart';
@@ -94,6 +96,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
     final gps = GpsTracker.instance.lastFix;
     final route = nav.route;
     final progress = nav.progress;
+
+    // Live rider position pushed over the socket (riderLocationUpdate).
+    // The marker itself interpolates between updates.
+    final riderLocation = context.watch<DriverProvider>().riderLocation;
 
     // Off-route / reroute banner.
     final rerouteStage = nav.rerouteStage;
@@ -208,6 +214,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
                 if (polylines.isNotEmpty)
                   PolylineLayer(polylines: polylines),
                 MarkerLayer(markers: markers),
+                if (riderLocation != null)
+                  SmoothRiderMarker(
+                    position: LatLng(riderLocation.lat, riderLocation.lng),
+                  ),
               ],
             ),
           ),

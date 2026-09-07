@@ -12,6 +12,7 @@ import '../providers/ride_provider.dart';
 import '../models/trip_models.dart' as models;
 import '../services/communication_service.dart';
 import '../services/api_service.dart';
+import '../services/location_reporter.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/state_container.dart';
 import '../components/tip_fab.dart';
@@ -33,6 +34,11 @@ class _TripScreenState extends State<TripScreen> {
   StreamSubscription<Position>? _positionSubscription;
   bool _dialogShown = false;
 
+  /// Throttles raw GPS fixes into a bounded 1 Hz stream so the backend
+  /// is never flooded (and its socket budget never silently drops
+  /// updates — which is what made the marker jitter).
+  late final LocationReporter _locationReporter;
+
   /// Guard: exactly one cancelled dialog + one exit per ride (spec §40).
   bool _cancelledHandled = false;
 
@@ -44,6 +50,14 @@ class _TripScreenState extends State<TripScreen> {
   @override
   void initState() {
     super.initState();
+    _locationReporter = LocationReporter(
+      minDistanceM: 5,
+      onReport: (lat, lng, {heading = 0}) {
+        if (!mounted) return;
+        Provider.of<RideProvider>(context, listen: false)
+            .updateLocation(lat, lng);
+      },
+    );
     _initLocationTracking();
   }
 
@@ -54,12 +68,11 @@ class _TripScreenState extends State<TripScreen> {
         distanceFilter: 0,
       ),
     ).listen((position) {
-      if (mounted) {
-        setState(() {
-          _riderLocation = LatLng(position.latitude, position.longitude);
-        });
-        Provider.of<RideProvider>(context, listen: false).updateLocation(position.latitude, position.longitude);
-      }
+      if (!mounted) return;
+      setState(() {
+        _riderLocation = LatLng(position.latitude, position.longitude);
+      });
+      _locationReporter.report(position.latitude, position.longitude);
     });
   }
 
@@ -344,7 +357,7 @@ class _TripScreenState extends State<TripScreen> {
               SmoothDriverMarker(
                 driverId: driver.id,
                 position: driverLocation,
-                heading: 0,
+                heading: driver.location?.heading ?? 0,
               ),
             ],
           ),

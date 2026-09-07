@@ -33,7 +33,13 @@ export const GoOnlineSchema = z.object({
   lng: z.number().min(-180).max(180).optional(),
 });
 
-export const UpdateLocationSchema = LocationSchema;
+// heading (compass degrees) is carried through the broadcast so the
+// rider's map can rotate the driver marker live. Zod objects strip
+// unknown keys, so it must be part of the schema — otherwise it would
+// never reach the `driverLocationUpdate` payload.
+export const UpdateLocationSchema = LocationSchema.extend({
+  heading: z.number().min(0).max(360).optional(),
+});
 
 export const AcceptTripSchema = z.string().uuid();
 

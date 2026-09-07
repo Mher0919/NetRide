@@ -51,6 +51,41 @@ const riderAutoCancelTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // tripId → { pickupArrivedAt: timestamp, destinationArrivedAt: timestamp }
 const driverArrivalTimes = new Map<string, { pickupArrivedAt?: number; destinationArrivedAt?: number }>();
 
+// ---- Active-trip cache ----------------------------------------------------
+//
+// The updateLocation hot path used to run RideService.getCurrentRide (a
+// Postgres query) on EVERY location update — up to 60/min per user. This
+// in-process cache with a short TTL removes ~90% of those queries while
+// keeping trip-state staleness bounded below the TTL. It is refreshed
+// eagerly at every trip lifecycle event (accept, request, pickup,
+// complete, cancel, getCurrentTrip), so in practice the window between a
+// state change and the next broadcast is a single location update.
+const activeTripCache = new Map<string, { trip: any; at: number }>();
+const ACTIVE_TRIP_CACHE_TTL_MS = 6000;
+
+function cachedTripKey(userId: string, role: string): string {
+  return `${role}:${userId}`;
+}
+
+async function getCachedCurrentRide(userId: string, role: string): Promise<any | null> {
+  const key = cachedTripKey(userId, role);
+  const hit = activeTripCache.get(key);
+  if (hit && Date.now() - hit.at < ACTIVE_TRIP_CACHE_TTL_MS) {
+    return hit.trip;
+  }
+  const trip = await RideService.getCurrentRide(userId, role);
+  activeTripCache.set(key, { trip, at: Date.now() });
+  return trip;
+}
+
+function setCachedCurrentRide(userId: string, role: string, trip: any | null): void {
+  activeTripCache.set(cachedTripKey(userId, role), { trip, at: Date.now() });
+}
+
+function clearCachedCurrentRide(userId: string, role: string): void {
+  activeTripCache.delete(cachedTripKey(userId, role));
+}
+
 const MAX_MESSAGE_BODY = 1000;
 const RATE_LIMIT_PER_MINUTE = 30;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -369,6 +404,7 @@ export function setupSocketGateway(io: Server) {
           // re-asks for the authoritative active trip so an accepted trip
           // is never lost to a stale local state.
           const currentTrip = await RideService.getCurrentRide(id, UserRole.DRIVER);
+          setCachedCurrentRide(id, UserRole.DRIVER, currentTrip);
           console.log(`[SOCKET] getCurrentTrip for driver ${id}: ${currentTrip?.id ?? 'none'}`);
           if (currentTrip) {
             socket.emit('tripUpdate', currentTrip);
@@ -410,7 +446,7 @@ export function setupSocketGateway(io: Server) {
         }
 
         // Broadcast to specific rider if driver is on a trip
-        const currentTrip = await RideService.getCurrentRide(id, UserRole.DRIVER);
+        const currentTrip = await getCachedCurrentRide(id, UserRole.DRIVER);
         if (currentTrip && currentTrip.status !== TripStatus.COMPLETED && currentTrip.status !== TripStatus.CANCELLED) {
           console.log(`[SOCKET] 📡 Broadcasting driver loc to rider:${currentTrip.rider_id}`);
           io.to(`rider:${currentTrip.rider_id}`).emit('driverLocationUpdate', {
@@ -494,7 +530,10 @@ export function setupSocketGateway(io: Server) {
           // already-ACCEPTED offer with "Offer is in state ACCEPTED...",
           // failing every legitimate accept. On failure the driver app
           // rolls back its optimistic state via the acceptTripFailed event.
-          await RideService.acceptTrip(tripId, id);
+          const acceptedTrip = await RideService.acceptTrip(tripId, id);
+          // Prime the active-trip cache immediately so the very next
+          // location update broadcasts to the rider without a DB query.
+          setCachedCurrentRide(id, UserRole.DRIVER, acceptedTrip);
         } catch (err: any) {
           console.error(`[SOCKET] Accept trip failed: ${err.message}`);
           socket.emit('acceptTripFailed', err.message);
@@ -577,6 +616,7 @@ export function setupSocketGateway(io: Server) {
           await DriverOfferService.releaseDriver(id);
 
           await RideService.cancelTrip(tripId, id, cancelOpts);
+          clearCachedCurrentRide(id, UserRole.DRIVER);
         } catch (err: any) {
           console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
           // Dedicated event so the client can distinguish a REJECTED
@@ -645,6 +685,7 @@ export function setupSocketGateway(io: Server) {
           console.log(`[SOCKET] pickUpRider: calling updateTripStatus`);
           await RideService.updateTripStatus(validated.data, TripStatus.IN_PROGRESS, id);
           console.log(`[SOCKET] pickUpRider: updateTripStatus done`);
+          clearCachedCurrentRide(id, UserRole.DRIVER);
           
           // Clear arrival time on successful pickup
           if (arrival.pickupArrivedAt) {
@@ -727,6 +768,7 @@ export function setupSocketGateway(io: Server) {
           }
           
           await RideService.updateTripStatus(tripId, TripStatus.COMPLETED, id);
+          clearCachedCurrentRide(id, UserRole.DRIVER);
           
           // Clear arrival time on successful completion
           if (arrival.destinationArrivedAt) {
@@ -822,6 +864,7 @@ export function setupSocketGateway(io: Server) {
         // service spins down and ALL sockets disconnect — wiping every
         // driver's location makes them invisible when the service wakes.
         // Location is only removed on explicit goOffline or heartbeat expiry.
+        clearCachedCurrentRide(id, UserRole.DRIVER);
         markOffline(id, 'driver').catch((err: any) =>
           console.error(`[SOCKET] ⚠️ Presence tracking failed on disconnect: ${err.message}`)
         );
@@ -894,11 +937,15 @@ export function setupSocketGateway(io: Server) {
       socket.on('updateLocation', async (loc: Location) => {
         const validated = validate(RiderUpdateLocationSchema, loc, socket, 'updateLocation');
         if (!validated.success || !validated.data) return;
+
+        // Same per-user budget as drivers — the rider app throttles to
+        // ~1 Hz client-side, and the server stays symmetric + bounded.
+        const allowed = await checkRateLimit(socket, 'updateLocation');
+        if (!allowed) return;
         
         try {
-          console.log(`[SOCKET] 📍 Location from rider ${id}: lat=${validated.data.lat}, lng=${validated.data.lng}`);
           // Broadcast to specific driver if rider is on a trip
-          const currentTrip = await RideService.getCurrentRide(id, UserRole.RIDER);
+          const currentTrip = await getCachedCurrentRide(id, UserRole.RIDER);
           if (currentTrip && currentTrip.driver_id && currentTrip.status !== TripStatus.COMPLETED) {
             console.log(`[SOCKET] 📡 Broadcasting rider loc to driver:${currentTrip.driver_id}`);
             io.to(`driver:${currentTrip.driver_id}`).emit('riderLocationUpdate', loc);
@@ -921,6 +968,7 @@ export function setupSocketGateway(io: Server) {
           // stale local state (e.g. rider stuck on "searching" after a
           // missed ACCEPTED tripUpdate).
           const currentTrip = await RideService.getCurrentRide(id, UserRole.RIDER);
+          setCachedCurrentRide(id, UserRole.RIDER, currentTrip);
           console.log(`[SOCKET] getCurrentTrip for rider ${id}: ${currentTrip?.id ?? 'none'}`);
           if (currentTrip) {
             socket.emit('tripUpdate', currentTrip);
@@ -948,6 +996,7 @@ export function setupSocketGateway(io: Server) {
             { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents, specialRedemptionId: data.specialRedemptionId },
             validated.data.favoritePriority
           );
+          setCachedCurrentRide(id, UserRole.RIDER, trip);
           socket.emit('tripUpdate', trip);
 
           // Demand heatmap signal: a REAL ride request — the strongest
@@ -986,6 +1035,7 @@ export function setupSocketGateway(io: Server) {
             console.log(`[SOCKET] Released driver ${releasedDriver} from cancelled ride ${tripId}`);
           }
           await RideService.cancelTrip(tripId, id, cancelOpts);
+          clearCachedCurrentRide(id, UserRole.RIDER);
         } catch (err: any) {
           console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
           // Dedicated event so the client can distinguish a REJECTED
@@ -1016,6 +1066,7 @@ export function setupSocketGateway(io: Server) {
         console.log(`[SOCKET] 🎯 Rider ${id} changed destination for trip ${validated.data.tripId} → ${validated.data.address}`);
         try {
           const trip: any = await RideService.getCurrentRide(id, UserRole.RIDER);
+          setCachedCurrentRide(id, UserRole.RIDER, trip);
           if (!trip || trip.id !== data.tripId || !trip.driver_id) {
             socket.emit('error', 'No active trip to update.');
             return;
@@ -1065,6 +1116,7 @@ export function setupSocketGateway(io: Server) {
 
       socket.on('disconnect', async () => {
         console.log(`[SOCKET] ❌ Rider ${id} disconnected`);
+        clearCachedCurrentRide(id, UserRole.RIDER);
         
         // Mark rider as offline for push notification delivery
         markOffline(id, 'rider').catch((err: any) =>

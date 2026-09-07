@@ -19,14 +19,16 @@ enum VehicleClass {
 class Location {
   final double lat;
   final double lng;
+  final double? heading;
   final String? address;
 
-  Location({required this.lat, required this.lng, this.address});
+  Location({required this.lat, required this.lng, this.heading, this.address});
 
   factory Location.fromJson(Map<String, dynamic> json) {
     return Location(
       lat: (json['lat'] as num).toDouble(),
       lng: (json['lng'] as num).toDouble(),
+      heading: json['heading'] is num ? (json['heading'] as num).toDouble() : null,
       address: json['address'] as String?,
     );
   }
@@ -35,6 +37,7 @@ class Location {
     return {
       'lat': lat,
       'lng': lng,
+      if (heading != null) 'heading': heading,
       if (address != null) 'address': address,
     };
   }

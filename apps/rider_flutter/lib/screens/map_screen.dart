@@ -1247,7 +1247,7 @@ class _MapScreenState extends State<MapScreen>
                               driverId: entry.key,
                               position:
                                   LatLng(entry.value.lat, entry.value.lng),
-                              heading: 0,
+                              heading: entry.value.heading ?? 0,
                             ),
                         ],
                       ),
