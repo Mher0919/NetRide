@@ -28,6 +28,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import {
   listPartners,
   createPartner,
@@ -95,6 +97,9 @@ const Partners: React.FC = () => {
   const [markTarget, setMarkTarget] = React.useState<any>(null);
   const [markRef, setMarkRef] = React.useState('');
   const [actionLoading, setActionLoading] = React.useState(false);
+
+  const [showCreatePassword, setShowCreatePassword] = React.useState(false);
+  const [showEditPassword, setShowEditPassword] = React.useState(false);
 
   const [snack, setSnack] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
@@ -418,7 +423,29 @@ const Partners: React.FC = () => {
               <TextField label="Contact email" fullWidth value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
               <TextField label="Partner login email" fullWidth value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </Stack>
-            <TextField label="Partner login password" fullWidth type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <TextField
+              label="Partner login password"
+              fullWidth
+              type={showCreatePassword ? 'text' : 'password'}
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        aria-label={showCreatePassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowCreatePassword((v) => !v)}
+                        edge="end"
+                        size="small"
+                      >
+                        {showCreatePassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
             <TextField
               label="Commission rate (%)"
               type="number"
@@ -461,9 +488,25 @@ const Partners: React.FC = () => {
             <TextField
               label="New password (leave blank to keep current)"
               fullWidth
-              type="password"
+              type={showEditPassword ? 'text' : 'password'}
               value={editForm.password}
               onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        aria-label={showEditPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowEditPassword((v) => !v)}
+                        edge="end"
+                        size="small"
+                      >
+                        {showEditPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                },
+              }}
             />
             <TextField
               label="Commission rate (%)"

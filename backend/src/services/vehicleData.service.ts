@@ -10,8 +10,15 @@ export class VehicleDataService {
    */
   static async getMakes(): Promise<string[]> {
     const cacheKey = 'vehicles:makes';
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached);
+    // Redis is fail-fast (enableOfflineQueue:false) — a cache read during a
+    // cold start can reject before the lazy connection opens. Treat any
+    // cache error as a miss and fall through to the network fetch.
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch {
+      // cache unavailable — proceed to fetch
+    }
 
     try {
       console.log('[VEHICLE DATA] 🚗 Fetching master makes list from NHTSA...');
@@ -21,7 +28,7 @@ export class VehicleDataService {
         .filter((name: string) => name.length > 0)
         .sort();
 
-      await redis.setex(cacheKey, this.CACHE_TTL, JSON.stringify(makes));
+      await redis.setex(cacheKey, this.CACHE_TTL, JSON.stringify(makes)).catch(() => {});
       return makes;
     } catch (error: any) {
       console.error(`[VEHICLE DATA] ❌ Failed to fetch makes: ${error.message}`);
@@ -35,8 +42,12 @@ export class VehicleDataService {
    */
   static async getModels(make: string): Promise<string[]> {
     const cacheKey = `vehicles:models:${make.toLowerCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached);
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch {
+      // cache unavailable — proceed to fetch
+    }
 
     try {
       console.log(`[VEHICLE DATA] 🚙 Fetching models for ${make}...`);
@@ -46,7 +57,7 @@ export class VehicleDataService {
         .filter((name: string) => name.length > 0)
         .sort();
 
-      await redis.setex(cacheKey, this.CACHE_TTL, JSON.stringify(models));
+      await redis.setex(cacheKey, this.CACHE_TTL, JSON.stringify(models)).catch(() => {});
       return models;
     } catch (error: any) {
       console.error(`[VEHICLE DATA] ❌ Failed to fetch models for ${make}: ${error.message}`);

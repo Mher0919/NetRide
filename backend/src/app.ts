@@ -205,7 +205,21 @@ io.use(async (socket, next) => {
     // dual-role user (same email owning both profiles) is identified by the
     // app they launched, never by account-existence order.
     const appRoleHint = socket.handshake.auth.role;
-    const active = await AuthService.resolveActiveRole(decoded.id, appRoleHint);
+    let active;
+    try {
+      active = await AuthService.resolveActiveRole(decoded.id, appRoleHint);
+    } catch (roleErr: any) {
+      // DB blip (pooler timeout, replica failover): never reject the whole
+      // real-time connection because role resolution hit the database. The
+      // JWT's frozen role claim is authoritative enough to keep the
+      // connection alive; the next reconnect re-resolves the live profile.
+      // This mirrors the fail-open philosophy used across the codebase
+      // (rate limiter, routing cache, vehicle data).
+      console.warn(
+        `[AUTH] ⚠️ Role resolution failed for ${decoded.id} (${roleErr.message}) — falling back to JWT role ${decoded.role}`,
+      );
+      active = { role: decoded.role, driverId: null, riderId: decoded.id };
+    }
 
     (socket as any).user = {
       id: decoded.id,
@@ -814,7 +828,8 @@ export function startServer(): void {
 
   // Vehicle Data Background Sync (Once on start)
   import('./services/vehicleData.service').then(({ VehicleDataService }) => {
-    VehicleDataService.syncCommonVehicles();
+    VehicleDataService.syncCommonVehicles()
+      .catch((err: any) => console.error(`[VEHICLE SYNC] ⚠️ Background sync failed (non-fatal): ${err.message}`));
   });
 
   // Weekly auto-payout sweep — checks once per minute, only fires on

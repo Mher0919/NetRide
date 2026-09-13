@@ -286,7 +286,7 @@ const Sponsors: React.FC = () => {
     }
     try {
       const res = await createSponsorPortalAccount(selected.id, portalForm.email.trim());
-      setNewPassword(res?.password ?? null);
+      setNewPassword(res?.temporaryPassword ?? res?.password ?? null);
       notify('Portal account created — share the password with the sponsor');
       setPortalForm({ email: '' });
       loadDetail(selected.id);
@@ -298,7 +298,7 @@ const Sponsors: React.FC = () => {
   const handlePortalReset = async () => {
     try {
       const res = await resetSponsorPortalPassword(selected.id);
-      setNewPassword(res?.password ?? null);
+      setNewPassword(res?.temporaryPassword ?? res?.password ?? null);
       notify('Password reset — share the new password with the sponsor');
       loadDetail(selected.id);
     } catch (err: unknown) {
@@ -443,7 +443,7 @@ const Sponsors: React.FC = () => {
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             sx={{ width: { xs: '100%', sm: 180 } }}
-            SelectProps={{ native: true }}
+            slotProps={{ select: { native: true } }}
           >
             <option value="">All</option>
             <option value="ACTIVE">Active</option>
@@ -548,7 +548,7 @@ const Sponsors: React.FC = () => {
               value={form.businessType}
               onChange={(e) => setForm({ ...form, businessType: e.target.value })}
               fullWidth
-              SelectProps={{ native: true }}
+              slotProps={{ select: { native: true } }}
             >
               {['RESTAURANT', 'CAFE', 'RETAIL', 'BAR', 'SERVICES', 'MEDICAL', 'AUTO', 'OTHER'].map((t) => (
                 <option key={t} value={t}>{t}</option>
@@ -570,7 +570,7 @@ const Sponsors: React.FC = () => {
               value={form.discountType}
               onChange={(e) => setForm({ ...form, discountType: e.target.value as 'PERCENTAGE' | 'FIXED_AMOUNT' })}
               fullWidth
-              SelectProps={{ native: true }}
+              slotProps={{ select: { native: true } }}
             >
               <option value="PERCENTAGE">Percentage off</option>
               <option value="FIXED_AMOUNT">Fixed amount off</option>
@@ -861,7 +861,7 @@ const Sponsors: React.FC = () => {
               value={adjustForm.direction}
               onChange={(e) => setAdjustForm({ ...adjustForm, direction: e.target.value as 'CREDIT' | 'DEBIT' })}
               fullWidth
-              SelectProps={{ native: true }}
+              slotProps={{ select: { native: true } }}
             >
               <option value="CREDIT">Credit (add funds)</option>
               <option value="DEBIT">Debit (remove funds)</option>
@@ -921,7 +921,7 @@ const Sponsors: React.FC = () => {
               value={editForm.businessType}
               onChange={(e) => setEditForm({ ...editForm, businessType: e.target.value })}
               fullWidth
-              SelectProps={{ native: true }}
+              slotProps={{ select: { native: true } }}
             >
               {['RESTAURANT', 'CAFE', 'RETAIL', 'BAR', 'SERVICES', 'MEDICAL', 'AUTO', 'OTHER'].map((t) => (
                 <option key={t} value={t}>{t}</option>
@@ -946,7 +946,7 @@ const Sponsors: React.FC = () => {
               value={editForm.discountType}
               onChange={(e) => setEditForm({ ...editForm, discountType: e.target.value as 'PERCENTAGE' | 'FIXED_AMOUNT' })}
               fullWidth
-              SelectProps={{ native: true }}
+              slotProps={{ select: { native: true } }}
             >
               <option value="PERCENTAGE">Percentage off</option>
               <option value="FIXED_AMOUNT">Fixed amount off</option>

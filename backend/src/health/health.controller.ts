@@ -7,15 +7,12 @@
 //                        "should I kill this instance?" decisions.
 //
 //   GET /health/ready  — process is ready to serve traffic. Pings every
-//                        critical dependency (Redis, Postgres, ORS, Mapbox).
+//                        critical dependency (Redis, Postgres, Google Routes).
 //                        Returns 503 with a JSON body listing what's
 //                        down. Use this for "should I send this instance
 //                        traffic?" decisions.
 
 import { Request, Response, Router } from 'express';
-import axios from 'axios';
-import http from 'http';
-import https from 'https';
 import { redis } from '../config/redis';
 import { pool } from '../config/database';
 import { env } from '../config/env';
@@ -24,6 +21,7 @@ import { logger } from '../observability/logger';
 import { matchQueue, dispatchQueue, cleanupQueue, scoreQueue } from '../queue/queue';
 import { prisma } from '../services/prisma.service';
 import { pubClient, subClient } from '../config/redisPubSub';
+import { GoogleRoutesEngine } from '../modules/routing/google-routes.engine';
 
 const router = Router();
 
@@ -65,21 +63,16 @@ async function probePostgres(): Promise<DependencyStatus> {
   }
 }
 
-async function probeORS(): Promise<DependencyStatus> {
+async function probeRoutingEngine(): Promise<DependencyStatus> {
   const start = Date.now();
   try {
-    const url = `https://api.openrouteservice.org/v2/directions/driving-car/geojson`;
-    await axios.post(url, {
-      coordinates: [[-118.4455, 34.0639], [-118.4400, 34.0700]],
-      instructions: false,
-      geometry: true,
-    }, {
-      params: { api_key: env.ORS_API_KEY },
-      timeout: 5000,
-      headers: { 'Content-Type': 'application/json' },
-    });
-    dependencyUp.set({ dependency: 'routing-engine' }, 1);
-    return { name: 'routing-engine', up: true, latencyMs: Date.now() - start };
+    // Google Routes is the SOLE routing engine (ORS/OSRM/A* were removed).
+    // Probe it with a short real route so the readiness signal reflects the
+    // engine that actually serves ride requests.
+    const route = await GoogleRoutesEngine.route([34.0639, -118.4455], [34.0700, -118.4400]);
+    const up = route !== null;
+    dependencyUp.set({ dependency: 'routing-engine' }, up ? 1 : 0);
+    return { name: 'routing-engine', up, latencyMs: Date.now() - start };
   } catch (err: any) {
     dependencyUp.set({ dependency: 'routing-engine' }, 0);
     return { name: 'routing-engine', up: false, error: err.message };
@@ -106,9 +99,23 @@ async function probeAStarEngine(): Promise<DependencyStatus> {
 }
 
 async function probeRedisPubSub(): Promise<DependencyStatus> {
-  const pubOk = pubClient.status === 'ready';
-  const subOk = subClient.status === 'ready';
-  return { name: 'redis-pubsub', up: pubOk && subOk };
+  const start = Date.now();
+  try {
+    // Pub/sub clients use lazyConnect — `.status` stays 'wait' until the
+    // first command triggers a connection, so a passive status check would
+    // report "down" even when Redis is healthy. Actively ping instead.
+    // NOTE: the subClient is in subscriber mode (psubscribed by the Socket.IO
+    // adapter), where ioredis returns an array like ["pong", ""] — a
+    // successful response either way proves the connection is alive.
+    const [pubPong, subPong] = await Promise.all([
+      pubClient.ping(),
+      subClient.ping().catch(() => null),
+    ]);
+    const up = pubPong === 'PONG' && subPong !== null;
+    return { name: 'redis-pubsub', up, latencyMs: Date.now() - start };
+  } catch (err: any) {
+    return { name: 'redis-pubsub', up: false, error: err.message };
+  }
 }
 
 async function probePostgresReplica(): Promise<DependencyStatus> {
@@ -142,7 +149,7 @@ router.get('/health/ready', async (_req: Request, res: Response) => {
     probeRedisPubSub(),
     probePostgres(),
     probePostgresReplica(),
-    probeORS(),
+    probeRoutingEngine(),
     probeAStarEngine(),
     probeQueue('match:ride', matchQueue),
     probeQueue('match:dispatch', dispatchQueue),
