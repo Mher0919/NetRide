@@ -1,5 +1,5 @@
 import React from 'react';
-import { 
+import {
   Box, 
   Drawer, 
   AppBar, 
@@ -14,8 +14,11 @@ import {
   ListItemText,
   Avatar,
   Menu,
-  MenuItem
+  MenuItem,
+  useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import PeopleIcon from '@mui/icons-material/People';
 import DriverIcon from '@mui/icons-material/LocalTaxi';
@@ -49,6 +52,9 @@ const MainLayout: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [mobileOpen, setMobileOpen] = React.useState(false);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [dangerousCount, setDangerousCount] = React.useState(0);
   const [profileChangeCount, setProfileChangeCount] = React.useState(0);
   const [payoutCardCount, setPayoutCardCount] = React.useState(0);
@@ -140,6 +146,15 @@ const MainLayout: React.FC = () => {
     navigate('/change-password');
   };
 
+  const closeDrawer = () => {
+    if (isMobile) setMobileOpen(false);
+  };
+
+  const go = (path: string) => {
+    closeDrawer();
+    navigate(path);
+  };
+
   return (
     <Box sx={{ display: 'flex' }}>
       <AppBar 
@@ -151,8 +166,18 @@ const MainLayout: React.FC = () => {
           borderBottom: '1px solid rgba(0, 0, 0, 0.06)'
         }}
       >
-        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 2, sm: 4 } }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 1.5, sm: 4 } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+            {isMobile && (
+              <IconButton
+                edge="start"
+                aria-label="Open navigation"
+                onClick={() => setMobileOpen(true)}
+                sx={{ mr: 1, ml: -0.5 }}
+              >
+                <MenuIcon />
+              </IconButton>
+            )}
             <Box sx={{ 
               width: 36, 
               height: 36, 
@@ -161,11 +186,12 @@ const MainLayout: React.FC = () => {
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center',
-              mr: 2
+              mr: 1.5,
+              flexShrink: 0
             }}>
               <DashboardIcon sx={{ color: 'white', fontSize: 20 }} />
             </Box>
-            <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 800, letterSpacing: '-0.03em', fontSize: '1.25rem' }}>
+            <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 800, letterSpacing: '-0.03em', fontSize: { xs: '1.05rem', sm: '1.25rem' } }}>
               NetRide <Typography component="span" sx={{ fontWeight: 400, color: 'text.secondary', ml: 0.5 }}>Admin</Typography>
             </Typography>
           </Box>
@@ -216,7 +242,10 @@ const MainLayout: React.FC = () => {
         </Toolbar>
       </AppBar>
       <Drawer
-        variant="permanent"
+        variant={isMobile ? 'temporary' : 'permanent'}
+        open={isMobile ? mobileOpen : undefined}
+        onClose={() => setMobileOpen(false)}
+        ModalProps={{ keepMounted: true }}
         sx={{
           width: drawerWidth,
           flexShrink: 0,
@@ -230,7 +259,7 @@ const MainLayout: React.FC = () => {
               <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
                 <ListItemButton
                   selected={location.pathname === item.path}
-                  onClick={() => navigate(item.path)}
+                  onClick={() => go(item.path)}
                   sx={{
                     py: 1.2,
                     px: 2,
@@ -284,7 +313,7 @@ const MainLayout: React.FC = () => {
           </List>
         </Box>
       </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, p: { xs: 3, sm: 6 }, backgroundColor: 'background.default', minHeight: '100vh' }}>
+      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, sm: 6 }, backgroundColor: 'background.default', minHeight: '100vh', width: { xs: '100%', md: 'auto' } }}>
         <Toolbar />
         <Box sx={{ maxWidth: '100%', mx: 'auto' }}>
           <Outlet />

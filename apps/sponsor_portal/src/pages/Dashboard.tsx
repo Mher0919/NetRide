@@ -115,6 +115,7 @@ const SponsorDashboard: React.FC<{ data: PortalDashboard; onChanged: () => void 
             autoFocus
             inputMode="numeric"
             placeholder="000000"
+            sx={{ mt: 1 }}
           />
           {confirmStep && (
             <Alert severity="warning" sx={{ mt: 2 }}>

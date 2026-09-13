@@ -1215,8 +1215,8 @@
     "semantic_hash": ""
   },
   "backend/src/app.ts": {
-    "mtime": 1788232044.6949103,
-    "ast_hash": "930bb159e2115b9b8d8be07477210708",
+    "mtime": 1789328659.2362046,
+    "ast_hash": "961572d6a842ed4be1f4999af3ef940b",
     "semantic_hash": ""
   },
   "backend/src/benchmark_routing.ts": {
@@ -1240,8 +1240,8 @@
     "semantic_hash": ""
   },
   "backend/src/config/redisPubSub.ts": {
-    "mtime": 1788154007.0082116,
-    "ast_hash": "82a679da197633fadf0db5b15884de07",
+    "mtime": 1789280389.2747047,
+    "ast_hash": "e1f45f4d2677d7bd62019ad7024d22a3",
     "semantic_hash": ""
   },
   "backend/src/config/supabase.ts": {
@@ -1260,8 +1260,8 @@
     "semantic_hash": ""
   },
   "backend/src/health/health.controller.ts": {
-    "mtime": 1784868407.257344,
-    "ast_hash": "974b7c9089a04a3ad958f7edc1d08613",
+    "mtime": 1789284237.689694,
+    "ast_hash": "423444ac8d9b350266d01fb053ea9793",
     "semantic_hash": ""
   },
   "backend/src/middleware/auth.middleware.ts": {
@@ -1735,8 +1735,8 @@
     "semantic_hash": ""
   },
   "backend/src/services/vehicleData.service.ts": {
-    "mtime": 1779858233.8325417,
-    "ast_hash": "f847f2f6525c6823f4e18cfb293bf5c3",
+    "mtime": 1789283998.3183258,
+    "ast_hash": "502583b5d528f060bc2859555a975f8d",
     "semantic_hash": ""
   },
   "backend/src/services/vehicleEligibility.service.ts": {
@@ -2765,8 +2765,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Partners.tsx": {
-    "mtime": 1788232290.3307984,
-    "ast_hash": "fd327e0d141b45a83438d82ecbbdfeb4",
+    "mtime": 1789335062.5873022,
+    "ast_hash": "85121c4519f79b73dd3cfe6eb79f2c57",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Promos.tsx": {
@@ -3235,8 +3235,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Sponsors.tsx": {
-    "mtime": 1787896290.8470297,
-    "ast_hash": "cf7dac2532cc6ff352e986db7e1dad91",
+    "mtime": 1789335037.4796956,
+    "ast_hash": "a78c4783ec0d1e2665e116069a3ef43c",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/driver_cancelled_dialog.dart": {
@@ -3662,6 +3662,56 @@
   "apps/sponsor_portal/public/favicon.png": {
     "mtime": 1777534487.5679464,
     "ast_hash": "5eb97e41283538df5828140ca5d6d164",
+    "semantic_hash": ""
+  },
+  "backend/check-rides-tmp.cjs": {
+    "mtime": 1789279480.288988,
+    "ast_hash": "24d9d22a2d208c3811a72b85dfcf18c3",
+    "semantic_hash": ""
+  },
+  "backend/cleanup-e2e-tmp.cjs": {
+    "mtime": 1789284251.9522755,
+    "ast_hash": "a6c5d793040ca5316d579f742864c407",
+    "semantic_hash": ""
+  },
+  "backend/dbcheck-tmp.cjs": {
+    "mtime": 1789328634.7731748,
+    "ast_hash": "a8cf9eefcc3e960a491a81e6cfca28ec",
+    "semantic_hash": ""
+  },
+  "backend/debug-adapter-tmp.cjs": {
+    "mtime": 1789279557.8813493,
+    "ast_hash": "8f38645ff53df5fc5ada34d13528e800",
+    "semantic_hash": ""
+  },
+  "backend/debug-login-tmp.cjs": {
+    "mtime": 1789279256.4518514,
+    "ast_hash": "8ea7c26884f53d1da2f87d5258289050",
+    "semantic_hash": ""
+  },
+  "backend/debug-rejection-hook.cjs": {
+    "mtime": 1789282280.371809,
+    "ast_hash": "78dda1d48edbae496c4d72e9fccc8383",
+    "semantic_hash": ""
+  },
+  "backend/debug-socket-tmp.cjs": {
+    "mtime": 1789279421.1472666,
+    "ast_hash": "710f5ab9afdd7a1155fa84195afbacc0",
+    "semantic_hash": ""
+  },
+  "backend/debug-subping-tmp.cjs": {
+    "mtime": 1789284225.656149,
+    "ast_hash": "f8966ab933cdcd70befd1c709b112af4",
+    "semantic_hash": ""
+  },
+  "backend/e2e-full-tmp.cjs": {
+    "mtime": 1789328590.2156136,
+    "ast_hash": "5b50641aff01557947f5c599491f6230",
+    "semantic_hash": ""
+  },
+  "backend/list-users-tmp.cjs": {
+    "mtime": 1789279169.9494035,
+    "ast_hash": "f30ac50a568829edfeaa7cc6d62f2caf",
     "semantic_hash": ""
   }
 }

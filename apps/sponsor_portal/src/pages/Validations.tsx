@@ -40,6 +40,8 @@ const fmtUSD = (cents: number | null | undefined) =>
 const fmtDateTime = (v: string | null | undefined) => (v ? new Date(v).toLocaleString() : '—');
 
 const statusColors: Record<string, { bg: string; fg: string }> = {
+  CREATED: { bg: '#E8F0FE', fg: '#1A73E8' },
+  RIDE_PENDING: { bg: '#E3F2FD', fg: '#1565C0' },
   WAITING_FOR_SPONSOR: { bg: '#FFF4E5', fg: '#B26A00' },
   SPONSOR_VALIDATED: { bg: '#E5F0EB', fg: '#2E7D32' },
   REWARD_COMPLETED: { bg: '#E5F0EB', fg: '#2E7D32' },
@@ -47,7 +49,7 @@ const statusColors: Record<string, { bg: string; fg: string }> = {
   EXPIRED: { bg: '#EEEEEE', fg: '#999999' },
 };
 
-const TABS = ['WAITING_FOR_SPONSOR', 'SPONSOR_VALIDATED', 'REWARD_COMPLETED', 'CANCELLED', 'EXPIRED'];
+const TABS = ['CREATED', 'RIDE_PENDING', 'WAITING_FOR_SPONSOR', 'SPONSOR_VALIDATED', 'REWARD_COMPLETED', 'CANCELLED', 'EXPIRED'];
 
 const Validations: React.FC = () => {
   const [tab, setTab] = React.useState('WAITING_FOR_SPONSOR');
@@ -133,7 +135,7 @@ const Validations: React.FC = () => {
         <Button variant="contained" onClick={() => { setCode(''); setConfirmStep(false); setCodeOpen(true); }}>Validate code</Button>
       </Box>
 
-      <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap' }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
         {TABS.map((t) => (
           <Chip
             key={t}
@@ -149,6 +151,11 @@ const Validations: React.FC = () => {
           />
         ))}
       </Stack>
+      {(tab === 'CREATED' || tab === 'RIDE_PENDING') && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          Upcoming codes — the rider hasn't completed their ride yet, so no code has been issued. These move to “Waiting for sponsor” once the ride finishes.
+        </Typography>
+      )}
 
       <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
         <Table>
@@ -211,6 +218,7 @@ const Validations: React.FC = () => {
             autoFocus
             inputMode="numeric"
             placeholder="000000"
+            sx={{ mt: 1 }}
           />
           {confirmStep && (
             <Alert severity="warning" sx={{ mt: 2 }}>

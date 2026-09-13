@@ -147,7 +147,7 @@ const ForgotPassword: React.FC = () => {
               autoFocus
               inputMode="numeric"
               placeholder="000000"
-              sx={{ mb: 3 }}
+              sx={{ mt: 1, mb: 3 }}
             />
             <Button type="submit" variant="contained" fullWidth size="large" disabled={loading}>
               {loading ? <CircularProgress size={22} color="inherit" /> : 'Verify code'}

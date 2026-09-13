@@ -381,5 +381,21 @@
   "379": "zod",
   "380": "pinoHttp.ts",
   "381": "check-db.js",
-  "387": ".requestOnDemandPayout"
+  "382": "User",
+  "383": ".sendDriverRegistrationNotice",
+  "384": "e2e-full-tmp.cjs",
+  "385": "api_service.dart",
+  "386": ".submitNewVehicle",
+  "387": ".requestOnDemandPayout",
+  "388": "debug-socket-tmp.cjs",
+  "389": "cleanup-e2e-tmp.cjs",
+  "390": "dbcheck-tmp.cjs",
+  "391": "debug-subping-tmp.cjs",
+  "392": ".submitProfileChange",
+  "393": "RideMessagesRepository",
+  "394": "_ReplaceVehicleScreenState",
+  "395": "check-rides-tmp.cjs",
+  "396": "list-users-tmp.cjs",
+  "397": "debug-login-tmp.cjs",
+  "398": "debug-rejection-hook.cjs"
 }

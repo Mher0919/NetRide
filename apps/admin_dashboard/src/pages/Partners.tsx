@@ -285,7 +285,7 @@ const Partners: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 0, sm: 3 } }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>

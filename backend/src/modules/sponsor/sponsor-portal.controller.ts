@@ -184,7 +184,7 @@ export class SponsorPortalController {
       const status = String(req.query.status ?? 'WAITING_FOR_SPONSOR').toUpperCase();
       const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 100);
       const offset = Math.max(Number(req.query.offset ?? 0), 0);
-      const validStatuses = ['WAITING_FOR_SPONSOR', 'SPONSOR_VALIDATED', 'REWARD_SELECTED', 'REWARD_COMPLETED', 'CANCELLED', 'EXPIRED', 'REWARD_FAILED'];
+      const validStatuses = ['CREATED', 'RIDE_PENDING', 'WAITING_FOR_SPONSOR', 'SPONSOR_VALIDATED', 'REWARD_SELECTED', 'REWARD_COMPLETED', 'CANCELLED', 'EXPIRED', 'REWARD_FAILED'];
       const effectiveStatus = validStatuses.includes(status) ? status : 'WAITING_FOR_SPONSOR';
 
       const resq = await pool.query(
