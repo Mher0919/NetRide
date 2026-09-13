@@ -14,6 +14,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { portalLogin } from '../api/portal';
+import PasswordField from '../components/PasswordField';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -61,9 +62,8 @@ const Login: React.FC = () => {
             autoFocus
             sx={{ mb: 2 }}
           />
-          <TextField
+          <PasswordField
             label="Password"
-            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             fullWidth

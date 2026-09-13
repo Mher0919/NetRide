@@ -15,6 +15,7 @@ import {
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import { useNavigate } from 'react-router-dom';
 import { portalForgotPassword, portalVerifyResetOTP, portalResetPassword } from '../api/portal';
+import PasswordField from '../components/PasswordField';
 
 const steps = ['Enter email', 'Verify code', 'Set new password'];
 
@@ -162,9 +163,8 @@ const ForgotPassword: React.FC = () => {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Create a new password for your account.
             </Typography>
-            <TextField
+            <PasswordField
               label="New password"
-              type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               fullWidth
@@ -173,9 +173,8 @@ const ForgotPassword: React.FC = () => {
               helperText="At least 8 characters"
               sx={{ mb: 2 }}
             />
-            <TextField
+            <PasswordField
               label="Confirm password"
-              type="password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               fullWidth

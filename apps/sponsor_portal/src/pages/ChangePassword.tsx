@@ -3,7 +3,6 @@ import {
   Box,
   Typography,
   Paper,
-  TextField,
   Button,
   Snackbar,
   Alert,
@@ -13,6 +12,7 @@ import LockResetIcon from '@mui/icons-material/LockReset';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { portalChangePassword } from '../api/portal';
+import PasswordField from '../components/PasswordField';
 
 const ChangePassword: React.FC = () => {
   const navigate = useNavigate();
@@ -59,9 +59,8 @@ const ChangePassword: React.FC = () => {
           </Box>
         </Box>
         <form onSubmit={handleSubmit}>
-          <TextField
+          <PasswordField
             label="New password"
-            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             fullWidth
@@ -70,9 +69,8 @@ const ChangePassword: React.FC = () => {
             helperText="At least 8 characters"
             sx={{ mb: 2 }}
           />
-          <TextField
+          <PasswordField
             label="Confirm password"
-            type="password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             fullWidth
