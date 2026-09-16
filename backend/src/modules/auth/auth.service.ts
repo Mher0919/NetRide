@@ -535,7 +535,21 @@ export class AuthService {
     }
 
     const token = this.generateToken(user);
-    return { user, token };
+    const trustedDeviceToken = this.generateTrustedDeviceToken(user);
+    return { user, token, trustedDeviceToken };
+  }
+
+  /**
+   * A dedicated "remember this device" token — valid for 30 days. While it is
+   * unexpired the admin skips the emailed 2FA code on login; after 30 days it
+   * fails verification and the code is required again.
+   */
+  static generateTrustedDeviceToken(user: any): string {
+    return jwt.sign(
+      { id: user.id, role: user.role, email: user.email, t: 'trusted-device' },
+      env.JWT_SECRET,
+      { expiresIn: '30d', algorithm: 'HS256' },
+    );
   }
 
   static generateToken(user: any, roleOverride?: string): string {

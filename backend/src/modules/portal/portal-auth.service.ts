@@ -19,9 +19,13 @@ import { pool } from '../../config/database';
 import { env } from '../../config/env';
 import { redis } from '../../config/redis';
 import { AuditEventsService } from '../../services/audit-events.service';
+import { OTPService } from '../auth/otp.service';
 
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL_DAYS = 30;
+/** How long a "remember this device" login skips the email 2FA code. */
+const TRUSTED_DEVICE_TTL = '30d';
+const TRUSTED_DEVICE_MARKER = 'portal-trusted';
 
 export type PortalType = 'SPONSOR' | 'PARTNER' | 'FLEET';
 
@@ -91,21 +95,8 @@ async function resolvePortals(userId: string, email: string): Promise<PortalInfo
 }
 
 export class PortalAuthService {
-  static async login(email: string, password: string): Promise<PortalSession> {
-    const normalizedEmail = String(email ?? '').trim().toLowerCase();
-    if (!normalizedEmail || !password) throw new Error('Email and password are required');
-
-    const userRes = await pool.query(
-      `SELECT id, email, password_hash, is_active, role FROM users WHERE email = $1`,
-      [normalizedEmail],
-    );
-    const user = userRes.rows[0];
-    if (!user || !user.password_hash) throw new Error('Invalid email or password');
-
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) throw new Error('Invalid email or password');
-    if (!user.is_active) throw new Error('Your account is disabled. Contact NetRide support.');
-
+  /** Issues access + refresh tokens for a resolved portal user (shared by login + 2FA). */
+  private static async issueSession(user: { id: string; email: string; role: string }): Promise<PortalSession> {
     const portals = await resolvePortals(user.id, user.email);
     if (portals.length === 0) {
       throw new Error('Portal access is not enabled for this account. Contact NetRide support.');
@@ -137,6 +128,92 @@ export class PortalAuthService {
     }).catch(() => undefined);
 
     return { token, refreshToken, portals, portal };
+  }
+
+  /** A 30-day "remember this device" token; expires → email 2FA required again. */
+  static generateTrustedDeviceToken(user: { id: string; email: string; role: string }): string {
+    return jwt.sign(
+      { id: user.id, role: user.role, email: user.email, t: TRUSTED_DEVICE_MARKER },
+      env.JWT_SECRET,
+      { expiresIn: TRUSTED_DEVICE_TTL, algorithm: 'HS256' },
+    );
+  }
+
+  static verifyTrustedDeviceToken(token: string): { id: string; email: string } | null {
+    try {
+      const decoded: any = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
+      if (decoded?.t !== TRUSTED_DEVICE_MARKER) return null;
+      return { id: String(decoded.id), email: String(decoded.email) };
+    } catch {
+      return null;
+    }
+  }
+
+  static async login(
+    email: string,
+    password: string,
+    trustedDeviceToken?: string | null,
+  ): Promise<PortalSession | { otp_required: true; email: string; message: string }> {
+    const normalizedEmail = String(email ?? '').trim().toLowerCase();
+    if (!normalizedEmail || !password) throw new Error('Email and password are required');
+
+    const userRes = await pool.query(
+      `SELECT id, email, password_hash, is_active, role FROM users WHERE email = $1`,
+      [normalizedEmail],
+    );
+    const user = userRes.rows[0];
+    if (!user || !user.password_hash) throw new Error('Invalid email or password');
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) throw new Error('Invalid email or password');
+    if (!user.is_active) throw new Error('Your account is disabled. Contact NetRide support.');
+
+    const portals = await resolvePortals(user.id, user.email);
+    if (portals.length === 0) {
+      throw new Error('Portal access is not enabled for this account. Contact NetRide support.');
+    }
+
+    // 2FA — skip the emailed code only for a remembered device (token valid ≤30 days).
+    let isTrusted = false;
+    if (trustedDeviceToken) {
+      const decoded = this.verifyTrustedDeviceToken(trustedDeviceToken);
+      if (decoded && decoded.id === user.id && decoded.email === user.email) {
+        isTrusted = true;
+      }
+    }
+
+    if (!isTrusted) {
+      await OTPService.generateOTP(user.email);
+      return {
+        otp_required: true,
+        email: user.email,
+        message: 'Verification code sent to your email',
+      };
+    }
+
+    return this.issueSession(user);
+  }
+
+  /** Completes 2FA: verifies the emailed code and issues the portal session. */
+  static async verify2FA(
+    email: string,
+    code: string,
+  ): Promise<PortalSession & { trustedDeviceToken: string }> {
+    const normalizedEmail = String(email ?? '').trim().toLowerCase();
+    const isValid = await OTPService.verifyOTP(normalizedEmail, code);
+    if (!isValid) throw new Error('Invalid or expired verification code');
+
+    const userRes = await pool.query(
+      `SELECT id, email, is_active, role FROM users WHERE email = $1`,
+      [normalizedEmail],
+    );
+    const user = userRes.rows[0];
+    if (!user) throw new Error('Invalid email');
+    if (!user.is_active) throw new Error('Your account is disabled. Contact NetRide support.');
+
+    const session = await this.issueSession(user);
+    const trustedDeviceToken = this.generateTrustedDeviceToken(user);
+    return { ...session, trustedDeviceToken };
   }
 
   static async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string; portals: PortalInfo[]; portal: PortalInfo }> {

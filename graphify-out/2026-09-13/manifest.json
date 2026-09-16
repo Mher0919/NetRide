@@ -1215,8 +1215,8 @@
     "semantic_hash": ""
   },
   "backend/src/app.ts": {
-    "mtime": 1789328659.2362046,
-    "ast_hash": "961572d6a842ed4be1f4999af3ef940b",
+    "mtime": 1789335848.9968843,
+    "ast_hash": "fedce9c441b581f7dd7c63d8606f60bd",
     "semantic_hash": ""
   },
   "backend/src/benchmark_routing.ts": {
@@ -3310,8 +3310,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/ChangePassword.tsx": {
-    "mtime": 1788232482.9576435,
-    "ast_hash": "ac967f7c20a9cbb0f7c519ba1ab4bc1d",
+    "mtime": 1789335900.6702359,
+    "ast_hash": "c0b1b9af837b14d1cf288fca5620e188",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Customers.tsx": {
@@ -3325,8 +3325,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Login.tsx": {
-    "mtime": 1788752442.1990364,
-    "ast_hash": "7b5e77e073c71e3b44633495e773a521",
+    "mtime": 1789335865.7059615,
+    "ast_hash": "ad5f354d84bc7704b998e3d10028b10a",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Settings.tsx": {
@@ -3535,8 +3535,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/ForgotPassword.tsx": {
-    "mtime": 1788232491.1456678,
-    "ast_hash": "51f464d377fdca327f45e218adbfbac7",
+    "mtime": 1789335883.882867,
+    "ast_hash": "f6926d71783f7e14292fc8144bb614f2",
     "semantic_hash": ""
   },
   "backend/src/modules/auth/__tests__/otp.unit.test.ts": {
@@ -3712,6 +3712,11 @@
   "backend/list-users-tmp.cjs": {
     "mtime": 1789279169.9494035,
     "ast_hash": "f30ac50a568829edfeaa7cc6d62f2caf",
+    "semantic_hash": ""
+  },
+  "apps/sponsor_portal/src/components/PasswordField.tsx": {
+    "mtime": 1789335927.9991305,
+    "ast_hash": "4020682e7ff8eca1d2c872d924f361d1",
     "semantic_hash": ""
   }
 }

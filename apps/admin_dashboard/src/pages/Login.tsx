@@ -39,10 +39,12 @@ const Login: React.FC = () => {
     try {
       if (showOTP) {
         const response = await api.post('/auth/admin/verify-2fa', { email, code: otp });
-        const { user, token } = response.data;
+        const { user, token, trustedDeviceToken } = response.data;
         
         if (trustDevice) {
-          localStorage.setItem('trusted_device_token', token);
+          // Remember this device for 30 days — no email code on next login
+          // until the token expires.
+          localStorage.setItem('trusted_device_token', trustedDeviceToken ?? token);
         }
 
         login(user, token);
@@ -200,7 +202,7 @@ const Login: React.FC = () => {
                       color="primary"
                     />
                   }
-                  label="Trust this workstation"
+                  label="Remember this device for 30 days"
                   sx={{ mt: 1, '& .MuiTypography-root': { fontWeight: 600, fontSize: '0.85rem' } }}
                 />
               </>

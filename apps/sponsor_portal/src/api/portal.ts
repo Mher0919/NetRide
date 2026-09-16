@@ -22,8 +22,23 @@ export interface PortalSession {
   portal: PortalInfo;
 }
 
-export const portalLogin = async (email: string, password: string) => {
-  const response = await api.post<PortalSession>('/portal/auth/login', { email, password });
+export interface PortalLoginPending {
+  otp_required: true;
+  email: string;
+  message: string;
+}
+
+export const portalLogin = async (email: string, password: string, trustedDeviceToken?: string | null) => {
+  const response = await api.post<PortalSession | PortalLoginPending>('/portal/auth/login', {
+    email,
+    password,
+    trusted_device_token: trustedDeviceToken ?? null,
+  });
+  return response.data;
+};
+
+export const portalVerify2FA = async (email: string, code: string) => {
+  const response = await api.post<PortalSession & { trustedDeviceToken?: string }>('/portal/auth/verify-2fa', { email, code });
   return response.data;
 };
 

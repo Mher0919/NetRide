@@ -14,7 +14,11 @@ import { OTPService } from '../auth/otp.service';
 import { SponsorService } from '../sponsor/sponsor.service';
 import { PartnerService } from '../partner/partner.service';
 
-const LoginSchema = z.object({ email: z.string().email(), password: z.string() });
+const LoginSchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+  trusted_device_token: z.string().nullable().optional(),
+});
 const ChangePasswordSchema = z.object({ newPassword: z.string().min(8) });
 const ResetPasswordSchema = z.object({ token: z.string(), newPassword: z.string().min(8) });
 
@@ -25,11 +29,25 @@ export class PortalController {
 
   static async login(req: Request, res: Response) {
     try {
-      const { email, password } = LoginSchema.parse(req.body);
-      const session = await PortalAuthService.login(email, password);
+      const { email, password, trusted_device_token } = LoginSchema.parse(req.body);
+      const session = await PortalAuthService.login(email, password, trusted_device_token);
       res.json(session);
     } catch (error: any) {
       console.error(`[PORTAL] ❌ Login error: ${error.message}`);
+      res.status(401).json({ error: error.message });
+    }
+  }
+
+  static async verify2FA(req: Request, res: Response) {
+    try {
+      const { email, code } = z.object({
+        email: z.string().email(),
+        code: z.string().length(6),
+      }).parse(req.body);
+      const result = await PortalAuthService.verify2FA(email, code);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[PORTAL] ❌ 2FA verify error: ${error.message}`);
       res.status(401).json({ error: error.message });
     }
   }

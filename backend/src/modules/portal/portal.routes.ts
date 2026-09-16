@@ -11,6 +11,7 @@ const router = Router();
 
 // ---- Auth (public) -----------------------------------------------------
 router.post('/portal/auth/login', PortalController.login);
+router.post('/portal/auth/verify-2fa', PortalController.verify2FA);
 router.post('/portal/auth/refresh', PortalController.refresh);
 router.post('/portal/auth/logout', PortalController.logout);
 router.post('/portal/auth/forgot-password', PortalController.forgotPassword);

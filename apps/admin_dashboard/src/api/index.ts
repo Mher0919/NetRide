@@ -59,7 +59,11 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    if (error.response && error.response.status === 401) {
+    // Public auth endpoints are handled by the login page (which shows the
+    // actual error) — a 401 there must NOT bounce the user to /login.
+    const url = error.config?.url ?? '';
+    const isPublicAuth = /\/auth\/(login-password|admin\/request-2fa|admin\/verify-2fa|forgot-password|reset-password|request-otp|verify-otp)$/.test(url);
+    if (error.response && error.response.status === 401 && !isPublicAuth) {
       localStorage.removeItem('admin_token');
       window.location.href = '/login';
     }

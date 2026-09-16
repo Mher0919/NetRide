@@ -45,8 +45,13 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const url = originalRequest?.url ?? '';
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Public auth endpoints are handled by their pages (which show the actual
+    // error) — a 401 there must NOT trigger the session-refresh/redirect logic.
+    const isPublicAuth = /\/portal\/auth\/(login|verify-2fa|refresh|forgot-password|verify-reset-otp|reset-password|logout)$/.test(url);
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isPublicAuth) {
       const refreshToken = localStorage.getItem('portal_refresh_token');
 
       if (!refreshToken) {

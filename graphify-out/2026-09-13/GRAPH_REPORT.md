@@ -1,16 +1,16 @@
 # Graph Report - NetRide  (2026-09-13)
 
 ## Corpus Check
-- 584 files · ~468,883 words
+- 585 files · ~468,981 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 6370 nodes · 9917 edges · 399 communities (284 shown, 115 thin omitted)
+- 6372 nodes · 9913 edges · 399 communities (275 shown, 124 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 63 edges (avg confidence: 0.69)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `52a88048`
+- Built from commit: `7b2518a5`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -260,7 +260,6 @@
 - .changePassword
 - @eslint/js
 - credits.service.ts
-- special_detail_screen.dart
 - GoogleMapController?
 - NavigationLeg
 - package:google_maps_flutter/google_maps_flutter.dart
@@ -388,7 +387,6 @@
 - debug-subping-tmp.cjs
 - .submitProfileChange
 - RideMessagesRepository
-- _ReplaceVehicleScreenState
 - check-rides-tmp.cjs
 - list-users-tmp.cjs
 
@@ -419,7 +417,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (399 total, 115 thin omitted)
+## Communities (399 total, 124 thin omitted)
 
 ### Community 0 - "driver_provider.dart"
 Cohesion: 0.03
@@ -430,8 +428,8 @@ Cohesion: 0.03
 Nodes (59): address, businessDescription, businessName, businessType, calculatedDiscountCents, cancellationReasonCode, cancellationReasonText, cancelledAt (+51 more)
 
 ### Community 2 - "routing.service.ts"
-Cohesion: 0.08
-Nodes (28): GoogleRoutesEngine, InvalidCoordinatesError, parseCoordinates(), PlanRequest, PlanResponse, RouteGeometry, RoutingResult, validateCoordinate() (+20 more)
+Cohesion: 0.09
+Nodes (27): GoogleRoutesEngine, InvalidCoordinatesError, parseCoordinates(), PlanRequest, PlanResponse, RouteGeometry, RoutingResult, validateCoordinate() (+19 more)
 
 ### Community 3 - "availability_screen.dart"
 Cohesion: 0.03
@@ -447,7 +445,7 @@ Nodes (63): _activeVehicle, _applyProfileData, _buildMenuTile, _buildPendingChan
 
 ### Community 6 - "rider_flutter/lib/screens/trip_screen.dart"
 Cohesion: 0.05
-Nodes (45): _handleOAuth, _buildRideSheet, _openSearch, _requestCancel, _startGeohashUpdates, _ArrivalSummaryDialog, _ArrivalSummaryDialogState, build (+37 more)
+Nodes (43): _handleOAuth, _buildRideSheet, _openSearch, _requestCancel, _startGeohashUpdates, _ArrivalSummaryDialog, _ArrivalSummaryDialogState, build (+35 more)
 
 ### Community 7 - "replace_vehicle_screen.dart"
 Cohesion: 0.04
@@ -467,11 +465,11 @@ Nodes (50): amountCents, balanceAfterCents, balanceCents, canScan, code, created
 
 ### Community 11 - "driver_flutter/lib/screens/chat_sheet.dart"
 Cohesion: 0.04
-Nodes (67): AppLinks, _appLinks, build, createState, dispose, _handleDeepLink, init, _initDeepLinks (+59 more)
+Nodes (66): AppLinks, _appLinks, build, createState, dispose, _handleDeepLink, init, _initDeepLinks (+58 more)
 
 ### Community 12 - "AuthService"
-Cohesion: 0.07
-Nodes (10): identifyUser(), AuthController, ChangePasswordSchema, ForgotPasswordSchema, LoginPasswordSchema, OAuthSchema, RequestPasswordChangeSchema, ResetPasswordSchema (+2 more)
+Cohesion: 0.09
+Nodes (4): AuthController, LoginPasswordSchema, OAuthSchema, SignupPasswordSchema
 
 ### Community 13 - "navigation_service.dart"
 Cohesion: 0.03
@@ -490,7 +488,7 @@ Nodes (49): ACCEPTED,
 
 ### Community 17 - "health.controller.ts"
 Cohesion: 0.07
-Nodes (27): pubClient, NOTE: these two clients MUST keep the offline queue enabled. The, redisOptions, redisUrl, subClient, DependencyStatus, probeAStarEngine(), NOTE: the subClient is in subscriber mode (psubscribed by the Socket.IO (+19 more)
+Nodes (28): pubClient, NOTE: these two clients MUST keep the offline queue enabled. The, redisOptions, redisUrl, subClient, DependencyStatus, probeAStarEngine(), NOTE: the subClient is in subscriber mode (psubscribed by the Socket.IO (+20 more)
 
 ### Community 18 - "rider_flutter/lib/services/routing_service.dart"
 Cohesion: 0.08
@@ -530,7 +528,7 @@ Nodes (29): AppNotification, body, build, _buildBody, _categoryMeta, createdAt, 
 
 ### Community 28 - "navigation_screen.dart"
 Cohesion: 0.05
-Nodes (38): _buildDestinationMarker, _buildDriverMarker, _buildRerouteBanner, canCompleteTrip, canPickupRider, _capitalize, createState, destinationAddress (+30 more)
+Nodes (43): build, SpeedHudCard, value, _buildDestinationMarker, _buildDriverMarker, _buildRerouteBanner, canCompleteTrip, canPickupRider (+35 more)
 
 ### Community 29 - "speed_monitor.dart"
 Cohesion: 0.06
@@ -546,7 +544,7 @@ Nodes (31): _analyze_video(), AntiSpoofingResult, compute_anti_spoofing_score(),
 
 ### Community 32 - "socket.gateway.ts"
 Cohesion: 0.06
-Nodes (44): envSchema, parsed, redis, redisUrl, InspectionStation, RouteResponse, STATIC_SUGGESTIONS, locationRepository (+36 more)
+Nodes (46): envSchema, parsed, redis, redisUrl, ProfileChangeChangesSchema, InspectionStation, STATIC_SUGGESTIONS, locationRepository (+38 more)
 
 ### Community 34 - "rider_flutter/lib/screens/profile_screen.dart"
 Cohesion: 0.05
@@ -569,12 +567,12 @@ Cohesion: 0.06
 Nodes (34): alongMeters, _bearingDeg, _bucketKey, _buckets, build, _candidateSegments, _cellLatDeg, _cellMeters (+26 more)
 
 ### Community 39 - "driver_flutter/lib/screens/call_overlay.dart"
-Cohesion: 0.14
-Nodes (6): DeviceSchema, ReferralController, referralErrorResponse(), ScanReferralSchema, ReferralError, ReferralService
+Cohesion: 0.12
+Nodes (15): build, _buildMenuTile, _buildSectionCard, _buildSwitchTile, createState, dispose, _handleAction, hasPassword (+7 more)
 
 ### Community 40 - "rider_flutter/lib/screens/login_screen.dart"
-Cohesion: 0.07
-Nodes (35): ALL_TYPES, VALID_CHANNELS, VALID_ROUTES, notifySpecialRefunded(), notifySpecialRewardCredited(), notifySpecialRewardReady(), emitRedemptionUpdate(), fmt() (+27 more)
+Cohesion: 0.06
+Nodes (42): listQuerySchema, readBodySchema, router, ALL_TYPES, VALID_CHANNELS, VALID_ROUTES, notifySpecialRefunded(), notifySpecialRewardCredited() (+34 more)
 
 ### Community 41 - "gps_tracker.dart"
 Cohesion: 0.07
@@ -586,11 +584,11 @@ Nodes (19): classifyRoad(), EdgeFlagsBit, GraphBuilder, haversineDistance(), isD
 
 ### Community 43 - "driver_flutter/lib/screens/splash_screen.dart"
 Cohesion: 0.10
-Nodes (20): build, _controller, createState, didUpdateWidget, dispose, driverId, _durationFor, heading (+12 more)
+Nodes (21): build, _controller, createState, didUpdateWidget, dispose, driverId, _durationFor, heading (+13 more)
 
 ### Community 44 - "driver_flutter/lib/screens/trip_screen.dart"
-Cohesion: 0.06
-Nodes (39): build, build, _buildNavigation, _cancelFailureNotified, _cancelledDialogShown, cancelledTrip, _classifyError, _completionNavStopped (+31 more)
+Cohesion: 0.04
+Nodes (57): _buildGoOfflineButton, _buildGoOnlineButton, _dismissFeedback, _fetchProfile, _handleRefresh, _onDeclineTap, _onTimeout, _showPendingChangeDetails (+49 more)
 
 ### Community 45 - "../services/auth_service.dart"
 Cohesion: 0.13
@@ -613,8 +611,8 @@ Cohesion: 0.16
 Nodes (17): blockUser(), clearDangerousFlag(), deleteUserDocument(), getDriverDocumentRequirements(), getDriverRidePreferences(), getDriverSpeeding(), requestDocumentResubmission(), requestVehicleResubmission() (+9 more)
 
 ### Community 50 - "StatelessWidget"
-Cohesion: 0.18
-Nodes (10): CANCELLATION_REASONS, cancellationReasonLabel(), isCancellationReasonValid(), isReportReasonValid(), ReasonOption, REPORT_REASONS, reportReasonLabel(), mapReportRow() (+2 more)
+Cohesion: 0.16
+Nodes (13): CANCELLATION_REASONS, cancellationReasonLabel(), isCancellationReasonValid(), isReportReasonValid(), PartyRole, ReasonOption, REPORT_REASONS, reportReasonLabel() (+5 more)
 
 ### Community 51 - "driver_flutter/lib/components/trip_completed_dialog.dart"
 Cohesion: 0.15
@@ -657,8 +655,8 @@ Cohesion: 0.09
 Nodes (22): actionEnabled, actionLabel, BottomSheetCard, build, _buildCommActions, callActive, destinationAddress, etaLabel (+14 more)
 
 ### Community 63 - "VoidCallback?"
-Cohesion: 0.11
-Nodes (18): build, _buildContent, _copyToClipboard, createState, _errorMessage, _fetch, _historyTile, _info (+10 more)
+Cohesion: 0.12
+Nodes (16): build, _buildContent, _copyToClipboard, createState, _errorMessage, _fetch, _historyTile, _info (+8 more)
 
 ### Community 64 - "driver_flutter/lib/screens/signup_screen.dart"
 Cohesion: 0.08
@@ -666,15 +664,15 @@ Nodes (24): _allCheckpointsMet, build, _buildCheckpointRow, _buildPasswordCheckp
 
 ### Community 65 - "address_search_delegate.dart"
 Cohesion: 0.07
-Nodes (27): build, buildActions, _buildBody, _buildEmptyHint, _buildError, buildLeading, _buildNoResults, _buildRecentSearches (+19 more)
+Nodes (26): build, buildActions, _buildBody, _buildEmptyHint, _buildError, buildLeading, _buildNoResults, _buildRecentSearches (+18 more)
 
 ### Community 66 - "RoutingService"
-Cohesion: 0.10
-Nodes (19): body, clearDevice, _currentFcmToken, _currentToken, data, _handleTap, init, instance (+11 more)
+Cohesion: 0.06
+Nodes (36): clearDevice, _currentFcmToken, _currentToken, _handleTap, init, instance, isFirebaseAvailable, _local (+28 more)
 
 ### Community 67 - "astar-engine.ts"
 Cohesion: 0.12
-Nodes (17): SponsorSpecial, createState, _distanceLabel, ExploreSpecialsSection, _ExploreSpecialsSectionState, _FilterChipLabel, label, labels (+9 more)
+Nodes (16): createState, _distanceLabel, ExploreSpecialsSection, _ExploreSpecialsSectionState, _FilterChipLabel, label, labels, onTap (+8 more)
 
 ### Community 68 - "types.ts"
 Cohesion: 0.16
@@ -698,7 +696,7 @@ Nodes (19): CountryDialCode, dialCode, digitsOnly, flag, _fmtPartial, formatUsDi
 
 ### Community 73 - "user.controller.ts"
 Cohesion: 0.09
-Nodes (17): CachedRoutePayload, NavigationLeg, NavigationService, RerouteService, RideEndpoints, haversineMeters(), LegName, OdcacheHit (+9 more)
+Nodes (18): RouteResponse, CachedRoutePayload, NavigationLeg, NavigationService, RerouteService, RideEndpoints, haversineMeters(), LegName (+10 more)
 
 ### Community 74 - "AStarEngine"
 Cohesion: 0.13
@@ -725,8 +723,8 @@ Cohesion: 0.10
 Nodes (20): CountryDialCode, dialCode, digitsOnly, flag, _fmtPartial, formatUsDisplay, hasLetters, hasStateCode (+12 more)
 
 ### Community 80 - "rider_flutter/lib/screens/reset_password_screen.dart"
-Cohesion: 0.09
-Nodes (21): _allCheckpointsMet, build, _buildCheckpointRow, _buildPasswordCheckpoints, _confirmPasswordController, createState, dispose, _handleReset (+13 more)
+Cohesion: 0.10
+Nodes (20): _allCheckpointsMet, build, _buildCheckpointRow, _buildPasswordCheckpoints, _confirmPasswordController, createState, dispose, _handleReset (+12 more)
 
 ### Community 81 - "smooth_driver_marker.dart"
 Cohesion: 0.08
@@ -741,8 +739,8 @@ Cohesion: 0.07
 Nodes (30): cancel, clear, _currentQuery, _debounce, dispose, _errorMessage, _executeSearch, _lat (+22 more)
 
 ### Community 84 - "push-notification.service.ts"
-Cohesion: 0.11
-Nodes (17): build, controller, country, createState, decoration, _digitsController, _digitsFocus, dispose (+9 more)
+Cohesion: 0.12
+Nodes (16): build, controller, country, createState, decoration, _digitsController, _digitsFocus, dispose (+8 more)
 
 ### Community 85 - "cache_keys.dart"
 Cohesion: 0.11
@@ -781,8 +779,8 @@ Cohesion: 0.08
 Nodes (25): cachedAt, cacheHit, _decodeCoordinates, _decodePolyline, _decodePolylineFromGeometry, destHex, distanceMeters, distanceMiles (+17 more)
 
 ### Community 94 - "driver_flutter/lib/screens/settings_screen.dart"
-Cohesion: 0.09
-Nodes (8): AdminRewardsController, COMMISSION_STATUSES, csvEscape(), GrantCreditsSchema, normalizePromoRow(), PromoCreateSchema, PromoUpdateSchema, toCsv()
+Cohesion: 0.10
+Nodes (5): AdminRewardsController, COMMISSION_STATUSES, GrantCreditsSchema, normalizePromoRow(), PromoUpdateSchema
 
 ### Community 95 - "driver_flutter/lib/services/error_handler.dart"
 Cohesion: 0.11
@@ -801,32 +799,32 @@ Cohesion: 0.11
 Nodes (17): compilerOptions, declaration, esModuleInterop, forceConsistentCasingInFileNames, module, moduleResolution, outDir, resolveJsonModule (+9 more)
 
 ### Community 99 - "../theme/app_theme.dart"
-Cohesion: 0.06
-Nodes (37): ActivityScreen, _ActivityScreenState, _ProfileScreenState, _VerificationScreenState, _ActivityScreenState, _alreadyReported, build, _CancellationReasonSheetState (+29 more)
+Cohesion: 0.08
+Nodes (25): _alreadyReported, build, CancellationReasonSheet, _canReport, code, _confirm, createState, _descriptionController (+17 more)
 
 ### Community 100 - "navigation_voice_service.dart"
-Cohesion: 0.09
-Nodes (21): init, instance, _muted, mutedListenable, NavigationVoiceService, _prefsKey, setMuted, speak (+13 more)
+Cohesion: 0.12
+Nodes (15): init, instance, _muted, mutedListenable, NavigationVoiceService, _prefsKey, setMuted, speak (+7 more)
 
 ### Community 101 - "driver_flutter/lib/services/user_service.dart"
 Cohesion: 0.12
 Nodes (16): addPayoutCard, batchResubmitDocuments, getCurrentProfileChange, getDocumentRequirements, getInspectionLocations, getPendingVehicleSubmissions, getProfile, getVehicles (+8 more)
 
 ### Community 102 - "rider_flutter/lib/screens/settings_screen.dart"
-Cohesion: 0.09
-Nodes (21): build, createState, initState, PostAuthGate, _PostAuthGateState, _resolve, build, _controller (+13 more)
+Cohesion: 0.08
+Nodes (24): build, _controller, createState, dispose, onboarding, _onDetect, _processing, _showResultDialog (+16 more)
 
 ### Community 103 - "CircuitBreaker"
 Cohesion: 0.06
 Nodes (29): AStarEngineAdapter, GoogleRoutesResponse, httpAgent, httpsAgent, axiosClient, httpAgent, httpsAgent, ORSEngine (+21 more)
 
 ### Community 104 - "DateTime"
-Cohesion: 0.08
-Nodes (4): AdminSponsorController, VALID_BUSINESS_TYPES, normalizeSponsor(), SponsorService
+Cohesion: 0.06
+Nodes (20): AdminReq, AdminSponsorController, VALID_BUSINESS_TYPES, SponsorRequest, computeSponsorDiscount(), discountLabelFor(), normalizeSponsor(), roundCents() (+12 more)
 
 ### Community 105 - "ride_preferences_screen.dart"
 Cohesion: 0.06
-Nodes (41): build, _buildBody, _buildComposer, _buildErrorBar, _buildHeader, ChatSheet, _ChatSheetState, _controller (+33 more)
+Nodes (42): build, _buildBody, _buildComposer, _buildErrorBar, _buildHeader, ChatSheet, _ChatSheetState, _controller (+34 more)
 
 ### Community 106 - "../services/api_service.dart"
 Cohesion: 0.10
@@ -834,27 +832,27 @@ Nodes (18): match, resolveFileUrl, url, false, isTestEmail, isTestTripFor, lower
 
 ### Community 107 - "blocked_account_screen.dart"
 Cohesion: 0.09
-Nodes (22): build, _buildBanner, onDismiss, onViewDetails, reason, status, VerificationBanner, BlockedAccountScreen (+14 more)
+Nodes (22): BlockedAccountScreen, _BlockedAccountScreenState, build, _checking, _CheckingHint, _checkUnblocked, createState, dispose (+14 more)
 
 ### Community 108 - "smoke_profile_change.ts"
 Cohesion: 0.38
 Nodes (15): adminClient, driverClient, fail(), login(), main(), ok(), step1_submitProfileChange(), step2_adminList() (+7 more)
 
 ### Community 109 - "rider_flutter/lib/screens/main_wrapper.dart"
-Cohesion: 0.15
-Nodes (23): clearFcmToken(), deliverOrPush(), getFcmToken(), getFcmTokens(), isOnline(), markOffline(), markOnline(), PRESENCE_KEY() (+15 more)
+Cohesion: 0.13
+Nodes (26): registerTokenSchema, router, clearFcmToken(), deliverOrPush(), getFcmToken(), getFcmTokens(), isOnline(), markOffline() (+18 more)
 
 ### Community 110 - "api/index.ts"
-Cohesion: 0.10
-Nodes (14): AuthRequest, validate(), registerTokenSchema, router, router, RouteHistoryEntry, router, SearchHistoryEntry (+6 more)
+Cohesion: 0.17
+Nodes (4): RequestEmailChangeSchema, updateProfileSchema, UserController, verifyIdentitySchema
 
 ### Community 111 - "StatefulWidget"
-Cohesion: 0.05
-Nodes (38): ActivityScreen, build, _buildEarningsSummary, _buildEmptyState, _buildRideCard, createState, _deleteActivity, _errorMessage (+30 more)
+Cohesion: 0.06
+Nodes (34): allCars, CarModel, make, model, toString, ActivityScreen, build, _buildEarningsSummary (+26 more)
 
 ### Community 112 - "search_result.dart"
 Cohesion: 0.07
-Nodes (26): _asin, category, city, copyWith, _cos, displayAddress, displayName, distanceMiles (+18 more)
+Nodes (29): _asin, category, city, copyWith, _cos, displayAddress, displayName, distanceMiles (+21 more)
 
 ### Community 113 - "driver_flutter/macos/Flutter/GeneratedPluginRegistrant.swift"
 Cohesion: 0.20
@@ -865,8 +863,8 @@ Cohesion: 0.08
 Nodes (39): check(), main(), pool, cachedConfigs, clamp(), computeFare(), computeMarketConditions(), computeRevenueAllocation() (+31 more)
 
 ### Community 115 - "driver_flutter/lib/screens/main_wrapper.dart"
-Cohesion: 0.67
-Nodes (3): _routeFromNotification, Route /credits, Route /special-redemption
+Cohesion: 0.14
+Nodes (14): SponsorSpecial, build, _content, createState, _fetch, initState, _picking, SpecialDetailScreen (+6 more)
 
 ### Community 116 - "FlutterMacOS"
 Cohesion: 0.18
@@ -877,16 +875,12 @@ Cohesion: 0.10
 Nodes (20): AnimatedPriceReduction, _AnimatedPriceReductionState, build, cents, _controller, _countdown, createState, didUpdateWidget (+12 more)
 
 ### Community 118 - "rating_screen.dart"
-Cohesion: 0.27
-Nodes (4): PlacesController, PlaceRow, router, PlacesService
+Cohesion: 0.18
+Nodes (8): query(), PlacesController, PlaceRow, placesRepository, RADII_MILES, router, inFlight, PlacesService
 
 ### Community 119 - "types/index.ts"
 Cohesion: 0.07
 Nodes (28): DriverStatusCard, build, _iconFor, indication, lane, LaneGuidance, LaneGuidanceRow, _LanePictogram (+20 more)
-
-### Community 120 - "GeospatialService"
-Cohesion: 0.13
-Nodes (5): query(), GeospatialService, placesRepository, RADII_MILES, inFlight
 
 ### Community 121 - "astar.ts"
 Cohesion: 0.24
@@ -905,16 +899,16 @@ Cohesion: 0.24
 Nodes (10): _In_, _In_opt_, wWinMain(), string, vector, wchar_t, CreateAndAttachConsole(), GetCommandLineArguments() (+2 more)
 
 ### Community 126 - "card.ts"
-Cohesion: 0.05
-Nodes (42): ProfileScreen, AccountActionScreen, _AccountActionScreenState, build, _buildMenuTile, _buildSectionCard, _buildSwitchTile, createState (+34 more)
+Cohesion: 0.06
+Nodes (43): ActivityScreen, _ActivityScreenState, ProfileScreen, _ProfileScreenState, ReplaceVehicleScreen, _ReplaceVehicleScreenState, AccountActionScreen, _AccountActionScreenState (+35 more)
 
 ### Community 127 - "MessageHandler"
 Cohesion: 0.27
 Nodes (12): HWND, LPARAM, LRESULT, UINT, Win32Window, WPARAM, EnableFullDpiSupportIfAvailable(), GetHandle (+4 more)
 
 ### Community 128 - "search_cache.dart"
-Cohesion: 0.15
-Nodes (12): _buildKey, _cache, cachedAt, CachedSearchResult, clear, data, _instance, invalidateQuery (+4 more)
+Cohesion: 0.10
+Nodes (19): CachePolicy, persist, shouldRevalidate, staleDuration, ttl, _buildKey, _cache, cachedAt (+11 more)
 
 ### Community 129 - "MessageHandler"
 Cohesion: 0.27
@@ -977,16 +971,16 @@ Cohesion: 0.22
 Nodes (8): Credentials, Features, Getting Started, Installation, NetRide Admin Dashboard, Prerequisites, Running the App, Tech Stack
 
 ### Community 146 - "SmsService"
-Cohesion: 0.07
-Nodes (8): EstimateRideSchema, RateRideSchema, RequestRideSchema, RideController, SubmitReportSchema, applyDriverPrePickupCancelPenalty(), fetchDisplayName(), RideService
+Cohesion: 0.12
+Nodes (5): EstimateRideSchema, RateRideSchema, RequestRideSchema, RideController, SubmitReportSchema
 
 ### Community 148 - "AppDelegate"
 Cohesion: 0.25
 Nodes (5): AppDelegate, Any, Bool, FlutterImplicitEngineBridge, UIApplication
 
 ### Community 149 - "_buildStatusCards"
-Cohesion: 0.06
-Nodes (40): pool, OTPService, router, PartnerAuthService, PartnerLoginPending, PartnerPortalSession, PartnerRequest, PartnerInput (+32 more)
+Cohesion: 0.04
+Nodes (43): pool, PORTAL_TYPES, portalMiddleware(), PRIORITY, resolveAccounts(), PartnerCreateSchema, PartnerUpdateSchema, OTPService (+35 more)
 
 ### Community 150 - "package:shared_preferences/shared_preferences.dart"
 Cohesion: 0.18
@@ -1025,16 +1019,16 @@ Cohesion: 0.13
 Nodes (17): getAdminStats(), getDangerousDrivers(), getPendingDocumentReviewsCount(), getSpeedingViolations(), listPayouts(), listProfileChanges(), markPayoutPaid(), MainLayout() (+9 more)
 
 ### Community 159 - "Payouts.tsx"
-Cohesion: 0.11
-Nodes (20): _routeFromNotification, build, _buildGoOfflineButton, _buildGoOnlineButton, _dismissFeedback, _fetchProfile, _handleRefresh, _onAcceptTap (+12 more)
+Cohesion: 0.29
+Nodes (7): _routeFromNotification, build, _onAcceptTap, _routeFromNotification, Route /credits, Route /special-redemption, Route /trip
 
 ### Community 160 - "ErrorBoundary"
 Cohesion: 0.20
 Nodes (6): RoutingService, DEST, fmt(), main(), ORIGIN, computeEstimate()
 
 ### Community 161 - "List"
-Cohesion: 0.24
-Nodes (7): portalChangePassword(), ProtectedRoute(), MainLayout(), typeLabel, useAuth(), ChangePassword(), theme
+Cohesion: 0.29
+Nodes (5): ProtectedRoute(), MainLayout(), typeLabel, useAuth(), theme
 
 ### Community 162 - "WindowClassRegistrar"
 Cohesion: 0.29
@@ -1045,20 +1039,16 @@ Cohesion: 0.29
 Nodes (5): wchar_t, WindowClassRegistrar, class_registered_, GetWindowClass, instance_
 
 ### Community 164 - "backend/package.json"
-Cohesion: 0.07
-Nodes (28): _haversineMeters, _headingDelta, _lastHeading, _lastLat, _lastLng, _lastSentAt, LocationReporter, maxStaleInterval (+20 more)
-
-### Community 165 - "ProfileChangeDetail.tsx"
-Cohesion: 0.15
-Nodes (5): PartnerCreateSchema, PartnerUpdateSchema, normalizePartner(), PARTNER_STATUSES, PartnerService
+Cohesion: 0.13
+Nodes (14): _haversineMeters, _headingDelta, _lastHeading, _lastLat, _lastLng, _lastSentAt, LocationReporter, maxStaleInterval (+6 more)
 
 ### Community 166 - "ProfileChanges.tsx"
 Cohesion: 0.10
 Nodes (19): code, deviceRisk, eligible, friendlyReferralError, fromJson, getCredits, getCreditTransactions, getOnboardingStatus (+11 more)
 
 ### Community 167 - "_SplashScreenState"
-Cohesion: 0.08
-Nodes (28): app, httpServer, io, bindIo(), adminMiddleware(), authMiddleware(), driverMiddleware(), partnerMiddleware() (+20 more)
+Cohesion: 0.06
+Nodes (37): app, httpServer, io, adminMiddleware(), authMiddleware(), AuthRequest, driverMiddleware(), partnerMiddleware() (+29 more)
 
 ### Community 168 - "AppDelegate"
 Cohesion: 0.47
@@ -1090,15 +1080,11 @@ Nodes (18): 10. Admin dashboard (web), 11. Sponsor portal (new standalone web ap
 
 ### Community 175 - ".submitNewVehicle"
 Cohesion: 0.12
-Nodes (17): build, _controller, createState, didUpdateWidget, dispose, _durationFor, _initAnimations, initState (+9 more)
+Nodes (16): build, _controller, createState, didUpdateWidget, dispose, _durationFor, _initAnimations, initState (+8 more)
 
 ### Community 176 - "server.js"
 Cohesion: 0.50
 Nodes (3): app, __dirname, DIST_DIR
-
-### Community 177 - "Rides.tsx"
-Cohesion: 0.15
-Nodes (8): clampCents(), computeWalletCharge(), WalletController, emitBalanceChange(), WalletAccount, WalletResult, WalletService, WalletTxType
 
 ### Community 180 - "resolveFileUrls.middleware.ts"
 Cohesion: 0.17
@@ -1129,8 +1115,8 @@ Cohesion: 0.50
 Nodes (3): Generation, Licensing, Sound assets — driver_flutter
 
 ### Community 202 - "_handleDeepLink"
-Cohesion: 0.08
-Nodes (27): _alreadyReported, build, CancellationReasonSheet, _CancellationReasonSheetState, _canReport, code, _confirm, createState (+19 more)
+Cohesion: 0.07
+Nodes (28): _alreadyReported, build, CancellationReasonSheet, _CancellationReasonSheetState, _canReport, code, _confirm, createState (+20 more)
 
 ### Community 205 - "@emotion/styled"
 Cohesion: 0.13
@@ -1138,15 +1124,15 @@ Nodes (22): PromoController, ValidatePromoSchema, applyPromoToRide(), computePro
 
 ### Community 206 - "@mui/material"
 Cohesion: 0.11
-Nodes (18): build, controller, country, createState, decoration, _digitsController, _digitsFocus, dispose (+10 more)
+Nodes (19): build, controller, country, createState, decoration, _digitsController, _digitsFocus, dispose (+11 more)
 
 ### Community 207 - "react-leaflet"
 Cohesion: 0.14
 Nodes (14): AccountActionScreen, State, SoundFeedbackMixin, _ResetPasswordScreenState, _AccountActionScreenState, _SettingsScreenState, _GlobalClickSoundListenerState, SoundFeedbackMixin (+6 more)
 
 ### Community 208 - "react-router-dom"
-Cohesion: 0.43
-Nodes (5): PORTAL_TYPES, portalMiddleware(), PRIORITY, resolveAccounts(), router
+Cohesion: 0.14
+Nodes (13): _haversineMeters, _headingDelta, _lastHeading, _lastLat, _lastLng, _lastSentAt, LocationReporter, maxStaleInterval (+5 more)
 
 ### Community 209 - "typescript"
 Cohesion: 0.30
@@ -1173,8 +1159,8 @@ Cohesion: 0.11
 Nodes (18): category, debugInfo, isAccuracyAcceptable, isLocationFresh, isRetryable, isTransient, _maxLat, _maxLng (+10 more)
 
 ### Community 218 - "firebase-admin"
-Cohesion: 0.67
-Nodes (3): SearchResult, AddressSearchDelegate, SearchDelegate
+Cohesion: 0.23
+Nodes (3): applyDriverPrePickupCancelPenalty(), fetchDisplayName(), RideService
 
 ### Community 219 - "driver_flutter/lib/utils/test_user.dart"
 Cohesion: 0.67
@@ -1188,13 +1174,17 @@ Nodes (8): downloadBlob(), exportCreditTransactions(), grantCredits(), listCredi
 Cohesion: 0.67
 Nodes (3): _SplashScreenState, SingleTickerProviderStateMixin, SplashScreen
 
+### Community 222 - "ngeohash"
+Cohesion: 0.17
+Nodes (11): build, _buildDefaultFailure, _buildDefaultLoading, errorMessage, loadingWidget, onRetry, state, StateContainer (+3 more)
+
 ### Community 223 - "nodemailer"
-Cohesion: 0.29
-Nodes (6): current, DeviceFingerprint, getOrCreate, _prefsKey, package:uuid/uuid.dart, static const
+Cohesion: 0.14
+Nodes (13): current, DeviceFingerprint, getOrCreate, _prefsKey, _cached, DeviceIdentity, installId, _key (+5 more)
 
 ### Community 225 - "@sentry/node"
-Cohesion: 0.20
-Nodes (9): PortalDashboard, portalEarnings(), portalForgotPassword(), portalLogin(), portalResetPassword(), PortalType, portalVerifyResetOTP(), ForgotPassword() (+1 more)
+Cohesion: 0.14
+Nodes (9): portalChangePassword(), PortalDashboard, portalEarnings(), portalForgotPassword(), portalLogin(), portalResetPassword(), PortalType, portalVerifyResetOTP() (+1 more)
 
 ### Community 226 - "socket.io"
 Cohesion: 0.12
@@ -1205,8 +1195,8 @@ Cohesion: 0.13
 Nodes (17): adjustSponsorBudget(), createSponsor(), createSponsorPortalAccount(), disableSponsorPortalAccount(), getSponsor(), listSponsors(), resetSponsorPortalPassword(), setSponsorStatus() (+9 more)
 
 ### Community 228 - "@supabase/supabase-js"
-Cohesion: 0.06
-Nodes (33): build, AppTheme, errorColor, lightCardBackground, primaryBackground, primaryBrandGreen, secondaryDarkText, softBorderColor (+25 more)
+Cohesion: 0.10
+Nodes (20): AppTheme, errorColor, lightCardBackground, primaryBackground, primaryBrandGreen, secondaryDarkText, softBorderColor, successGreen (+12 more)
 
 ### Community 229 - "off_route_detector.dart"
 Cohesion: 0.12
@@ -1240,25 +1230,13 @@ Nodes (15): activity_screen.dart, build, _checkAuth, connected, _ConnectionBanne
 Cohesion: 0.31
 Nodes (9): listPortalValidations(), portalCancelValidation(), portalValidate(), fmtDateTime(), fmtUSD(), statusColors, TABS, ValidationRow (+1 more)
 
-### Community 256 - "special_detail_screen.dart"
-Cohesion: 0.11
-Nodes (17): clearDevice, _currentFcmToken, _currentToken, _handleTap, init, instance, isFirebaseAvailable, _local (+9 more)
-
 ### Community 258 - "NavigationLeg"
 Cohesion: 0.33
 Nodes (5): { Client }, env, fs, path, sql
 
-### Community 260 - "SpeedingDetector"
-Cohesion: 0.17
-Nodes (12): build, _commentController, createState, _isFavorite, _isSubmitting, RatingScreen, _RatingScreenState, _selectedRating (+4 more)
-
 ### Community 261 - "favorite_driver_service.dart"
 Cohesion: 0.14
 Nodes (13): addedAt, driverId, FavoriteDriverInfo, FavoriteDriverService, fromJson, fullName, getFavorites, id (+5 more)
-
-### Community 262 - "driver_flutter/lib/services/location_reporter.dart"
-Cohesion: 0.13
-Nodes (13): build, isFreeway, onRefresh, primaryRoad, RoutingOptionsBar, build, _buildBanner, onDismiss (+5 more)
 
 ### Community 263 - "rider_flutter/lib/screens/settings_screen.dart"
 Cohesion: 0.15
@@ -1273,16 +1251,16 @@ Cohesion: 0.33
 Nodes (6): scripts, build, dev, lint, preview, start
 
 ### Community 266 - "driver_flutter/lib/components/trip_completed_dialog.dart"
-Cohesion: 0.12
-Nodes (18): build, createState, _customController, _isSubmitting, rideId, _selectAmount, _selectedAmount, _showTipSheet (+10 more)
+Cohesion: 0.08
+Nodes (31): build, createState, _customController, _isSubmitting, rideId, _selectAmount, _selectedAmount, _showTipSheet (+23 more)
 
 ### Community 267 - "package:shared_preferences/shared_preferences.dart"
 Cohesion: 0.39
 Nodes (7): PortalInfo, portalLogout(), PortalSession, AuthContext, AuthContextType, AuthProvider(), readSession()
 
 ### Community 268 - "ErrorBoundary"
-Cohesion: 0.11
-Nodes (17): CachePolicy, persist, shouldRevalidate, staleDuration, ttl, autoDismissAfter, build, createState (+9 more)
+Cohesion: 0.20
+Nodes (10): autoDismissAfter, build, createState, _dismissTimer, dispose, DriverCancelledDialog, _DriverCancelledDialogState, initState (+2 more)
 
 ### Community 269 - ".submitNewVehicle"
 Cohesion: 0.53
@@ -1297,11 +1275,11 @@ Cohesion: 0.14
 Nodes (13): chooseReward, count, createRedemption, currentRedemption, friendlyError, getOne, introSeen, list (+5 more)
 
 ### Community 274 - "dart:async"
-Cohesion: 0.06
-Nodes (31): _account, build, _buildContent, createState, CreditsScreen, _CreditsScreenState, _errorMessage, _fetch (+23 more)
+Cohesion: 0.08
+Nodes (23): build, ChatBubble, failed, isMine, onRetry, pending, text, timestamp (+15 more)
 
 ### Community 275 - "driver.controller.ts"
-Cohesion: 0.40
+Cohesion: 0.43
 Nodes (3): DriverRepository, DriverProfile, VehicleCategory
 
 ### Community 276 - "notifications.routes.ts"
@@ -1313,28 +1291,28 @@ Cohesion: 0.11
 Nodes (18): bodyColor, build, createState, _ctrl, dispose, _drawWheel, height, initState (+10 more)
 
 ### Community 278 - "RideProvider"
-Cohesion: 0.06
-Nodes (38): SpecialsProvider, _onItemTapped, build, _content, createState, _fetch, initState, _pick (+30 more)
+Cohesion: 0.09
+Nodes (25): SpecialsProvider, _onItemTapped, _pick, _bodyFor, build, _businessHeader, _cancelledBody, _chooseReward (+17 more)
 
 ### Community 281 - ".sendDriverRegistrationNotice"
-Cohesion: 0.14
-Nodes (13): backgroundColor, build, _buildAvatar, _buildControls, _CallButton, CallOverlay, foregroundColor, icon (+5 more)
+Cohesion: 0.07
+Nodes (28): build, distanceLabel, icon, instruction, lanes, maneuverIcon, TopManeuverCard, _turnIcon (+20 more)
 
 ### Community 282 - "apply-migration-20260818.cjs"
 Cohesion: 0.40
 Nodes (3): { Client }, fs, path
 
 ### Community 283 - ".submitNewVehicle"
-Cohesion: 0.25
-Nodes (7): cacheTtl, fetchZones, friendlyError, HeatmapService, ../models/demand_zone.dart, package:dio/dio.dart, static const Duration
+Cohesion: 0.15
+Nodes (11): api_service.dart, cacheTtl, fetchZones, friendlyError, HeatmapService, getProfile, updateProfile, UserService (+3 more)
 
 ### Community 284 - "bullmq"
 Cohesion: 0.53
 Nodes (5): listPricingProfiles(), updatePricingProfile(), fmtMoney(), NUMBER_KEYS, Pricing()
 
 ### Community 285 - "cors"
-Cohesion: 0.06
-Nodes (31): allCars, CarModel, make, model, toString, build, _buildDigitBox, _controllers (+23 more)
+Cohesion: 0.07
+Nodes (27): build, _buildDigitBox, _controllers, createState, email, _focusNodes, fullName, _isLoading (+19 more)
 
 ### Community 286 - "driver_flutter/lib/components/trip_completed_dialog.dart"
 Cohesion: 0.17
@@ -1347,10 +1325,6 @@ Nodes (5): getDriverEarnings(), EarningsPanel(), EarningsPanelProps, fmtUSD(), P
 ### Community 288 - "referral.controller.ts"
 Cohesion: 0.60
 Nodes (3): getLiveDrivers(), driverIcon(), LiveMonitoring()
-
-### Community 294 - "_buildStatusCards"
-Cohesion: 0.17
-Nodes (10): build, SpeedHudCard, value, amount, build, tipperName, TipReceivedDialog, ../services/speed_monitor.dart (+2 more)
 
 ### Community 295 - "sponsor_portal/server.js"
 Cohesion: 0.50
@@ -1380,10 +1354,6 @@ Nodes (14): consume(), legacyIpLimiter(), rateLimitMiddleware(), DEFAULT_IP_LIMI
 Cohesion: 0.67
 Nodes (3): API_BASE, resolveFileUrls(), transformObject()
 
-### Community 313 - "top_maneuver_card.dart"
-Cohesion: 0.18
-Nodes (10): build, distanceLabel, icon, instruction, lanes, maneuverIcon, TopManeuverCard, _turnIcon (+2 more)
-
 ### Community 314 - "Reports.tsx"
 Cohesion: 0.43
 Nodes (6): listReports(), resolveReport(), ACTION_LABELS, fmtDate(), Reports(), STATUS_COLORS
@@ -1397,8 +1367,8 @@ Cohesion: 0.15
 Nodes (13): Animation, arguments, build, _controller, createState, dispose, _fadeAnimation, initState (+5 more)
 
 ### Community 323 - "ProfileScreen"
-Cohesion: 0.17
-Nodes (11): build, _buildDefaultFailure, _buildDefaultLoading, errorMessage, loadingWidget, onRetry, state, StateContainer (+3 more)
+Cohesion: 0.07
+Nodes (25): build, isFreeway, onRefresh, primaryRoad, RoutingOptionsBar, build, _buildDefaultFailure, _buildDefaultLoading (+17 more)
 
 ### Community 324 - "RewardEngine"
 Cohesion: 0.25
@@ -1416,21 +1386,13 @@ Nodes (9): build, ChatBubble, failed, isMine, onRetry, pending, text, timestamp 
 Cohesion: 0.33
 Nodes (6): { Client }, DIR, fs, path, probe(), stripComments()
 
-### Community 333 - "StatefulWidget"
-Cohesion: 0.18
-Nodes (8): ProfileChangeChangesSchema, getRevenueAllocationForRide(), VehicleDataService, CardBrandName, detectCardBrand(), isValidLuhn(), last4(), maskCardNumber()
-
 ### Community 341 - "device-risk.service.ts"
-Cohesion: 0.07
-Nodes (24): getIo(), clampCents(), computeCreditApplication(), roundCents(), CreditsController, CreditAccount, CreditResult, CreditsService (+16 more)
+Cohesion: 0.05
+Nodes (33): bindIo(), getIo(), clampCents(), computeCreditApplication(), roundCents(), CreditsController, CreditAccount, CreditResult (+25 more)
 
 ### Community 342 - "_MapScreenState"
 Cohesion: 0.25
 Nodes (8): _confirmRide, didChangeAppLifecycleState, _initLiveLocation, initState, MapScreen, _MapScreenState, SpecialsProvider, TickerProviderStateMixin
-
-### Community 343 - "import-pois.ts"
-Cohesion: 0.47
-Nodes (5): CATEGORIES, fetchOverpass(), importCategory(), main(), POICategory
 
 ### Community 346 - "bool get"
 Cohesion: 0.17
@@ -1444,13 +1406,9 @@ Nodes (4): { Client }, DIR, fs, path
 Cohesion: 0.40
 Nodes (4): name, private, type, version
 
-### Community 354 - "notifications.routes.ts"
-Cohesion: 0.22
-Nodes (7): listQuerySchema, readBodySchema, router, listNotifications(), markNotificationsRead(), NotificationRole, unreadNotificationCount()
-
 ### Community 355 - "rider_flutter/lib/components/verification_banner.dart"
-Cohesion: 0.18
-Nodes (10): picker, pickImage, pickImageWithSource, source, picker, pickImage, pickImageWithSource, source (+2 more)
+Cohesion: 0.09
+Nodes (20): build, SuccessScreen, picker, pickImage, pickImageWithSource, source, build, _buildBanner (+12 more)
 
 ### Community 380 - "pinoHttp.ts"
 Cohesion: 0.13
@@ -1464,29 +1422,25 @@ Nodes (3): UserRepository, UserService, User
 Cohesion: 0.28
 Nodes (5): adminLoginFlow(), http(), { io }, loginWithOtp(), Redis
 
-### Community 385 - "api_service.dart"
-Cohesion: 0.40
-Nodes (4): api_service.dart, getProfile, updateProfile, UserService
-
 ## Knowledge Gaps
-- **3338 isolated node(s):** `statusColors`, `statusColors`, `redemptionStatusColors`, `emptyForm`, `SnackState` (+3333 more)
+- **3339 isolated node(s):** `steps`, `app`, `httpServer`, `io`, `statusColors` (+3334 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **115 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **124 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `ReferralInfo` connect `VoidCallback?` to `device-risk.service.ts`?**
-  _High betweenness centrality (0.171) - this node is a cross-community bridge._
+  _High betweenness centrality (0.172) - this node is a cross-community bridge._
 - **Why does `LatLng` connect `driver_flutter/lib/main.dart` to `gps_tracker.dart`, `routing.service.ts`?**
-  _High betweenness centrality (0.116) - this node is a cross-community bridge._
-- **Why does `State` connect `react-leaflet` to `h3-js`, `driver_flutter/lib/components/trip_completed_dialog.dart`, `SpeedingDetector`, `multer`?**
-  _High betweenness centrality (0.048) - this node is a cross-community bridge._
-- **What connects `statusColors`, `statusColors`, `redemptionStatusColors` to the rest of the system?**
-  _3338 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _High betweenness centrality (0.112) - this node is a cross-community bridge._
+- **Why does `State` connect `react-leaflet` to `h3-js`, `driver_flutter/lib/components/trip_completed_dialog.dart`, `multer`?**
+  _High betweenness centrality (0.047) - this node is a cross-community bridge._
+- **What connects `steps`, `app`, `httpServer` to the rest of the system?**
+  _3339 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `driver_provider.dart` be split into smaller, more focused modules?**
   _Cohesion score 0.02564102564102564 - nodes in this community are weakly interconnected._
 - **Should `app.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.03333333333333333 - nodes in this community are weakly interconnected._
 - **Should `routing.service.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.08199643493761141 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.08522727272727272 - nodes in this community are weakly interconnected._
