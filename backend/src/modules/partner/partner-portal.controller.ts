@@ -4,12 +4,13 @@
 // Every handler scopes queries by the partner id from the JWT, so partner A
 // can never read partner B's usage or earnings (spec requirement).
 //
+// NOTE: authentication (login + email 2FA + password change) lives on the
+// unified portal controller (/api/portal/auth/*). The legacy /partner/auth/*
+// credential login was removed because it bypassed 2FA.
 
 import { Request, Response } from 'express';
 import { pool } from '../../config/database';
 import { PartnerService } from '../partner/partner.service';
-import { PartnerAuthService } from './partner-auth.service';
-import { OTPService } from '../auth/otp.service';
 import { FinancialLedgerService } from '../../services/financial-ledger.service';
 
 export interface PartnerRequest extends Request {
@@ -18,124 +19,6 @@ export interface PartnerRequest extends Request {
 }
 
 export class PartnerPortalController {
-  // --------------------------------------------------------------- auth
-
-  static async login(req: Request, res: Response) {
-    try {
-      const { email, password } = req.body ?? {};
-      const session = await PartnerAuthService.login(email, password);
-      if (session.partnerSessionPending) {
-        // OTP was sent, waiting for verification
-        return res.json({
-          partnerSessionPending: true,
-          loginToken: session.loginToken,
-          partner: session.partner,
-          message: 'Verification code sent to email',
-        });
-      }
-      res.json(session);
-    } catch (err: any) {
-      res.status(401).json({ error: err.message });
-    }
-  }
-
-  static async refresh(req: Request, res: Response) {
-    try {
-      const { refreshToken } = req.body ?? {};
-      if (!refreshToken) return res.status(400).json({ error: 'Refresh token is required' });
-      const result = await PartnerAuthService.refreshToken(refreshToken);
-      res.json(result);
-    } catch (err: any) {
-      res.status(401).json({ error: err.message });
-    }
-  }
-
-  static async logout(req: Request, res: Response) {
-    try {
-      const { refreshToken } = req.body ?? {};
-      if (refreshToken) await PartnerAuthService.invalidateRefreshToken(refreshToken);
-      res.json({ message: 'Logged out' });
-    } catch (err: any) {
-      res.status(200).json({ message: 'Logged out' });
-    }
-  }
-
-  static async changePassword(req: PartnerRequest, res: Response) {
-    try {
-      await PartnerAuthService.changePassword(req.user!.id, req.body?.newPassword);
-      res.json({ message: 'Password updated. Please log in again.' });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  }
-
-  // --------------------------------------------------------- forgot password
-
-  static async forgotPassword(req: Request, res: Response) {
-    try {
-      const email = String(req.body?.email ?? '').trim().toLowerCase();
-      if (!email) return res.status(400).json({ error: 'Email is required' });
-
-      const userRes = await pool.query(
-        `SELECT id, email FROM users WHERE email = $1 AND role = 'PARTNER' AND is_active = TRUE`,
-        [email],
-      );
-      if (userRes.rows.length === 0) {
-        res.json({ message: 'If an account with that email exists, a verification code has been sent.' });
-        return;
-      }
-
-      await OTPService.generateOTP(email);
-      res.json({ message: 'If an account with that email exists, a verification code has been sent.' });
-    } catch (err: any) {
-      res.status(500).json({ error: 'Failed to send verification code' });
-    }
-  }
-
-  static async verifyResetOTP(req: Request, res: Response) {
-    try {
-      const email = String(req.body?.email ?? '').trim().toLowerCase();
-      const code = String(req.body?.code ?? '');
-      if (!email || !code) return res.status(400).json({ error: 'Email and code are required' });
-
-      const valid = await OTPService.verifyOTP(email, code);
-      if (!valid) return res.status(400).json({ error: 'Invalid or expired verification code' });
-
-      const resetToken = crypto.randomUUID();
-      const redis = (await import('../../config/redis')).redis;
-      await redis.set(`partner_pwd_reset:${resetToken}`, email, 'EX', 3600);
-
-      res.json({ message: 'Code verified', resetToken });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  }
-
-  static async resetPassword(req: Request, res: Response) {
-    try {
-      const { resetToken, newPassword } = req.body ?? {};
-      if (!resetToken || !newPassword) return res.status(400).json({ error: 'Reset token and new password are required' });
-      if (String(newPassword).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-
-      const redis = (await import('../../config/redis')).redis;
-      const email = await redis.get(`partner_pwd_reset:${resetToken}`);
-      if (!email) return res.status(400).json({ error: 'Invalid or expired reset token' });
-
-      const userRes = await pool.query(
-        `SELECT id FROM users WHERE email = $1 AND role = 'PARTNER'`,
-        [email],
-      );
-      if (userRes.rows.length === 0) return res.status(400).json({ error: 'Account not found' });
-
-      await PartnerAuthService.changePassword(userRes.rows[0].id, newPassword);
-      await redis.del(`partner_pwd_reset:${resetToken}`);
-
-      res.json({ message: 'Password reset successful. Please log in with your new password.' });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  }
-
   // --------------------------------------------------------- dashboard
 
   static async dashboard(req: PartnerRequest, res: Response) {

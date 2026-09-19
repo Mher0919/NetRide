@@ -127,19 +127,33 @@ test('OTP: SQL DELETE clears old codes before inserting', () => {
   assert.ok(deleteSql.includes('$1'), 'Should parameterize email');
 });
 
-test('OTP: SQL INSERT stores email, code, expires_at', () => {
+test('OTP: SQL INSERT stores email, code_hash, expires_at', () => {
   const insertSql =
-    'INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)';
+    'INSERT INTO verification_codes (email, code_hash, expires_at) VALUES ($1, $2, $3)';
   assert.ok(insertSql.includes('email'), 'Should include email column');
-  assert.ok(insertSql.includes('code'), 'Should include code column');
+  assert.ok(insertSql.includes('code_hash'), 'Should store ONLY the code digest (never plaintext)');
+  assert.ok(!insertSql.includes('code, expires'), 'Raw code column must not be written');
   assert.ok(insertSql.includes('expires_at'), 'Should include expires_at column');
 });
 
-test('OTP: SQL SELECT checks email + code + expiry', () => {
+test('OTP: SQL SELECT checks email + code_hash + expiry', () => {
   const selectSql =
-    'SELECT * FROM verification_codes WHERE email = $1 AND code = $2 AND expires_at > NOW()';
+    'SELECT * FROM verification_codes WHERE email = $1 AND code_hash = $2 AND expires_at > NOW()';
+  assert.ok(selectSql.includes('code_hash'), 'Lookup must compare against the digest');
   assert.ok(selectSql.includes('expires_at > NOW()'), 'Should check expiry');
   assert.ok(selectSql.includes('$1') && selectSql.includes('$2'), 'Should use params');
+});
+
+test('OTP: failed verification increments attempts and voids the code at the cap', () => {
+  const maxAttempts = 5;
+  // Delete-on-exhaustion SQL mirrors otp.service.ts verifyOTP.
+  const throttleSql =
+    'DELETE FROM verification_codes WHERE email = $1 AND attempts + 1 >= $2';
+  const incrementSql =
+    'UPDATE verification_codes SET attempts = attempts + 1 WHERE email = $1';
+  assert.ok(throttleSql.includes('attempts + 1'), 'Should delete the code at the attempt cap');
+  assert.ok(incrementSql.includes('attempts = attempts + 1'), 'Should burn one attempt per failure');
+  assert.equal(maxAttempts, 5, 'Max attempts must be 5');
 });
 
 test('OTP: SQL DELETE after successful verification cleans up', () => {

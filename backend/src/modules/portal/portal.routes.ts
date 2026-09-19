@@ -4,7 +4,7 @@
 
 import { Router } from 'express';
 import { authMiddleware } from '../../middleware/auth.middleware';
-import { portalMiddleware } from '../../middleware/portal.middleware';
+import { portalMiddleware, portalPasswordChangeMiddleware } from '../../middleware/portal.middleware';
 import { PortalController } from './portal.controller';
 
 const router = Router();
@@ -17,7 +17,10 @@ router.post('/portal/auth/logout', PortalController.logout);
 router.post('/portal/auth/forgot-password', PortalController.forgotPassword);
 router.post('/portal/auth/verify-reset-otp', PortalController.verifyResetOTP);
 router.post('/portal/auth/reset-password', PortalController.resetPassword);
-router.post('/portal/auth/change-password', authMiddleware, portalMiddleware, PortalController.changePassword);
+// The change-password route is intentionally gated by the password-change
+// variant so accounts on a temporary password can clear it while every
+// other portal endpoint stays blocked (server-enforced).
+router.post('/portal/auth/change-password', authMiddleware, portalPasswordChangeMiddleware, PortalController.changePassword);
 
 // ---- Authed (type-aware) -----------------------------------------------
 router.get('/portal/dashboard', authMiddleware, portalMiddleware, PortalController.dashboard);

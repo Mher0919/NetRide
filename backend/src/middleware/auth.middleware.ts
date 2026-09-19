@@ -56,7 +56,7 @@ export const sponsorMiddleware = async (req: any, res: Response, next: NextFunct
     // fleet), so the sponsor account is resolved by user_id — never from
     // the users.role column.
     const resq = await pool.query(
-      `SELECT spa.sponsor_id FROM sponsor_portal_accounts spa
+      `SELECT spa.sponsor_id, spa.must_change_password FROM sponsor_portal_accounts spa
        JOIN sponsors s ON s.id = spa.sponsor_id
        WHERE spa.user_id = $1 AND spa.is_active = TRUE
          AND s.status <> 'SUSPENDED'`,
@@ -64,6 +64,12 @@ export const sponsorMiddleware = async (req: any, res: Response, next: NextFunct
     );
     if (resq.rows.length === 0) {
       return res.status(403).json({ error: 'Your sponsor account is inactive or suspended.' });
+    }
+    // Server-side temporary-password enforcement: an account on the
+    // initial temporary password must complete the forced change BEFORE
+    // any sponsor data is readable/writable.
+    if (resq.rows[0].must_change_password) {
+      return res.status(403).json({ error: 'You must set a new password before using the portal.' });
     }
     req.sponsor = { id: resq.rows[0].sponsor_id, userId: req.user.id, email: req.user.email };
     next();
@@ -110,7 +116,7 @@ export const partnerMiddleware = async (req: AuthRequest & { partner?: any }, re
   }
   try {
     const result = await pool.query(
-      `SELECT p.id, p.name, p.status
+      `SELECT p.id, p.name, p.status, p.must_change_password
        FROM partners p
        WHERE p.user_id = $1 OR p.contact_email ILIKE $2
        LIMIT 1`,
@@ -118,6 +124,10 @@ export const partnerMiddleware = async (req: AuthRequest & { partner?: any }, re
     );
     if (result.rows.length === 0) {
       return res.status(403).json({ error: 'Partner account not found.' });
+    }
+    // Server-side temporary-password enforcement (mirrors sponsorMiddleware).
+    if (result.rows[0].must_change_password) {
+      return res.status(403).json({ error: 'You must set a new password before using the portal.' });
     }
     req.partner = { id: result.rows[0].id, name: result.rows[0].name, status: result.rows[0].status };
     next();

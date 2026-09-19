@@ -1,22 +1,18 @@
 // backend/src/modules/partner/partner-portal.routes.ts
 //
-// Partner portal (web) API: auth, dashboard, usage, earnings, commission,
-// password recovery. All partners have their own isolated data.
+// Partner portal (legacy) API: dashboard, usage, earnings, commission.
+// All protected by partnerMiddleware (partner resolved from the user link;
+// accounts on a temporary password are blocked until the forced change).
+//
+// NOTE: authentication for partner dashboards lives on the UNIFIED portal
+// (/api/portal/auth/*). The legacy /partner/auth/* credential login was
+// removed because it bypassed email 2FA — a parallel, weaker auth path.
 
 import { Router } from 'express';
 import { authMiddleware, partnerMiddleware } from '../../middleware/auth.middleware';
 import { PartnerPortalController } from './partner-portal.controller';
 
 const router = Router();
-
-// ---- Auth (public) -----------------------------------------------------
-router.post('/partner/auth/login', PartnerPortalController.login);
-router.post('/partner/auth/refresh', PartnerPortalController.refresh);
-router.post('/partner/auth/logout', PartnerPortalController.logout);
-router.post('/partner/auth/forgot-password', PartnerPortalController.forgotPassword);
-router.post('/partner/auth/verify-reset-otp', PartnerPortalController.verifyResetOTP);
-router.post('/partner/auth/reset-password', PartnerPortalController.resetPassword);
-router.post('/partner/auth/change-password', authMiddleware, partnerMiddleware, PartnerPortalController.changePassword);
 
 // ---- Authed partner API --------------------------------------------------
 router.get('/partner/dashboard', authMiddleware, partnerMiddleware, PartnerPortalController.dashboard);

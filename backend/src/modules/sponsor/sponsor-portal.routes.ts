@@ -1,23 +1,19 @@
 // backend/src/modules/sponsor/sponsor-portal.routes.ts
 //
-// Sponsor portal (web) API: auth, dashboard, validations, customers,
-// settings. All protected by sponsorMiddleware (SPONSOR role + sponsorId
-// claim verified against sponsor_portal_accounts per request).
+// Sponsor portal (web) API: dashboard, validations, customers, settings.
+// All protected by sponsorMiddleware (SPONSOR role + sponsorId claim
+// verified against sponsor_portal_accounts per request; accounts on a
+// temporary password are blocked until the forced change completes).
+//
+// NOTE: authentication for the sponsor portal lives on the UNIFIED portal
+// (/api/portal/auth/*). The legacy /sponsor/auth/* credential login was
+// removed because it bypassed email 2FA — a parallel, weaker auth path.
 
 import { Router } from 'express';
 import { authMiddleware, sponsorMiddleware } from '../../middleware/auth.middleware';
 import { SponsorPortalController } from './sponsor-portal.controller';
 
 const router = Router();
-
-// ---- Auth (public) -----------------------------------------------------
-router.post('/sponsor/auth/login', SponsorPortalController.login);
-router.post('/sponsor/auth/refresh', SponsorPortalController.refresh);
-router.post('/sponsor/auth/logout', SponsorPortalController.logout);
-router.post('/sponsor/auth/forgot-password', SponsorPortalController.forgotPassword);
-router.post('/sponsor/auth/verify-reset-otp', SponsorPortalController.verifyResetOTP);
-router.post('/sponsor/auth/reset-password', SponsorPortalController.resetPassword);
-router.post('/sponsor/auth/change-password', authMiddleware, sponsorMiddleware, SponsorPortalController.changePassword);
 
 // ---- Authed portal API --------------------------------------------------
 router.get('/sponsor/dashboard', authMiddleware, sponsorMiddleware, SponsorPortalController.dashboard);

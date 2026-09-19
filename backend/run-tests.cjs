@@ -30,7 +30,9 @@ require('./src/modules/reporting/__tests__/report-reasons.unit.test.ts');
 require('./src/modules/sponsor/__tests__/sponsor-discount.unit.test.ts');
 require('./src/modules/sponsor/__tests__/sponsor-auth.unit.test.ts');
 require('./src/modules/sponsor/__tests__/forgot-password.unit.test.ts');
+require('./src/modules/portal/__tests__/portal-2fa.unit.test.ts');
 require('./src/modules/auth/__tests__/otp.unit.test.ts');
+require('./src/modules/auth/__tests__/auth-enumeration.unit.test.ts');
 
 // ioredis keeps the event loop alive while retrying a dead host; force a
 // clean exit once the test run finishes.

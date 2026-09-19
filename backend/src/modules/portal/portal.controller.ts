@@ -83,11 +83,21 @@ export class PortalController {
   }
 
   static async forgotPassword(req: Request, res: Response) {
+    // Enumeration-safe AND abuse-safe: the response is identical whether or
+    // not the account exists, but the reset email is only sent to real
+    // accounts — this endpoint can never be used as an unrestricted mailer.
     try {
       const { email } = z.object({ email: z.string().email() }).parse(req.body);
-      await OTPService.generateOTP(email);
+      const normalized = String(email).trim().toLowerCase();
+      const userRes = await pool.query(
+        `SELECT id FROM users WHERE email = $1`,
+        [normalized],
+      );
+      if (userRes.rows.length > 0) {
+        await OTPService.generateOTP(normalized);
+      }
     } catch {
-      // anti-enumeration: same response either way
+      // validation failures and DB errors return the same generic response
     }
     res.json({ message: 'If an account with that email exists, a verification code has been sent.' });
   }

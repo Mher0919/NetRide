@@ -39,7 +39,9 @@ const ForgotPassword: React.FC = () => {
     setLoading(true);
     try {
       await portalForgotPassword(email.trim());
-      setSnack({ open: true, message: 'Verification code sent to your email', severity: 'success' });
+      // Intentionally generic: identical for existing and non-existing
+      // accounts so the response never reveals account existence.
+      setSnack({ open: true, message: 'If an account with that email exists, a verification code has been sent.', severity: 'success' });
       setActiveStep(1);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Failed to send code';
@@ -115,7 +117,7 @@ const ForgotPassword: React.FC = () => {
         {activeStep === 0 && (
           <form onSubmit={handleRequestOTP}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Enter the email address associated with your sponsor portal account. We'll send you a verification code.
+              Enter the email address associated with your sponsor portal account. If an account exists, we'll send you a verification code.
             </Typography>
             <TextField
               label="Email"
@@ -136,7 +138,7 @@ const ForgotPassword: React.FC = () => {
         {activeStep === 1 && (
           <form onSubmit={handleVerifyOTP}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Enter the 6-digit code sent to <b>{email}</b>
+              Enter the 6-digit code we may have sent to <b>{email}</b>
             </Typography>
             <TextField
               label="6-digit code"

@@ -32,17 +32,29 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     ip: { max: 5, windowMs: MINUTE },
   },
 
-  // Sponsor portal auth — strict limits (anti-brute-force)
-  'POST /api/sponsor/auth/login': {
-    ip: { max: 10, windowMs: MINUTE },
-  },
-  'POST /api/sponsor/auth/forgot-password': {
-    ip: { max: 3, windowMs: MINUTE },
-  },
-  'POST /api/sponsor/auth/verify-reset-otp': {
+  // Admin 2FA — strict limits (6-digit code = 900k possibilities; an
+  // online attacker must never get anywhere near a brute-force budget).
+  'POST /api/auth/admin/request-2fa': {
     ip: { max: 5, windowMs: MINUTE },
   },
-  'POST /api/sponsor/auth/reset-password': {
+  'POST /api/auth/admin/verify-2fa': {
+    ip: { max: 5, windowMs: MINUTE },
+  },
+
+  // Unified portal (Colab) auth — strict limits (anti-brute-force)
+  'POST /api/portal/auth/login': {
+    ip: { max: 10, windowMs: MINUTE },
+  },
+  'POST /api/portal/auth/verify-2fa': {
+    ip: { max: 5, windowMs: MINUTE },
+  },
+  'POST /api/portal/auth/forgot-password': {
+    ip: { max: 3, windowMs: MINUTE },
+  },
+  'POST /api/portal/auth/verify-reset-otp': {
+    ip: { max: 5, windowMs: MINUTE },
+  },
+  'POST /api/portal/auth/reset-password': {
     ip: { max: 3, windowMs: MINUTE },
   },
 

@@ -1,53 +1,9 @@
 import api from './index';
 
-export interface SponsorSession {
-  token: string;
-  refreshToken: string;
-  sponsor: {
-    id: string;
-    businessName: string;
-    email: string;
-    mustChangePassword: boolean;
-  };
-}
-
-export const sponsorLogin = async (email: string, password: string) => {
-  const response = await api.post<SponsorSession>('/sponsor/auth/login', { email, password });
-  return response.data;
-};
-
-export const sponsorRefresh = async (refreshToken: string) => {
-  const response = await api.post<{ token: string; refreshToken: string }>('/sponsor/auth/refresh', { refreshToken });
-  return response.data;
-};
-
-export const sponsorLogout = async (refreshToken: string) => {
-  try {
-    await api.post('/sponsor/auth/logout', { refreshToken });
-  } catch {
-    // Best-effort logout
-  }
-};
-
-export const sponsorForgotPassword = async (email: string) => {
-  const response = await api.post('/sponsor/auth/forgot-password', { email });
-  return response.data;
-};
-
-export const sponsorVerifyResetOTP = async (email: string, code: string) => {
-  const response = await api.post<{ resetToken: string }>('/sponsor/auth/verify-reset-otp', { email, code });
-  return response.data;
-};
-
-export const sponsorResetPassword = async (resetToken: string, newPassword: string) => {
-  const response = await api.post('/sponsor/auth/reset-password', { resetToken, newPassword });
-  return response.data;
-};
-
-export const sponsorChangePassword = async (newPassword: string) => {
-  const response = await api.post('/sponsor/auth/change-password', { newPassword });
-  return response.data;
-};
+// NOTE: portal authentication (login + email 2FA + password change) is
+// handled by the unified portal API (api/portal.ts → /portal/auth/*).
+// The legacy /sponsor/auth/* credential endpoints were removed from the
+// backend because they bypassed the mandatory 2FA step.
 
 export interface PortalSponsor {
   id: string;

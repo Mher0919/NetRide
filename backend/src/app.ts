@@ -303,6 +303,18 @@ async function runMigrations() {
       console.log('✅ Verification schema (002) initialized successfully');
     }
 
+    // OTP code hashing + attempt capping (048).
+    const hasOtpCodeHash = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'verification_codes' AND column_name = 'code_hash'"
+    );
+    if (hasOtpCodeHash.rowCount === 0) {
+      console.log('⚡ Applying OTP code hashing schema (048)...');
+      const schemaPath = path.join(__dirname, '../migrations/048_otp_code_hashing.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ OTP code hashing schema (048) applied');
+    }
+
     // Fix User Schema
     const hasPasswordHash = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'password_hash'");
     if (hasPasswordHash.rowCount === 0) {

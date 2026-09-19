@@ -26,6 +26,14 @@ const REFRESH_TOKEN_TTL_DAYS = 30;
 /** How long a "remember this device" login skips the email 2FA code. */
 const TRUSTED_DEVICE_TTL = '30d';
 const TRUSTED_DEVICE_MARKER = 'portal-trusted';
+/**
+ * Server-side pending-login state created the moment a password check
+ * succeeds but 2FA has not yet been completed. `verify2FA` only issues a
+ * session for an email that has an ACTIVE pending login, so a valid code
+ * alone can never mint a session — the password must have been verified
+ * first. Lifetime matches the OTP code TTL (10 minutes).
+ */
+const PENDING_LOGIN_TTL_S = 10 * 60;
 
 export type PortalType = 'SPONSOR' | 'PARTNER' | 'FLEET';
 
@@ -183,6 +191,15 @@ export class PortalAuthService {
     }
 
     if (!isTrusted) {
+      // Establish the pending 2FA state BEFORE generating the code so there
+      // is never a code in circulation without a matching pending login.
+      await redis.del(`portal_pending_login:${user.email}`);
+      await redis.set(
+        `portal_pending_login:${user.email}`,
+        JSON.stringify({ userId: user.id }),
+        'EX',
+        PENDING_LOGIN_TTL_S,
+      );
       await OTPService.generateOTP(user.email);
       return {
         otp_required: true,
@@ -194,18 +211,38 @@ export class PortalAuthService {
     return this.issueSession(user);
   }
 
-  /** Completes 2FA: verifies the emailed code and issues the portal session. */
+  /**
+   * Completes 2FA: requires an ACTIVE pending login (password previously
+   * verified via login) plus a valid emailed code, then issues the portal
+   * session. Any failure consumes the pending state, so replaying a code or
+   * brute-forcing the endpoint forces a fresh credential submission.
+   */
   static async verify2FA(
     email: string,
     code: string,
   ): Promise<PortalSession & { trustedDeviceToken: string }> {
     const normalizedEmail = String(email ?? '').trim().toLowerCase();
-    const isValid = await OTPService.verifyOTP(normalizedEmail, code);
-    if (!isValid) throw new Error('Invalid or expired verification code');
+    const pendingKey = `portal_pending_login:${normalizedEmail}`;
 
+    // No password-verified login in flight → no session, no exceptions.
+    const pendingData = await redis.get(pendingKey);
+    if (!pendingData) {
+      throw new Error('Login session expired or invalid. Please sign in again.');
+    }
+
+    const isValid = await OTPService.verifyOTP(normalizedEmail, code);
+    if (!isValid) {
+      await redis.del(pendingKey);
+      throw new Error('Invalid or expired verification code');
+    }
+
+    // Consume the pending state — each session requires a fresh login+2FA.
+    await redis.del(pendingKey);
+
+    const { userId } = JSON.parse(pendingData);
     const userRes = await pool.query(
-      `SELECT id, email, is_active, role FROM users WHERE email = $1`,
-      [normalizedEmail],
+      `SELECT id, email, is_active, role FROM users WHERE id = $1 AND email = $2`,
+      [userId, normalizedEmail],
     );
     const user = userRes.rows[0];
     if (!user) throw new Error('Invalid email');
