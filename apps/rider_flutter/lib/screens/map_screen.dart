@@ -143,9 +143,9 @@ class _MapScreenState extends State<MapScreen>
     _specialsRefreshTimer = Timer.periodic(const Duration(minutes: 3), (_) {
       if (!mounted || !TickerMode.of(context)) return;
       context.read<SpecialsProvider>().refresh(
-            lat: _smoothedPosition?.latitude,
-            lng: _smoothedPosition?.longitude,
-          );
+        lat: _smoothedPosition?.latitude,
+        lng: _smoothedPosition?.longitude,
+      );
     });
     _sheetController = AnimationController(
       vsync: this,
@@ -176,7 +176,10 @@ class _MapScreenState extends State<MapScreen>
     final results = recent.take(6).toList();
     if (_userPosition != null) {
       for (final result in results) {
-        result.recalculateFrom(_userPosition!.latitude, _userPosition!.longitude);
+        result.recalculateFrom(
+          _userPosition!.latitude,
+          _userPosition!.longitude,
+        );
       }
     }
     setState(() => _recentSearches = results);
@@ -254,9 +257,9 @@ class _MapScreenState extends State<MapScreen>
     // re-query the authoritative active-special list on every foreground.
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<SpecialsProvider>().refresh(
-            lat: _smoothedPosition?.latitude,
-            lng: _smoothedPosition?.longitude,
-          );
+        lat: _smoothedPosition?.latitude,
+        lng: _smoothedPosition?.longitude,
+      );
     }
   }
 
@@ -369,7 +372,10 @@ class _MapScreenState extends State<MapScreen>
     // Refresh distances for recent places when location changes
     if (_recentSearches.isNotEmpty && _userPosition != null) {
       for (final result in _recentSearches) {
-        result.recalculateFrom(_userPosition!.latitude, _userPosition!.longitude);
+        result.recalculateFrom(
+          _userPosition!.latitude,
+          _userPosition!.longitude,
+        );
       }
     }
 
@@ -392,7 +398,9 @@ class _MapScreenState extends State<MapScreen>
       delegate: AddressSearchDelegate(
         userLat: _userPosition?.latitude,
         userLon: _userPosition?.longitude,
-        searchFieldLabel: isPickup ? 'Enter pickup location' : 'Enter destination',
+        searchFieldLabel: isPickup
+            ? 'Enter pickup location'
+            : 'Enter destination',
       ),
     );
 
@@ -410,7 +418,11 @@ class _MapScreenState extends State<MapScreen>
           _shouldFollowUser = false;
           // The rider is actively planning a ride → demand signal for the
           // heatmap (server-side cooldowns dedupe bursts).
-          context.read<RideProvider>().reportActivity('REQUEST_FLOW', lat: loc.lat, lng: loc.lng);
+          context.read<RideProvider>().reportActivity(
+            'REQUEST_FLOW',
+            lat: loc.lat,
+            lng: loc.lng,
+          );
         }
       });
       _updateRoute();
@@ -609,8 +621,7 @@ class _MapScreenState extends State<MapScreen>
       _buildEstimateFromRouteData(
         distanceMeters: plan.distanceMeters,
         durationSeconds: plan.durationSeconds,
-        backendFareTotal:
-            (plan.fare['totalFare'] as num?)?.toDouble() ?? 0.0,
+        backendFareTotal: (plan.fare['totalFare'] as num?)?.toDouble() ?? 0.0,
         engine: plan.engine,
       );
 
@@ -666,7 +677,9 @@ class _MapScreenState extends State<MapScreen>
         _loadingEstimates = false;
         if (plan.points.isNotEmpty) _routePoints = plan.points;
       });
-      debugPrint('[ESTIMATE] Background fare refresh landed: ${fareTotal ?? 'no fare'}');
+      debugPrint(
+        '[ESTIMATE] Background fare refresh landed: ${fareTotal ?? 'no fare'}',
+      );
     } catch (e) {
       debugPrint('[ESTIMATE] Background fare refresh failed (kept cache): $e');
       if (mounted) setState(() => _loadingEstimates = false);
@@ -707,8 +720,8 @@ class _MapScreenState extends State<MapScreen>
   }
 
   /// What the rider owes: fare − promo − credits.
-  int get _finalCents => math.max(
-      0, _fareCents - _promoDiscountCents - _creditsToUseCents);
+  int get _finalCents =>
+      math.max(0, _fareCents - _promoDiscountCents - _creditsToUseCents);
 
   int get _totalSavedCents => _promoDiscountCents + _creditsToUseCents;
 
@@ -717,12 +730,11 @@ class _MapScreenState extends State<MapScreen>
     // SPECIALS: attach the rider's CREATED redemption (if any) so the
     // backend applies the sponsor discount inside the pricing transaction.
     final specials = Provider.of<SpecialsProvider>(context, listen: false);
-    _specialRedemptionId = specials.canAttachToRide ? specials.current!.id : null;
+    _specialRedemptionId = specials.canAttachToRide
+        ? specials.current!.id
+        : null;
     setState(() => _requesting = true);
-    Provider.of<RideProvider>(
-      context,
-      listen: false,
-    ).requestRide(
+    Provider.of<RideProvider>(context, listen: false).requestRide(
       _pickup!,
       _destination!,
       favoritePriority: _favoriteDriverEnabled,
@@ -738,16 +750,15 @@ class _MapScreenState extends State<MapScreen>
     // Any open "searching" sheet — initial request OR a resumed search
     // after a driver cancellation — cancels the pending ride on close,
     // exactly like the sheet's own Cancel Ride button.
-    final hasActiveSearch =
-        _requesting || rideProvider.isSearchingForDriver;
+    final hasActiveSearch = _requesting || rideProvider.isSearchingForDriver;
     if (cancelIfRequesting && hasActiveSearch) {
       final error = await rideProvider.cancelRide();
       if (!mounted) return;
       if (error != null) {
         // Keep the sheet open so the rider can retry; surface why.
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error)));
         setState(() => _requesting = false);
         _animateSheetTo(1);
         return;
@@ -784,8 +795,13 @@ class _MapScreenState extends State<MapScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Cancel Ride?', style: TextStyle(fontWeight: FontWeight.w700)),
-        content: const Text('Are you sure you want to cancel this ride request?'),
+        title: const Text(
+          'Cancel Ride?',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          'Are you sure you want to cancel this ride request?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -793,20 +809,25 @@ class _MapScreenState extends State<MapScreen>
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
+            child: const Text(
+              'Yes, Cancel',
+              style: TextStyle(color: Color(0xFFC65A5A)),
+            ),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
 
-    final error = await Provider.of<RideProvider>(context, listen: false)
-        .cancelRide();
+    final error = await Provider.of<RideProvider>(
+      context,
+      listen: false,
+    ).cancelRide();
     if (!mounted) return;
     if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
     await _closePanel(cancelIfRequesting: false);
@@ -868,8 +889,9 @@ class _MapScreenState extends State<MapScreen>
     final range = maxH - _sheetMinHeight;
     if (range <= 0) return;
     final deltaFrac = -details.delta.dy / range;
-    _sheetController.value =
-        (_dragStartFraction + deltaFrac).clamp(0.0, 1.0).toDouble();
+    _sheetController.value = (_dragStartFraction + deltaFrac)
+        .clamp(0.0, 1.0)
+        .toDouble();
   }
 
   void _onSheetDragEnd(DragEndDetails details) {
@@ -889,11 +911,12 @@ class _MapScreenState extends State<MapScreen>
     // Eligible active specials — the single authoritative list shared by
     // the Explore SPECIALS section and these map markers. Zero active
     // specials ⇒ zero markers (hidden, not placeholders).
-    final eligibleSponsors = context.select<SpecialsProvider, List<SponsorSpecial>>(
-      (s) => s.sponsors
-          .where((x) => x.latitude != null && x.longitude != null)
-          .toList(),
-    );
+    final eligibleSponsors = context
+        .select<SpecialsProvider, List<SponsorSpecial>>(
+          (s) => s.sponsors
+              .where((x) => x.latitude != null && x.longitude != null)
+              .toList(),
+        );
 
     // When a driver accepts, leave the map and go to the active trip
     // screen. Covers BOTH the initial request (`_requesting`) and a resumed
@@ -956,7 +979,8 @@ class _MapScreenState extends State<MapScreen>
     final pendingNotice = rideProvider.driverCancelledNotice;
     if (pendingNotice != null &&
         rideProvider.isSearchingForDriver &&
-        rideProvider.driverCancelledNoticeSeq != _driverCancelNotifiedNoticeId) {
+        rideProvider.driverCancelledNoticeSeq !=
+            _driverCancelNotifiedNoticeId) {
       _driverCancelNotifiedNoticeId = rideProvider.driverCancelledNoticeSeq;
       rideProvider.consumeDriverCancelledNotice();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -969,434 +993,526 @@ class _MapScreenState extends State<MapScreen>
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _initLiveLocation,
-        successWidget: Stack(
-          children: [
-            Column(
+        successWidget: LayoutBuilder(
+          builder: (context, constraints) {
+            final fullMapHeight = constraints.maxHeight;
+            final miniMapHeight = (fullMapHeight * 0.40).clamp(240.0, 380.0);
+            return Stack(
               children: [
-                // Part 2: the explore header slides away when the map goes
-                // full screen (AnimatedSize keeps the map subtree mounted,
-                // so tiles/camera survive the transition).
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 380),
-                  curve: Curves.easeInOutCubic,
-                  alignment: Alignment.topCenter,
-                  child: _mapExpanded
-                      ? const SizedBox(width: double.infinity)
-                      : SafeArea(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 10,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 8,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(24),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black
-                                                .withOpacity(0.05),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 4),
-                                          ),
+                Column(
+                  children: [
+                    // Part 2: scrollable Explore content (greeting, search
+                    // cards, SPECIALS). The map below keeps a FIXED height —
+                    // adding specials never shrinks it — and this area
+                    // scrolls when the content overflows. Full-screen map
+                    // mode hides it entirely.
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        child: _mapExpanded
+                            ? const SizedBox.shrink(
+                                key: ValueKey('map-expanded'),
+                              )
+                            : SingleChildScrollView(
+                                key: const ValueKey('explore-content'),
+                                physics: const BouncingScrollPhysics(),
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: SafeArea(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                      vertical: 10,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 16,
+                                                    vertical: 8,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                borderRadius:
+                                                    BorderRadius.circular(24),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black
+                                                        .withOpacity(0.05),
+                                                    blurRadius: 10,
+                                                    offset: const Offset(0, 4),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Text(
+                                                _firstName.isNotEmpty
+                                                    ? 'Hello, $_firstName'
+                                                    : 'Welcome',
+                                                style: theme
+                                                    .textTheme
+                                                    .bodyMedium
+                                                    ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: const Color(
+                                                        0xFF2F3A32,
+                                                      ),
+                                                    ),
+                                              ),
+                                            ),
+                                            Container(
+                                              width: 12,
+                                              height: 12,
+                                              decoration: BoxDecoration(
+                                                color: rideProvider.isConnected
+                                                    ? const Color(0xFF6E8B74)
+                                                    : const Color(0xFFC65A5A),
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color: Colors.white,
+                                                  width: 2,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 14),
+                                        _buildExploreLocationCard(theme),
+                                        const SizedBox(height: 10),
+                                        Hero(
+                                          tag: 'search_container',
+                                          child: _buildWhereToCard(theme),
+                                        ),
+                                        if (_recentSearches.isNotEmpty) ...[
+                                          const SizedBox(height: 14),
+                                          _buildRecentSearches(theme),
                                         ],
+                                        // SPECIALS — conditional section living INSIDE
+                                        // Explore. Renders nothing when the backend
+                                        // reports zero eligible active specials (the
+                                        // widget's own visibility rule), so Explore
+                                        // stays clean in both cases.
+                                        const ExploreSpecialsSection(),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
+                    if (_smoothedPosition != null)
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 380),
+                        curve: Curves.easeInOutCubic,
+                        alignment: Alignment.topCenter,
+                        child: SizedBox(
+                          height: _mapExpanded ? fullMapHeight : miniMapHeight,
+                          child: AnimatedPadding(
+                            duration: const Duration(milliseconds: 380),
+                            curve: Curves.easeInOutCubic,
+                            padding: _mapExpanded
+                                ? EdgeInsets.zero
+                                : const EdgeInsets.fromLTRB(20, 2, 20, 20),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 380),
+                              curve: Curves.easeInOutCubic,
+                              clipBehavior: Clip.antiAlias,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(
+                                  _mapExpanded ? 0 : 28,
+                                ),
+                                boxShadow: _mapExpanded
+                                    ? null
+                                    : [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.10),
+                                          blurRadius: 24,
+                                          offset: const Offset(0, 10),
+                                        ),
+                                      ],
+                              ),
+                              child: Stack(
+                                children: [
+                                  Listener(
+                                    // In mini mode a light tap expands the map
+                                    // (state A -> B); drags and pinches pan/zoom the
+                                    // map directly (interaction enabled below). Raw
+                                    // pointer events are used because flutter_map's
+                                    // tap recognizer would win the gesture arena
+                                    // against a wrapping GestureDetector.
+                                    onPointerDown: _mapExpanded
+                                        ? null
+                                        : (e) {
+                                            _miniTapDownPosition = e.position;
+                                            _miniTapDownAt = DateTime.now();
+                                          },
+                                    onPointerUp: _mapExpanded
+                                        ? null
+                                        : (e) {
+                                            final down = _miniTapDownPosition;
+                                            final downAt = _miniTapDownAt;
+                                            _miniTapDownPosition = null;
+                                            _miniTapDownAt = null;
+                                            if (down == null || downAt == null)
+                                              return;
+                                            final moved =
+                                                (e.position - down).distance;
+                                            final elapsed = DateTime.now()
+                                                .difference(downAt);
+                                            if (moved < 16 &&
+                                                elapsed <
+                                                    const Duration(
+                                                      milliseconds: 400,
+                                                    )) {
+                                              _expandMap();
+                                            }
+                                          },
+                                    child: FlutterMap(
+                                      mapController: _mapController,
+                                      options: MapOptions(
+                                        initialCenter: _smoothedPosition!,
+                                        initialZoom: 15.0,
+                                        minZoom: 12,
+                                        maxZoom: 18,
+                                        interactionOptions:
+                                            const InteractionOptions(
+                                              flags:
+                                                  InteractiveFlag.all &
+                                                  ~InteractiveFlag.rotate,
+                                            ),
+                                        onMapReady: () {
+                                          setState(() => _isMapReady = true);
+                                        },
+                                        onPositionChanged: (pos, hasGesture) {
+                                          if (hasGesture) {
+                                            setState(
+                                              () => _shouldFollowUser = false,
+                                            );
+                                          }
+                                        },
                                       ),
-                                      child: Text(
-                                        _firstName.isNotEmpty
-                                            ? 'Hello, $_firstName'
-                                            : 'Welcome',
-                                        style: theme.textTheme.bodyMedium
-                                            ?.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                          color: const Color(0xFF2F3A32),
+                                      children: [
+                                        TileLayer(
+                                          urlTemplate:
+                                              'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                                          subdomains: const [
+                                            'a',
+                                            'b',
+                                            'c',
+                                            'd',
+                                          ],
+                                          userAgentPackageName:
+                                              'com.NetRide.rider',
+                                          tileBuilder:
+                                              (context, tileWidget, tile) {
+                                                return ColorFiltered(
+                                                  colorFilter:
+                                                      const ColorFilter.matrix(
+                                                        <double>[
+                                                          0.937,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          0.922,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          0.902,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          0,
+                                                          1,
+                                                          0,
+                                                        ],
+                                                      ),
+                                                  child: ColorFiltered(
+                                                    colorFilter:
+                                                        ColorFilter.mode(
+                                                          const Color(
+                                                            0xFFEEEBE6,
+                                                          ).withOpacity(0.3),
+                                                          BlendMode.multiply,
+                                                        ),
+                                                    child: tileWidget,
+                                                  ),
+                                                );
+                                              },
+                                        ),
+                                        AnimatedOpacity(
+                                          opacity: _routePoints.isNotEmpty
+                                              ? 1
+                                              : 0,
+                                          duration: const Duration(
+                                            milliseconds: 350,
+                                          ),
+                                          child: _routePoints.isEmpty
+                                              ? const SizedBox.shrink()
+                                              : PolylineLayer(
+                                                  polylines: [
+                                                    Polyline<Object>(
+                                                      points: _routePoints,
+                                                      color: const Color(
+                                                        0xFF5B7760,
+                                                      ),
+                                                      strokeWidth: 4.0,
+                                                      borderColor: Colors.white,
+                                                      borderStrokeWidth: 1.0,
+                                                    ),
+                                                  ],
+                                                ),
+                                        ),
+                                        MarkerLayer(
+                                          markers: [
+                                            if (_smoothedPosition != null)
+                                              Marker(
+                                                point: _smoothedPosition!,
+                                                width: 40,
+                                                height: 40,
+                                                child:
+                                                    _buildUserLocationMarker(),
+                                              ),
+                                            if (_pickup != null &&
+                                                _pickup!.address !=
+                                                    'Current Location')
+                                              Marker(
+                                                point: LatLng(
+                                                  _pickup!.lat,
+                                                  _pickup!.lng,
+                                                ),
+                                                width: 30,
+                                                height: 30,
+                                                child: _buildPinMarker(
+                                                  const Color(0xFF5B7760),
+                                                  isPickup: true,
+                                                ),
+                                              ),
+                                            if (_destination != null)
+                                              Marker(
+                                                point: LatLng(
+                                                  _destination!.lat,
+                                                  _destination!.lng,
+                                                ),
+                                                width: 30,
+                                                height: 30,
+                                                child: _buildPinMarker(
+                                                  const Color(0xFF2F3A32),
+                                                  isPickup: false,
+                                                ),
+                                              ),
+                                            // SPECIALS sponsor markers (eligible active
+                                            // specials only — deactivated sponsors drop
+                                            // out of the list on the next refresh, so zero
+                                            // active specials means zero markers).
+                                            for (final s in eligibleSponsors)
+                                              Marker(
+                                                point: LatLng(
+                                                  s.latitude!,
+                                                  s.longitude!,
+                                                ),
+                                                width: 36,
+                                                height: 36,
+                                                child: GestureDetector(
+                                                  onTap: () =>
+                                                      Navigator.of(
+                                                        context,
+                                                      ).pushNamed(
+                                                        '/special-detail',
+                                                        arguments: {'id': s.id},
+                                                      ),
+                                                  child: _buildSponsorMarker(s),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                        for (var entry
+                                            in rideProvider
+                                                .nearbyDrivers
+                                                .entries)
+                                          SmoothDriverMarker(
+                                            driverId: entry.key,
+                                            position: LatLng(
+                                              entry.value.lat,
+                                              entry.value.lng,
+                                            ),
+                                            heading: entry.value.heading ?? 0,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  // Tap-to-expand hint pill — glued to the mini map
+                                  // so it stays with it (state A).
+                                  if (!_mapExpanded)
+                                    Positioned(
+                                      top: 10,
+                                      right: 10,
+                                      child: IgnorePointer(
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 6,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withOpacity(
+                                              0.92,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                            border: Border.all(
+                                              color: const Color(0xFFD8D2CA),
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(
+                                                  0.06,
+                                                ),
+                                                blurRadius: 8,
+                                                offset: const Offset(0, 3),
+                                              ),
+                                            ],
+                                          ),
+                                          child: const Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.open_in_full_rounded,
+                                                size: 12,
+                                                color: Color(0xFF5B7760),
+                                              ),
+                                              SizedBox(width: 5),
+                                              Text(
+                                                'Drag to explore · tap for full screen',
+                                                style: TextStyle(
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Color(0xFF5B7760),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
-                                    Container(
-                                      width: 12,
-                                      height: 12,
-                                      decoration: BoxDecoration(
-                                        color: rideProvider.isConnected
-                                            ? const Color(0xFF6E8B74)
-                                            : const Color(0xFFC65A5A),
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                            color: Colors.white, width: 2),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 14),
-                                _buildExploreLocationCard(theme),
-                                const SizedBox(height: 10),
-                                Hero(
-                                  tag: 'search_container',
-                                  child: _buildWhereToCard(theme),
-                                ),
-                                if (_recentSearches.isNotEmpty) ...[
-                                  const SizedBox(height: 14),
-                                  _buildRecentSearches(theme),
                                 ],
-                                // SPECIALS — conditional section living INSIDE
-                                // Explore. Renders nothing when the backend
-                                // reports zero eligible active specials (the
-                                // widget's own visibility rule), so Explore
-                                // stays clean in both cases.
-                                const ExploreSpecialsSection(),
-                              ],
+                              ),
                             ),
                           ),
                         ),
+                      )
+                    else
+                      const Expanded(child: SizedBox()),
+                  ],
                 ),
-                if (_smoothedPosition != null)
-                  Expanded(
-                    child: AnimatedPadding(
-                      duration: const Duration(milliseconds: 380),
-                      curve: Curves.easeInOutCubic,
-                      padding: _mapExpanded
-                          ? EdgeInsets.zero
-                          : const EdgeInsets.fromLTRB(20, 2, 20, 20),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 380),
-                        curve: Curves.easeInOutCubic,
-                        clipBehavior: Clip.antiAlias,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(
-                              _mapExpanded ? 0 : 28),
-                          boxShadow: _mapExpanded
-                              ? null
-                              : [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.10),
-                                    blurRadius: 24,
-                                    offset: const Offset(0, 10),
-                                  ),
-                                ],
-                        ),
-                        child: Listener(
-                          // In mini mode the map has no pan/zoom gestures;
-                          // a light tap expands it (state A -> B). Raw
-                          // pointer events are used because flutter_map's
-                          // tap recognizer would win the gesture arena
-                          // against a wrapping GestureDetector.
-                          onPointerDown: _mapExpanded
-                              ? null
-                              : (e) {
-                                  _miniTapDownPosition = e.position;
-                                  _miniTapDownAt = DateTime.now();
-                                },
-                          onPointerUp: _mapExpanded
-                              ? null
-                              : (e) {
-                                  final down = _miniTapDownPosition;
-                                  final downAt = _miniTapDownAt;
-                                  _miniTapDownPosition = null;
-                                  _miniTapDownAt = null;
-                                  if (down == null || downAt == null) return;
-                                  final moved = (e.position - down).distance;
-                                  final elapsed =
-                                      DateTime.now().difference(downAt);
-                                  if (moved < 16 &&
-                                      elapsed < const Duration(milliseconds: 400)) {
-                                    _expandMap();
-                                  }
-                                },
-                          child: FlutterMap(
-                        mapController: _mapController,
-                        options: MapOptions(
-                          initialCenter: _smoothedPosition!,
-                          initialZoom: 15.0,
-                          minZoom: 12,
-                          maxZoom: 18,
-                          interactionOptions: _mapExpanded
-                              ? const InteractionOptions(
-                                  flags: InteractiveFlag.all &
-                                      ~InteractiveFlag.rotate,
-                                )
-                              : const InteractionOptions(
-                                  flags: InteractiveFlag.none,
-                                ),
-                          onMapReady: () {
-                            setState(() => _isMapReady = true);
-                          },
-                          onPositionChanged: (pos, hasGesture) {
-                            if (hasGesture) {
-                              setState(() => _shouldFollowUser = false);
-                            }
-                          },
-                        ),
-                        children: [
-                          TileLayer(
-                            urlTemplate:
-                                'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-                            subdomains: const ['a', 'b', 'c', 'd'],
-                            userAgentPackageName: 'com.NetRide.rider',
-                            tileBuilder: (context, tileWidget, tile) {
-                              return ColorFiltered(
-                                colorFilter: const ColorFilter.matrix(<double>[
-                                  0.937,
-                                  0,
-                                  0,
-                                  0,
-                                  0,
-                                  0,
-                                  0.922,
-                                  0,
-                                  0,
-                                  0,
-                                  0,
-                                  0,
-                                  0.902,
-                                  0,
-                                  0,
-                                  0,
-                                  0,
-                                  0,
-                                  1,
-                                  0,
-                                ]),
-                                child: ColorFiltered(
-                                  colorFilter: ColorFilter.mode(
-                                    const Color(0xFFEEEBE6).withOpacity(0.3),
-                                    BlendMode.multiply,
-                                  ),
-                                  child: tileWidget,
-                                ),
-                              );
-                            },
-                          ),
-                          AnimatedOpacity(
-                            opacity: _routePoints.isNotEmpty ? 1 : 0,
-                            duration: const Duration(milliseconds: 350),
-                            child: _routePoints.isEmpty
-                                ? const SizedBox.shrink()
-                                : PolylineLayer(
-                                    polylines: [
-                                      Polyline<Object>(
-                                        points: _routePoints,
-                                        color: const Color(0xFF5B7760),
-                                        strokeWidth: 4.0,
-                                        borderColor: Colors.white,
-                                        borderStrokeWidth: 1.0,
-                                      ),
-                                    ],
-                                  ),
-                          ),
-                          MarkerLayer(
-                            markers: [
-                              if (_smoothedPosition != null)
-                                Marker(
-                                  point: _smoothedPosition!,
-                                  width: 40,
-                                  height: 40,
-                                  child: _buildUserLocationMarker(),
-                                ),
-                              if (_pickup != null &&
-                                  _pickup!.address != 'Current Location')
-                                Marker(
-                                  point: LatLng(_pickup!.lat, _pickup!.lng),
-                                  width: 30,
-                                  height: 30,
-                                  child: _buildPinMarker(
-                                    const Color(0xFF5B7760),
-                                    isPickup: true,
-                                  ),
-                                ),
-                              if (_destination != null)
-                                Marker(
-                                  point:
-                                      LatLng(_destination!.lat, _destination!.lng),
-                                  width: 30,
-                                  height: 30,
-                                  child: _buildPinMarker(
-                                    const Color(0xFF2F3A32),
-                                    isPickup: false,
-                                  ),
-                                ),
-                              // SPECIALS sponsor markers (eligible active
-                              // specials only — deactivated sponsors drop
-                              // out of the list on the next refresh, so zero
-                              // active specials means zero markers).
-                              for (final s in eligibleSponsors)
-                                Marker(
-                                  point: LatLng(s.latitude!, s.longitude!),
-                                  width: 36,
-                                  height: 36,
-                                  child: GestureDetector(
-                                    onTap: () => Navigator.of(context)
-                                        .pushNamed('/special-detail',
-                                            arguments: {'id': s.id}),
-                                    child: _buildSponsorMarker(s),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          for (var entry in rideProvider.nearbyDrivers.entries)
-                            SmoothDriverMarker(
-                              driverId: entry.key,
-                              position:
-                                  LatLng(entry.value.lat, entry.value.lng),
-                              heading: entry.value.heading ?? 0,
+
+                // Part 2: back arrow — only in full-screen map mode (B/C).
+                if (_mapExpanded)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    child: SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Material(
+                          color: Colors.white,
+                          shape: const CircleBorder(),
+                          elevation: 3,
+                          shadowColor: Colors.black.withOpacity(0.2),
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: _collapseMap,
+                            child: const Padding(
+                              padding: EdgeInsets.all(10),
+                              child: Icon(
+                                Icons.arrow_back_rounded,
+                                size: 20,
+                                color: Color(0xFF2F3A32),
+                              ),
                             ),
-                        ],
-                      ),
+                          ),
                         ),
                       ),
                     ),
-                  )
-                else
-                  const Expanded(child: SizedBox()),
+                  ),
+
+                // Tap-to-expand hint pill lives INSIDE the mini map (above).
+
+                // My-location FAB — rides above the bottom sheet when open.
+                AnimatedBuilder(
+                  animation: _sheetController,
+                  builder: (context, _) {
+                    // The sheet also renders for an on-going backend search even
+                    // when the local pickup/destination are gone (fresh Explore
+                    // after a driver-cancel recovery re-attaches to the ride).
+                    final searchingOnMap =
+                        _requesting || rideProvider.isSearchingForDriver;
+                    final sheetOpen =
+                        _panelOpen &&
+                        (searchingOnMap ||
+                            (_pickup != null && _destination != null));
+                    final sheetHeight = sheetOpen
+                        ? _sheetHeightForFraction(_sheetController.value)
+                        : 0.0;
+                    return Positioned(
+                      right: 20,
+                      bottom: sheetOpen
+                          ? sheetHeight + 16
+                          : (_mapExpanded ? 24 : 40),
+                      child: FloatingActionButton(
+                        heroTag: 'location_fab',
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF2F3A32),
+                        elevation: 4,
+                        shape: const CircleBorder(),
+                        onPressed: () {
+                          setState(() => _shouldFollowUser = true);
+                          if (_smoothedPosition != null) {
+                            _mapController.move(_smoothedPosition!, 15.0);
+                          }
+                        },
+                        child: const Icon(Icons.my_location),
+                      ),
+                    );
+                  },
+                ),
+
+                if (_panelOpen &&
+                    (_pickup != null && _destination != null ||
+                        _requesting ||
+                        rideProvider.isSearchingForDriver))
+                  _buildRideSheet(theme)
+                else if (_pickup != null && _destination != null)
+                  Positioned(
+                    bottom: 40,
+                    left: 20,
+                    right: 20,
+                    child: Hero(
+                      tag: 'confirm_button',
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _openRidePanel,
+                          child: const Text('See Ride Options'),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
-            ),
-
-            // Part 2: back arrow — only in full-screen map mode (B/C).
-            if (_mapExpanded)
-              Positioned(
-                top: 0,
-                left: 0,
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Material(
-                      color: Colors.white,
-                      shape: const CircleBorder(),
-                      elevation: 3,
-                      shadowColor: Colors.black.withOpacity(0.2),
-                      child: InkWell(
-                        customBorder: const CircleBorder(),
-                        onTap: _collapseMap,
-                        child: const Padding(
-                          padding: EdgeInsets.all(10),
-                          child: Icon(
-                            Icons.arrow_back_rounded,
-                            size: 20,
-                            color: Color(0xFF2F3A32),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-            // Tap-to-expand hint pill, only on the mini map (state A).
-            if (!_mapExpanded)
-              Positioned(
-                right: 20,
-                top: _smoothedPosition != null ? 10 : 0,
-                child: SafeArea(
-                  child: IgnorePointer(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.92),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: const Color(0xFFD8D2CA)),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.06),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.open_in_full_rounded,
-                            size: 12,
-                            color: Color(0xFF5B7760),
-                          ),
-                          SizedBox(width: 5),
-                          Text(
-                            'Tap map to explore',
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF2F3A32),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-            // My-location FAB — rides above the bottom sheet when open.
-            AnimatedBuilder(
-              animation: _sheetController,
-              builder: (context, _) {
-                // The sheet also renders for an on-going backend search even
-                // when the local pickup/destination are gone (fresh Explore
-                // after a driver-cancel recovery re-attaches to the ride).
-                final searchingOnMap =
-                    _requesting || rideProvider.isSearchingForDriver;
-                final sheetOpen =
-                    _panelOpen &&
-                    (searchingOnMap ||
-                        (_pickup != null && _destination != null));
-                final sheetHeight =
-                    sheetOpen ? _sheetHeightForFraction(_sheetController.value) : 0.0;
-                return Positioned(
-                  right: 20,
-                  bottom: sheetOpen
-                      ? sheetHeight + 16
-                      : (_mapExpanded ? 24 : 40),
-                  child: FloatingActionButton(
-                    heroTag: 'location_fab',
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF2F3A32),
-                    elevation: 4,
-                    shape: const CircleBorder(),
-                    onPressed: () {
-                      setState(() => _shouldFollowUser = true);
-                      if (_smoothedPosition != null) {
-                        _mapController.move(_smoothedPosition!, 15.0);
-                      }
-                    },
-                    child: const Icon(Icons.my_location),
-                  ),
-                );
-              },
-            ),
-
-            if (_panelOpen &&
-                (_pickup != null && _destination != null ||
-                    _requesting || rideProvider.isSearchingForDriver))
-              _buildRideSheet(theme)
-            else if (_pickup != null && _destination != null)
-              Positioned(
-                bottom: 40,
-                left: 20,
-                right: 20,
-                child: Hero(
-                  tag: 'confirm_button',
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _openRidePanel,
-                      child: const Text('See Ride Options'),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -1413,7 +1529,7 @@ class _MapScreenState extends State<MapScreen>
     // backend is still matching (initial + resumed after driver cancel).
     final searching =
         rideProvider.status == models.TripStatus.REQUESTED &&
-            (_requesting || rideProvider.isSearchingForDriver);
+        (_requesting || rideProvider.isSearchingForDriver);
 
     return Positioned(
       bottom: 0,
@@ -1466,10 +1582,10 @@ class _MapScreenState extends State<MapScreen>
     final priceText = _loadingEstimates
         ? 'Calculating…'
         : (_estimateFare <= 0
-            ? '—'
-            : (_finalCents >= 0
-                ? formatCents(_finalCents)
-                : '\$${_estimateFare.toStringAsFixed(2)}'));
+              ? '—'
+              : (_finalCents >= 0
+                    ? formatCents(_finalCents)
+                    : '\$${_estimateFare.toStringAsFixed(2)}'));
     return GestureDetector(
       onTap: () => _animateSheetTo(1),
       behavior: HitTestBehavior.opaque,
@@ -1511,7 +1627,7 @@ class _MapScreenState extends State<MapScreen>
                   ),
                   if (_estimateFare > 0)
                     Text(
-                      'Est. ${( _estimateDurationSeconds / 60).round().clamp(1, 99)} min',
+                      'Est. ${(_estimateDurationSeconds / 60).round().clamp(1, 99)} min',
                       style: TextStyle(
                         fontSize: 10.5,
                         color: Colors.grey.shade600,
@@ -1531,8 +1647,11 @@ class _MapScreenState extends State<MapScreen>
                 ),
               ),
               const SizedBox(width: 6),
-              Icon(Icons.keyboard_arrow_up_rounded,
-                  size: 20, color: Colors.grey.shade500),
+              Icon(
+                Icons.keyboard_arrow_up_rounded,
+                size: 20,
+                color: Colors.grey.shade500,
+              ),
             ],
           ),
         ],
@@ -1638,7 +1757,11 @@ class _MapScreenState extends State<MapScreen>
                   else
                     OutlinedButton.icon(
                       onPressed: _requestCancel,
-                      icon: const Icon(Icons.close, size: 18, color: Color(0xFFC65A5A)),
+                      icon: const Icon(
+                        Icons.close,
+                        size: 18,
+                        color: Color(0xFFC65A5A),
+                      ),
                       label: const Text(
                         'Cancel Ride',
                         style: TextStyle(
@@ -1678,44 +1801,52 @@ class _MapScreenState extends State<MapScreen>
         if (!_loadingEstimates && !searching) ...[
           // SPECIALS: when the rider has a CREATED redemption, the checkout
           // advertises the applied special right above the confirm button.
-          Builder(builder: (context) {
-            final attachable = context
-                .select<SpecialsProvider, SpecialRedemption?>(
-                    (s) => s.canAttachToRide ? s.current : null);
-            if (attachable == null) return const SizedBox.shrink();
-            return Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF5B7760).withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(30),
-                  border: Border.all(color: const Color(0xFF5B7760)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.storefront_rounded,
-                        size: 16, color: Color(0xFF5B7760)),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        'SPECIAL at ${attachable.sponsorName} — '
-                        '${attachable.discountLabel.isEmpty ? 'save on this ride' : attachable.discountLabel}',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF5B7760),
+          Builder(
+            builder: (context) {
+              final attachable = context
+                  .select<SpecialsProvider, SpecialRedemption?>(
+                    (s) => s.canAttachToRide ? s.current : null,
+                  );
+              if (attachable == null) return const SizedBox.shrink();
+              return Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF5B7760).withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(color: const Color(0xFF5B7760)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.storefront_rounded,
+                        size: 16,
+                        color: Color(0xFF5B7760),
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'SPECIAL at ${attachable.sponsorName} — '
+                          '${attachable.discountLabel.isEmpty ? 'save on this ride' : attachable.discountLabel}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF5B7760),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            );
-          }),
+              );
+            },
+          ),
           Padding(
             padding: EdgeInsets.fromLTRB(20, 0, 20, 18 + bottomInset),
             child: SizedBox(
@@ -1817,7 +1948,11 @@ class _MapScreenState extends State<MapScreen>
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [
-                const Icon(Icons.local_offer_outlined, size: 18, color: Color(0xFF5B7760)),
+                const Icon(
+                  Icons.local_offer_outlined,
+                  size: 18,
+                  color: Color(0xFF5B7760),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
@@ -1842,7 +1977,10 @@ class _MapScreenState extends State<MapScreen>
                       isDense: true,
                       border: InputBorder.none,
                     ),
-                    style: const TextStyle(fontSize: 14, color: Color(0xFF2F3A32)),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF2F3A32),
+                    ),
                     onSubmitted: (_) => _validatePromo(),
                   ),
                 ),
@@ -1850,10 +1988,17 @@ class _MapScreenState extends State<MapScreen>
                   const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5B7760)),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFF5B7760),
+                    ),
                   )
                 else if (_promoApplied)
-                  const Icon(Icons.check_circle_rounded, color: Color(0xFF6E8B74), size: 20)
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: Color(0xFF6E8B74),
+                    size: 20,
+                  )
                 else
                   TextButton(
                     onPressed: _validatePromo,
@@ -1862,7 +2007,8 @@ class _MapScreenState extends State<MapScreen>
               ],
             ),
           ),
-          if (_promoPreview != null && _promoCodeController.text.trim().isNotEmpty) ...[
+          if (_promoPreview != null &&
+              _promoCodeController.text.trim().isNotEmpty) ...[
             const Divider(height: 1, indent: 14, endIndent: 14),
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
@@ -1875,7 +2021,9 @@ class _MapScreenState extends State<MapScreen>
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: _promoPreview!.valid ? const Color(0xFF6E8B74) : const Color(0xFFC65A5A),
+                    color: _promoPreview!.valid
+                        ? const Color(0xFF6E8B74)
+                        : const Color(0xFFC65A5A),
                   ),
                 ),
               ),
@@ -1888,9 +2036,13 @@ class _MapScreenState extends State<MapScreen>
             child: Row(
               children: [
                 Icon(
-                  _favoriteDriverEnabled ? Icons.favorite_rounded : Icons.favorite_outline_rounded,
+                  _favoriteDriverEnabled
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_outline_rounded,
                   size: 18,
-                  color: _favoriteDriverEnabled ? const Color(0xFFC65A5A) : const Color(0xFF5B7760),
+                  color: _favoriteDriverEnabled
+                      ? const Color(0xFFC65A5A)
+                      : const Color(0xFF5B7760),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1907,7 +2059,9 @@ class _MapScreenState extends State<MapScreen>
                         ),
                       ),
                       Text(
-                        _favoriteDriverEnabled ? 'Prioritizing your favorite drivers' : 'Prioritize your favorite drivers',
+                        _favoriteDriverEnabled
+                            ? 'Prioritizing your favorite drivers'
+                            : 'Prioritize your favorite drivers',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
@@ -1933,7 +2087,11 @@ class _MapScreenState extends State<MapScreen>
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [
-                const Icon(Icons.credit_card_rounded, size: 18, color: Color(0xFF5B7760)),
+                const Icon(
+                  Icons.credit_card_rounded,
+                  size: 18,
+                  color: Color(0xFF5B7760),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1964,7 +2122,10 @@ class _MapScreenState extends State<MapScreen>
               return Transform.translate(
                 offset: Offset(shake, 0),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -2000,9 +2161,10 @@ class _MapScreenState extends State<MapScreen>
                                     color: _creditsZeroFeedback
                                         ? const Color(0xFFC65A5A)
                                         : (hasCredits
-                                            ? const Color(0xFF5B7760)
-                                                .withOpacity(0.7)
-                                            : Colors.grey.shade500),
+                                              ? const Color(
+                                                  0xFF5B7760,
+                                                ).withOpacity(0.7)
+                                              : Colors.grey.shade500),
                                   ),
                                 ),
                               ],
@@ -2094,9 +2256,10 @@ class _MapScreenState extends State<MapScreen>
                             Expanded(
                               child: TextField(
                                 controller: _customCreditController,
-                                keyboardType: const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
                                 decoration: InputDecoration(
                                   prefixText: '\$ ',
                                   hintText: '0.00',
@@ -2146,10 +2309,15 @@ class _MapScreenState extends State<MapScreen>
                                   },
                                   style: TextButton.styleFrom(
                                     foregroundColor: const Color(0xFFC65A5A),
-                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                    ),
                                     minimumSize: Size.zero,
                                   ),
-                                  child: const Text('Clear', style: TextStyle(fontSize: 12)),
+                                  child: const Text(
+                                    'Clear',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
                                 ),
                               ),
                           ],
@@ -2165,7 +2333,9 @@ class _MapScreenState extends State<MapScreen>
                             ),
                           ),
                         ],
-                        if (_creditUseCents != null && _creditUseCents! > 0 && _creditAmountError == null) ...[
+                        if (_creditUseCents != null &&
+                            _creditUseCents! > 0 &&
+                            _creditAmountError == null) ...[
                           const SizedBox(height: 8),
                           const Divider(height: 1),
                           const SizedBox(height: 8),
@@ -2237,8 +2407,8 @@ class _MapScreenState extends State<MapScreen>
               color: bold
                   ? const Color(0xFF2F3A32)
                   : positive
-                      ? const Color(0xFF2F3A32)
-                      : const Color(0xFF5B7760),
+                  ? const Color(0xFF2F3A32)
+                  : const Color(0xFF5B7760),
             ),
           ),
         ],
@@ -2278,7 +2448,8 @@ class _MapScreenState extends State<MapScreen>
     if (cents > balance) {
       setState(() {
         _creditUseCents = null;
-        _creditAmountError = 'You can use up to ${formatCents(balance)} in ride credits.';
+        _creditAmountError =
+            'You can use up to ${formatCents(balance)} in ride credits.';
       });
       return;
     }
@@ -2467,7 +2638,8 @@ class _MapScreenState extends State<MapScreen>
           const SizedBox(width: 8),
           Text(
             amount == 0 ? '' : formatCents(amount),
-            style: priceStyle ??
+            style:
+                priceStyle ??
                 TextStyle(
                   fontSize: 12.5,
                   fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
