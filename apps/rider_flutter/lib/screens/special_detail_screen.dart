@@ -1,13 +1,19 @@
 // lib/screens/special_detail_screen.dart
 //
-// Sponsor detail + "Visit and save" — the rider picks a business here, which
-// creates the CREATED redemption (step 1 of the lifecycle, spec §27).
+// Sponsor detail + "Ride there" — the rider picks a business here, which
+// creates the CREATED redemption (step 1 of the lifecycle, spec §27) and
+// then drops them straight into the normal ride-booking flow on the map
+// (route + ride options + confirm), with the deal attached and promo codes
+// disabled. A live map shows the sponsor's registered location.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../components/state_container.dart';
 import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
+import '../services/ride_intent.dart';
 import '../services/specials_service.dart';
 
 class SpecialDetailScreen extends StatefulWidget {
@@ -49,15 +55,32 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
     }
   }
 
-  Future<void> _pick() async {
-    if (_picking) return;
+  /// Book a ride to this special: create the redemption (step 1), then hand
+  /// the destination to the map screen which runs the normal ride flow.
+  Future<void> _rideThere() async {
+    final s = _sponsor;
+    if (_picking || s == null || s.latitude == null || s.longitude == null) {
+      return;
+    }
     setState(() => _picking = true);
     final specials = context.read<SpecialsProvider>();
     try {
       await specials.pickSponsor(widget.sponsorId);
       if (!mounted) return;
-      Navigator.of(context)
-          .pushReplacementNamed('/special-redemption');
+      RideIntent.instance.startSpecialRide(
+        SpecialRideIntent(
+          lat: s.latitude!,
+          lng: s.longitude!,
+          address: s.address ?? s.businessName,
+          sponsorName: s.businessName,
+          discountLabel: s.discount.label.isEmpty
+              ? 'Save on your ride'
+              : s.discount.label,
+        ),
+      );
+      // Back to MainWrapper — the map screen consumes the intent and opens
+      // the ride panel with the route to the sponsor.
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -157,7 +180,9 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF5B7760).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(30),
@@ -174,8 +199,11 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
                   ),
                 ),
                 const Spacer(),
-                const Icon(Icons.verified_rounded,
-                    color: Color(0xFF5B7760), size: 20),
+                const Icon(
+                  Icons.verified_rounded,
+                  color: Color(0xFF5B7760),
+                  size: 20,
+                ),
                 const SizedBox(width: 4),
                 Text(
                   'SPECIAL',
@@ -213,8 +241,11 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
             const SizedBox(height: 16),
             Row(
               children: [
-                Icon(Icons.location_on_rounded,
-                    size: 18, color: const Color(0xFF2F3A32).withOpacity(0.6)),
+                Icon(
+                  Icons.location_on_rounded,
+                  size: 18,
+                  color: const Color(0xFF2F3A32).withOpacity(0.6),
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -228,12 +259,56 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
               ],
             ),
           ],
+          if (s.latitude != null && s.longitude != null) ...[
+            const SizedBox(height: 16),
+            // Live location map — drag and pinch to explore; the pin marks
+            // the exact spot the admin registered for this special.
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: SizedBox(
+                height: 200,
+                child: FlutterMap(
+                  options: MapOptions(
+                    initialCenter: LatLng(s.latitude!, s.longitude!),
+                    initialZoom: 15,
+                    minZoom: 10,
+                    maxZoom: 18,
+                    interactionOptions: const InteractionOptions(
+                      flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                    ),
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                      subdomains: const ['a', 'b', 'c', 'd'],
+                      userAgentPackageName: 'com.NetRide.rider',
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: LatLng(s.latitude!, s.longitude!),
+                          width: 36,
+                          height: 36,
+                          child: Icon(
+                            Icons.location_on_rounded,
+                            size: 36,
+                            color: const Color(0xFF5B7760),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             height: 54,
             child: FilledButton.icon(
-              onPressed: _picking ? null : _pick,
+              onPressed: _picking ? null : _rideThere,
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF5B7760),
                 shape: RoundedRectangleBorder(
@@ -249,10 +324,12 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
                         color: Colors.white,
                       ),
                     )
-                  : const Icon(Icons.local_activity_rounded),
-              label: const Text(
-                'Visit and save',
-                style: TextStyle(
+                  : const Icon(Icons.directions_car_filled_rounded),
+              label: Text(
+                _picking
+                    ? 'Getting your ride ready…'
+                    : 'Book a ride to this place',
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                 ),
@@ -261,8 +338,8 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            'You\'ll get your 6-digit code after the ride — the business '
-            'confirms the visit inside the app.',
+            'Your ${s.discount.label.isEmpty ? 'special deal' : s.discount.label} '
+            'is attached to this ride — no promo code needed.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,

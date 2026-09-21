@@ -83,7 +83,9 @@ String specialDiscountLabel(SponsorSpecial s) {
   if (s.discount.type == 'PERCENT' && s.discount.percent != null) {
     final base = '${s.discount.percent}% off';
     final cap = s.discount.fixedAmountCents;
-    return (cap != null && cap > 0) ? '$base (up to ${formatCents2(cap)})' : base;
+    return (cap != null && cap > 0)
+        ? '$base (up to ${formatCents2(cap)})'
+        : base;
   }
   if (s.discount.fixedAmountCents != null && s.discount.fixedAmountCents! > 0) {
     return '${formatCents2(s.discount.fixedAmountCents!)} off';
@@ -107,20 +109,36 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
     return Consumer<SpecialsProvider>(
       builder: (context, specials, _) {
         // Backend-authoritative: only ACTIVE eligible specials live in
-        // provider.sponsors. Zero active specials → zero SPECIALS UI.
-        final active = specials.sponsors;
+        // provider.sponsors. Show ONLY the 5 closest, horizontally
+        // scrollable — never a random pile of every sponsor. When the list
+        // was fetched with a geo origin the backend already ordered it by
+        // distance (kmAway ascending); a local sort keeps the guarantee even
+        // for coordinate-less refreshes. Zero active specials → zero UI.
+        final closest = [...specials.sponsors]
+          ..sort(
+            (a, b) => (a.kmAway ?? double.infinity).compareTo(
+              b.kmAway ?? double.infinity,
+            ),
+          );
+        final active = closest.take(5).toList();
         if (active.isEmpty) return const SizedBox.shrink();
 
         final categories = active
             .map((s) => specialCategoryLabel(s.businessType))
             .toSet()
             .toList();
-        final selected = (_selectedCategory != null && categories.contains(_selectedCategory))
+        final selected =
+            (_selectedCategory != null &&
+                categories.contains(_selectedCategory))
             ? _selectedCategory
             : null;
         final shown = selected == null
             ? active
-            : active.where((s) => specialCategoryLabel(s.businessType) == selected).toList();
+            : active
+                  .where(
+                    (s) => specialCategoryLabel(s.businessType) == selected,
+                  )
+                  .toList();
 
         return Padding(
           padding: const EdgeInsets.only(top: 18),
@@ -129,7 +147,11 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.storefront_rounded, size: 18, color: Color(0xFF5B7760)),
+                  const Icon(
+                    Icons.storefront_rounded,
+                    size: 18,
+                    color: Color(0xFF5B7760),
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'SPECIALS',
@@ -185,7 +207,10 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
               const SizedBox(height: 12),
               if (shown.isEmpty)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
@@ -193,7 +218,11 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.storefront_rounded, size: 18, color: Color(0xFF9AA79E)),
+                      const Icon(
+                        Icons.storefront_rounded,
+                        size: 18,
+                        color: Color(0xFF9AA79E),
+                      ),
                       const SizedBox(width: 10),
                       Text(
                         'No $selected specials right now',
@@ -213,7 +242,8 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
                     physics: const BouncingScrollPhysics(),
                     itemCount: shown.length,
                     separatorBuilder: (_, _) => const SizedBox(width: 10),
-                    itemBuilder: (context, i) => _SponsorDealCard(sponsor: shown[i]),
+                    itemBuilder: (context, i) =>
+                        _SponsorDealCard(sponsor: shown[i]),
                   ),
                 ),
             ],
@@ -248,7 +278,9 @@ class _FilterChipLabel extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(30),
             border: Border.all(
-              color: selected ? const Color(0xFF5B7760) : const Color(0xFFD8D2CA),
+              color: selected
+                  ? const Color(0xFF5B7760)
+                  : const Color(0xFFD8D2CA),
             ),
           ),
           child: Text(
@@ -276,9 +308,10 @@ class _SponsorDealCard extends StatelessWidget {
       final miles = km * 0.621371;
       return '${miles < 10 ? miles.toStringAsFixed(1) : miles.round()} mi';
     }
-    final place = [sponsor.city, sponsor.state]
-        .where((v) => v?.isNotEmpty ?? false)
-        .join(', ');
+    final place = [
+      sponsor.city,
+      sponsor.state,
+    ].where((v) => v?.isNotEmpty ?? false).join(', ');
     return place.isEmpty ? 'Local' : place;
   }
 
@@ -308,10 +341,9 @@ class _SponsorDealCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(18),
           onTap: () {
-            Navigator.of(context).pushNamed(
-              '/special-detail',
-              arguments: {'id': sponsor.id},
-            );
+            Navigator.of(
+              context,
+            ).pushNamed('/special-detail', arguments: {'id': sponsor.id});
           },
           child: Padding(
             padding: const EdgeInsets.all(14),

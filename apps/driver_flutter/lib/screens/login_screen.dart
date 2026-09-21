@@ -158,7 +158,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         final message = ErrorHandler.friendly(
           e,
-          fallback: 'The phone number or password you entered is incorrect.',
+          fallback: 'The email or password you entered is incorrect.',
         );
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message), backgroundColor: Colors.redAccent),

@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/ride_provider.dart';
+import '../services/ride_intent.dart';
 import '../providers/specials_provider.dart';
 import '../models/special_models.dart';
 import '../models/trip_models.dart' as models;
@@ -155,6 +156,7 @@ class _MapScreenState extends State<MapScreen>
       vsync: this,
       duration: const Duration(milliseconds: 420),
     );
+    RideIntent.instance.notifier.addListener(_onRideIntent);
     _initCacheServices();
     _initLiveLocation();
     _fetchProfile();
@@ -197,6 +199,42 @@ class _MapScreenState extends State<MapScreen>
       _shouldFollowUser = false;
     });
     _updateRoute();
+  }
+
+  /// A special's "Book a ride to this place" handed us a destination: pre-fill
+  /// it, attach the active redemption, and start the NORMAL ride planning
+  /// flow (route + ride options + confirm → searching).
+  void _onRideIntent() {
+    final intent = RideIntent.instance.notifier.value;
+    if (intent == null || !mounted) return;
+    RideIntent.instance.clear();
+
+    final specials = context.read<SpecialsProvider>();
+    _specialRedemptionId = specials.canAttachToRide
+        ? specials.current!.id
+        : null;
+
+    final userPos = _userPosition;
+    setState(() {
+      _pickup = models.Location(
+        lat: userPos?.latitude ?? intent.lat,
+        lng: userPos?.longitude ?? intent.lng,
+        address: 'Current Location',
+      );
+      _destination = models.Location(
+        lat: intent.lat,
+        lng: intent.lng,
+        address: intent.address,
+      );
+      _shouldFollowUser = false;
+    });
+    _updateRoute();
+    // Demand signal for the heatmap (same as a manual destination pick).
+    context.read<RideProvider>().reportActivity(
+      'REQUEST_FLOW',
+      lat: intent.lat,
+      lng: intent.lng,
+    );
   }
 
   Future<void> _initCacheServices() async {
@@ -266,6 +304,7 @@ class _MapScreenState extends State<MapScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    RideIntent.instance.notifier.removeListener(_onRideIntent);
     _specialsRefreshTimer?.cancel();
     _positionSubscription?.cancel();
     _geohashTimer?.cancel();
@@ -725,6 +764,12 @@ class _MapScreenState extends State<MapScreen>
 
   int get _totalSavedCents => _promoDiscountCents + _creditsToUseCents;
 
+  /// A special (sponsor deal) is attached to this ride: the redemption was
+  /// created on the special-detail page and this map attaches it to the
+  /// request, so the backend applies the sponsor discount. Promo codes are
+  /// disabled for special rides.
+  bool get _specialAttached => _specialRedemptionId != null;
+
   void _confirmRide() {
     if (_pickup == null || _destination == null) return;
     // SPECIALS: attach the rider's CREATED redemption (if any) so the
@@ -738,7 +783,9 @@ class _MapScreenState extends State<MapScreen>
       _pickup!,
       _destination!,
       favoritePriority: _favoriteDriverEnabled,
-      promoCode: _promoApplied ? _promoCodeController.text : null,
+      promoCode: _promoApplied && !_specialAttached
+          ? _promoCodeController.text
+          : null,
       applyCredits: _creditsToUseCents > 0,
       creditUseCents: _creditsToUseCents > 0 ? _creditsToUseCents : null,
       specialRedemptionId: _specialRedemptionId,
@@ -778,6 +825,7 @@ class _MapScreenState extends State<MapScreen>
       _promoCodeController.clear();
       _promoPreview = null;
       _promoApplied = false;
+      _specialRedemptionId = null;
       _applyCredits = false;
       _creditUseCents = null;
       _creditAmountError = null;
@@ -1929,6 +1977,63 @@ class _MapScreenState extends State<MapScreen>
     }
   }
 
+  /// Small banner inside the checkout panel announcing the attached special.
+  /// Replaces the promo-code row: a special ride never combines with a promo.
+  Widget _buildSpecialBanner(ThemeData theme) {
+    final redemption =
+        Provider.of<SpecialsProvider>(context, listen: false).current;
+    final name = (redemption?.sponsorName?.isNotEmpty ?? false)
+        ? redemption!.sponsorName!
+        : 'Your deal';
+    final label = (redemption?.discountLabel?.isNotEmpty ?? false)
+        ? redemption!.discountLabel!
+        : 'SPECIAL';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: const Color(0xFF5B7760).withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.local_activity_rounded,
+              size: 18,
+              color: Color(0xFF5B7760),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Special attached — $name',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2F3A32),
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  '$label off this ride · no promo code needed',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: const Color(0xFF2F3A32).withOpacity(0.6),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Compact promo + credits + payment options shown at checkout.
   /// Ride credits default OFF; turning ON reveals a precise amount input.
   Widget _buildRewardsPanel(ThemeData theme) {
@@ -1943,8 +2048,11 @@ class _MapScreenState extends State<MapScreen>
       ),
       child: Column(
         children: [
-          // --- Promo Code ---
-          Padding(
+          // --- Promo Code (disabled while a special is attached) ---
+          if (_specialAttached)
+            _buildSpecialBanner(theme)
+          else
+            Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [

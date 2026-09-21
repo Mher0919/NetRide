@@ -124,7 +124,7 @@ class ErrorHandler {
       return 'Please verify your email address before signing in.';
     }
     if (lower.contains('user not found') || lower.contains('invalid login')) {
-      return 'The phone number or password you entered is incorrect.';
+      return 'The email or password you entered is incorrect.';
     }
     return 'We couldn\'t sign you in. Please try again.';
   }
@@ -166,7 +166,7 @@ class ErrorHandler {
       return 'This number is already registered.';
     }
     if (m.contains('not found') || m.contains('no account') || m.contains('unknown user')) {
-      return 'We couldn\'t find an account with that phone number.';
+      return 'We couldn\'t find an account with that email.';
     }
     if (m.contains('expired')) {
       return 'Your verification code has expired. Please request a new one.';
@@ -183,7 +183,7 @@ class ErrorHandler {
 
     // Credentials
     if (m.contains('invalid login') || m.contains('invalid credential') || m.contains('incorrect') || m.contains('wrong password') || m.contains('bad password')) {
-      return 'The phone number or password you entered is incorrect.';
+      return 'The email or password you entered is incorrect.';
     }
     if (m.contains('email not confirmed') || m.contains('not verified')) {
       return 'Please verify your account before signing in.';
