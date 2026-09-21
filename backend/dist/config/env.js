@@ -81,6 +81,8 @@ const envSchema = zod_1.z.object({
     GMAIL_REFRESH_TOKEN: zod_1.z.string().optional(),
     GMAIL_USER_EMAIL: zod_1.z.string().optional(),
     EMAIL_FROM: zod_1.z.string().default('NetRide <noreply@netride.com>'),
+    // Inbox for admin notifications + admin 2FA codes (support@netride.org
+    // forwards to the ops Gmail).
     ADMIN_NOTIFY_EMAIL: zod_1.z.string().default('support@netride.org'),
     APP_URL: zod_1.z.string().default('http://localhost:3000'),
     ADMIN_URL: zod_1.z.string().default('http://localhost:5173'),
@@ -158,6 +160,8 @@ const envSchema = zod_1.z.object({
     SPONSOR_DRIVER_SHARE: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(0.60),
     // Whether sponsor-ledger writes are enforced strictly (unit tests disable).
     SPONSOR_LEDGER_ENFORCED: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(1),
+    CORS_ORIGINS: zod_1.z.string().optional(),
+    SPONSOR_PORTAL_URL: zod_1.z.string().optional(),
 });
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {

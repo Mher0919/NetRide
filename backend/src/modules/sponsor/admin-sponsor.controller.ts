@@ -91,6 +91,17 @@ export class AdminSponsorController {
       }
       const budget = Math.round(Number(b.initialBudgetCents ?? 0));
       if (!(budget >= 0)) return res.status(400).json({ error: 'Budget must be >= 0' });
+      const lat = b.latitude != null && b.latitude !== '' ? Number(b.latitude) : null;
+      const lng = b.longitude != null && b.longitude !== '' ? Number(b.longitude) : null;
+      if (lat != null && (isNaN(lat) || lat < -90 || lat > 90)) {
+        return res.status(400).json({ error: 'Latitude must be between -90 and 90' });
+      }
+      if (lng != null && (isNaN(lng) || lng < -180 || lng > 180)) {
+        return res.status(400).json({ error: 'Longitude must be between -180 and 180' });
+      }
+      if ((lat == null) !== (lng == null)) {
+        return res.status(400).json({ error: 'Both latitude and longitude are required together' });
+      }
 
       const sponsor = await SponsorService.create({
         businessName: b.businessName,
@@ -105,8 +116,8 @@ export class AdminSponsorController {
         state: b.state,
         postalCode: b.postalCode,
         country: b.country,
-        latitude: b.latitude ?? null,
-        longitude: b.longitude ?? null,
+        latitude: lat,
+        longitude: lng,
         logoUrl: b.logoUrl ?? null,
         coverImageUrl: b.coverImageUrl ?? null,
         discountType: b.discountType,
@@ -152,6 +163,22 @@ export class AdminSponsorController {
       if (b.discountPercent !== undefined) patch.discount_percent = b.discountPercent;
       if (b.maxDiscountPercent !== undefined) patch.max_discount_percent = b.maxDiscountPercent;
       if (b.discountFixedAmountCents !== undefined) patch.discount_fixed_amount_cents = b.discountFixedAmountCents;
+
+      const lat = b.latitude != null && b.latitude !== '' ? Number(b.latitude) : null;
+      const lng = b.longitude != null && b.longitude !== '' ? Number(b.longitude) : null;
+      if (lat != null && (isNaN(lat) || lat < -90 || lat > 90)) {
+        return res.status(400).json({ error: 'Latitude must be between -90 and 90' });
+      }
+      if (lng != null && (isNaN(lng) || lng < -180 || lng > 180)) {
+        return res.status(400).json({ error: 'Longitude must be between -180 and 180' });
+      }
+      if ((lat == null) !== (lng == null)) {
+        return res.status(400).json({ error: 'Both latitude and longitude are required together' });
+      }
+      if (b.latitude !== undefined || b.longitude !== undefined) {
+        patch.latitude = lat;
+        patch.longitude = lng;
+      }
 
       const sponsor = await SponsorService.update(req.params.id, patch);
       if (!sponsor) return res.status(404).json({ error: 'Sponsor not found' });

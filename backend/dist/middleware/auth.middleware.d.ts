@@ -19,3 +19,12 @@ export declare const adminMiddleware: (req: AuthRequest, res: Response, next: Ne
 export declare const sponsorMiddleware: (req: any, res: Response, next: NextFunction) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const riderMiddleware: (req: AuthRequest, res: Response, next: NextFunction) => Response<any, Record<string, any>> | undefined;
 export declare const driverMiddleware: (req: AuthRequest, res: Response, next: NextFunction) => Promise<void | Response<any, Record<string, any>>>;
+/**
+ * PARTNER portal guard (legacy /partner/* API). Resolves the partner row
+ * from the authenticated user at request time — a single login may own
+ * multiple portal types, so the link lives on partners.user_id and the
+ * users.role column is never consulted.
+ */
+export declare const partnerMiddleware: (req: AuthRequest & {
+    partner?: any;
+}, res: Response, next: NextFunction) => Promise<Response<any, Record<string, any>> | undefined>;

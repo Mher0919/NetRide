@@ -34,6 +34,8 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import SponsorLocationPicker from '../components/SponsorLocationPicker';
 import {
   listSponsors,
   createSponsor,
@@ -87,6 +89,8 @@ const emptyForm = {
   discountFixedAmountCents: '500',
   initialBudgetCents: '100000',
   specialsEnabled: true,
+  latitude: '',
+  longitude: '',
 };
 
 interface SnackState {
@@ -215,6 +219,20 @@ const Sponsors: React.FC = () => {
       notify('Initial budget must be >= $0', 'error');
       return;
     }
+    const lat = form.latitude === '' ? null : Number(form.latitude);
+    const lng = form.longitude === '' ? null : Number(form.longitude);
+    if (lat != null && (isNaN(lat) || lat < -90 || lat > 90)) {
+      notify('Latitude must be between -90 and 90', 'error');
+      return;
+    }
+    if (lng != null && (isNaN(lng) || lng < -180 || lng > 180)) {
+      notify('Longitude must be between -180 and 180', 'error');
+      return;
+    }
+    if ((lat == null) !== (lng == null)) {
+      notify('Both latitude and longitude are required — set the pin on the map', 'error');
+      return;
+    }
     setSaving(true);
     try {
       await createSponsor({
@@ -235,6 +253,8 @@ const Sponsors: React.FC = () => {
         discountFixedAmountCents: form.discountType === 'FIXED_AMOUNT' ? Math.round(Number(form.discountFixedAmountCents)) : undefined,
         initialBudgetCents: Math.round(Number(form.initialBudgetCents)),
         specialsEnabled: true,
+        latitude: lat,
+        longitude: lng,
       });
       notify('Sponsor created');
       setCreateOpen(false);
@@ -336,6 +356,8 @@ const Sponsors: React.FC = () => {
       discountFixedAmountCents: String(sponsor.discount_fixed_amount_cents ?? 500),
       initialBudgetCents: String(sponsor.initial_budget_cents ?? 0),
       specialsEnabled: sponsor.specials_enabled ?? true,
+      latitude: sponsor.latitude != null ? String(sponsor.latitude) : '',
+      longitude: sponsor.longitude != null ? String(sponsor.longitude) : '',
     });
     setEditOpen(true);
   };
@@ -364,6 +386,20 @@ const Sponsors: React.FC = () => {
         return;
       }
     }
+    const lat = editForm.latitude === '' ? null : Number(editForm.latitude);
+    const lng = editForm.longitude === '' ? null : Number(editForm.longitude);
+    if (lat != null && (isNaN(lat) || lat < -90 || lat > 90)) {
+      notify('Latitude must be between -90 and 90', 'error');
+      return;
+    }
+    if (lng != null && (isNaN(lng) || lng < -180 || lng > 180)) {
+      notify('Longitude must be between -180 and 180', 'error');
+      return;
+    }
+    if ((lat == null) !== (lng == null)) {
+      notify('Both latitude and longitude are required — set the pin on the map', 'error');
+      return;
+    }
     setEditSaving(true);
     try {
       await updateSponsor(selected.id as string, {
@@ -382,6 +418,8 @@ const Sponsors: React.FC = () => {
         discountPercent: editForm.discountType === 'PERCENTAGE' ? Number(editForm.discountPercent) : undefined,
         maxDiscountPercent: editForm.discountType === 'PERCENTAGE' ? Number(editForm.maxDiscountPercent) : undefined,
         discountFixedAmountCents: editForm.discountType === 'FIXED_AMOUNT' ? Math.round(Number(editForm.discountFixedAmountCents)) : undefined,
+        latitude: lat,
+        longitude: lng,
       });
       notify('Sponsor updated');
       setEditOpen(false);
@@ -563,6 +601,17 @@ const Sponsors: React.FC = () => {
               <Grid item xs={12}><TextField label="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} fullWidth /></Grid>
             </Grid>
             <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+              Location (SPECIALS map pin)
+            </Typography>
+            <SponsorLocationPicker
+              value={{ latitude: form.latitude === '' ? null : Number(form.latitude), longitude: form.longitude === '' ? null : Number(form.longitude) }}
+              onChange={(loc) =>
+                setForm({ ...form, latitude: loc.latitude == null ? '' : String(loc.latitude), longitude: loc.longitude == null ? '' : String(loc.longitude) })
+              }
+              address={[form.address, form.city, form.state, form.country].filter(Boolean).join(', ')}
+            />
+            <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Discount</Typography>
             <TextField
               label="Discount type"
@@ -707,6 +756,23 @@ const Sponsors: React.FC = () => {
                       <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Contact</Typography>
                       <Typography variant="body2">{sponsor.manager_name ?? '—'} · {sponsor.phone ?? '—'} · {sponsor.email ?? '—'}</Typography>
                       <Typography variant="body2" color="text.secondary">{sponsor.address ?? ''}{sponsor.city ? `, ${sponsor.city}` : ''}{sponsor.state ? `, ${sponsor.state}` : ''}</Typography>
+                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1.5 }}>
+                        <LocationOnIcon fontSize="small" sx={{ color: 'primary.main' }} />
+                        {sponsor.latitude != null && sponsor.longitude != null ? (
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                            {sponsor.latitude.toFixed(5)}, {sponsor.longitude.toFixed(5)}
+                            <Chip
+                              size="small"
+                              label="Shown on rider map"
+                              sx={{ ml: 1, bgcolor: '#E5F0EB', color: '#2E7D32', fontWeight: 700, fontSize: 10 }}
+                            />
+                          </Typography>
+                        ) : (
+                          <Typography variant="body2" color="error" sx={{ fontWeight: 700 }}>
+                            No location set — not shown to riders
+                          </Typography>
+                        )}
+                      </Stack>
                     </Paper>
                   </Stack>
                 )}
@@ -938,6 +1004,17 @@ const Sponsors: React.FC = () => {
               <Grid item xs={12}><TextField label="Address" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} fullWidth /></Grid>
               <Grid item xs={12}><TextField label="Country" value={editForm.country} onChange={(e) => setEditForm({ ...editForm, country: e.target.value })} fullWidth /></Grid>
             </Grid>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+              Location (SPECIALS map pin)
+            </Typography>
+            <SponsorLocationPicker
+              value={{ latitude: editForm.latitude === '' ? null : Number(editForm.latitude), longitude: editForm.longitude === '' ? null : Number(editForm.longitude) }}
+              onChange={(loc) =>
+                setEditForm({ ...editForm, latitude: loc.latitude == null ? '' : String(loc.latitude), longitude: loc.longitude == null ? '' : String(loc.longitude) })
+              }
+              address={[editForm.address, editForm.city, editForm.state, editForm.country].filter(Boolean).join(', ')}
+            />
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Discount</Typography>
             <TextField

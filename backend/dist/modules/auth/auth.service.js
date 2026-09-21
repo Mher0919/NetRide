@@ -127,11 +127,14 @@ class AuthService {
                 }
             }
             if (!isTrusted) {
+                // Route the 2FA code through the configured admin notification
+                // inbox (ADMIN_NOTIFY_EMAIL, e.g. an ops Gmail the admin actually
+                // reads). Falls back to the admin's own email when unset.
                 await otp_service_1.OTPService.generateOTP(env_1.env.ADMIN_NOTIFY_EMAIL || user.email);
                 return {
                     otp_required: true,
                     email: env_1.env.ADMIN_NOTIFY_EMAIL || user.email,
-                    message: 'Admin 2FA required. Code sent to trusted email.'
+                    message: 'Admin 2FA required. Code sent to the admin inbox.',
                 };
             }
         }
@@ -424,7 +427,16 @@ class AuthService {
             throw new Error('Unauthorized');
         }
         const token = this.generateToken(user);
-        return { user, token };
+        const trustedDeviceToken = this.generateTrustedDeviceToken(user);
+        return { user, token, trustedDeviceToken };
+    }
+    /**
+     * A dedicated "remember this device" token — valid for 30 days. While it is
+     * unexpired the admin skips the emailed 2FA code on login; after 30 days it
+     * fails verification and the code is required again.
+     */
+    static generateTrustedDeviceToken(user) {
+        return jsonwebtoken_1.default.sign({ id: user.id, role: user.role, email: user.email, t: 'trusted-device' }, env_1.env.JWT_SECRET, { expiresIn: '30d', algorithm: 'HS256' });
     }
     static generateToken(user, roleOverride) {
         // The `role` claim MUST reflect the active application session, not the

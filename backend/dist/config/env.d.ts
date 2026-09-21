@@ -78,4 +78,6 @@ export declare const env: {
     DATABASE_REPLICA_URL?: string | undefined;
     FCM_SERVICE_ACCOUNT_PATH?: string | undefined;
     FCM_SERVICE_ACCOUNT_B64?: string | undefined;
+    CORS_ORIGINS?: string | undefined;
+    SPONSOR_PORTAL_URL?: string | undefined;
 };

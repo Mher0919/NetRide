@@ -60,6 +60,13 @@ const metrics_1 = require("./observability/metrics");
 // Sentry must initialize before any other module that may throw at
 // import time so it can capture those errors.
 (0, sentry_1.initSentry)();
+// Safety net: a stray rejected promise (e.g. a queued Redis command when
+// Redis is down at boot) must never take down the whole API. Log it and
+// keep serving — the affected subsystem degrades and recovers on its own.
+process.on('unhandledRejection', (reason) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    console.error(`[PROCESS] ⚠️ Unhandled promise rejection (non-fatal): ${message}`);
+});
 // Route Imports
 const auth_routes_1 = __importDefault(require("./modules/auth/auth.routes"));
 const user_routes_1 = __importDefault(require("./modules/user/user.routes"));
@@ -82,6 +89,8 @@ const heatmap_routes_1 = __importDefault(require("./modules/heatmap/heatmap.rout
 const specials_routes_1 = __importDefault(require("./modules/sponsor/specials.routes"));
 const sponsor_portal_routes_1 = __importDefault(require("./modules/sponsor/sponsor-portal.routes"));
 const admin_sponsor_routes_1 = __importDefault(require("./modules/sponsor/admin-sponsor.routes"));
+const partner_portal_routes_1 = __importDefault(require("./modules/partner/partner-portal.routes"));
+const portal_routes_1 = __importDefault(require("./modules/portal/portal.routes"));
 const special_redemption_service_1 = require("./modules/sponsor/special-redemption.service");
 const geospatial_service_1 = require("./modules/geospatial/geospatial.service");
 const upload_service_1 = require("./services/upload.service");
@@ -100,10 +109,39 @@ app.use('/api/admin', (_req, res, next) => {
     next();
 });
 const httpServer = (0, http_1.createServer)(app);
+// Explicit allowlist ONLY when the operator configures CORS_ORIGINS.
+// Without it, all origins are accepted — the pre-regression behavior that
+// the deployed dashboards (admin-dashboard.netride.org, sponsor portal,
+// local dev on any port) depend on. Auth is bearer-token based
+// (localStorage), never cookies, so an open CORS policy does not expose
+// credentials to third-party origins.
+const corsOrigins = env_1.env.CORS_ORIGINS
+    ? env_1.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+const isAllowedOrigin = (origin) => {
+    if (corsOrigins.length === 0 || corsOrigins.includes(origin))
+        return true;
+    // Local dev origins stay usable even against a strictly-configured backend.
+    try {
+        const host = new URL(origin).hostname;
+        if (host === 'localhost' || host === '127.0.0.1')
+            return true;
+    }
+    catch {
+        return false;
+    }
+    return false;
+};
 const io = new socket_io_1.Server(httpServer, {
     cors: {
-        origin: '*',
+        origin: (origin, callback) => {
+            if (!origin || isAllowedOrigin(origin))
+                callback(null, true);
+            else
+                callback(new Error('Not allowed by CORS'));
+        },
         methods: ['GET', 'POST'],
+        credentials: true,
     },
 });
 exports.io = io;
@@ -124,7 +162,19 @@ catch (adapterErr) {
 // lazy binding instead of importing this file (which would evaluate the
 // whole app — including its HTTP listener — inside worker processes).
 (0, io_handle_1.bindIo)(io);
-app.use((0, cors_1.default)());
+app.use((0, cors_1.default)({
+    origin: (origin, callback) => {
+        if (!origin || isAllowedOrigin(origin)) {
+            callback(null, true);
+        }
+        else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-portal-type'],
+}));
 // Trust Render proxy so req.ip resolves individual client IPs
 // instead of the proxy IP. This fixes rate-limit key collisions
 // where all users share one rate-limit bucket behind Render.
@@ -186,7 +236,20 @@ io.use(async (socket, next) => {
         // dual-role user (same email owning both profiles) is identified by the
         // app they launched, never by account-existence order.
         const appRoleHint = socket.handshake.auth.role;
-        const active = await auth_service_1.AuthService.resolveActiveRole(decoded.id, appRoleHint);
+        let active;
+        try {
+            active = await auth_service_1.AuthService.resolveActiveRole(decoded.id, appRoleHint);
+        }
+        catch (roleErr) {
+            // DB blip (pooler timeout, replica failover): never reject the whole
+            // real-time connection because role resolution hit the database. The
+            // JWT's frozen role claim is authoritative enough to keep the
+            // connection alive; the next reconnect re-resolves the live profile.
+            // This mirrors the fail-open philosophy used across the codebase
+            // (rate limiter, routing cache, vehicle data).
+            console.warn(`[AUTH] ⚠️ Role resolution failed for ${decoded.id} (${roleErr.message}) — falling back to JWT role ${decoded.role}`);
+            active = { role: decoded.role, driverId: null, riderId: decoded.id };
+        }
         socket.user = {
             id: decoded.id,
             // Active application/session role — used for all downstream branching,
@@ -231,6 +294,8 @@ app.use('/api/notifications', notifications_routes_1.default);
 app.use('/api/heatmap', heatmap_routes_1.default);
 app.use('/api', specials_routes_1.default);
 app.use('/api', sponsor_portal_routes_1.default);
+app.use('/api/partner', partner_portal_routes_1.default);
+app.use('/api', portal_routes_1.default);
 app.use('/api/admin', admin_sponsor_routes_1.default);
 app.post('/api/upload', upload_service_1.UploadService.upload);
 // Global Error Handler
@@ -260,6 +325,15 @@ async function runMigrations() {
             const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
             await database_1.pool.query(schema);
             console.log('✅ Verification schema (002) initialized successfully');
+        }
+        // OTP code hashing + attempt capping (048).
+        const hasOtpCodeHash = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'verification_codes' AND column_name = 'code_hash'");
+        if (hasOtpCodeHash.rowCount === 0) {
+            console.log('⚡ Applying OTP code hashing schema (048)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/048_otp_code_hashing.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ OTP code hashing schema (048) applied');
         }
         // Fix User Schema
         const hasPasswordHash = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'password_hash'");
@@ -719,7 +793,8 @@ function startServer() {
         });
         // Vehicle Data Background Sync (Once on start)
         Promise.resolve().then(() => __importStar(require('./services/vehicleData.service'))).then(({ VehicleDataService }) => {
-            VehicleDataService.syncCommonVehicles();
+            VehicleDataService.syncCommonVehicles()
+                .catch((err) => console.error(`[VEHICLE SYNC] ⚠️ Background sync failed (non-fatal): ${err.message}`));
         });
         // Weekly auto-payout sweep — checks once per minute, only fires on
         // Monday 09:00 UTC. Idempotent via Redis lock + partial UNIQUE INDEX.

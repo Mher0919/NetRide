@@ -7,6 +7,8 @@ var UserRole;
     UserRole["RIDER"] = "RIDER";
     UserRole["DRIVER"] = "DRIVER";
     UserRole["ADMIN"] = "ADMIN";
+    UserRole["PARTNER"] = "PARTNER";
+    UserRole["FLEET"] = "FLEET";
 })(UserRole || (exports.UserRole = UserRole = {}));
 var TripStatus;
 (function (TripStatus) {

@@ -168,7 +168,14 @@ export declare class AuthService {
     static verifyAdmin2FA(email: string, code: string): Promise<{
         user: any;
         token: string;
+        trustedDeviceToken: string;
     }>;
+    /**
+     * A dedicated "remember this device" token — valid for 30 days. While it is
+     * unexpired the admin skips the emailed 2FA code on login; after 30 days it
+     * fails verification and the code is required again.
+     */
+    static generateTrustedDeviceToken(user: any): string;
     static generateToken(user: any, roleOverride?: string): string;
     /**
      * Resolve the ACTIVE session role from the connecting application's context.
