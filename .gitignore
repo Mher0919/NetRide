@@ -4,5 +4,8 @@ backend/.env
 **/.env
 osrm-data/
 
+GoogleService-Info.plist
+**/ios/Runner/GoogleService-Info.plist
+
 uploads/
 backend/uploads/

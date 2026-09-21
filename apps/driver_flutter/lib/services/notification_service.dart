@@ -74,6 +74,17 @@ class NotificationService {
             AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
 
+    // iOS must be asked explicitly or no prompt ever appears and FCM
+    // token delivery stays silent.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      final settings = await _messaging!.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      debugPrint('[NOTIF] iOS permission: ${settings.authorizationStatus}');
+    }
+
     _messaging!.getInitialMessage().then((message) {
       if (message != null) _handleTap(message);
     });
@@ -96,7 +107,9 @@ class NotificationService {
     try {
       await ApiService.dio.post('/push/register-token', data: {
         'token': effective,
-        'platform': 'android',
+        'platform': !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS
+            ? 'ios'
+            : 'android',
       });
       debugPrint('[NOTIF] FCM token registered for this device');
     } catch (e) {

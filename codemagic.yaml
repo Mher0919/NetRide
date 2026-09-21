@@ -1,10 +1,10 @@
-workflows:
+﻿workflows:
   flutter-apps:
     name: Build Flutter Apps
     max_build_duration: 60
     environment:
-      flutter-version: "3.11.5"
-      xcode: "15.0"
+      flutter-version: "3.41.7"
+      xcode: "latest"
       node-version: "20"
       cocoapods: "1.15.2"
     environment_vars:
@@ -56,8 +56,8 @@ workflows:
     name: Build iOS Rider
     max_build_duration: 60
     environment:
-      flutter-version: "3.11.5"
-      xcode: "15.0"
+      flutter-version: "3.41.7"
+      xcode: "latest"
       node-version: "20"
       cocoapods: "1.15.2"
     triggering:
@@ -82,8 +82,8 @@ workflows:
     name: Build iOS Driver
     max_build_duration: 60
     environment:
-      flutter-version: "3.11.5"
-      xcode: "15.0"
+      flutter-version: "3.41.7"
+      xcode: "latest"
       node-version: "20"
       cocoapods: "1.15.2"
     triggering:
@@ -108,7 +108,7 @@ workflows:
     name: Build Android Rider
     max_build_duration: 60
     environment:
-      flutter-version: "3.11.5"
+      flutter-version: "3.41.7"
     triggering:
       branch_patterns:
         - pattern: main
@@ -128,7 +128,7 @@ workflows:
     name: Build Android Driver
     max_build_duration: 60
     environment:
-      flutter-version: "3.11.5"
+      flutter-version: "3.41.7"
     triggering:
       branch_patterns:
         - pattern: main

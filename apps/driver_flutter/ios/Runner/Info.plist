@@ -35,6 +35,12 @@
 	<string>NetRide uses the camera to take photos of your profile, documents, and vehicle.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>NetRide accesses your photo library so you can upload profile photos and documents.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>NetRide uses your location to show nearby ride requests, calculate earnings, and navigate to riders.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>NetRide uses your location to show nearby ride requests, calculate earnings, and navigate to riders.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>NetRide uses the microphone to record vehicle photos and trip videos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
