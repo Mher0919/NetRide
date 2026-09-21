@@ -227,6 +227,8 @@ export class ReferralService {
    * URL, or a raw manual code. All fraud guards live here; nothing is trusted
    * from the client. On success the rider is permanently linked AND their
    * referral_onboarding_state is set to 'USED' (one referral per rider, ever).
+   * A rider who previously skipped the onboarding offer may still use a code
+   * here — skipping is no longer permanent.
    */
   static async scanReferral(
     scannerId: string,
@@ -317,20 +319,9 @@ export class ReferralService {
       throw new ReferralError('SELF_REFERRAL', 'This referral code cannot be used with your account.');
     }
 
-    // ---- 3b. Skipped onboarding is permanent — a declined rider can never
-    // accept a referral later, exactly like a rider who already accepted. ---
-    const scannerState = await pool.query(
-      `SELECT referral_onboarding_state FROM users WHERE id = $1`,
-      [scannerId],
-    );
-    if (scannerState.rows[0]?.referral_onboarding_state === 'SKIPPED') {
-      await AuditEventsService.record({
-        actorId: scannerId, actorRole: 'RIDER',
-        action: 'REFERRAL_REJECTED', entityType: 'REFERRAL_RELATIONSHIP',
-        details: { reason: 'ONBOARDING_SKIPPED', source, referrer_id: referrerId },
-      });
-      throw new ReferralError('REFERRALS_CLOSED', 'Referrals are closed for this account.');
-    }
+    // ---- 3b. Skipping the onboarding offer is NOT binding — a rider who
+    // skipped can still use a friend's referral code later from the account
+    // page. Only an EXISTING relationship (or self-referral) blocks them. ---
 
     const client = await pool.connect();
     try {
@@ -462,10 +453,11 @@ export class ReferralService {
 
   /**
    * First-time onboarding gate. The backend is the ONLY authority on whether
-   * a rider can still accept a referral:
-   *   - a linked relationship  → USED   (already accepted, forever)
-   *   - referral_onboarding_state = 'SKIPPED' → SKIPPED (declined, forever)
-   *   - otherwise              → ELIGIBLE
+   * the onboarding OFFER is still shown:
+   *   - a linked relationship → USED (accepted, forever)
+   *   - referral_onboarding_state = 'SKIPPED' → SKIPPED (offer declined; the
+   *     rider may still accept a referral later from the account page)
+   *   - otherwise → ELIGIBLE
    * Also registers the rider's install id (device fingerprint) and computes
    * their device risk state — used at reward time, never to block onboarding.
    */
@@ -522,9 +514,10 @@ export class ReferralService {
   }
 
   /**
-   * Permanently closes the rider's referral onboarding (skip). One referral
-   * per rider, forever — skipping is final, exactly like accepting. Safe to
-   * call repeatedly; idempotent and never throws.
+   * Closes the rider's referral onboarding OFFER (skip). The rider can still
+   * use a friend's referral code later from the account page — skipping is
+   * not a permanent opt-out. Safe to call repeatedly; idempotent and never
+   * throws.
    */
   static async skipOnboarding(userId: string): Promise<{ state: 'SKIPPED' | 'USED' }> {
     const rel = await pool.query(

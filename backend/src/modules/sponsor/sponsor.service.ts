@@ -124,15 +124,16 @@ export function normalizeSponsor(r: any): SponsorRow {
   };
 }
 
-const SPONSOR_SELECT = `
+const SPONSOR_COLUMNS = `
   SELECT id, business_name, business_type, business_description, manager_name,
          phone, email, other_contact_info, address, city, state, postal_code,
          country, latitude, longitude, logo_url, cover_image_url,
          discount_type, discount_percent, max_discount_percent,
          discount_fixed_amount_cents, initial_budget_cents,
          remaining_budget_cents, reserved_budget_cents, used_budget_cents,
-         status, specials_enabled, map_listing_enabled, created_at, updated_at
-  FROM sponsors`;
+         status, specials_enabled, map_listing_enabled, created_at, updated_at`;
+
+const SPONSOR_SELECT = `${SPONSOR_COLUMNS} FROM sponsors`;
 
 export interface SponsorCreateInput {
   businessName: string;
@@ -449,7 +450,8 @@ export class SponsorService {
       params.push(opts.businessType.toUpperCase());
       where.push(`business_type = $${params.length}`);
     }
-    const distanceSelect = opts.lat != null && opts.lng != null
+    const geo = opts.lat != null && opts.lng != null;
+    const distanceSelect = geo
       ? `, (6371 * acos(
            LEAST(1, GREATEST(-1,
              cos(radians($${params.length + 1})) * cos(radians(latitude)) *
@@ -458,14 +460,15 @@ export class SponsorService {
            ))
          )) AS km_away`
       : ', NULL AS km_away';
-    const distanceOrder = opts.lat != null && opts.lng != null ? 'km_away ASC' : 'created_at DESC';
+    const distanceOrder = geo ? 'km_away ASC' : 'created_at DESC';
+    const geoParams = geo ? [opts.lat, opts.lng] : [];
 
     const res = await pool.query(
-      `${SPONSOR_SELECT}${distanceSelect}
+      `${SPONSOR_COLUMNS}${distanceSelect} FROM sponsors
        WHERE ${where.join(' AND ')}
        ORDER BY ${distanceOrder}
-       LIMIT $${params.length + 3} OFFSET $${params.length + 4}`,
-      [...params, opts.lat ?? null, opts.lng ?? null, limit, offset],
+       LIMIT $${params.length + geoParams.length + 1} OFFSET $${params.length + geoParams.length + 2}`,
+      [...params, ...geoParams, limit, offset],
     );
     return res.rows.map((r: any) => ({ ...normalizeSponsor(r), km_away: r.km_away != null ? Number(r.km_away) : null }));
   }

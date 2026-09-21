@@ -5,7 +5,9 @@
 // never trusts local state). Three paths:
 //   1. Scan a friend's QR     → QrScannerScreen (onboarding mode)
 //   2. Enter a referral code  → manual code dialog
-//   3. Skip for now           → permanent, closes onboarding forever
+//   3. Skip for now           → closes the onboarding offer; the rider can
+//                               still use a referral code later from the
+//                               account page (Refer & Earn)
 //
 // Every path is validated server-side; the app maps structured error codes
 // to friendly copy (no raw errors).
@@ -13,6 +15,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import '../services/rewards_service.dart';
+import '../widgets/referral_code_dialog.dart';
 import 'qr_scanner_screen.dart';
 
 class ReferralOnboardingScreen extends StatefulWidget {
@@ -35,9 +38,9 @@ class _ReferralOnboardingScreenState extends State<ReferralOnboardingScreen> {
     await _linkedSuccess(result['referrer_name'] as String?);
   }
 
-  Future<void> _enterCode() async {
+Future<void> _enterCode() async {
     if (_busy) return;
-    final code = await _promptForCode();
+    final code = await promptForReferralCode(context);
     if (code == null || !mounted) return;
     setState(() => _busy = true);
     try {
@@ -71,11 +74,11 @@ class _ReferralOnboardingScreenState extends State<ReferralOnboardingScreen> {
     if (_busy) return;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Skip for now?', textAlign: TextAlign.center),
         content: const Text(
-          'This is a one-time choice — if you skip, you won\'t be able to use a referral code on this account later.',
+          'No problem — you can use a referral code later from the Refer & Earn page in your account.',
           textAlign: TextAlign.center,
         ),
         actionsAlignment: MainAxisAlignment.center,
@@ -110,84 +113,7 @@ class _ReferralOnboardingScreenState extends State<ReferralOnboardingScreen> {
     }
   }
 
-  Future<String?> _promptForCode() async {
-    final controller = TextEditingController();
-    final code = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          String? error;
-          String? validate(String v) {
-            final t = v.trim().toUpperCase();
-            if (t.isEmpty) return 'Enter the referral code.';
-            if (!RegExp(r'^[A-Z2-9]{10}$').hasMatch(t)) {
-              return 'That referral code doesn\'t look valid. Please check the code and try again.';
-            }
-            return null;
-          }
-
-          void submit() {
-            error = validate(controller.text);
-            setDialogState(() {});
-            if (error == null) Navigator.pop(ctx, controller.text.trim().toUpperCase());
-          }
-
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('Enter referral code', textAlign: TextAlign.center),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Ask a friend for their NetRide referral code.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: controller,
-                  textCapitalization: TextCapitalization.characters,
-                  maxLength: 10,
-                  autofocus: true,
-                  onSubmitted: (_) => submit(),
-                  decoration: InputDecoration(
-                    counterText: '',
-                    hintText: 'AB12CD34EF',
-                    hintStyle: const TextStyle(letterSpacing: 3, color: Color(0xFFB7B0A6)),
-                    errorText: error,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 4,
-                  ),
-                  onChanged: (v) {
-                    if (v.length == 10 && RegExp(r'^[A-Za-z2-9]{10}$').hasMatch(v)) submit();
-                  },
-                ),
-              ],
-            ),
-            actionsAlignment: MainAxisAlignment.center,
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: submit,
-                child: const Text('Link referral'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    return code;
-  }
-
-  Future<void> _showMessage({
+Future<void> _showMessage({
     required String title,
     required String message,
     bool error = false,

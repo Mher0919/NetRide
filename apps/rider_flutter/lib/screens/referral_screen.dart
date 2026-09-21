@@ -1,8 +1,11 @@
 // lib/screens/referral_screen.dart
 //
 // "Refer & Earn" — shows the rider's referral QR + code, share actions,
-// and the history of friends who scanned / completed rides.
+// and the history of friends who scanned / completed rides. When the rider
+// has NOT used a referral code yet, it also offers to scan a friend's QR or
+// enter a code (usable later even if the post-signup offer was skipped).
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +13,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
+import '../widgets/referral_code_dialog.dart';
+import 'qr_scanner_screen.dart';
 
 class ReferralScreen extends StatefulWidget {
   const ReferralScreen({super.key});
@@ -55,6 +60,173 @@ class _ReferralScreenState extends State<ReferralScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label copied to clipboard')),
+    );
+  }
+
+  /// Account-page entry: scan a friend's QR and link it. The scanner shows
+  /// its own success/error dialog and pops itself; we then refresh so the
+  /// "already used" state renders immediately.
+  Future<void> _openScanner() async {
+    await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) => const QrScannerScreen(onboarding: false)),
+    );
+    if (!mounted) return;
+    _fetch();
+  }
+
+  /// Account-page entry: type a friend's referral code and link it.
+  Future<void> _enterCode() async {
+    final code = await promptForReferralCode(context);
+    if (code == null || !mounted) return;
+    try {
+      final result = await RewardsService.scanReferral(code: code);
+      if (!mounted) return;
+      await _linkedSuccess(result['referrer_name'] as String?);
+    } on DioException catch (e) {
+      if (!mounted) return;
+      await _showMessage(
+        title: 'Could not link referral',
+        message: friendlyReferralError(e),
+        error: true,
+      );
+    }
+  }
+
+  Future<void> _linkedSuccess(String? referrerName) async {
+    await _showMessage(
+      title: 'Referral linked!',
+      message: referrerName != null
+          ? 'You\'re now connected to $referrerName. You both earn \$5 in ride credits after your first completed ride.'
+          : 'You\'re now linked. You both earn \$5 in ride credits after your first completed ride.',
+    );
+    if (!mounted) return;
+    _fetch();
+  }
+
+  Future<void> _showMessage({
+    required String title,
+    required String message,
+    bool error = false,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        icon: Icon(
+          error ? Icons.error_outline_rounded : Icons.check_circle_rounded,
+          size: 48,
+          color: error ? const Color(0xFFC65A5A) : const Color(0xFF6E8B74),
+        ),
+        title: Text(title, textAlign: TextAlign.center),
+        content: Text(message, textAlign: TextAlign.center),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Section shown on the account page for riders who have NOT used a
+  /// referral code yet — lets them use one later even if they skipped the
+  /// post-signup offer.
+  Widget _useACodeSection(ThemeData theme) {
+    final info = _info!;
+    if (!info.canScan) {
+      final referrer = info.referrerName;
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F4EF),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFD8D2CA)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: const Color(0xFFC65A5A).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.check_circle_rounded, color: Color(0xFFC65A5A), size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'You already used a referral code on this account.',
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+                  ),
+                  if (referrer != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Connected to $referrer — one referral per account.',
+                      style: TextStyle(fontSize: 12, color: const Color(0xFF2F3A32).withOpacity(0.6)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Have a referral code?',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Use a friend\'s code once — you both earn \$5 in ride credits after your first completed ride.',
+          style: TextStyle(fontSize: 12.5, color: const Color(0xFF2F3A32).withOpacity(0.6)),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _openScanner,
+                icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                label: const Text('Scan QR'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF5B7760),
+                  side: const BorderSide(color: Color(0xFF5B7760)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _enterCode,
+                icon: const Icon(Icons.keyboard_rounded, size: 18),
+                label: const Text('Enter code'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF5B7760),
+                  side: const BorderSide(color: Color(0xFF5B7760)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -220,6 +392,8 @@ class _ReferralScreenState extends State<ReferralScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 28),
+          _useACodeSection(theme),
           const SizedBox(height: 28),
           Text(
             'Referral activity',

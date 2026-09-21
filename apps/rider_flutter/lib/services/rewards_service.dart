@@ -47,7 +47,7 @@ String friendlyReferralError(DioException e) {
     case 'CODE_NOT_FOUND':
       return 'We could not find that referral code. Please check the code and try again.';
     case 'REFERRALS_CLOSED':
-      return 'Referrals are closed for this account. This is a one-time choice and can\'t be changed later.';
+      return 'Referrals are not available for this account.';
     case 'REFERRER_UNAVAILABLE':
       return 'This referral account is unavailable.';
     case 'INVALID_LINK':
@@ -83,7 +83,9 @@ class RewardsService {
     return OnboardingStatus.fromJson(res.data as Map<String, dynamic>);
   }
 
-  /// Permanently closes first-time referral onboarding. Idempotent.
+  /// Closes the first-time referral onboarding offer. The rider can still
+  /// use a referral code later from the account page (Refer & Earn).
+  /// Idempotent.
   static Future<void> skipOnboarding() async {
     await ApiService.dio.post('referral/skip');
   }
