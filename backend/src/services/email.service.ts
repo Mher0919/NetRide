@@ -43,6 +43,18 @@ export class EmailService {
       throw new Error('Email service not configured. Please check backend .env file.');
     }
 
+    const fromAddress = (env.EMAIL_FROM.match(/<([^>]+)>/) ?? [null, env.EMAIL_FROM])[1]?.trim();
+    if (fromAddress && fromAddress.toLowerCase() !== env.GMAIL_USER_EMAIL.toLowerCase()) {
+      // Gmail rewrites the From header to the authenticated account unless
+      // the EMAIL_FROM address is a verified "Send mail as" alias there.
+      // Log loudly so a wrong-looking sender is never a silent surprise.
+      console.warn(
+        `⚠️ [GMAIL API] Sending as "${env.EMAIL_FROM}" but authenticated as ${env.GMAIL_USER_EMAIL}. ` +
+        `Gmail will show the authenticated account as sender unless "${fromAddress}" is added as a ` +
+        `verified "Send mail as" alias in ${env.GMAIL_USER_EMAIL} (Gmail Settings → Accounts and Import).`
+      );
+    }
+
     try {
       const gmail = await this.getGmailClient();
       

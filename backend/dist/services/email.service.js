@@ -29,6 +29,15 @@ class EmailService {
             console.error('❌ [GMAIL API] Cannot send email. Gmail credentials (USER_EMAIL, REFRESH_TOKEN, CLIENT_ID, CLIENT_SECRET) are missing in .env.');
             throw new Error('Email service not configured. Please check backend .env file.');
         }
+        const fromAddress = (env_1.env.EMAIL_FROM.match(/<([^>]+)>/) ?? [null, env_1.env.EMAIL_FROM])[1]?.trim();
+        if (fromAddress && fromAddress.toLowerCase() !== env_1.env.GMAIL_USER_EMAIL.toLowerCase()) {
+            // Gmail rewrites the From header to the authenticated account unless
+            // the EMAIL_FROM address is a verified "Send mail as" alias there.
+            // Log loudly so a wrong-looking sender is never a silent surprise.
+            console.warn(`⚠️ [GMAIL API] Sending as "${env_1.env.EMAIL_FROM}" but authenticated as ${env_1.env.GMAIL_USER_EMAIL}. ` +
+                `Gmail will show the authenticated account as sender unless "${fromAddress}" is added as a ` +
+                `verified "Send mail as" alias in ${env_1.env.GMAIL_USER_EMAIL} (Gmail Settings → Accounts and Import).`);
+        }
         try {
             const gmail = await this.getGmailClient();
             // Use Nodemailer to generate the raw MIME message string
