@@ -225,47 +225,90 @@ export class SpecialRedemptionService {
   // ------------------------------------------------------------ step 1: pick
 
   /**
-   * Rider selects a sponsor (SPECIALS detail → "Visit and save"). Creates
-   * the CREATED redemption with immutable sponsor snapshots. Only ACTIVE +
+   * Rider selects a sponsor (SPECIALS detail → "Book a ride"). Creates the
+   * CREATED redemption with immutable sponsor snapshots. Only ACTIVE +
    * eligible sponsors can be selected.
+   *
+   * One special at a time: picking a NEW sponsor cancels any other CREATED
+   * redemptions the rider still has, and picking the SAME sponsor again
+   * reuses the existing CREATED redemption instead of stacking duplicates.
    */
   static async createForRider(riderId: string, sponsorId: string): Promise<RedemptionRow> {
     const sponsor = await SponsorService.findById(sponsorId);
     if (!sponsor || !SponsorService.isEligible(sponsor)) {
       throw new Error('This special is temporarily unavailable');
     }
-    const res = await pool.query(
-      `INSERT INTO special_redemptions (
-         sponsor_id, rider_id,
-         sponsor_name, sponsor_business_type, sponsor_latitude,
-         sponsor_longitude, sponsor_address,
-         discount_type, discount_percent, discount_fixed_amount_cents,
-         discount_label, status
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'CREATED')
-       RETURNING *`,
-      [
-        sponsor.id,
-        riderId,
-        sponsor.business_name,
-        sponsor.business_type,
-        sponsor.latitude,
-        sponsor.longitude,
-        sponsor.address,
-        sponsor.discount_type,
-        sponsor.discount_percent,
-        sponsor.discount_fixed_amount_cents,
-        discountLabelFor(sponsor),
-      ],
-    );
-    AuditEventsService.record({
-      actorId: riderId,
-      actorRole: 'RIDER',
-      action: 'special_redemption_created',
-      entityType: 'special_redemption',
-      entityId: res.rows[0].id,
-      details: { sponsorId },
-    }).catch(() => undefined);
-    return normalizeRedemption(res.rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Same sponsor already picked (and still CREATED) → reuse it.
+      const existing = await client.query(
+        `SELECT * FROM special_redemptions
+         WHERE rider_id = $1 AND sponsor_id = $2 AND status = 'CREATED'
+         ORDER BY created_at DESC LIMIT 1
+         FOR UPDATE`,
+        [riderId, sponsorId],
+      );
+      if (existing.rows.length > 0) {
+        await client.query('COMMIT');
+        return normalizeRedemption(existing.rows[0]);
+      }
+
+      // A rider can only ever hold ONE open (CREATED) special pick — cancel
+      // any stale picks for other sponsors so the app's "current redemption"
+      // is unambiguous (no orphan rows, no stale attach).
+      await client.query(
+        `UPDATE special_redemptions
+         SET status = 'CANCELLED', cancelled_at = NOW(),
+             cancellation_reason_code = 'SUPERSEDED',
+             cancellation_reason_text = 'A different special was picked',
+             updated_at = NOW()
+         WHERE rider_id = $1 AND status = 'CREATED'`,
+        [riderId],
+      );
+
+      const res = await client.query(
+        `INSERT INTO special_redemptions (
+           sponsor_id, rider_id,
+           sponsor_name, sponsor_business_type, sponsor_latitude,
+           sponsor_longitude, sponsor_address,
+           discount_type, discount_percent, discount_fixed_amount_cents,
+           discount_label, status
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'CREATED')
+         RETURNING *`,
+        [
+          sponsor.id,
+          riderId,
+          sponsor.business_name,
+          sponsor.business_type,
+          sponsor.latitude,
+          sponsor.longitude,
+          sponsor.address,
+          sponsor.discount_type,
+          sponsor.discount_percent,
+          sponsor.discount_fixed_amount_cents,
+          discountLabelFor(sponsor),
+        ],
+      );
+
+      await client.query('COMMIT');
+      const row = res.rows[0];
+      AuditEventsService.record({
+        actorId: riderId,
+        actorRole: 'RIDER',
+        action: 'special_redemption_created',
+        entityType: 'special_redemption',
+        entityId: row.id,
+        details: { sponsorId },
+      }).catch(() => undefined);
+      return normalizeRedemption(row);
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   // --------------------------------------------------------- step 2: request
@@ -294,12 +337,28 @@ export class SpecialRedemptionService {
       `SELECT * FROM special_redemptions WHERE id = $1 AND rider_id = $2 FOR UPDATE`,
       [args.specialRedemptionId, riderId],
     );
-    const redemption = redRes.rows[0];
-    if (!redemption) throw new Error('This special is no longer available');
+    let redemption = redRes.rows[0];
+
+    // The client's id is only a HINT — after a cancel/retry the app may hold
+    // a stale redemption (CANCELLED/RIDE_PENDING). Resolve to the rider's
+    // actual current CREATED redemption so a special ride always carries the
+    // right deal; if none exists the ride proceeds WITHOUT a special (the
+    // driver still receives the request — a ride must never die because of
+    // a stale special id).
+    if (!redemption || redemption.status !== 'CREATED') {
+      const current = await client.query(
+        `SELECT * FROM special_redemptions
+         WHERE rider_id = $1 AND status = 'CREATED'
+         ORDER BY created_at DESC LIMIT 1
+         FOR UPDATE`,
+        [riderId],
+      );
+      redemption = current.rows[0] ?? null;
+    }
+    if (!redemption) {
+      return { redemption: null, discountCents: 0, sponsorDiscountCents: 0 };
+    }
     if (redemption.status !== 'CREATED') {
-      if (redemption.status === 'RIDE_PENDING' || redemption.status === 'WAITING_FOR_SPONSOR') {
-        throw new Error('You already have a special ride in progress');
-      }
       throw new Error('This special can no longer be redeemed');
     }
 

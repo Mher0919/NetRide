@@ -77,9 +77,13 @@ IconData specialTypeIcon(String? type) {
 }
 
 /// Discount copy straight from backend-configured values (never hardcoded).
+/// Always ends in "off" so the rider sees the actual deal ("$5.00 off" /
+/// "25% off"), never a bare number.
 String specialDiscountLabel(SponsorSpecial s) {
   final label = s.discount.label;
-  if (label.isNotEmpty) return label;
+  if (label.isNotEmpty) {
+    return label.toLowerCase().endsWith('off') ? label : '$label off';
+  }
   if (s.discount.type == 'PERCENT' && s.discount.percent != null) {
     final base = '${s.discount.percent}% off';
     final cap = s.discount.fixedAmountCents;

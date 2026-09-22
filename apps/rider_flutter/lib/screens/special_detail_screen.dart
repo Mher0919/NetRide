@@ -15,6 +15,7 @@ import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
 import '../services/ride_intent.dart';
 import '../services/specials_service.dart';
+import '../widgets/explore_specials_section.dart';
 
 class SpecialDetailScreen extends StatefulWidget {
   const SpecialDetailScreen({super.key, required this.sponsorId});
@@ -188,9 +189,7 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
                     borderRadius: BorderRadius.circular(30),
                   ),
                   child: Text(
-                    s.discount.label.isEmpty
-                        ? 'Save on your ride'
-                        : s.discount.label,
+                    specialDiscountLabel(s),
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
@@ -280,7 +279,7 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
                   children: [
                     TileLayer(
                       urlTemplate:
-                          'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                          'https://tiles.openfreemap.org/positron/{z}/{x}/{y}.png',
                       subdomains: const ['a', 'b', 'c', 'd'],
                       userAgentPackageName: 'com.NetRide.rider',
                     ),
@@ -338,8 +337,8 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            'Your ${s.discount.label.isEmpty ? 'special deal' : s.discount.label} '
-            'is attached to this ride — no promo code needed.',
+            'Your ${specialDiscountLabel(s)} is attached to this ride — '
+            'no promo code needed.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,

@@ -1250,7 +1250,7 @@ class _MapScreenState extends State<MapScreen>
                                       children: [
                                         TileLayer(
                                           urlTemplate:
-                                              'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                                              'https://tiles.openfreemap.org/positron/{z}/{x}/{y}.png',
                                           subdomains: const [
                                             'a',
                                             'b',
@@ -1637,72 +1637,75 @@ class _MapScreenState extends State<MapScreen>
     return GestureDetector(
       onTap: () => _animateSheetTo(1),
       behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 38,
-            height: 5,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Image.asset(
-                  'assets/images/car-logo.png',
-                  width: 68,
-                  height: 36,
-                  fit: BoxFit.contain,
-                ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 38,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(999),
               ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'NetRide Premium',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13,
-                      color: Color(0xFF2F3A32),
-                    ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.asset(
+                    'assets/images/car-logo.png',
+                    width: 68,
+                    height: 36,
+                    fit: BoxFit.contain,
                   ),
-                  if (_estimateFare > 0)
-                    Text(
-                      'Est. ${(_estimateDurationSeconds / 60).round().clamp(1, 99)} min',
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'NetRide Premium',
                       style: TextStyle(
-                        fontSize: 10.5,
-                        color: Colors.grey.shade600,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        color: Color(0xFF2F3A32),
                       ),
                     ),
-                ],
-              ),
-              const SizedBox(width: 12),
-              Text(
-                priceText,
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF2F3A32),
-                  letterSpacing: -0.4,
+                    if (_estimateFare > 0)
+                      Text(
+                        'Est. ${(_estimateDurationSeconds / 60).round().clamp(1, 99)} min',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 6),
-              Icon(
-                Icons.keyboard_arrow_up_rounded,
-                size: 20,
-                color: Colors.grey.shade500,
-              ),
-            ],
-          ),
-        ],
+                const SizedBox(width: 12),
+                Text(
+                  priceText,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF2F3A32),
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.keyboard_arrow_up_rounded,
+                  size: 20,
+                  color: Colors.grey.shade500,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1712,6 +1715,7 @@ class _MapScreenState extends State<MapScreen>
   Widget _buildSheetBody(ThemeData theme, {required bool searching}) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final cancelling = Provider.of<RideProvider>(context).cancelling;
+    final requestFailure = Provider.of<RideProvider>(context).requestFailure;
 
     return Column(
       children: [
@@ -1774,62 +1778,125 @@ class _MapScreenState extends State<MapScreen>
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Column(
-                children: [
-                  const SizedBox(
-                    width: 36,
-                    height: 36,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3,
-                      color: Color(0xFF5B7760),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Matching you with nearby drivers…',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF2F3A32),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  if (cancelling)
-                    const Text(
-                      'Cancelling ride request…',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: Color(0xFFC65A5A),
-                      ),
-                    )
-                  else
-                    OutlinedButton.icon(
-                      onPressed: _requestCancel,
-                      icon: const Icon(
-                        Icons.close,
-                        size: 18,
-                        color: Color(0xFFC65A5A),
-                      ),
-                      label: const Text(
-                        'Cancel Ride',
-                        style: TextStyle(
+              child: requestFailure != null
+                  ? Column(
+                      children: [
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          size: 40,
                           color: Color(0xFFC65A5A),
-                          fontWeight: FontWeight.w700,
                         ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFE5B9B9)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                        const SizedBox(height: 14),
+                        Text(
+                          'Ride request failed',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF2F3A32),
+                          ),
                         ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 22,
-                          vertical: 12,
+                        const SizedBox(height: 8),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 28),
+                          child: Text(
+                            requestFailure!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              height: 1.4,
+                              color: const Color(0xFF2F3A32).withOpacity(0.75),
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 20),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Provider.of<RideProvider>(
+                              context,
+                              listen: false,
+                            ).clearRequestFailure();
+                            _closePanel(cancelIfRequesting: false);
+                          },
+                          icon: const Icon(
+                            Icons.close,
+                            size: 18,
+                            color: Color(0xFF5B7760),
+                          ),
+                          label: const Text(
+                            'Close',
+                            style: TextStyle(
+                              color: Color(0xFF5B7760),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFF5B7760)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      children: [
+                        const SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            color: Color(0xFF5B7760),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Matching you with nearby drivers…',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF2F3A32),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        if (cancelling)
+                          const Text(
+                            'Cancelling ride request…',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: Color(0xFFC65A5A),
+                            ),
+                          )
+                        else
+                          OutlinedButton.icon(
+                            onPressed: _requestCancel,
+                            icon: const Icon(
+                              Icons.close,
+                              size: 18,
+                              color: Color(0xFFC65A5A),
+                            ),
+                            label: const Text(
+                              'Cancel Ride',
+                              style: TextStyle(
+                                color: Color(0xFFC65A5A),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Color(0xFFE5B9B9)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 22,
+                                vertical: 12,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                ],
-              ),
             ),
           )
         else
@@ -1880,7 +1947,7 @@ class _MapScreenState extends State<MapScreen>
                       Flexible(
                         child: Text(
                           'SPECIAL at ${attachable.sponsorName} — '
-                          '${attachable.discountLabel.isEmpty ? 'save on this ride' : attachable.discountLabel}',
+                          '${attachable.discountLabel.isEmpty ? 'save on this ride' : '${attachable.discountLabel} off'}',
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12.5,
@@ -1980,8 +2047,10 @@ class _MapScreenState extends State<MapScreen>
   /// Small banner inside the checkout panel announcing the attached special.
   /// Replaces the promo-code row: a special ride never combines with a promo.
   Widget _buildSpecialBanner(ThemeData theme) {
-    final redemption =
-        Provider.of<SpecialsProvider>(context, listen: false).current;
+    final redemption = Provider.of<SpecialsProvider>(
+      context,
+      listen: false,
+    ).current;
     final name = (redemption?.sponsorName?.isNotEmpty ?? false)
         ? redemption!.sponsorName!
         : 'Your deal';
@@ -2053,68 +2122,68 @@ class _MapScreenState extends State<MapScreen>
             _buildSpecialBanner(theme)
           else
             Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.local_offer_outlined,
-                  size: 18,
-                  color: Color(0xFF5B7760),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _promoCodeController,
-                    textCapitalization: TextCapitalization.characters,
-                    // Uppercase the code while typing (not just the mobile
-                    // keyboard) so the Apply/preview and backend lookup are
-                    // always consistent.
-                    inputFormatters: [
-                      TextInputFormatter.withFunction((oldValue, newValue) {
-                        final upper = newValue.text.toUpperCase();
-                        if (upper == newValue.text) return newValue;
-                        return TextEditingValue(
-                          text: upper,
-                          selection: newValue.selection,
-                          composing: TextRange.empty,
-                        );
-                      }),
-                    ],
-                    decoration: const InputDecoration(
-                      hintText: 'Promo code',
-                      isDense: true,
-                      border: InputBorder.none,
-                    ),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF2F3A32),
-                    ),
-                    onSubmitted: (_) => _validatePromo(),
-                  ),
-                ),
-                if (_promoChecking)
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Color(0xFF5B7760),
-                    ),
-                  )
-                else if (_promoApplied)
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                children: [
                   const Icon(
-                    Icons.check_circle_rounded,
-                    color: Color(0xFF6E8B74),
-                    size: 20,
-                  )
-                else
-                  TextButton(
-                    onPressed: _validatePromo,
-                    child: const Text('Apply'),
+                    Icons.local_offer_outlined,
+                    size: 18,
+                    color: Color(0xFF5B7760),
                   ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _promoCodeController,
+                      textCapitalization: TextCapitalization.characters,
+                      // Uppercase the code while typing (not just the mobile
+                      // keyboard) so the Apply/preview and backend lookup are
+                      // always consistent.
+                      inputFormatters: [
+                        TextInputFormatter.withFunction((oldValue, newValue) {
+                          final upper = newValue.text.toUpperCase();
+                          if (upper == newValue.text) return newValue;
+                          return TextEditingValue(
+                            text: upper,
+                            selection: newValue.selection,
+                            composing: TextRange.empty,
+                          );
+                        }),
+                      ],
+                      decoration: const InputDecoration(
+                        hintText: 'Promo code',
+                        isDense: true,
+                        border: InputBorder.none,
+                      ),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF2F3A32),
+                      ),
+                      onSubmitted: (_) => _validatePromo(),
+                    ),
+                  ),
+                  if (_promoChecking)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF5B7760),
+                      ),
+                    )
+                  else if (_promoApplied)
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      color: Color(0xFF6E8B74),
+                      size: 20,
+                    )
+                  else
+                    TextButton(
+                      onPressed: _validatePromo,
+                      child: const Text('Apply'),
+                    ),
+                ],
+              ),
             ),
-          ),
           if (_promoPreview != null &&
               _promoCodeController.text.trim().isNotEmpty) ...[
             const Divider(height: 1, indent: 14, endIndent: 14),

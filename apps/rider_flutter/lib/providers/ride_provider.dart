@@ -95,6 +95,20 @@ class RideProvider with ChangeNotifier {
   int _driverCancelledNoticeSeq = 0;
   int get driverCancelledNoticeSeq => _driverCancelledNoticeSeq;
 
+  /// Last request-level failure pushed by the backend socket `error` event
+  /// (e.g. "This special is temporarily unavailable"). The map screen
+  /// surfaces this instead of leaving the rider stuck on "Finding your
+  /// driver…". Cleared on the next successful request.
+  String? _requestFailure;
+  String? get requestFailure => _requestFailure;
+
+  /// Dismiss the last request failure (the rider closed the error card).
+  void clearRequestFailure() {
+    if (_requestFailure == null) return;
+    _requestFailure = null;
+    notifyListeners();
+  }
+
   /// True while the rider has an active ride request that the backend is
   /// still matching (initial request OR re-match after a driver cancel).
   /// The ONE predicate the map screen uses to keep the existing search UI
@@ -138,7 +152,9 @@ class RideProvider with ChangeNotifier {
     });
 
     _socket!.onConnect((_) {
-      debugPrint('[SOCKET] Rider connected URL=$socketUrl transport=${_socket?.io.engine?.transport?.name ?? '?'}');
+      debugPrint(
+        '[SOCKET] Rider connected URL=$socketUrl transport=${_socket?.io.engine?.transport?.name ?? '?'}',
+      );
       _isConnected = true;
       notifyListeners();
       // Reconnect resync: if a trip is pending (REQUESTED/ACCEPTED/
@@ -147,7 +163,9 @@ class RideProvider with ChangeNotifier {
       // the rider stuck on "searching" forever — the tripUpdate is not
       // replayed automatically.
       if (_status != TripStatus.IDLE && _tripId != null) {
-        debugPrint('[RIDE] Resyncing current trip (status=$_status) after reconnect');
+        debugPrint(
+          '[RIDE] Resyncing current trip (status=$_status) after reconnect',
+        );
         _socket?.emit('getCurrentTrip');
       }
       // Cold-start restore: the process was killed mid-trip. Re-attach to
@@ -161,7 +179,9 @@ class RideProvider with ChangeNotifier {
       // when we believe we have one — the server may have cancelled it
       // while we were disconnected.
       if (_status != TripStatus.IDLE && _tripId != null) {
-        debugPrint('[RIDE] Server reports no current trip — clearing stale local state');
+        debugPrint(
+          '[RIDE] Server reports no current trip — clearing stale local state',
+        );
         reset();
       }
     });
@@ -191,12 +211,16 @@ class RideProvider with ChangeNotifier {
       // Reject ALL stale updates when IDLE, not just REQUESTED/CANCELLED.
       // A stale ACCEPTED arriving after reset would resurrect driver state.
       if (_status == TripStatus.IDLE) {
-        debugPrint('[RIDE] Ignoring stale ${trip.status} tripUpdate while IDLE (trip ${trip.id})');
+        debugPrint(
+          '[RIDE] Ignoring stale ${trip.status} tripUpdate while IDLE (trip ${trip.id})',
+        );
         return;
       }
       // Reject updates for a different ride ID after we have an active trip.
       if (_tripId != null && trip.id != _tripId) {
-        debugPrint('[RIDE] Ignoring tripUpdate for different trip ${trip.id} (current: $_tripId)');
+        debugPrint(
+          '[RIDE] Ignoring tripUpdate for different trip ${trip.id} (current: $_tripId)',
+        );
         return;
       }
       _currentTrip = trip;
@@ -223,23 +247,28 @@ class RideProvider with ChangeNotifier {
       // Persist the active trip for cold-start restore; drop the marker
       // the instant the ride reaches a terminal state so a later reboot
       // stays clean.
-      if (trip.status == TripStatus.CANCELLED || trip.status == TripStatus.COMPLETED) {
+      if (trip.status == TripStatus.CANCELLED ||
+          trip.status == TripStatus.COMPLETED) {
         _persistActiveTrip(null);
       } else {
         _persistActiveTrip(trip.id);
       }
 
-      if (oldStatus == TripStatus.REQUESTED && trip.status == TripStatus.ACCEPTED) {
+      if (oldStatus == TripStatus.REQUESTED &&
+          trip.status == TripStatus.ACCEPTED) {
         SoundService.instance.play(SoundEffect.orderAccepted);
       }
-      if (oldStatus != TripStatus.CANCELLED && trip.status == TripStatus.CANCELLED) {
+      if (oldStatus != TripStatus.CANCELLED &&
+          trip.status == TripStatus.CANCELLED) {
         SoundService.instance.play(SoundEffect.orderCancelled);
       }
-      if (oldStatus != TripStatus.COMPLETED && trip.status == TripStatus.COMPLETED) {
+      if (oldStatus != TripStatus.COMPLETED &&
+          trip.status == TripStatus.COMPLETED) {
         SoundService.instance.play(SoundEffect.tripCompleted);
       }
-      
-      if (trip.status == TripStatus.ACCEPTED || trip.status == TripStatus.IN_PROGRESS) {
+
+      if (trip.status == TripStatus.ACCEPTED ||
+          trip.status == TripStatus.IN_PROGRESS) {
         Location? initialLoc;
         if (data['driver_location'] != null) {
           initialLoc = Location.fromJson(data['driver_location']);
@@ -277,7 +306,9 @@ class RideProvider with ChangeNotifier {
     // the departing driver so the next ACCEPTED builds fresh identity,
     // and let the active screen pop the apology dialog once.
     _socket!.on('tripDriverCancelled', (data) {
-      debugPrint('[RIDE] tripDriverCancelled → ride released + re-matching (same ride)');
+      debugPrint(
+        '[RIDE] tripDriverCancelled → ride released + re-matching (same ride)',
+      );
       if (data is! Map<String, dynamic>) return;
       _driver = null;
       _navigationRoute = null;
@@ -285,10 +316,7 @@ class RideProvider with ChangeNotifier {
       _driverEtaSeconds = null;
       _driverRemainingMeters = null;
       _driverCancelledNoticeSeq += 1;
-      _driverCancelledNotice = {
-        ...data,
-        'noticeId': _driverCancelledNoticeSeq,
-      };
+      _driverCancelledNotice = {...data, 'noticeId': _driverCancelledNoticeSeq};
       notifyListeners();
     });
 
@@ -356,7 +384,9 @@ class RideProvider with ChangeNotifier {
     // A new push was recorded for this rider (deduped server-side). The
     // notifications screen uses this to refresh instead of polling.
     _socket!.on('notificationReceived', (data) {
-      debugPrint('[RIDE] notificationReceived → ${data is Map ? data['type'] : data}');
+      debugPrint(
+        '[RIDE] notificationReceived → ${data is Map ? data['type'] : data}',
+      );
       if (!_notificationPing.isClosed) _notificationPing.add(null);
     });
 
@@ -364,11 +394,25 @@ class RideProvider with ChangeNotifier {
     // redemption transitions (ride pending → code issued → sponsor
     // validated → reward processed). The SPECIALS screen refetches state.
     _socket!.on('specialRedemptionUpdate', (data) {
-      debugPrint('[RIDE] specialRedemptionUpdate → ${data is Map ? data['status'] : data}');
+      debugPrint(
+        '[RIDE] specialRedemptionUpdate → ${data is Map ? data['status'] : data}',
+      );
       if (data is Map<String, dynamic>) _specialRedemptionUpdates.add(data);
     });
 
-    _socket!.on('error', (data) => print('Socket Error: $data'));
+    // A ride request was REJECTED server-side (e.g. the special is no longer
+    // attachable). Never a silent hang: the searching sheet reads this and
+    // tells the rider what happened.
+    _socket!.on('error', (data) {
+      debugPrint('[RIDE] Socket error: $data');
+      final msg = data is String
+          ? data
+          : (data is Map && data['message'] is String)
+          ? data['message'] as String
+          : 'Your ride request could not be sent. Please try again.';
+      _requestFailure = msg;
+      notifyListeners();
+    });
 
     // Cancellation rejected server-side (e.g. missing reason / not in a
     // cancellable state). The REST confirm path surfaces the same message
@@ -380,12 +424,14 @@ class RideProvider with ChangeNotifier {
 
   void sendMessage(String tripId, String message) {
     _socket?.emit('sendMessage', {'tripId': tripId, 'message': message});
-    _messages.add(ChatMessage(
-      senderId: 'me',
-      role: 'rider',
-      message: message,
-      timestamp: DateTime.now(),
-    ));
+    _messages.add(
+      ChatMessage(
+        senderId: 'me',
+        role: 'rider',
+        message: message,
+        timestamp: DateTime.now(),
+      ),
+    );
     notifyListeners();
   }
 
@@ -394,7 +440,9 @@ class RideProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void requestRide(Location pickup, Location destination, {
+  void requestRide(
+    Location pickup,
+    Location destination, {
     bool isScheduled = false,
     DateTime? scheduledAt,
     bool favoritePriority = false,
@@ -404,17 +452,21 @@ class RideProvider with ChangeNotifier {
     int? creditUseCents,
     String? specialRedemptionId,
   }) {
-    debugPrint('[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}');
+    debugPrint(
+      '[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}',
+    );
     if (_socket == null) {
       debugPrint('[RIDE] ❌ Socket is NULL — request will be silently dropped!');
     } else if (!_socket!.connected) {
-      debugPrint('[RIDE] ⚠️ Socket exists but NOT connected — attempting emit anyway');
+      debugPrint(
+        '[RIDE] ⚠️ Socket exists but NOT connected — attempting emit anyway',
+      );
     }
-    
+
     // Generate idempotency key if not provided (for retries)
     final key = idempotencyKey ?? const Uuid().v4();
     final cleanedPromo = promoCode?.trim();
-    
+
     _socket?.emit('requestRide', {
       'pickup': pickup.toJson(),
       'destination': destination.toJson(),
@@ -422,15 +474,19 @@ class RideProvider with ChangeNotifier {
       if (scheduledAt != null) 'scheduledAt': scheduledAt.toIso8601String(),
       'favoritePriority': favoritePriority,
       'idempotencyKey': key,
-      if (cleanedPromo != null && cleanedPromo.isNotEmpty) 'promoCode': cleanedPromo.toUpperCase(),
+      if (cleanedPromo != null && cleanedPromo.isNotEmpty)
+        'promoCode': cleanedPromo.toUpperCase(),
       'applyCredits': applyCredits,
-      if (creditUseCents != null && creditUseCents > 0) 'creditUseCents': creditUseCents,
-      if (specialRedemptionId != null && specialRedemptionId.isNotEmpty) 'specialRedemptionId': specialRedemptionId,
+      if (creditUseCents != null && creditUseCents > 0)
+        'creditUseCents': creditUseCents,
+      if (specialRedemptionId != null && specialRedemptionId.isNotEmpty)
+        'specialRedemptionId': specialRedemptionId,
     });
-    
+
     if (!isScheduled) {
       _status = TripStatus.REQUESTED;
     }
+    _requestFailure = null;
     notifyListeners();
   }
 
@@ -491,9 +547,13 @@ class RideProvider with ChangeNotifier {
           final current = await ApiService.dio.get('/ride/current');
           final active = current.data is Map ? current.data['trip'] : null;
           final stillActive =
-              active is Map && active['id'] == _tripId && active['status'] != 'CANCELLED';
+              active is Map &&
+              active['id'] == _tripId &&
+              active['status'] != 'CANCELLED';
           if (!stillActive) {
-            debugPrint('[RIDE] Cancel 409 but no matching active ride — treating as success');
+            debugPrint(
+              '[RIDE] Cancel 409 but no matching active ride — treating as success',
+            );
             reset();
             return null;
           }
@@ -501,14 +561,18 @@ class RideProvider with ChangeNotifier {
           debugPrint('[RIDE] Cancel-409 probe failed: $probeErr');
         }
         if (_status == TripStatus.CANCELLED) {
-          debugPrint('[RIDE] Cancel 409 but already CANCELLED via socket — resetting');
+          debugPrint(
+            '[RIDE] Cancel 409 but already CANCELLED via socket — resetting',
+          );
           reset();
           return null;
         }
         debugPrint('[RIDE] Cancel refused (409): ride in progress');
         return 'This ride is already in progress and cannot be cancelled.';
       }
-      debugPrint('[RIDE] Cancel failed: ${e.response?.statusCode ?? e.type} ${e.message}');
+      debugPrint(
+        '[RIDE] Cancel failed: ${e.response?.statusCode ?? e.type} ${e.message}',
+      );
       return 'We couldn\'t cancel the ride right now. Please try again.';
     } catch (e) {
       debugPrint('[RIDE] Cancel failed: $e');
@@ -557,15 +621,17 @@ class RideProvider with ChangeNotifier {
 
   /// Fire-and-forget persistence of the active trip id (or its removal).
   void _persistActiveTrip(String? tripId) {
-    SharedPreferences.getInstance().then((prefs) {
-      if (tripId == null) {
-        prefs.remove(_activeTripKey);
-      } else {
-        prefs.setString(_activeTripKey, tripId);
-      }
-    }).catchError((e) {
-      debugPrint('[RIDE] active_trip_id persistence failed: $e');
-    });
+    SharedPreferences.getInstance()
+        .then((prefs) {
+          if (tripId == null) {
+            prefs.remove(_activeTripKey);
+          } else {
+            prefs.setString(_activeTripKey, tripId);
+          }
+        })
+        .catchError((e) {
+          debugPrint('[RIDE] active_trip_id persistence failed: $e');
+        });
   }
 
   void updateLocation(double lat, double lng) {
@@ -588,7 +654,11 @@ class RideProvider with ChangeNotifier {
       return;
     }
     debugPrint('[RIDE] reportActivity($type) @ $useLat,$useLng');
-    _socket?.emit('reportActivity', {'type': type, 'lat': useLat, 'lng': useLng});
+    _socket?.emit('reportActivity', {
+      'type': type,
+      'lat': useLat,
+      'lng': useLng,
+    });
   }
 
   /// Parse the route payload shipped with navigationStarted /
@@ -687,12 +757,17 @@ class RideProvider with ChangeNotifier {
     return points;
   }
 
-  Future<void> rateRide(String rideId, int rating, String reviewText, {bool favorite = false}) async {
+  Future<void> rateRide(
+    String rideId,
+    int rating,
+    String reviewText, {
+    bool favorite = false,
+  }) async {
     await ApiService.rateRide(
       rideId: rideId,
       rating: rating,
       reviewText: reviewText,
-      favorite: favorite
+      favorite: favorite,
     );
   }
 

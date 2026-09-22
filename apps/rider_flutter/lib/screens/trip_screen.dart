@@ -54,26 +54,29 @@ class _TripScreenState extends State<TripScreen> {
       minDistanceM: 5,
       onReport: (lat, lng, {heading = 0}) {
         if (!mounted) return;
-        Provider.of<RideProvider>(context, listen: false)
-            .updateLocation(lat, lng);
+        Provider.of<RideProvider>(
+          context,
+          listen: false,
+        ).updateLocation(lat, lng);
       },
     );
     _initLocationTracking();
   }
 
   Future<void> _initLocationTracking() async {
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0,
-      ),
-    ).listen((position) {
-      if (!mounted) return;
-      setState(() {
-        _riderLocation = LatLng(position.latitude, position.longitude);
-      });
-      _locationReporter.report(position.latitude, position.longitude);
-    });
+    _positionSubscription =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            distanceFilter: 0,
+          ),
+        ).listen((position) {
+          if (!mounted) return;
+          setState(() {
+            _riderLocation = LatLng(position.latitude, position.longitude);
+          });
+          _locationReporter.report(position.latitude, position.longitude);
+        });
   }
 
   @override
@@ -113,19 +116,15 @@ class _TripScreenState extends State<TripScreen> {
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (_) => const RideCancelledDialog(
-          cancelledTrip: null,
-          isDriver: false,
-        ),
+        builder: (_) =>
+            const RideCancelledDialog(cancelledTrip: null, isDriver: false),
       );
     } else {
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (_) => RideCancelledDialog(
-          cancelledTrip: trip,
-          isDriver: false,
-        ),
+        builder: (_) =>
+            RideCancelledDialog(cancelledTrip: trip, isDriver: false),
       );
     }
 
@@ -169,8 +168,13 @@ class _TripScreenState extends State<TripScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Cancel Ride?', style: TextStyle(fontWeight: FontWeight.w700)),
-        content: const Text('Are you sure you want to cancel this ride? Your driver is on the way.'),
+        title: const Text(
+          'Cancel Ride?',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          'Are you sure you want to cancel this ride? Your driver is on the way.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -180,15 +184,18 @@ class _TripScreenState extends State<TripScreen> {
             onPressed: () async {
               Navigator.pop(ctx);
               // 042: cancelling an accepted ride requires a reason.
-              final reason = await showModalBottomSheet<({String code, String label})>(
-                context: context,
-                backgroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                isScrollControlled: true,
-                builder: (sheetContext) => const CancellationReasonSheet(),
-              );
+              final reason =
+                  await showModalBottomSheet<({String code, String label})>(
+                    context: context,
+                    backgroundColor: Colors.white,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(24),
+                      ),
+                    ),
+                    isScrollControlled: true,
+                    builder: (sheetContext) => const CancellationReasonSheet(),
+                  );
               if (reason == null) return;
               try {
                 final error = await rideProvider.cancelRide(
@@ -197,9 +204,9 @@ class _TripScreenState extends State<TripScreen> {
                 );
                 if (error != null) {
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(error)),
-                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text(error)));
                   }
                 } else if (context.mounted) {
                   Navigator.pop(context);
@@ -211,7 +218,10 @@ class _TripScreenState extends State<TripScreen> {
                 }
               }
             },
-            child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFC65A5A))),
+            child: const Text(
+              'Yes, Cancel',
+              style: TextStyle(color: Color(0xFFC65A5A)),
+            ),
           ),
         ],
       ),
@@ -229,7 +239,8 @@ class _TripScreenState extends State<TripScreen> {
     // that used to fire a routing API call every ~50 m of driver
     // movement.
     final navigationRoute = rideProvider.navigationRoute;
-    final etaSec = rideProvider.driverEtaSeconds ?? rideProvider.navigationEtaSeconds;
+    final etaSec =
+        rideProvider.driverEtaSeconds ?? rideProvider.navigationEtaSeconds;
 
     if (rideProvider.status == models.TripStatus.COMPLETED && !_dialogShown) {
       _dialogShown = true;
@@ -242,7 +253,8 @@ class _TripScreenState extends State<TripScreen> {
     // ride, render who cancelled + why with a Report option, then exit once.
     // The rider's OWN cancel already resets via cancelRide()'s REST confirm,
     // so this only fires for the other party's cancellation.
-    if (rideProvider.status == models.TripStatus.CANCELLED && !_cancelledHandled) {
+    if (rideProvider.status == models.TripStatus.CANCELLED &&
+        !_cancelledHandled) {
       _cancelledHandled = true;
       final currentTrip = rideProvider.currentTrip;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -283,12 +295,18 @@ class _TripScreenState extends State<TripScreen> {
                 const SizedBox(height: 32),
                 Text(
                   'Securing your driver...',
-                  style: theme.textTheme.headlineMedium?.copyWith(fontSize: 20, fontWeight: FontWeight.w700),
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Text(
                   'Your premium vehicle is on its way.',
-                  style: TextStyle(color: const Color(0xFF2F3A32).withOpacity(0.5), fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                    color: const Color(0xFF2F3A32).withOpacity(0.5),
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ],
             ),
@@ -298,9 +316,12 @@ class _TripScreenState extends State<TripScreen> {
       );
     }
 
-    final driverLocation = driver.location != null 
-        ? LatLng(driver.location!.lat, driver.location!.lng) 
-        : LatLng(rideProvider.currentTrip!.pickup.lat, rideProvider.currentTrip!.pickup.lng);
+    final driverLocation = driver.location != null
+        ? LatLng(driver.location!.lat, driver.location!.lng)
+        : LatLng(
+            rideProvider.currentTrip!.pickup.lat,
+            rideProvider.currentTrip!.pickup.lng,
+          );
 
     return Scaffold(
       body: Stack(
@@ -316,7 +337,8 @@ class _TripScreenState extends State<TripScreen> {
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                urlTemplate:
+                    'https://tiles.openfreemap.org/positron/{z}/{x}/{y}.png',
                 subdomains: const ['a', 'b', 'c', 'd'],
                 userAgentPackageName: 'com.NetRide.rider',
               ),
@@ -342,15 +364,26 @@ class _TripScreenState extends State<TripScreen> {
                           color: const Color(0xFF5B7760).withOpacity(0.2),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.person_pin_circle, color: Color(0xFF5B7760), size: 30),
+                        child: const Icon(
+                          Icons.person_pin_circle,
+                          color: Color(0xFF5B7760),
+                          size: 30,
+                        ),
                       ),
                     ),
                   if (rideProvider.status == models.TripStatus.IN_PROGRESS)
                     Marker(
-                      point: LatLng(rideProvider.currentTrip!.destination.lat, rideProvider.currentTrip!.destination.lng),
+                      point: LatLng(
+                        rideProvider.currentTrip!.destination.lat,
+                        rideProvider.currentTrip!.destination.lng,
+                      ),
                       width: 30,
                       height: 30,
-                      child: const Icon(Icons.location_on, color: Color(0xFF2F3A32), size: 30),
+                      child: const Icon(
+                        Icons.location_on,
+                        color: Color(0xFF2F3A32),
+                        size: 30,
+                      ),
                     ),
                 ],
               ),
@@ -372,7 +405,11 @@ class _TripScreenState extends State<TripScreen> {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 10)),
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
                   ],
                 ),
                 child: Column(
@@ -382,7 +419,10 @@ class _TripScreenState extends State<TripScreen> {
                       children: [
                         const CircleAvatar(
                           backgroundColor: Color(0xFFF7F4EF),
-                          child: Icon(Icons.local_taxi, color: Color(0xFF5B7760)),
+                          child: Icon(
+                            Icons.local_taxi,
+                            color: Color(0xFF5B7760),
+                          ),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
@@ -390,12 +430,25 @@ class _TripScreenState extends State<TripScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                rideProvider.status == models.TripStatus.ACCEPTED ? 'DRIVER IS ARRIVING' : 'TRIP IN PROGRESS',
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1, color: Color(0xFF5B7760)),
+                                rideProvider.status ==
+                                        models.TripStatus.ACCEPTED
+                                    ? 'DRIVER IS ARRIVING'
+                                    : 'TRIP IN PROGRESS',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1,
+                                  color: Color(0xFF5B7760),
+                                ),
                               ),
                               Text(
-                                driver.name.isNotEmpty ? driver.name : 'Your driver',
-                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                                driver.name.isNotEmpty
+                                    ? driver.name
+                                    : 'Your driver',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ],
                           ),
@@ -407,12 +460,18 @@ class _TripScreenState extends State<TripScreen> {
                               if (driver.plate != null)
                                 Text(
                                   driver.plate!,
-                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 14,
+                                  ),
                                 ),
                               if (driver.vehicle != null)
                                 Text(
                                   driver.vehicle!,
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade600,
+                                  ),
                                 ),
                             ],
                           ),
@@ -442,9 +501,15 @@ class _TripScreenState extends State<TripScreen> {
               padding: const EdgeInsets.fromLTRB(24, 12, 24, 40),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(32),
+                ),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, -10)),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 20,
+                    offset: const Offset(0, -10),
+                  ),
                 ],
               ),
               child: Column(
@@ -453,13 +518,20 @@ class _TripScreenState extends State<TripScreen> {
                   Container(
                     width: 32,
                     height: 4,
-                    decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(2)),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                   if (etaSec != null && etaSec > 0) ...[
                     const SizedBox(height: 16),
                     Row(
                       children: [
-                        const Icon(Icons.schedule, color: Color(0xFF5B7760), size: 16),
+                        const Icon(
+                          Icons.schedule,
+                          color: Color(0xFF5B7760),
+                          size: 16,
+                        ),
                         const SizedBox(width: 6),
                         Text(
                           rideProvider.status == models.TripStatus.ACCEPTED
@@ -482,13 +554,28 @@ class _TripScreenState extends State<TripScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              rideProvider.status == models.TripStatus.ACCEPTED ? 'PICKUP' : 'DESTINATION',
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.grey.shade400, letterSpacing: 1),
+                              rideProvider.status == models.TripStatus.ACCEPTED
+                                  ? 'PICKUP'
+                                  : 'DESTINATION',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.grey.shade400,
+                                letterSpacing: 1,
+                              ),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              rideProvider.status == models.TripStatus.ACCEPTED ? rideProvider.currentTrip!.pickup.address! : rideProvider.currentTrip!.destination.address!,
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              rideProvider.status == models.TripStatus.ACCEPTED
+                                  ? rideProvider.currentTrip!.pickup.address!
+                                  : rideProvider
+                                        .currentTrip!
+                                        .destination
+                                        .address!,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -499,13 +586,26 @@ class _TripScreenState extends State<TripScreen> {
                       if (rideProvider.status == models.TripStatus.ACCEPTED ||
                           rideProvider.status == models.TripStatus.IN_PROGRESS)
                         TextButton.icon(
-                          onPressed: () => _showCancelDialog(context, rideProvider),
-                          icon: const Icon(Icons.close, color: Color(0xFFC65A5A), size: 18),
-                          label: const Text('Cancel', style: TextStyle(color: Color(0xFFC65A5A), fontWeight: FontWeight.w600)),
+                          onPressed: () =>
+                              _showCancelDialog(context, rideProvider),
+                          icon: const Icon(
+                            Icons.close,
+                            color: Color(0xFFC65A5A),
+                            size: 18,
+                          ),
+                          label: const Text(
+                            'Cancel',
+                            style: TextStyle(
+                              color: Color(0xFFC65A5A),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                       _ChatCallButtons(
                         tripId: rideProvider.tripId ?? '',
-                        peerName: driver.name.isNotEmpty ? driver.name : 'Your driver',
+                        peerName: driver.name.isNotEmpty
+                            ? driver.name
+                            : 'Your driver',
                       ),
                     ],
                   ),
@@ -579,7 +679,11 @@ class RideCancelledDialog extends StatelessWidget {
             const SizedBox(height: 12),
             const Text(
               'Ride Cancelled',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22, color: Color(0xFF2F3A32)),
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 22,
+                color: Color(0xFF2F3A32),
+              ),
             ),
           ],
         ),
@@ -590,13 +694,21 @@ class RideCancelledDialog extends StatelessWidget {
           Text(
             heading,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF2F3A32)),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF2F3A32),
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             body,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 13, color: Colors.grey, height: 1.4),
+            style: const TextStyle(
+              fontSize: 13,
+              color: Colors.grey,
+              height: 1.4,
+            ),
           ),
         ],
       ),
@@ -613,14 +725,23 @@ class RideCancelledDialog extends StatelessWidget {
                   context: context,
                   backgroundColor: Colors.white,
                   shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
                   ),
                   isScrollControlled: true,
                   builder: (_) => ReportSheet(rideId: cancelled.id),
                 );
               },
-              icon: const Icon(Icons.report_gmailerrorred_outlined, size: 18, color: Color(0xFFC65A5A)),
-              label: Text('Report ${isDriver ? 'Driver' : 'Rider'}', style: const TextStyle(fontWeight: FontWeight.w700)),
+              icon: const Icon(
+                Icons.report_gmailerrorred_outlined,
+                size: 18,
+                color: Color(0xFFC65A5A),
+              ),
+              label: Text(
+                'Report ${isDriver ? 'Driver' : 'Rider'}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -633,9 +754,14 @@ class RideCancelledDialog extends StatelessWidget {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2F3A32),
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
-            child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800)),
+            child: const Text(
+              'Done',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
           ),
         ),
       ],
@@ -662,7 +788,11 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
       title: const Center(
         child: Text(
           'You have arrived! 🎉',
-          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22, color: Color(0xFF2F3A32)),
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            fontSize: 22,
+            color: Color(0xFF2F3A32),
+          ),
         ),
       ),
       content: Column(
@@ -676,7 +806,11 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
           const SizedBox(height: 24),
           Text(
             '\$${finalFare.toStringAsFixed(2)}',
-            style: const TextStyle(fontSize: 38, fontWeight: FontWeight.w900, color: Color(0xFF2F3A32)),
+            style: const TextStyle(
+              fontSize: 38,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF2F3A32),
+            ),
           ),
           const SizedBox(height: 16),
         ],
@@ -688,15 +822,20 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
           height: 48,
           child: ElevatedButton(
             onPressed: () {
-              final rideProvider = Provider.of<RideProvider>(context, listen: false);
+              final rideProvider = Provider.of<RideProvider>(
+                context,
+                listen: false,
+              );
               final trip = rideProvider.currentTrip;
               rideProvider.reset();
               try {
                 Navigator.pop(context); // Close dialog
                 if (trip != null) {
                   Navigator.pushReplacement(
-                    context, 
-                    MaterialPageRoute(builder: (context) => RatingScreen(trip: trip))
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => RatingScreen(trip: trip),
+                    ),
                   );
                 } else {
                   Navigator.pop(context);
@@ -708,9 +847,14 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2F3A32),
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
             ),
-            child: const Text('RATE YOUR TRIP', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+            child: const Text(
+              'RATE YOUR TRIP',
+              style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5),
+            ),
           ),
         ),
       ],
@@ -756,7 +900,10 @@ class _ChatCallButtons extends StatelessWidget {
         return;
       }
       final uri = Uri(scheme: 'tel', path: phone.trim());
-      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
       if (!launched) {
         _showSnack(context, 'Unable to open the phone app.');
       }
