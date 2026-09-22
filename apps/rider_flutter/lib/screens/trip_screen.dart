@@ -17,6 +17,7 @@ import '../components/smooth_driver_marker.dart';
 import '../components/state_container.dart';
 import '../components/tip_fab.dart';
 import '../components/driver_cancelled_dialog.dart';
+import '../widgets/branded_map_tile.dart';
 import 'rating_screen.dart';
 import 'chat_sheet.dart';
 import 'report_sheet.dart';
@@ -339,6 +340,7 @@ class _TripScreenState extends State<TripScreen> {
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.NetRide.rider',
+                tileBuilder: brandedMapTile,
               ),
               if (navigationRoute != null && navigationRoute.length >= 2)
                 PolylineLayer(

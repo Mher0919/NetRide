@@ -729,8 +729,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
   Widget _buildTiles() {
     return TileLayer(
-      urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-      subdomains: const ['a', 'b', 'c', 'd'],
+      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       userAgentPackageName: 'com.NetRide.driver',
       tileBuilder: (context, tileWidget, tile) {
         return ColorFiltered(
@@ -2034,9 +2033,7 @@ class _RouteThumbnail extends StatelessWidget {
           ),
           children: [
             TileLayer(
-              urlTemplate:
-                  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-              subdomains: const ['a', 'b', 'c', 'd'],
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.NetRide.driver',
               tileBuilder: (context, tileWidget, tile) {
                 return ColorFiltered(

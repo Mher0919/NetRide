@@ -27,6 +27,7 @@ import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/animated_price.dart';
 import '../components/driver_cancelled_dialog.dart';
+import '../widgets/branded_map_tile.dart';
 import '../widgets/explore_specials_section.dart';
 import 'wallet_screen.dart';
 
@@ -1269,48 +1270,8 @@ class _MapScreenState extends State<MapScreen>
                                                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                                                       userAgentPackageName:
                                                           'com.NetRide.rider',
-                                                      tileBuilder: (context, tileWidget, tile) {
-                                                        return ColorFiltered(
-                                                          colorFilter:
-                                                              const ColorFilter.matrix(
-                                                                <double>[
-                                                                  0.937,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  0.922,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  0.902,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  0,
-                                                                  1,
-                                                                  0,
-                                                                ],
-                                                              ),
-                                                          child: ColorFiltered(
-                                                            colorFilter:
-                                                                ColorFilter.mode(
-                                                                  const Color(
-                                                                    0xFFEEEBE6,
-                                                                  ).withOpacity(
-                                                                    0.3,
-                                                                  ),
-                                                                  BlendMode
-                                                                      .multiply,
-                                                                ),
-                                                            child: tileWidget,
-                                                          ),
-                                                        );
-                                                      },
+                                                      tileBuilder:
+                                                          brandedMapTile,
                                                     ),
                                                     AnimatedOpacity(
                                                       opacity:

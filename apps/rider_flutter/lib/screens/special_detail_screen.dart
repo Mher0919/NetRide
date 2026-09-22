@@ -15,6 +15,7 @@ import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
 import '../services/ride_intent.dart';
 import '../services/specials_service.dart';
+import '../widgets/branded_map_tile.dart';
 import '../widgets/explore_specials_section.dart';
 
 class SpecialDetailScreen extends StatefulWidget {
@@ -278,9 +279,9 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       userAgentPackageName: 'com.NetRide.rider',
+                      tileBuilder: brandedMapTile,
                     ),
                     MarkerLayer(
                       markers: [

@@ -12,9 +12,13 @@ async function main() {
   const httpServer = createServer();
   const io = new Server(httpServer);
 
+  // NOTE: do NOT call pubClient.connect()/subClient.connect() here —
+  // redisPubSub.ts already opens both connections at module load. A second
+  // explicit connect() throws ("Redis is already connecting/connected"),
+  // which silently leaves the worker's Socket.IO on the default in-memory
+  // adapter — every worker emit is then dropped instead of reaching clients
+  // on the API server.
   try {
-    await pubClient.connect();
-    await subClient.connect();
     io.adapter(createAdapter(pubClient, subClient));
     console.log('[CRON] Socket.IO Redis adapter connected');
   } catch (err: any) {

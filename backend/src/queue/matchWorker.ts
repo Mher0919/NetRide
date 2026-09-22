@@ -14,9 +14,13 @@ async function main() {
 
   // Share the same Redis pub/sub channel as the main app so emits
   // (io.to('driver:xxx').emit(...)) reach clients connected to the main server.
+  // NOTE: do NOT call pubClient.connect()/subClient.connect() here —
+  // redisPubSub.ts already opens both connections at module load. A second
+  // explicit connect() throws ("Redis is already connecting/connected"),
+  // which silently leaves the worker's Socket.IO on the default in-memory
+  // adapter — every worker emit (newTripRequest offers, ride cancellations)
+  // is then dropped instead of reaching clients on the API server.
   try {
-    await pubClient.connect();
-    await subClient.connect();
     io.adapter(createAdapter(pubClient, subClient));
     console.log('[WORKER] Socket.IO Redis adapter connected');
   } catch (err: any) {
