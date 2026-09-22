@@ -279,8 +279,7 @@ class _SpecialDetailScreenState extends State<SpecialDetailScreen> {
                   children: [
                     TileLayer(
                       urlTemplate:
-                          'https://tiles.openfreemap.org/positron/{z}/{x}/{y}.png',
-                      subdomains: const ['a', 'b', 'c', 'd'],
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       userAgentPackageName: 'com.NetRide.rider',
                     ),
                     MarkerLayer(

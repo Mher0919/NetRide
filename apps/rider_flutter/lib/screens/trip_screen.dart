@@ -337,9 +337,7 @@ class _TripScreenState extends State<TripScreen> {
             ),
             children: [
               TileLayer(
-                urlTemplate:
-                    'https://tiles.openfreemap.org/positron/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.NetRide.rider',
               ),
               if (navigationRoute != null && navigationRoute.length >= 2)

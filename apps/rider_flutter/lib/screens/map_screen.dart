@@ -1049,420 +1049,484 @@ class _MapScreenState extends State<MapScreen>
               children: [
                 Column(
                   children: [
-                    // Part 2: scrollable Explore content (greeting, search
-                    // cards, SPECIALS). The map below keeps a FIXED height —
-                    // adding specials never shrinks it — and this area
-                    // scrolls when the content overflows. Full-screen map
-                    // mode hides it entirely.
+                    // Part 2: the WHOLE Explore page scrolls as one unit — greeting,
+                    // search cards, SPECIALS and the map. The map keeps a
+                    // fixed height (specials never shrink it) and moves with
+                    // the page like everything else. Tapping the mini map
+                    // expands it to full screen; in full-screen mode the
+                    // rest of the page collapses and the map fills the
+                    // screen (still scrollable as one page).
                     Expanded(
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        switchInCurve: Curves.easeOut,
-                        switchOutCurve: Curves.easeIn,
-                        child: _mapExpanded
-                            ? const SizedBox.shrink(
-                                key: ValueKey('map-expanded'),
-                              )
-                            : SingleChildScrollView(
-                                key: const ValueKey('explore-content'),
-                                physics: const BouncingScrollPhysics(),
-                                padding: const EdgeInsets.only(bottom: 16),
-                                child: SafeArea(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 10,
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 16,
-                                                    vertical: 8,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white,
-                                                borderRadius:
-                                                    BorderRadius.circular(24),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: Colors.black
-                                                        .withOpacity(0.05),
-                                                    blurRadius: 10,
-                                                    offset: const Offset(0, 4),
-                                                  ),
-                                                ],
-                                              ),
-                                              child: Text(
-                                                _firstName.isNotEmpty
-                                                    ? 'Hello, $_firstName'
-                                                    : 'Welcome',
-                                                style: theme
-                                                    .textTheme
-                                                    .bodyMedium
-                                                    ?.copyWith(
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      color: const Color(
-                                                        0xFF2F3A32,
-                                                      ),
-                                                    ),
-                                              ),
-                                            ),
-                                            Container(
-                                              width: 12,
-                                              height: 12,
-                                              decoration: BoxDecoration(
-                                                color: rideProvider.isConnected
-                                                    ? const Color(0xFF6E8B74)
-                                                    : const Color(0xFFC65A5A),
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                  color: Colors.white,
-                                                  width: 2,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        padding: const EdgeInsets.only(bottom: 24),
+                        child: SafeArea(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 10,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                if (!_mapExpanded) ...[
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 8,
                                         ),
-                                        const SizedBox(height: 14),
-                                        _buildExploreLocationCard(theme),
-                                        const SizedBox(height: 10),
-                                        Hero(
-                                          tag: 'search_container',
-                                          child: _buildWhereToCard(theme),
-                                        ),
-                                        if (_recentSearches.isNotEmpty) ...[
-                                          const SizedBox(height: 14),
-                                          _buildRecentSearches(theme),
-                                        ],
-                                        // SPECIALS — conditional section living INSIDE
-                                        // Explore. Renders nothing when the backend
-                                        // reports zero eligible active specials (the
-                                        // widget's own visibility rule), so Explore
-                                        // stays clean in both cases.
-                                        const ExploreSpecialsSection(),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                      ),
-                    ),
-                    if (_smoothedPosition != null)
-                      AnimatedSize(
-                        duration: const Duration(milliseconds: 380),
-                        curve: Curves.easeInOutCubic,
-                        alignment: Alignment.topCenter,
-                        child: SizedBox(
-                          height: _mapExpanded ? fullMapHeight : miniMapHeight,
-                          child: AnimatedPadding(
-                            duration: const Duration(milliseconds: 380),
-                            curve: Curves.easeInOutCubic,
-                            padding: _mapExpanded
-                                ? EdgeInsets.zero
-                                : const EdgeInsets.fromLTRB(20, 2, 20, 20),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 380),
-                              curve: Curves.easeInOutCubic,
-                              clipBehavior: Clip.antiAlias,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(
-                                  _mapExpanded ? 0 : 28,
-                                ),
-                                boxShadow: _mapExpanded
-                                    ? null
-                                    : [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.10),
-                                          blurRadius: 24,
-                                          offset: const Offset(0, 10),
-                                        ),
-                                      ],
-                              ),
-                              child: Stack(
-                                children: [
-                                  Listener(
-                                    // In mini mode a light tap expands the map
-                                    // (state A -> B); drags and pinches pan/zoom the
-                                    // map directly (interaction enabled below). Raw
-                                    // pointer events are used because flutter_map's
-                                    // tap recognizer would win the gesture arena
-                                    // against a wrapping GestureDetector.
-                                    onPointerDown: _mapExpanded
-                                        ? null
-                                        : (e) {
-                                            _miniTapDownPosition = e.position;
-                                            _miniTapDownAt = DateTime.now();
-                                          },
-                                    onPointerUp: _mapExpanded
-                                        ? null
-                                        : (e) {
-                                            final down = _miniTapDownPosition;
-                                            final downAt = _miniTapDownAt;
-                                            _miniTapDownPosition = null;
-                                            _miniTapDownAt = null;
-                                            if (down == null || downAt == null)
-                                              return;
-                                            final moved =
-                                                (e.position - down).distance;
-                                            final elapsed = DateTime.now()
-                                                .difference(downAt);
-                                            if (moved < 16 &&
-                                                elapsed <
-                                                    const Duration(
-                                                      milliseconds: 400,
-                                                    )) {
-                                              _expandMap();
-                                            }
-                                          },
-                                    child: FlutterMap(
-                                      mapController: _mapController,
-                                      options: MapOptions(
-                                        initialCenter: _smoothedPosition!,
-                                        initialZoom: 15.0,
-                                        minZoom: 12,
-                                        maxZoom: 18,
-                                        interactionOptions:
-                                            const InteractionOptions(
-                                              flags:
-                                                  InteractiveFlag.all &
-                                                  ~InteractiveFlag.rotate,
-                                            ),
-                                        onMapReady: () {
-                                          setState(() => _isMapReady = true);
-                                        },
-                                        onPositionChanged: (pos, hasGesture) {
-                                          if (hasGesture) {
-                                            setState(
-                                              () => _shouldFollowUser = false,
-                                            );
-                                          }
-                                        },
-                                      ),
-                                      children: [
-                                        TileLayer(
-                                          urlTemplate:
-                                              'https://tiles.openfreemap.org/positron/{z}/{x}/{y}.png',
-                                          subdomains: const [
-                                            'a',
-                                            'b',
-                                            'c',
-                                            'd',
-                                          ],
-                                          userAgentPackageName:
-                                              'com.NetRide.rider',
-                                          tileBuilder:
-                                              (context, tileWidget, tile) {
-                                                return ColorFiltered(
-                                                  colorFilter:
-                                                      const ColorFilter.matrix(
-                                                        <double>[
-                                                          0.937,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          0.922,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          0.902,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          0,
-                                                          1,
-                                                          0,
-                                                        ],
-                                                      ),
-                                                  child: ColorFiltered(
-                                                    colorFilter:
-                                                        ColorFilter.mode(
-                                                          const Color(
-                                                            0xFFEEEBE6,
-                                                          ).withOpacity(0.3),
-                                                          BlendMode.multiply,
-                                                        ),
-                                                    child: tileWidget,
-                                                  ),
-                                                );
-                                              },
-                                        ),
-                                        AnimatedOpacity(
-                                          opacity: _routePoints.isNotEmpty
-                                              ? 1
-                                              : 0,
-                                          duration: const Duration(
-                                            milliseconds: 350,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(
+                                            24,
                                           ),
-                                          child: _routePoints.isEmpty
-                                              ? const SizedBox.shrink()
-                                              : PolylineLayer(
-                                                  polylines: [
-                                                    Polyline<Object>(
-                                                      points: _routePoints,
-                                                      color: const Color(
-                                                        0xFF5B7760,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(
+                                                0.05,
+                                              ),
+                                              blurRadius: 10,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Text(
+                                          _firstName.isNotEmpty
+                                              ? 'Hello, $_firstName'
+                                              : 'Welcome',
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                                color: const Color(0xFF2F3A32),
+                                              ),
+                                        ),
+                                      ),
+                                      Container(
+                                        width: 12,
+                                        height: 12,
+                                        decoration: BoxDecoration(
+                                          color: rideProvider.isConnected
+                                              ? const Color(0xFF6E8B74)
+                                              : const Color(0xFFC65A5A),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: Colors.white,
+                                            width: 2,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 14),
+                                  _buildExploreLocationCard(theme),
+                                  const SizedBox(height: 10),
+                                  Hero(
+                                    tag: 'search_container',
+                                    child: _buildWhereToCard(theme),
+                                  ),
+                                  if (_recentSearches.isNotEmpty) ...[
+                                    const SizedBox(height: 14),
+                                    _buildRecentSearches(theme),
+                                  ],
+                                  // SPECIALS — conditional section living INSIDE
+                                  // Explore. Renders nothing when the backend
+                                  // reports zero eligible active specials (the
+                                  // widget's own visibility rule), so Explore
+                                  // stays clean in both cases.
+                                  const ExploreSpecialsSection(),
+                                ], // end of the non-fullscreen spread
+                                const SizedBox(height: 14),
+                                if (_smoothedPosition != null)
+                                  AnimatedSize(
+                                    duration: const Duration(milliseconds: 380),
+                                    curve: Curves.easeInOutCubic,
+                                    alignment: Alignment.topCenter,
+                                    child: SizedBox(
+                                      height: _mapExpanded
+                                          ? fullMapHeight
+                                          : miniMapHeight,
+                                      child: AnimatedPadding(
+                                        duration: const Duration(
+                                          milliseconds: 380,
+                                        ),
+                                        curve: Curves.easeInOutCubic,
+                                        padding: _mapExpanded
+                                            ? EdgeInsets.zero
+                                            : const EdgeInsets.only(bottom: 4),
+                                        child: AnimatedContainer(
+                                          duration: const Duration(
+                                            milliseconds: 380,
+                                          ),
+                                          curve: Curves.easeInOutCubic,
+                                          clipBehavior: Clip.antiAlias,
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(
+                                              _mapExpanded ? 0 : 28,
+                                            ),
+                                            boxShadow: _mapExpanded
+                                                ? null
+                                                : [
+                                                    BoxShadow(
+                                                      color: Colors.black
+                                                          .withOpacity(0.10),
+                                                      blurRadius: 24,
+                                                      offset: const Offset(
+                                                        0,
+                                                        10,
                                                       ),
-                                                      strokeWidth: 4.0,
-                                                      borderColor: Colors.white,
-                                                      borderStrokeWidth: 1.0,
                                                     ),
                                                   ],
-                                                ),
-                                        ),
-                                        MarkerLayer(
-                                          markers: [
-                                            if (_smoothedPosition != null)
-                                              Marker(
-                                                point: _smoothedPosition!,
-                                                width: 40,
-                                                height: 40,
-                                                child:
-                                                    _buildUserLocationMarker(),
-                                              ),
-                                            if (_pickup != null &&
-                                                _pickup!.address !=
-                                                    'Current Location')
-                                              Marker(
-                                                point: LatLng(
-                                                  _pickup!.lat,
-                                                  _pickup!.lng,
-                                                ),
-                                                width: 30,
-                                                height: 30,
-                                                child: _buildPinMarker(
-                                                  const Color(0xFF5B7760),
-                                                  isPickup: true,
-                                                ),
-                                              ),
-                                            if (_destination != null)
-                                              Marker(
-                                                point: LatLng(
-                                                  _destination!.lat,
-                                                  _destination!.lng,
-                                                ),
-                                                width: 30,
-                                                height: 30,
-                                                child: _buildPinMarker(
-                                                  const Color(0xFF2F3A32),
-                                                  isPickup: false,
-                                                ),
-                                              ),
-                                            // SPECIALS sponsor markers (eligible active
-                                            // specials only — deactivated sponsors drop
-                                            // out of the list on the next refresh, so zero
-                                            // active specials means zero markers).
-                                            for (final s in eligibleSponsors)
-                                              Marker(
-                                                point: LatLng(
-                                                  s.latitude!,
-                                                  s.longitude!,
-                                                ),
-                                                width: 36,
-                                                height: 36,
-                                                child: GestureDetector(
-                                                  onTap: () =>
-                                                      Navigator.of(
-                                                        context,
-                                                      ).pushNamed(
-                                                        '/special-detail',
-                                                        arguments: {'id': s.id},
-                                                      ),
-                                                  child: _buildSponsorMarker(s),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                        for (var entry
-                                            in rideProvider
-                                                .nearbyDrivers
-                                                .entries)
-                                          SmoothDriverMarker(
-                                            driverId: entry.key,
-                                            position: LatLng(
-                                              entry.value.lat,
-                                              entry.value.lng,
-                                            ),
-                                            heading: entry.value.heading ?? 0,
                                           ),
-                                      ],
-                                    ),
-                                  ),
-                                  // Tap-to-expand hint pill — glued to the mini map
-                                  // so it stays with it (state A).
-                                  if (!_mapExpanded)
-                                    Positioned(
-                                      top: 10,
-                                      right: 10,
-                                      child: IgnorePointer(
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 6,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white.withOpacity(
-                                              0.92,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              999,
-                                            ),
-                                            border: Border.all(
-                                              color: const Color(0xFFD8D2CA),
-                                            ),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withOpacity(
-                                                  0.06,
-                                                ),
-                                                blurRadius: 8,
-                                                offset: const Offset(0, 3),
-                                              ),
-                                            ],
-                                          ),
-                                          child: const Row(
-                                            mainAxisSize: MainAxisSize.min,
+                                          child: Stack(
                                             children: [
-                                              Icon(
-                                                Icons.open_in_full_rounded,
-                                                size: 12,
-                                                color: Color(0xFF5B7760),
-                                              ),
-                                              SizedBox(width: 5),
-                                              Text(
-                                                'Drag to explore · tap for full screen',
-                                                style: TextStyle(
-                                                  fontSize: 10.5,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: Color(0xFF5B7760),
+                                              Listener(
+                                                // In mini mode a light tap expands the map
+                                                // (state A -> B); drags and pinches pan/zoom the
+                                                // map directly (interaction enabled below). Raw
+                                                // pointer events are used because flutter_map's
+                                                // tap recognizer would win the gesture arena
+                                                // against a wrapping GestureDetector.
+                                                onPointerDown: _mapExpanded
+                                                    ? null
+                                                    : (e) {
+                                                        _miniTapDownPosition =
+                                                            e.position;
+                                                        _miniTapDownAt =
+                                                            DateTime.now();
+                                                      },
+                                                onPointerUp: _mapExpanded
+                                                    ? null
+                                                    : (e) {
+                                                        final down =
+                                                            _miniTapDownPosition;
+                                                        final downAt =
+                                                            _miniTapDownAt;
+                                                        _miniTapDownPosition =
+                                                            null;
+                                                        _miniTapDownAt = null;
+                                                        if (down == null ||
+                                                            downAt == null)
+                                                          return;
+                                                        final moved =
+                                                            (e.position - down)
+                                                                .distance;
+                                                        final elapsed =
+                                                            DateTime.now()
+                                                                .difference(
+                                                                  downAt,
+                                                                );
+                                                        if (moved < 16 &&
+                                                            elapsed <
+                                                                const Duration(
+                                                                  milliseconds:
+                                                                      400,
+                                                                )) {
+                                                          _expandMap();
+                                                        }
+                                                      },
+                                                child: FlutterMap(
+                                                  mapController: _mapController,
+                                                  options: MapOptions(
+                                                    initialCenter:
+                                                        _smoothedPosition!,
+                                                    initialZoom: 15.0,
+                                                    minZoom: 12,
+                                                    maxZoom: 18,
+                                                    interactionOptions:
+                                                        InteractionOptions(
+                                                          flags: _mapExpanded
+                                                              ? InteractiveFlag
+                                                                        .all &
+                                                                    ~InteractiveFlag
+                                                                        .rotate
+                                                              : InteractiveFlag
+                                                                    .none,
+                                                        ),
+                                                    onMapReady: () {
+                                                      setState(
+                                                        () =>
+                                                            _isMapReady = true,
+                                                      );
+                                                    },
+                                                    onPositionChanged:
+                                                        (pos, hasGesture) {
+                                                          if (hasGesture) {
+                                                            setState(
+                                                              () =>
+                                                                  _shouldFollowUser =
+                                                                      false,
+                                                            );
+                                                          }
+                                                        },
+                                                  ),
+                                                  children: [
+                                                    TileLayer(
+                                                      urlTemplate:
+                                                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                                      userAgentPackageName:
+                                                          'com.NetRide.rider',
+                                                      tileBuilder: (context, tileWidget, tile) {
+                                                        return ColorFiltered(
+                                                          colorFilter:
+                                                              const ColorFilter.matrix(
+                                                                <double>[
+                                                                  0.937,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  0.922,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  0.902,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  1,
+                                                                  0,
+                                                                ],
+                                                              ),
+                                                          child: ColorFiltered(
+                                                            colorFilter:
+                                                                ColorFilter.mode(
+                                                                  const Color(
+                                                                    0xFFEEEBE6,
+                                                                  ).withOpacity(
+                                                                    0.3,
+                                                                  ),
+                                                                  BlendMode
+                                                                      .multiply,
+                                                                ),
+                                                            child: tileWidget,
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                    AnimatedOpacity(
+                                                      opacity:
+                                                          _routePoints
+                                                              .isNotEmpty
+                                                          ? 1
+                                                          : 0,
+                                                      duration: const Duration(
+                                                        milliseconds: 350,
+                                                      ),
+                                                      child:
+                                                          _routePoints.isEmpty
+                                                          ? const SizedBox.shrink()
+                                                          : PolylineLayer(
+                                                              polylines: [
+                                                                Polyline<
+                                                                  Object
+                                                                >(
+                                                                  points:
+                                                                      _routePoints,
+                                                                  color: const Color(
+                                                                    0xFF5B7760,
+                                                                  ),
+                                                                  strokeWidth:
+                                                                      4.0,
+                                                                  borderColor:
+                                                                      Colors
+                                                                          .white,
+                                                                  borderStrokeWidth:
+                                                                      1.0,
+                                                                ),
+                                                              ],
+                                                            ),
+                                                    ),
+                                                    MarkerLayer(
+                                                      markers: [
+                                                        if (_smoothedPosition !=
+                                                            null)
+                                                          Marker(
+                                                            point:
+                                                                _smoothedPosition!,
+                                                            width: 40,
+                                                            height: 40,
+                                                            child:
+                                                                _buildUserLocationMarker(),
+                                                          ),
+                                                        if (_pickup != null &&
+                                                            _pickup!.address !=
+                                                                'Current Location')
+                                                          Marker(
+                                                            point: LatLng(
+                                                              _pickup!.lat,
+                                                              _pickup!.lng,
+                                                            ),
+                                                            width: 30,
+                                                            height: 30,
+                                                            child:
+                                                                _buildPinMarker(
+                                                                  const Color(
+                                                                    0xFF5B7760,
+                                                                  ),
+                                                                  isPickup:
+                                                                      true,
+                                                                ),
+                                                          ),
+                                                        if (_destination !=
+                                                            null)
+                                                          Marker(
+                                                            point: LatLng(
+                                                              _destination!.lat,
+                                                              _destination!.lng,
+                                                            ),
+                                                            width: 30,
+                                                            height: 30,
+                                                            child:
+                                                                _buildPinMarker(
+                                                                  const Color(
+                                                                    0xFF2F3A32,
+                                                                  ),
+                                                                  isPickup:
+                                                                      false,
+                                                                ),
+                                                          ),
+                                                        // SPECIALS sponsor markers (eligible active
+                                                        // specials only — deactivated sponsors drop
+                                                        // out of the list on the next refresh, so zero
+                                                        // active specials means zero markers).
+                                                        for (final s
+                                                            in eligibleSponsors)
+                                                          Marker(
+                                                            point: LatLng(
+                                                              s.latitude!,
+                                                              s.longitude!,
+                                                            ),
+                                                            width: 36,
+                                                            height: 36,
+                                                            child: GestureDetector(
+                                                              onTap: () =>
+                                                                  Navigator.of(
+                                                                    context,
+                                                                  ).pushNamed(
+                                                                    '/special-detail',
+                                                                    arguments: {
+                                                                      'id':
+                                                                          s.id,
+                                                                    },
+                                                                  ),
+                                                              child:
+                                                                  _buildSponsorMarker(
+                                                                    s,
+                                                                  ),
+                                                            ),
+                                                          ),
+                                                      ],
+                                                    ),
+                                                    for (var entry
+                                                        in rideProvider
+                                                            .nearbyDrivers
+                                                            .entries)
+                                                      SmoothDriverMarker(
+                                                        driverId: entry.key,
+                                                        position: LatLng(
+                                                          entry.value.lat,
+                                                          entry.value.lng,
+                                                        ),
+                                                        heading:
+                                                            entry
+                                                                .value
+                                                                .heading ??
+                                                            0,
+                                                      ),
+                                                  ],
                                                 ),
                                               ),
+                                              // Tap-to-expand hint pill — glued to the mini map
+                                              // so it stays with it (state A).
+                                              if (!_mapExpanded)
+                                                Positioned(
+                                                  top: 10,
+                                                  right: 10,
+                                                  child: IgnorePointer(
+                                                    child: Container(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 12,
+                                                            vertical: 6,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.white
+                                                            .withOpacity(0.92),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              999,
+                                                            ),
+                                                        border: Border.all(
+                                                          color: const Color(
+                                                            0xFFD8D2CA,
+                                                          ),
+                                                        ),
+                                                        boxShadow: [
+                                                          BoxShadow(
+                                                            color: Colors.black
+                                                                .withOpacity(
+                                                                  0.06,
+                                                                ),
+                                                            blurRadius: 8,
+                                                            offset:
+                                                                const Offset(
+                                                                  0,
+                                                                  3,
+                                                                ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      child: const Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons
+                                                                .open_in_full_rounded,
+                                                            size: 12,
+                                                            color: Color(
+                                                              0xFF5B7760,
+                                                            ),
+                                                          ),
+                                                          SizedBox(width: 5),
+                                                          Text(
+                                                            'Tap map for full screen · scroll to explore',
+                                                            style: TextStyle(
+                                                              fontSize: 10.5,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                              color: Color(
+                                                                0xFF5B7760,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
                                             ],
                                           ),
                                         ),
                                       ),
                                     ),
-                                ],
-                              ),
+                                  ),
+                              ],
                             ),
                           ),
                         ),
-                      )
-                    else
-                      const Expanded(child: SizedBox()),
+                      ),
+                    ),
                   ],
                 ),
 
