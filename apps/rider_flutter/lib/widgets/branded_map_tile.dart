@@ -1,8 +1,8 @@
 // lib/widgets/branded_map_tile.dart
 //
-// EXACTLY the same tile rendering the DRIVER app uses: CartoDB light_all
-// basemap + the app's light channel-scaling and warm paper tint. The rider
-// map must look and behave identically to the driver's.
+// EXACTLY the same tile rendering the DRIVER app uses: OSM standard
+// basemap color-tuned with the app's light channel-scaling and warm paper
+// tint. The rider map must look and behave identically to the driver's.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' show TileImage;

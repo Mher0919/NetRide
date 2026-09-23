@@ -120,8 +120,8 @@ const LiveMonitoring: React.FC = () => {
           <Paper sx={{ height: '100%', p: 0, borderRadius: 4, overflow: 'hidden', border: 'none' }}>
             <MapContainer center={[34.0522, -118.2437]} zoom={11} style={{ height: '100%', width: '100%' }}>
               <TileLayer 
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" 
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               />
               {drivers.map(driver => (
                 <Marker 
