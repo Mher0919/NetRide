@@ -7,7 +7,8 @@
 // duplicating the Redis read or branching the hot path.
 
 import { EventEmitter } from 'events';
-import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } from '../../config/redis';
+import { latLngToCell, gridDisk } from 'h3-js';
+import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX, DRIVER_H3_CELL_PREFIX, DRIVER_H3_INDEX_PREFIX } from '../../config/redis';
 import { Location } from '../../types';
 import * as geohash from 'ngeohash';
 
@@ -40,6 +41,58 @@ export const trajectoryEvents = new EventEmitter();
 // attach (current consumers: SpeedingDetector + future ML pipeline).
 trajectoryEvents.setMaxListeners(64);
 
+// H3 resolution for the driver-cell index. Res 6 hexagons have an average
+// edge length of ~3.7 km — a good balance between index size and the number
+// of cells we must touch for the 10/15/20 km dispatch rings.
+const H3_MATCHING_RESOLUTION = 6;
+// Average H3 hexagon edge length in km at res 6 (≈3.72 km). Used to convert a
+// search radius into a gridDisk ring count.
+const H3_EDGE_KM = 3.72;
+
+/**
+ * Atomically moves a driver between H3 cell sets. Reads the driver's current
+ * cell, removes them from that cell's set if it changed, adds them to the new
+ * cell's set, and stores the new cell mapping — all in one Lua script so two
+ * concurrent location updates can never leak a stale membership.
+ */
+const MOVE_DRIVER_CELL_LUA = `
+  local cellKey = KEYS[1]
+  local cellPrefix = KEYS[2]
+  local driverId = ARGV[1]
+  local cell = ARGV[2]
+  local prevCell = redis.call('GET', cellKey)
+  if prevCell and prevCell ~= cell then
+    redis.call('SREM', cellPrefix .. prevCell, driverId)
+  end
+  redis.call('SADD', cellPrefix .. cell, driverId)
+  redis.call('SET', cellKey, cell)
+  return 1
+`;
+
+/**
+ * Converts a search radius (km) into a gridDisk ring count so the ring fully
+ * covers the radius (plus a safety margin of one extra ring).
+ */
+function radiusToGridDiskRings(radiusKm: number): number {
+  // Center-to-center distance between adjacent res-6 hexagons ≈ edge * sqrt(3).
+  const stepKm = H3_EDGE_KM * Math.sqrt(3);
+  return Math.max(1, Math.ceil(radiusKm / stepKm) + 1);
+}
+
+/** Great-circle distance in km between two coordinates. */
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 export class LocationsService {
   /**
    * Updates a driver's real-time location in Redis
@@ -55,16 +108,31 @@ export class LocationsService {
     // survive brief socket disconnects (free-tier spin-down, network
     // blip) without making truly offline drivers invisible to matching.
     pipeline.set(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`, '1', 'EX', 90);
-    
+
+    // 3. Maintain the H3 hexagonal cell index. Each online driver lives in
+    // the set of their current cell; matching only queries the small ring of
+    // cells around the pickup instead of scanning the global GEO set. The
+    // move between cell sets is atomic (Lua) so concurrent updates never leak
+    // stale memberships.
+    const cell = latLngToCell(loc.lat, loc.lng, H3_MATCHING_RESOLUTION);
+    pipeline.eval(
+      MOVE_DRIVER_CELL_LUA,
+      2,
+      `${DRIVER_H3_CELL_PREFIX}${driverId}`,
+      DRIVER_H3_INDEX_PREFIX,
+      driverId,
+      cell,
+    );
+
     await pipeline.exec();
 
-    // 3. Trajectory Buffering - ONLY if driver is on a trip
+    // 4. Trajectory Buffering - ONLY if driver is on a trip
     // We use a separate async task to not block the main location update
     this.bufferTrajectory(driverId, loc).catch(err => {
       console.error(`[GEO] ❌ Trajectory buffering failed for driver ${driverId}:`, err.message);
     });
 
-    // 4. Return geohash precision 6 (~1.2km x 0.6km) for socket room management
+    // 5. Return geohash precision 6 (~1.2km x 0.6km) for socket room management
     return geohash.encode(loc.lat, loc.lng, 6);
   }
 
@@ -133,7 +201,12 @@ export class LocationsService {
   }
 
   /**
-   * Finds nearby online drivers within a radius
+   * Finds nearby online drivers within a radius using the H3 hexagonal index.
+   *
+   * Instead of scanning the global GEO set (O(all online drivers) in the worst
+   * case), it computes the rider's H3 cell, expands to a small disk of cells
+   * that fully covers the radius, and unions only those cell sets — the query
+   * cost scales with the number of cells in the ring, not the total fleet.
    * Filters out drivers whose heartbeats have expired using pipelined MGET.
    */
   static async findNearbyDrivers(loc: Location, radiusKm: number): Promise<{ id: string; distance: number }[]> {
@@ -142,11 +215,87 @@ export class LocationsService {
     const searchRadius = Math.max(radiusKm, 0.1);
 
     try {
+      // 1. Hexagonal candidate discovery — union the cell sets in the ring.
+      const centerCell = latLngToCell(loc.lat, loc.lng, H3_MATCHING_RESOLUTION);
+      const rings = radiusToGridDiskRings(searchRadius);
+      const cells = gridDisk(centerCell, rings);
+      const cellKeys = cells.map(c => `${DRIVER_H3_INDEX_PREFIX}${c}`);
+
+      let candidates: string[] = await redis.sunion(...cellKeys);
+
+      // Fallback: if the H3 index is empty (e.g. cold start / rollout before
+      // the index is backfilled) fall back to the classic GEO scan so a live
+      // rider request is never starved.
+      if (!candidates || candidates.length === 0) {
+        return this._georadiusFallback(loc, searchRadius);
+      }
+
+      candidates = [...new Set(candidates)];
+
+      // 2. Exact straight-line distance to the pickup for each candidate.
+      // Fetch each candidate's position from the GEO set (pipeline) and
+      // compute haversine distance. Candidates still present in the cell set
+      // but gone from the GEO set (stale index entry) return null and are
+      // skipped.
+      const distPipe = redis.pipeline();
+      for (const id of candidates) {
+        distPipe.geopos(DRIVER_LOCATIONS_KEY, id);
+      }
+      const posResults = (await distPipe.exec()) || [];
+
+      const inRadius: { id: string; distance: number }[] = [];
+      candidates.forEach((id, i) => {
+        const res = posResults[i];
+        const pos = res && !res[0] ? (res[1] as any) : null;
+        if (!pos || !pos[0]) return;
+        const [lng, lat] = [Number(pos[0][0]), Number(pos[0][1])];
+        const distance = haversineKm(loc.lat, loc.lng, lat, lng);
+        if (distance <= searchRadius) {
+          inRadius.push({ id, distance });
+        }
+      });
+
+      if (inRadius.length === 0) return [];
+
+      // 3. Heartbeat freshness filter (same as before).
+      const ids = inRadius.map((d) => d.id);
+      const heartbeatKeys = ids.map((id: string) => `${DRIVER_HEARTBEAT_PREFIX}${id}`);
+      const heartbeats = await redis.mget(...heartbeatKeys);
+
+      const nearbyDrivers: { id: string; distance: number }[] = [];
+      const staleIds: string[] = [];
+
+      inRadius.forEach((d, i) => {
+        if (heartbeats[i]) {
+          nearbyDrivers.push(d);
+        } else {
+          staleIds.push(d.id);
+        }
+      });
+
+      if (staleIds.length > 0) {
+        console.log(`[GEO] Skipping ${staleIds.length} stale driver(s) (heartbeat expired): ${staleIds.join(', ')}`);
+        // Don't remove from Redis here — the driver may reconnect soon.
+        // Stale locations will be cleaned up by the cron worker instead.
+      }
+
+      return nearbyDrivers.sort((a, b) => a.distance - b.distance);
+    } catch (error) {
+      console.error(`[GEO] Error in hexagonal search:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Classic GEORADIUS scan, kept as a fallback when the H3 index has no data.
+   */
+  private static async _georadiusFallback(loc: Location, radiusKm: number): Promise<{ id: string; distance: number }[]> {
+    try {
       const results = await redis.georadius(
         DRIVER_LOCATIONS_KEY,
         loc.lng,
         loc.lat,
-        searchRadius,
+        radiusKm,
         'km',
         'WITHDIST',
         'ASC'
@@ -171,25 +320,29 @@ export class LocationsService {
 
       if (staleIds.length > 0) {
         console.log(`[GEO] Skipping ${staleIds.length} stale driver(s) (heartbeat expired): ${staleIds.join(', ')}`);
-        // Don't remove from Redis here — the driver may reconnect soon.
-        // Stale locations will be cleaned up by the cron worker instead.
       }
 
       return nearbyDrivers;
     } catch (error) {
-      console.error(`[GEO] Error in georadius:`, error);
+      console.error(`[GEO] Error in georadius fallback:`, error);
       return [];
     }
   }
 
   /**
-   * Removes a driver from online tracking
+   * Removes a driver from online tracking (GEO set, heartbeat, H3 cell index)
    */
   static async removeDriverLocation(driverId: string): Promise<void> {
-    await redis.pipeline()
-      .zrem(DRIVER_LOCATIONS_KEY, driverId)
-      .del(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`)
-      .exec();
+    const cellKey = `${DRIVER_H3_CELL_PREFIX}${driverId}`;
+    const cell = await redis.get(cellKey);
+    const pipeline = redis.pipeline();
+    pipeline.zrem(DRIVER_LOCATIONS_KEY, driverId);
+    pipeline.del(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`);
+    if (cell) {
+      pipeline.srem(`${DRIVER_H3_INDEX_PREFIX}${cell}`, driverId);
+    }
+    pipeline.del(cellKey);
+    await pipeline.exec();
   }
 
   static async getDriverLocation(driverId: string): Promise<Location | null> {

@@ -32,6 +32,10 @@ const RequestRideSchema = zod_1.z.object({
     promoCode: zod_1.z.string().trim().min(2).max(32).optional(),
     applyCredits: zod_1.z.boolean().optional(),
     creditUseCents: zod_1.z.number().int().min(1).optional(),
+    // SPECIALS: the rider's open redemption (CREATED) attached to this ride.
+    // Mirrors the socket requestRide payload so both request paths carry the
+    // special ride end-to-end (discount snapshot + sponsor budget reserve).
+    specialRedemptionId: zod_1.z.string().uuid().optional(),
 });
 const EstimateRideSchema = zod_1.z.object({
     pickup: zod_1.z.object({
@@ -64,7 +68,7 @@ class RideController {
             if (user?.verification_status === 'PENDING') {
                 return res.status(403).json({ error: 'Your account is undergoing age verification. Requests are restricted until completed.' });
             }
-            const trip = await ride_service_1.RideService.requestRide(riderId, validatedData.pickup, validatedData.destination, validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined, validatedData.isScheduled, validatedData.idempotencyKey, { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents }, validatedData.favoritePriority);
+            const trip = await ride_service_1.RideService.requestRide(riderId, validatedData.pickup, validatedData.destination, validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined, validatedData.isScheduled, validatedData.idempotencyKey, { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents, specialRedemptionId: validatedData.specialRedemptionId }, validatedData.favoritePriority);
             res.status(201).json(trip);
         }
         catch (error) {
@@ -187,11 +191,20 @@ class RideController {
     static async getCurrent(req, res) {
         try {
             const userId = req.user?.id;
-            const role = req.user?.role;
             if (!userId)
                 return res.status(401).json({ error: 'Unauthorized' });
-            const activeRole = role === 'DRIVER' ? types_1.UserRole.DRIVER : types_1.UserRole.RIDER;
-            const trip = await ride_service_1.RideService.getCurrentRide(userId, activeRole);
+            // The JWT's `role` claim freezes the account's ORIGINAL signup role —
+            // a dual-role user (rider who later became a driver, or vice versa)
+            // gets a RIDER token even while driving. The socket gateway resolves
+            // the active app role from the connection context; the HTTP layer has
+            // no such hint, so this endpoint checks BOTH hats and returns the
+            // active ride whichever side it belongs to (a user can never be
+            // mid-ride as driver AND rider at the same time).
+            const trips = await Promise.all([
+                ride_service_1.RideService.getCurrentRide(userId, types_1.UserRole.RIDER),
+                ride_service_1.RideService.getCurrentRide(userId, types_1.UserRole.DRIVER),
+            ]);
+            const trip = trips.find((t) => t != null) ?? null;
             if (!trip)
                 return res.json({ trip: null });
             if (trip.status === 'COMPLETED' || trip.status === 'CANCELLED') {

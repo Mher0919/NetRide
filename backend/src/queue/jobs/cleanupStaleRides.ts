@@ -3,6 +3,7 @@ import { prisma } from '../../services/prisma.service';
 import { TripStatus } from '../../types';
 import { RideRepository } from '../../modules/ride/ride.repository';
 import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } from '../../config/redis';
+import { LocationsService } from '../../modules/location/locations.service';
 import { sweepExpiredActivity } from '../../services/demand.service';
 import { env } from '../../config/env';
 
@@ -137,7 +138,7 @@ export async function handleCleanupStaleRides(io?: Server) {
       for (const id of driverIds) {
         const heartbeat = await redis.get(`${DRIVER_HEARTBEAT_PREFIX}${id}`);
         if (!heartbeat) {
-          await redis.zrem(DRIVER_LOCATIONS_KEY, id);
+          await LocationsService.removeDriverLocation(id);
           ghostCount++;
         }
       }

@@ -8,6 +8,7 @@ import { TripStatus } from '../types';
 import { getIo } from '../gateway/io-handle';
 import { RideRepository } from '../modules/ride/ride.repository';
 import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } from '../config/redis';
+import { LocationsService } from '../modules/location/locations.service';
 import { cleanupQueue } from '../queue/queue';
 
 export const CleanupService = {
@@ -72,7 +73,7 @@ export const CleanupService = {
     for (const id of driverIds) {
       const heartbeat = await redis.get(`${DRIVER_HEARTBEAT_PREFIX}${id}`);
       if (!heartbeat) {
-        await redis.zrem(DRIVER_LOCATIONS_KEY, id);
+        await LocationsService.removeDriverLocation(id);
         ghostCount++;
       }
     }

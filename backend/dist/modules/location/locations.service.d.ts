@@ -40,7 +40,12 @@ export declare class LocationsService {
     static getTrajectory(tripId: string): Promise<any[]>;
     static clearTrajectory(tripId: string): Promise<void>;
     /**
-     * Finds nearby online drivers within a radius
+     * Finds nearby online drivers within a radius using the H3 hexagonal index.
+     *
+     * Instead of scanning the global GEO set (O(all online drivers) in the worst
+     * case), it computes the rider's H3 cell, expands to a small disk of cells
+     * that fully covers the radius, and unions only those cell sets — the query
+     * cost scales with the number of cells in the ring, not the total fleet.
      * Filters out drivers whose heartbeats have expired using pipelined MGET.
      */
     static findNearbyDrivers(loc: Location, radiusKm: number): Promise<{
@@ -48,7 +53,11 @@ export declare class LocationsService {
         distance: number;
     }[]>;
     /**
-     * Removes a driver from online tracking
+     * Classic GEORADIUS scan, kept as a fallback when the H3 index has no data.
+     */
+    private static _georadiusFallback;
+    /**
+     * Removes a driver from online tracking (GEO set, heartbeat, H3 cell index)
      */
     static removeDriverLocation(driverId: string): Promise<void>;
     static getDriverLocation(driverId: string): Promise<Location | null>;

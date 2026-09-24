@@ -57,7 +57,10 @@ const envSchema = zod_1.z.object({
     DRIVER_MATCH_RADIUS_KM: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     DRIVER_ACCEPT_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15000),
     DRIVER_PICKUP_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15),
-    DRIVER_DESTINATION_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(30),
+    // Radius (meters) inside which a driver may complete the ride. 100m is
+    // the practical drop-off zone: GPS accuracy + parking variance. The
+    // driver app enables COMPLETE TRIP at the same 100m.
+    DRIVER_DESTINATION_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(100),
     // Grace period: after this many seconds at pickup/dropoff, allow completion even if slightly outside strict proximity
     DRIVER_PROXIMITY_GRACE_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(30),
     // Wait timer: max seconds to wait for rider at pickup before driver can force-start

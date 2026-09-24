@@ -119,8 +119,14 @@ class RideService {
             }
             // 2. Check if already rated by this person for this ride
             const existingRating = await client.query('SELECT id FROM ratings WHERE ride_id = $1 AND rater_id = $2', [data.ride_id, data.rater_id]);
-            if (existingRating.rows.length > 0)
-                throw new Error('You have already rated this ride');
+            if (existingRating.rows.length > 0) {
+                // IDEMPOTENT (mirrors cancelTrip): a double-tap, a retry after a
+                // lost response, or a re-submit from a re-rendered rating screen
+                // must NEVER trap the user on a 400. The existing rating IS the
+                // answer — return it as success.
+                await client.query('COMMIT');
+                return { id: existingRating.rows[0].id, ride_id: data.ride_id, rater_id: data.rater_id, alreadyRated: true };
+            }
             // 3. Create Rating
             // Flag for admin review when a low rating (<3) is left with a note.
             const flagged = data.rating < 3 && !!data.review_text && String(data.review_text).trim().length > 0;
@@ -498,13 +504,26 @@ class RideService {
             extra.started_at = new Date();
         if (status === 'COMPLETED') {
             extra.completed_at = new Date();
-            // Retrieve and persist trajectory
-            const trajectory = await locations_service_1.LocationsService.getTrajectory(tripId);
-            extra.trajectory = JSON.stringify(trajectory);
-            // Clear active trip cache
-            await redis_1.redis.del(`driver:${userId}:active_trip`);
-            await locations_service_1.LocationsService.clearTrajectory(tripId);
-            await navigation_service_1.NavigationService.clearTrip(tripId);
+            // Trajectory snapshot + cache cleanup are best-effort: a Redis blip
+            // must NEVER abort the completion before the DB update and the
+            // tripUpdate broadcast — otherwise the ride stays IN_PROGRESS in
+            // the DB while both apps keep showing the ride (and the driver app
+            // has already "celebrated" a completion that never happened).
+            try {
+                const trajectory = await locations_service_1.LocationsService.getTrajectory(tripId);
+                extra.trajectory = JSON.stringify(trajectory);
+            }
+            catch (err) {
+                console.warn(`[RIDE] ⚠️ Trajectory read failed (non-blocking) for trip ${tripId}: ${err.message}`);
+            }
+            try {
+                await redis_1.redis.del(`driver:${userId}:active_trip`);
+                await locations_service_1.LocationsService.clearTrajectory(tripId);
+                await navigation_service_1.NavigationService.clearTrip(tripId);
+            }
+            catch (err) {
+                console.warn(`[RIDE] ⚠️ Trip cache cleanup failed (non-blocking) for trip ${tripId}: ${err.message}`);
+            }
             // TODO: Calculate distance/fare based on trajectory if needed
         }
         const updatedTrip = await ride_repository_1.RideRepository.updateStatus(tripId, status, extra);

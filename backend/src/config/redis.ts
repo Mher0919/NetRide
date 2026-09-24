@@ -35,3 +35,11 @@ redis.on('connect', () => {
 
 export const DRIVER_LOCATIONS_KEY = 'driver_locations';
 export const DRIVER_HEARTBEAT_PREFIX = 'driver:heartbeat:';
+
+// H3 hexagonal cell index for scalable rider↔driver matching. Each online
+// driver is a member of the set for their current H3 cell; `findNearbyDrivers`
+// queries only the small ring of cells around the pickup (gridDisk) instead of
+// scanning the global GEO set. `DRIVER_H3_CELL_PREFIX` maps a driver to their
+// current cell so we can remove them from the old cell when they move.
+export const DRIVER_H3_CELL_PREFIX = 'driver:h3:';
+export const DRIVER_H3_INDEX_PREFIX = 'drivers:h3:';

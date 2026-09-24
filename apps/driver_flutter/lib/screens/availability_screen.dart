@@ -47,8 +47,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   bool _isTogglingOnline = false;
 
   /// Smart location sender: max 1 report/s, skips stationary fixes
-  /// (10 m / 15° gates) and self-heartbeats every 10 s. This is what
-  /// keeps the socket at a steady ~1 Hz while moving and ~0.1 Hz while
+  /// (10 m / 15° gates) and self-heartbeats every 4 s. This is what
+  /// keeps the socket at a steady ~1 Hz while moving and ~0.25 Hz while
   /// parked — the backend never drops updates (which previously made
   /// the rider's marker jitter) and never gets flooded.
   late final LocationReporter _locationReporter;
@@ -630,10 +630,10 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     });
 
     // Presence heartbeat: the reporter only forwards it when nothing
-    // has been sent for >10 s, so a moving driver sends 1 Hz and a
-    // parked driver ~1 per 10 s.
+    // has been sent for >4 s, so a moving driver sends 1 Hz and a
+    // parked driver ~1 per 4 s.
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
       final pos = _lastPosition;
       if (pos == null || provider.status == models.DriverStatus.offline) return;
       _locationReporter.report(

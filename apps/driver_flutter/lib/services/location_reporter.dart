@@ -17,7 +17,7 @@ class LocationReporter {
     this.minInterval = const Duration(milliseconds: 1000),
     this.minDistanceM = 0,
     this.minHeadingDeltaDeg = 0,
-    this.maxStaleInterval = const Duration(seconds: 10),
+    this.maxStaleInterval = const Duration(seconds: 4),
   });
 
   /// Invoked when a report should actually be sent.
@@ -43,7 +43,7 @@ class LocationReporter {
   void report(double lat, double lng, {double heading = 0}) {
     final now = DateTime.now();
     final lastAt = _lastSentAt;
-    final stale = lastAt == null || now.difference(lastAt) > maxStaleInterval;
+    final stale = lastAt == null || now.difference(lastAt) >= maxStaleInterval;
 
     if (!stale && now.difference(lastAt) < minInterval) {
       return;

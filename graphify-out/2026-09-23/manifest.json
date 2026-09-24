@@ -310,8 +310,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/providers/driver_provider.dart": {
-    "mtime": 1786687480.9446924,
-    "ast_hash": "5c14a26e9d74dba5bc9e7e904d446f3e",
+    "mtime": 1790126572.766196,
+    "ast_hash": "4189885d0d92e5df51b14ed949f6dd8b",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/activity_screen.dart": {
@@ -350,8 +350,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/navigation_screen.dart": {
-    "mtime": 1790125705.2755785,
-    "ast_hash": "6989148dab3d63c831a60c01afe8aff5",
+    "mtime": 1790215514.381315,
+    "ast_hash": "0197a976d3ba8ddf7e9b1f94f47fb550",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/onboarding_screen.dart": {
@@ -395,8 +395,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/trip_screen.dart": {
-    "mtime": 1786689657.5942893,
-    "ast_hash": "a6e8dc202e157dcaa5a4608bafe3b566",
+    "mtime": 1790215552.566794,
+    "ast_hash": "918a61a62efe1168b39bc60c17dfb6ea",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/vehicle_inspection_screen.dart": {
@@ -685,8 +685,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/main.dart": {
-    "mtime": 1786862917.6742,
-    "ast_hash": "2a7e16cac601416deb527bf9725c1589",
+    "mtime": 1790127890.472855,
+    "ast_hash": "47daa52890472189b7cab2b8a6d1841f",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/search_result.dart": {
@@ -740,8 +740,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/map_screen.dart": {
-    "mtime": 1790125687.0657122,
-    "ast_hash": "18871676139747ca64f51b3d996d3b7f",
+    "mtime": 1790127858.0017843,
+    "ast_hash": "20c08cf65e16dffd9a3a0c54bb3f9a20",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/onboarding_screen.dart": {
@@ -780,8 +780,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/trip_screen.dart": {
-    "mtime": 1790125695.474496,
-    "ast_hash": "0e2b0f46461e0a8ccdc271eab8ac64bd",
+    "mtime": 1790127957.5117593,
+    "ast_hash": "82330664a45d024cadd9c236ddc25471",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/verification_screen.dart": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "backend/src/config/env.ts": {
-    "mtime": 1790030202.2966242,
-    "ast_hash": "ee576b6c15881fb91480622104033cd5",
+    "mtime": 1790215495.4863422,
+    "ast_hash": "f447f19e65da56d59ddfe2a8606175e7",
     "semantic_hash": ""
   },
   "backend/src/config/redis.ts": {
@@ -1250,8 +1250,8 @@
     "semantic_hash": ""
   },
   "backend/src/gateway/socket.gateway.ts": {
-    "mtime": 1788747944.836194,
-    "ast_hash": "ab7a08ff7d46e3e2b0d65d3eb02489e5",
+    "mtime": 1790126552.4471262,
+    "ast_hash": "2e4ab11aba199cdd41230b0c998ef47e",
     "semantic_hash": ""
   },
   "backend/src/gateway/socket.middleware.ts": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/ride/ride.controller.ts": {
-    "mtime": 1786689563.1283152,
-    "ast_hash": "c36de24392398960f65afbd6980d964d",
+    "mtime": 1790137588.6157954,
+    "ast_hash": "96bbc5a9851cb48703be648aaac88648",
     "semantic_hash": ""
   },
   "backend/src/modules/ride/ride.repository.ts": {
@@ -1400,8 +1400,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/ride/ride.service.ts": {
-    "mtime": 1786925717.8449738,
-    "ast_hash": "5e4493e95dad8ce198e288e5275883b6",
+    "mtime": 1790126557.3143244,
+    "ast_hash": "940f5a5f60eeb97d19792db73148799e",
     "semantic_hash": ""
   },
   "backend/src/modules/ride/ride_messages.repository.ts": {
@@ -3240,18 +3240,18 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/driver_cancelled_dialog.dart": {
-    "mtime": 1786923347.457366,
-    "ast_hash": "91b05f28831b711a6c96a783365d01ed",
+    "mtime": 1790126865.5625753,
+    "ast_hash": "5de005bbe99232fcd9654332d12533ec",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/special_models.dart": {
-    "mtime": 1786917252.32715,
-    "ast_hash": "22431161bea9adc640d1b269ab511906",
+    "mtime": 1790127747.6285112,
+    "ast_hash": "2c8173a065ade9c975fe38542d68586b",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/providers/specials_provider.dart": {
-    "mtime": 1786917268.2760227,
-    "ast_hash": "fe057787d4ef59b5cfb40afec19da5aa",
+    "mtime": 1790215425.4618423,
+    "ast_hash": "6e57ce4881fd9524baa212f0549e96a1",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/special_detail_screen.dart": {
@@ -3260,13 +3260,13 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/special_redemption_screen.dart": {
-    "mtime": 1786862892.3666866,
-    "ast_hash": "1a6a93c6c1036e37752c25f03166a4db",
+    "mtime": 1790127850.1812577,
+    "ast_hash": "c3ec9904a1d85c999598379ec0a20e6b",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/services/specials_service.dart": {
-    "mtime": 1786917260.8855457,
-    "ast_hash": "2cabf20a3f9d4c8d0753d283c3b920c6",
+    "mtime": 1790127725.1907067,
+    "ast_hash": "a0c309aa5510f17a029a39345af0506c",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/eslint.config.js": {
@@ -3395,18 +3395,18 @@
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/special-redemption.service.ts": {
-    "mtime": 1790034966.3771055,
-    "ast_hash": "e6f16ea236c1c9bde6331a5d4996850a",
+    "mtime": 1790127713.530119,
+    "ast_hash": "2de2f7f0385abb2c870b309006d14be8",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/specials.controller.ts": {
-    "mtime": 1786917239.2223065,
-    "ast_hash": "670e3cdf944b2593c9e405533ed0762f",
+    "mtime": 1790127720.4599545,
+    "ast_hash": "fbd5aadc0871243e099f4d2b149a5f30",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/specials.routes.ts": {
-    "mtime": 1786861000.9608195,
-    "ast_hash": "abf6d5c9f72c3b949249e801cbbe1cdb",
+    "mtime": 1790127720.9505029,
+    "ast_hash": "5baf8d0ab52a2d5291f06362009095a9",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor-auth.service.ts": {
@@ -3705,8 +3705,8 @@
     "semantic_hash": ""
   },
   "backend/e2e-full-tmp.cjs": {
-    "mtime": 1789328590.2156136,
-    "ast_hash": "5b50641aff01557947f5c599491f6230",
+    "mtime": 1790217474.4166257,
+    "ast_hash": "affcb2287a85e27c00dbd16c8a332a2e",
     "semantic_hash": ""
   },
   "backend/list-users-tmp.cjs": {
@@ -3757,6 +3757,36 @@
   "apps/rider_flutter/lib/widgets/branded_map_tile.dart": {
     "mtime": 1790125281.0898492,
     "ast_hash": "4847150db4ad35558f250332b43043bd",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/widgets/explore_validation_section.dart": {
+    "mtime": 1790127833.1057358,
+    "ast_hash": "c3712d238538979157c3ed4821a6e5e4",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/widgets/special_ready_dialog.dart": {
+    "mtime": 1790127757.617747,
+    "ast_hash": "f371baf0c230a1a6b68c10a5d80877f5",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/widgets/special_reward_dialog.dart": {
+    "mtime": 1790127786.311562,
+    "ast_hash": "b4aae507517df2cb6dee4a099783bdb4",
+    "semantic_hash": ""
+  },
+  "backend/e2e-cancel-rider.cjs": {
+    "mtime": 1790217814.4103267,
+    "ast_hash": "e9041be8bc8dd991fe8f3a4dd8a66de4",
+    "semantic_hash": ""
+  },
+  "backend/e2e-specials.cjs": {
+    "mtime": 1790216542.942853,
+    "ast_hash": "ad92afc0d62d5ccec83166268719075c",
+    "semantic_hash": ""
+  },
+  "backend/reset-env.cjs": {
+    "mtime": 1790216533.5522714,
+    "ast_hash": "53e9dbb8956e9dc8a10346be42bde045",
     "semantic_hash": ""
   }
 }
