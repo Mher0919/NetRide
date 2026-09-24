@@ -860,7 +860,20 @@ export class DriverService {
       balance_cents: Number(wallet?.balance_cents ?? 0),
       lifetime_earnings_cents: Number(wallet?.lifetime_earnings_cents ?? 0),
       payout_card: cardSummary,
-      recent_payouts: pRes.rows,
+      // pg returns BIGINT columns as strings — normalize to numbers so the
+      // mobile client never hits a `String is not subtype of num` cast error.
+      recent_payouts: (pRes.rows ?? []).map((r: any) => ({
+        id: r.id,
+        amount_cents: Number(r.amount_cents ?? 0),
+        fee_cents: Number(r.fee_cents ?? 0),
+        net_cents: Number(r.net_cents ?? 0),
+        status: r.status,
+        method: r.method,
+        requested_at: r.requested_at,
+        processed_at: r.processed_at,
+        reference: r.reference,
+        notes: r.notes,
+      })),
     };
   }
 

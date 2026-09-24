@@ -1498,8 +1498,10 @@ class _MapScreenState extends State<MapScreen>
                   ],
                 ),
 
-                // Part 2: back arrow — only in full-screen map mode (B/C).
-                if (_mapExpanded)
+                // Part 2: back arrow — only in full-screen map mode (B/C) AND when the
+                // choose-your-ride panel is closed. The panel has no top-left
+                // arrow; its Cancel button is the way out.
+                if (_mapExpanded && !_panelOpen)
                   Positioned(
                     top: 0,
                     left: 0,
@@ -1787,15 +1789,20 @@ class _MapScreenState extends State<MapScreen>
                   ),
                 )
               else
-                IconButton(
-                  icon: const Icon(
-                    Icons.close,
-                    size: 20,
-                    color: Color(0xFF2F3A32),
-                  ),
+                TextButton(
                   onPressed: _closePanel,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF5B7760),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    side: const BorderSide(color: Color(0xFF5B7760)),
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
             ],
           ),

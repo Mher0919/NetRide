@@ -1409,6 +1409,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Parses a cents value that may arrive as a num (int/double) or a String
+  /// (e.g. pg BIGINT columns serialized as text). Returns 0 for anything else.
+  int _centsValue(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v.trim()) ?? 0;
+    return 0;
+  }
+
   /// Wallet summary card: balance, lifetime earnings, current payout card,
   /// recent payouts. Matches the existing theme (sage primary, terracotta
   /// accents).
@@ -1428,8 +1437,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         }
         final w = snap.data ?? const {};
-        final balanceCents = (w['balance_cents'] as num?)?.toInt() ?? 0;
-        final lifetimeCents = (w['lifetime_earnings_cents'] as num?)?.toInt() ?? 0;
+        final balanceCents = _centsValue(w['balance_cents']);
+        final lifetimeCents = _centsValue(w['lifetime_earnings_cents']);
         final balance = NumberFormat.simpleCurrency(name: 'USD').format(balanceCents / 100);
         final lifetime = NumberFormat.simpleCurrency(name: 'USD').format(lifetimeCents / 100);
         final card = w['payout_card'] as Map<String, dynamic>?;
@@ -1498,7 +1507,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               ...payouts.map((p) {
-                final cents = ((p as Map)['net_cents'] as num?)?.toInt() ?? 0;
+                final cents = _centsValue((p as Map)['net_cents']);
                 final status = (p['status'] ?? '').toString();
                 final requestedAt = p['requested_at']?.toString();
                 final method = (p['method'] ?? '').toString();
