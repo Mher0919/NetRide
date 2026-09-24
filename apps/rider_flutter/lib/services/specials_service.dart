@@ -72,6 +72,17 @@ class SpecialsService {
     return json == null ? null : SpecialRedemption.fromJson(json as Map<String, dynamic>);
   }
 
+  /// All open validation cards (one per completed special ride awaiting the
+  /// sponsor's code entry), newest first. Renders the Explore "SPECIAL
+  /// CODES" section — multiple cards scroll side by side like SPECIALS.
+  static Future<List<SpecialRedemption>> pendingRedemptions() async {
+    final res = await ApiService.dio.get('specials/redemptions/pending');
+    final raw = (res.data as Map<String, dynamic>)['redemptions'] as List? ?? [];
+    return raw
+        .map((e) => SpecialRedemption.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   /// Step 4 — rider tells the backend they've been verified at the business.
   static Future<SpecialRedemption> markVerified(String redemptionId) async {
     final res = await ApiService.dio.post('specials/redemptions/$redemptionId/verified');

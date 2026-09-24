@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/ride_provider.dart';
+import '../providers/specials_provider.dart';
 import '../models/trip_models.dart' as models;
 import '../services/communication_service.dart';
 import '../services/api_service.dart';
@@ -18,6 +19,7 @@ import '../components/state_container.dart';
 import '../components/tip_fab.dart';
 import '../components/driver_cancelled_dialog.dart';
 import '../widgets/branded_map_tile.dart';
+import '../widgets/special_ready_dialog.dart';
 import 'rating_screen.dart';
 import 'chat_sheet.dart';
 import 'report_sheet.dart';
@@ -719,7 +721,6 @@ class RideCancelledDialog extends StatelessWidget {
         if (cancelled != null) ...[
           SizedBox(
             width: double.infinity,
-            height: 46,
             child: OutlinedButton.icon(
               onPressed: () {
                 Navigator.pop(context);
@@ -742,7 +743,18 @@ class RideCancelledDialog extends StatelessWidget {
               ),
               label: Text(
                 'Report ${isDriver ? 'Driver' : 'Rider'}',
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  height: 1.25,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                  horizontal: 16,
+                ),
+                minimumSize: const Size(0, 48),
+                textStyle: const TextStyle(fontSize: 15, height: 1.25),
               ),
             ),
           ),
@@ -750,19 +762,24 @@ class RideCancelledDialog extends StatelessWidget {
         ],
         SizedBox(
           width: double.infinity,
-          height: 46,
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2F3A32),
               foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(
+                vertical: 14,
+                horizontal: 16,
+              ),
+              minimumSize: const Size(0, 48),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
+              textStyle: const TextStyle(fontSize: 15, height: 1.25),
             ),
             child: const Text(
               'Done',
-              style: TextStyle(fontWeight: FontWeight.w800),
+              style: TextStyle(fontWeight: FontWeight.w800, height: 1.25),
             ),
           ),
         ),
@@ -821,9 +838,8 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
       actions: [
         SizedBox(
           width: double.infinity,
-          height: 48,
           child: ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               final rideProvider = Provider.of<RideProvider>(
                 context,
                 listen: false,
@@ -831,16 +847,43 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
               final trip = rideProvider.currentTrip;
               rideProvider.reset();
               try {
-                Navigator.pop(context); // Close dialog
+                final nav = Navigator.of(context, rootNavigator: true);
+                nav.pop(); // Close the arrival dialog
                 if (trip != null) {
-                  Navigator.pushReplacement(
+                  // A completed SPECIAL ride pops the validation code card
+                  // right away: the rider must show this code inside the
+                  // deal place to get their deal back (card refund or a
+                  // little extra in ride credits). They can close it for
+                  // now — the Explore "SPECIAL CODES" card keeps it handy.
+                  final specials = Provider.of<SpecialsProvider>(
                     context,
+                    listen: false,
+                  );
+                  final readyId = specials.consumeReadyNotice();
+                  if (readyId != null) {
+                    final card = specials.pending
+                        .where((e) => e.id == readyId)
+                        .toList();
+                    if (card.isNotEmpty) {
+                      final r = card.first;
+                      await showDialog<void>(
+                        context: nav.context,
+                        barrierDismissible: false,
+                        builder: (_) => SpecialReadyDialog(
+                          redemption: r,
+                          code: specials.codeFor(r.id),
+                        ),
+                      );
+                    }
+                  }
+                  if (!nav.context.mounted) return;
+                  nav.pushReplacement(
                     MaterialPageRoute(
-                      builder: (context) => RatingScreen(trip: trip),
+                      builder: (_) => RatingScreen(trip: trip),
                     ),
                   );
                 } else {
-                  Navigator.pop(context);
+                  nav.pop();
                 }
               } catch (e) {
                 debugPrint('[ARRIVAL] Navigation error after reset: $e');
@@ -849,13 +892,23 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2F3A32),
               foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(
+                vertical: 14,
+                horizontal: 16,
+              ),
+              minimumSize: const Size(0, 48),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
+              textStyle: const TextStyle(fontSize: 15, height: 1.25),
             ),
             child: const Text(
               'RATE YOUR TRIP',
-              style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+                height: 1.25,
+              ),
             ),
           ),
         ),

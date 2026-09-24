@@ -60,6 +60,16 @@ class DriverProvider with ChangeNotifier {
   /// chat/cancel flows).
   final Set<String> _settledTripIds = {};
 
+  /// Last user-facing error the server pushed on the socket (`error`
+  /// event). The trip screen surfaces this when a trip action (e.g.
+  /// completing the ride) was rejected server-side — never a silent
+  /// failure that leaves the driver thinking the ride finished.
+  String? _socketError;
+  String? get socketError => _socketError;
+  void clearSocketError() {
+    _socketError = null;
+  }
+
   bool _hasPendingProfileChange = false;
   String? _pendingRequestId;
   DateTime? _pendingSince;
@@ -696,7 +706,18 @@ class DriverProvider with ChangeNotifier {
       }
     });
 
-    _socket!.on('error', (data) => print('Socket Error: $data'));
+    _socket!.on('error', (data) {
+      debugPrint('[RIDE] Socket error: $data');
+      final msg = data is String
+          ? data
+          : (data is Map && data['message'] is String)
+              ? data['message'] as String
+              : null;
+      if (msg != null && msg.isNotEmpty) {
+        _socketError = msg;
+        notifyListeners();
+      }
+    });
 
     // The server rejected our acceptTrip (offer expired / superseded /
     // ride cancelled). Roll back the optimistic _currentTrip so the
@@ -933,6 +954,32 @@ class DriverProvider with ChangeNotifier {
 
   void completeTrip(String tripId) {
     _socket?.emit('completeTrip', tripId);
+  }
+
+  /// Emits `completeTrip` and resolves only when the server confirms:
+  /// - true  → the authoritative COMPLETED tripUpdate arrived and cleared
+  ///   `currentTrip` (the ride is really finished server-side).
+  /// - false → the server rejected the completion (socket `error` captured
+  ///   in [socketError]) or no confirmation arrived within [timeout].
+  ///
+  /// The UI must NEVER celebrate a completion that wasn't confirmed — the
+  /// old flow showed "congratulations, you earned X" after a blind timeout
+  /// even when the server had rejected the ride, leaving both apps stuck
+  /// on the ride screen.
+  Future<bool> completeTripConfirmed(
+    String tripId, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    _socketError = null;
+    notifyListeners();
+    _socket?.emit('completeTrip', tripId);
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      await Future.delayed(const Duration(milliseconds: 150));
+      if (_currentTrip == null) return true;
+      if (_socketError != null) return false;
+    }
+    return _currentTrip == null;
   }
 
   Future<void> rateRide(String rideId, int rating, String reviewText) async {

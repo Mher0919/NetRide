@@ -81,6 +81,18 @@ class _NavigationScreenState extends State<NavigationScreen> {
     _mapController.move(fix.position, _mapController.camera.zoom);
   }
 
+  /// Locate button: snap back to the driver's current position and orient
+  /// the map to face the way the phone is pointing (like the Explore map).
+  void _locateMe() {
+    final fix = GpsTracker.instance.lastFix;
+    if (fix == null || !_mapReady) return;
+    _following = true;
+    _followPauseTimer?.cancel();
+    _lastFollowedFix = null;
+    _mapController.move(fix.position, _mapController.camera.zoom);
+    _mapController.rotate(fix.headingDeg);
+  }
+
   void _onUserMapGesture() {
     _following = false;
     _followPauseTimer?.cancel();
@@ -271,6 +283,21 @@ class _NavigationScreenState extends State<NavigationScreen> {
                   );
                 },
               ),
+            ),
+          ),
+
+          Positioned(
+            right: 16,
+            bottom: 322,
+            child: FloatingActionButton(
+              heroTag: 'nav_locate_fab',
+              mini: true,
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF2F3A32),
+              elevation: 4,
+              shape: const CircleBorder(),
+              onPressed: _locateMe,
+              child: const Icon(Icons.my_location_rounded, size: 22),
             ),
           ),
 

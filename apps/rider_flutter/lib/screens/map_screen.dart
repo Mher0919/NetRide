@@ -29,6 +29,7 @@ import '../components/animated_price.dart';
 import '../components/driver_cancelled_dialog.dart';
 import '../widgets/branded_map_tile.dart';
 import '../widgets/explore_specials_section.dart';
+import '../widgets/explore_validation_section.dart';
 import 'wallet_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -1133,6 +1134,11 @@ class _MapScreenState extends State<MapScreen>
                                     const SizedBox(height: 14),
                                     _buildRecentSearches(theme),
                                   ],
+                                  // SPECIAL CODES — open validation cards
+                                  // (one per completed special ride) between
+                                  // Recents and SPECIALS. Renders nothing
+                                  // when no code is pending validation.
+                                  const ExploreValidationSection(),
                                   // SPECIALS — conditional section living INSIDE
                                   // Explore. Renders nothing when the backend
                                   // reports zero eligible active specials (the

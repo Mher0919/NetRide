@@ -18,10 +18,15 @@ import '../providers/specials_provider.dart';
 import '../services/specials_service.dart';
 
 class SpecialRedemptionScreen extends StatefulWidget {
-  const SpecialRedemptionScreen({super.key, this.code});
+  const SpecialRedemptionScreen({super.key, this.code, this.redemptionId});
 
   /// Code delivered by a tapped `special_reward_ready` push, if any.
   final String? code;
+
+  /// Which validation card to render. Null → the rider's current (latest)
+  /// redemption. Set when opened from an Explore "SPECIAL CODES" card so
+  /// multiple pending cards each show THEIR OWN code.
+  final String? redemptionId;
 
   @override
   State<SpecialRedemptionScreen> createState() =>
@@ -37,6 +42,11 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
     super.initState();
     _knownCode = widget.code;
     final provider = context.read<SpecialsProvider>();
+    // Ensure the requested card is loaded (cold start / deep link).
+    final rid = widget.redemptionId;
+    if (rid != null && provider.pending.every((e) => e.id != rid)) {
+      provider.refresh();
+    }
     if (provider.current == null) provider.refresh();
     if (_knownCode == null) {
       _recoverCode();
@@ -46,11 +56,24 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
     });
   }
 
+  /// The redemption this screen renders: the requested card when opened by
+  /// id, otherwise the rider's current (latest) redemption.
+  SpecialRedemption? _resolve(SpecialsProvider specials) {
+    final rid = widget.redemptionId;
+    if (rid != null) {
+      for (final r in specials.pending) {
+        if (r.id == rid) return r;
+      }
+    }
+    return specials.current;
+  }
+
   Future<void> _recoverCode() async {
-    final r = context.read<SpecialsProvider>().current;
-    if (r == null || _knownCode != null) return;
+    final specials = context.read<SpecialsProvider>();
+    final rid = widget.redemptionId ?? specials.current?.id;
+    if (rid == null || _knownCode != null) return;
     setState(() => _recoveringCode = true);
-    final code = await SpecialsService.recoverCode(r.id);
+    final code = await SpecialsService.recoverCode(rid);
     if (!mounted) return;
     setState(() {
       _knownCode = code;
@@ -80,10 +103,10 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
       ),
       body: Consumer<SpecialsProvider>(
         builder: (context, specials, _) {
-          if (specials.loading && specials.current == null) {
+          if (specials.loading && specials.current == null && specials.pending.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
-          final r = specials.current;
+          final r = _resolve(specials);
           if (r == null) {
             return _noRedemption();
           }

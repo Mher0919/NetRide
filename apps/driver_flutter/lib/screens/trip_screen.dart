@@ -383,7 +383,7 @@ class _TripScreenState extends State<TripScreen> {
           pickupAddress: trip.pickup.address ?? 'Pickup',
           destinationAddress: trip.destination.address ?? 'Destination',
           onPickupRider: () => driverProvider.pickUpRider(trip.id),
-          onCompleteTrip: _showRiderRatingDialog,
+          onCompleteTrip: () => _completeTripThenRate(driverProvider, trip),
           onChat: () => _openChat(context, trip),
           onCall: () => _dialParticipant(context, trip),
         ),
@@ -538,38 +538,66 @@ class _TripScreenState extends State<TripScreen> {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  void _showRiderRatingDialog() {
-    final driverProvider = Provider.of<DriverProvider>(context, listen: false);
-    final trip = driverProvider.currentTrip;
-    if (trip == null) return;
+  /// COMPLETE FIRST, THEN RATE: the ride is finished on the server the
+  /// moment the driver taps COMPLETE TRIP — both apps transition together
+  /// (the rider immediately gets the arrival summary + their own rating
+  /// screen). Only after the ride is confirmed completed does the driver
+  /// see the earnings celebration, then their rating dialog for the rider.
+  /// If the server rejects the completion, the driver stays on the ride
+  /// with the actual reason (never a fake celebration).
+  Future<void> _completeTripThenRate(
+    DriverProvider driverProvider,
+    models.Trip trip,
+  ) async {
+    SoundService.instance.play(SoundEffect.tripCompleted);
 
-    if (trip.isTestTrip) {
-      SoundService.instance.play(SoundEffect.tripCompleted);
-      driverProvider.completeTrip(trip.id);
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => TripCompletedDialog(
-          fareAmount: trip.fareAmount ?? 0.0,
-          tipAmount: trip.tipAmount ?? 0.0,
-          isDriver: true,
-          driverEarningsCents: trip.driverEarningsCents,
-        ),
-      ).then((_) {
-        if (mounted) Navigator.pop(context);
-      });
+    final completed = await driverProvider.completeTripConfirmed(trip.id);
+    if (!completed) {
+      if (!mounted) return;
+      showSnackBar(
+        driverProvider.socketError ??
+            'Trip could not be completed. Make sure you are at the destination and try again.',
+      );
       return;
     }
 
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => TripCompletedDialog(
+        fareAmount: trip.fareAmount ?? 0.0,
+        tipAmount: trip.tipAmount ?? 0.0,
+        isDriver: true,
+        driverEarningsCents: trip.driverEarningsCents,
+      ),
+    );
+    if (!mounted) return;
+
+    // Test trips skip the rider-rating step entirely.
+    if (trip.isTestTrip) {
+      Navigator.pop(context);
+      return;
+    }
+
+    await _showRiderRatingDialog(trip);
+    if (!mounted) return;
+    Navigator.pop(context);
+  }
+
+  /// Driver rates the rider AFTER the ride already completed server-side.
+  /// Rating is best-effort — a rating failure never blocks the finished
+  /// trip or the return to the dashboard.
+  Future<void> _showRiderRatingDialog(models.Trip trip) async {
     int selectedRating = 5;
     final reviewController = TextEditingController();
     bool isSubmitting = false;
 
-    showDialog(
+    await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setState) => AlertDialog(
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(
@@ -634,63 +662,23 @@ class _TripScreenState extends State<TripScreen> {
                     ? null
                     : () async {
                         setState(() => isSubmitting = true);
-                        final driverProvider =
-                            Provider.of<DriverProvider>(context,
+                        final provider =
+                            Provider.of<DriverProvider>(dialogContext,
                                 listen: false);
+                        // Rating is best-effort — the trip is already
+                        // finished, a rating failure must never block it.
                         try {
-                          if (driverProvider.currentTrip != null) {
-                            final trip = driverProvider.currentTrip!;
-                            // Finish the trip FIRST: the backend only
-                            // accepts ratings for COMPLETED rides, so
-                            // rating before completing would fail AND
-                            // leave the trip unfinished.
-                            SoundService.instance.play(SoundEffect.tripCompleted);
-                            driverProvider.completeTrip(trip.id);
-                            // Wait for the authoritative COMPLETED
-                            // tripUpdate (provider clears currentTrip)
-                            // so the rating POST is not rejected.
-                            final deadline = DateTime.now()
-                                .add(const Duration(seconds: 6));
-                            while (driverProvider.currentTrip != null &&
-                                DateTime.now().isBefore(deadline)) {
-                              await Future.delayed(
-                                  const Duration(milliseconds: 150));
-                            }
-                            // Rating is best-effort — a rating failure must
-                            // never block the finished trip or the dialog.
-                            try {
-                              await driverProvider.rateRide(
-                                trip.id,
-                                selectedRating,
-                                reviewController.text.trim(),
-                              );
-                            } catch (rateErr) {
-                              debugPrint(
-                                  '[TRIP] Rating rider failed (non-blocking): $rateErr');
-                            }
-                            if (mounted) {
-                              Navigator.pop(context);
-                              await showDialog(
-                                context: context,
-                                barrierDismissible: false,
-                                builder: (context) => TripCompletedDialog(
-                                  fareAmount: trip.fareAmount ?? 0.0,
-                                  tipAmount: trip.tipAmount ?? 0.0,
-                                  isDriver: true,
-                                  driverEarningsCents: trip.driverEarningsCents,
-                                ),
-                              );
-                            }
-                          }
-                          if (mounted) Navigator.pop(context);
-                        } catch (e) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                    content: Text(
-                                        'Failed to submit rating: $e')));
-                            setState(() => isSubmitting = false);
-                          }
+                          await provider.rateRide(
+                            trip.id,
+                            selectedRating,
+                            reviewController.text.trim(),
+                          );
+                        } catch (rateErr) {
+                          debugPrint(
+                              '[TRIP] Rating rider failed (non-blocking): $rateErr');
+                        }
+                        if (dialogContext.mounted) {
+                          Navigator.pop(dialogContext);
                         }
                       },
                 child: isSubmitting
@@ -699,7 +687,7 @@ class _TripScreenState extends State<TripScreen> {
                         width: 20,
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2))
-                    : const Text('SUBMIT & FINISH'),
+                    : const Text('SUBMIT RATING'),
               ),
             ),
           ],
@@ -711,7 +699,10 @@ class _TripScreenState extends State<TripScreen> {
   // ---- Proximity helpers ------------------------------------------------
 
   static const double kPickupProximityM = 15;
-  static const double kDestinationProximityM = 30;
+  // Destination radius: GPS accuracy + parking variance. 100m is the
+  // practical drop-off zone — the button enables and the server allows
+  // completion at the same radius (DRIVER_DESTINATION_PROXIMITY_M).
+  static const double kDestinationProximityM = 100;
 
   double _metersFromDriverTo(LatLng target, DriverProvider provider) {
     final loc = provider.lastLocation;
@@ -907,7 +898,6 @@ class RideCancelledDialog extends StatelessWidget {
         if (!confirmFailed) ...[
           SizedBox(
             width: double.infinity,
-            height: 46,
             child: OutlinedButton.icon(
               onPressed: () async {
                 Navigator.pop(context);
@@ -922,22 +912,35 @@ class RideCancelledDialog extends StatelessWidget {
                 );
               },
               icon: const Icon(Icons.report_gmailerrorred_outlined, size: 18, color: Color(0xFFC65A5A)),
-              label: const Text('Report Rider', style: TextStyle(fontWeight: FontWeight.w700)),
+              label: const Text(
+                'Report Rider',
+                style: TextStyle(fontWeight: FontWeight.w700, height: 1.25),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                minimumSize: const Size(0, 48),
+                textStyle: const TextStyle(fontSize: 15, height: 1.25),
+              ),
             ),
           ),
           const SizedBox(height: 8),
         ],
         SizedBox(
           width: double.infinity,
-          height: 46,
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2F3A32),
               foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              minimumSize: const Size(0, 48),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              textStyle: const TextStyle(fontSize: 15, height: 1.25),
             ),
-            child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800)),
+            child: const Text(
+              'Done',
+              style: TextStyle(fontWeight: FontWeight.w800, height: 1.25),
+            ),
           ),
         ),
       ],

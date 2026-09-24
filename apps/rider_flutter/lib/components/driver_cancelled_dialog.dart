@@ -77,15 +77,28 @@ class _DriverCancelledDialogState extends State<DriverCancelledDialog> {
             : [
                 SizedBox(
                   width: double.infinity,
-                  height: 46,
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2F3A32),
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 14,
+                        horizontal: 16,
+                      ),
+                      minimumSize: const Size(0, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      textStyle: const TextStyle(fontSize: 15, height: 1.25),
                     ),
-                    child: const Text("OK", style: TextStyle(fontWeight: FontWeight.w800)),
+                    child: const Text(
+                      "OK",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        height: 1.25,
+                      ),
+                    ),
                   ),
                 ),
               ],

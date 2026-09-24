@@ -92,6 +92,16 @@ export class SpecialsController {
     }
   }
 
+  /** GET /api/specials/redemptions/pending — open validation cards (one per completed special ride). */
+  static async pendingRedemptions(req: AuthRequest, res: Response) {
+    try {
+      const redemptions = await SpecialRedemptionService.findPendingForRider(req.user!.id);
+      res.json({ redemptions });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
   /** POST /api/specials/redemptions/:id/verified — rider taps "I got verified". */
   static async markVerified(req: AuthRequest, res: Response) {
     try {

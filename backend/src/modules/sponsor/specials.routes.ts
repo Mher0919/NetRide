@@ -17,6 +17,7 @@ router.get('/specials/count', SpecialsController.count);
 router.get('/specials/intro-state', authMiddleware, riderMiddleware, SpecialsController.getIntroState);
 router.post('/specials/intro-seen', authMiddleware, riderMiddleware, SpecialsController.markIntroSeen);
 router.get('/specials/redemptions/current', authMiddleware, riderMiddleware, SpecialsController.currentRedemption);
+router.get('/specials/redemptions/pending', authMiddleware, riderMiddleware, SpecialsController.pendingRedemptions);
 router.post('/specials/redemptions/:id/verified', authMiddleware, riderMiddleware, SpecialsController.markVerified);
 router.post('/specials/redemptions/:id/reward', authMiddleware, riderMiddleware, SpecialsController.chooseReward);
 

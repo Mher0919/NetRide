@@ -582,14 +582,25 @@ export class RideService {
     if (status === 'COMPLETED') {
       extra.completed_at = new Date();
 
-      // Retrieve and persist trajectory
-      const trajectory = await LocationsService.getTrajectory(tripId);
-      extra.trajectory = JSON.stringify(trajectory);
+      // Trajectory snapshot + cache cleanup are best-effort: a Redis blip
+      // must NEVER abort the completion before the DB update and the
+      // tripUpdate broadcast — otherwise the ride stays IN_PROGRESS in
+      // the DB while both apps keep showing the ride (and the driver app
+      // has already "celebrated" a completion that never happened).
+      try {
+        const trajectory = await LocationsService.getTrajectory(tripId);
+        extra.trajectory = JSON.stringify(trajectory);
+      } catch (err: any) {
+        console.warn(`[RIDE] ⚠️ Trajectory read failed (non-blocking) for trip ${tripId}: ${err.message}`);
+      }
 
-      // Clear active trip cache
-      await redis.del(`driver:${userId}:active_trip`);
-      await LocationsService.clearTrajectory(tripId);
-      await NavigationService.clearTrip(tripId);
+      try {
+        await redis.del(`driver:${userId}:active_trip`);
+        await LocationsService.clearTrajectory(tripId);
+        await NavigationService.clearTrip(tripId);
+      } catch (err: any) {
+        console.warn(`[RIDE] ⚠️ Trip cache cleanup failed (non-blocking) for trip ${tripId}: ${err.message}`);
+      }
 
       // TODO: Calculate distance/fare based on trajectory if needed
     }

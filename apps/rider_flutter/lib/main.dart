@@ -48,7 +48,10 @@ void _routeFromNotification(NetRideNotification notification) {
   // to this rider; never stored, spec §99).
   if (notification.type == 'special_reward_ready') {
     nav.pushNamed('/special-redemption',
-        arguments: {'code': notification.data['code']});
+        arguments: {
+          'code': notification.data['code'],
+          'redemptionId': notification.data['redemptionId'],
+        });
     return;
   }
   switch (notification.route) {
@@ -339,7 +342,8 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
               case '/special-redemption':
                 final args = settings.arguments as Map<String, dynamic>?;
                 page = SpecialRedemptionScreen(
-                    code: args?['code'] as String?);
+                    code: args?['code'] as String?,
+                    redemptionId: args?['redemptionId'] as String?);
                 break;
               default:
                 page = const MapScreen();

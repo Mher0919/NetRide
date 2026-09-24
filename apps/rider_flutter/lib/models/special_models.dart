@@ -217,3 +217,13 @@ String formatCents2(int cents) {
   final sign = dollars < 0 ? '-' : '';
   return '$sign\$${dollars.abs().toStringAsFixed(2)}';
 }
+
+/// Validation-code countdown label: hours only while >= 1h ("23h"), then
+/// minutes only under 1h ("45m"). Seconds are never shown.
+String validationCountdownLabel(DateTime expiresAt, {DateTime? now}) {
+  final remaining = expiresAt.difference(now ?? DateTime.now());
+  if (remaining <= Duration.zero) return 'Expired';
+  if (remaining.inHours >= 1) return '${remaining.inHours}h';
+  final minutes = (remaining.inSeconds / 60).ceil().clamp(1, 59);
+  return '${minutes}m';
+}

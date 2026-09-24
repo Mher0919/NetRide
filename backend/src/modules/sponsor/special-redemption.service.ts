@@ -182,7 +182,7 @@ function hashValidationCode(code: string, redemptionId: string): string {
 }
 
 /** Live card update to the rider's app (minified card syncs instantly). */
-function emitRedemptionUpdate(redemption: RedemptionRow | null) {
+function emitRedemptionUpdate(redemption: RedemptionRow | null, code?: string | null) {
   if (!redemption) return;
   try {
     getIo().to(`rider:${redemption.rider_id}`).emit('specialRedemptionUpdate', {
@@ -193,6 +193,10 @@ function emitRedemptionUpdate(redemption: RedemptionRow | null) {
       discountCents: redemption.calculated_discount_cents,
       rewardChoice: redemption.reward_choice,
       rewardAmountCents: redemption.reward_amount_cents,
+      validationExpiresAt: redemption.validation_expires_at,
+      // The raw code is delivered ONLY to the owner's private socket room
+      // (same trust boundary as the FCM push that already carries it).
+      code: code ?? null,
       timestamps: {
         requestedAt: redemption.ride_requested_at,
         completedAt: redemption.ride_completed_at,
@@ -220,6 +224,24 @@ export class SpecialRedemptionService {
       [riderId],
     );
     return res.rows.length > 0 ? normalizeRedemption(res.rows[0]) : null;
+  }
+
+  /**
+   * All of the rider's OPEN validation cards (one per completed special
+   * ride awaiting the sponsor's code entry), newest first. Excludes
+   * expired codes and terminal rows. The Explore "SPECIAL CODES" section
+   * renders one horizontal card per row.
+   */
+  static async findPendingForRider(riderId: string): Promise<RedemptionRow[]> {
+    const res = await pool.query(
+      `${REDEMPTION_SELECT}
+       WHERE rider_id = $1
+         AND status IN ('WAITING_FOR_SPONSOR','SPONSOR_VALIDATED','REWARD_SELECTED','REWARD_FAILED')
+         AND (validation_expires_at IS NULL OR validation_expires_at > NOW())
+       ORDER BY created_at DESC`,
+      [riderId],
+    );
+    return res.rows.map(normalizeRedemption);
   }
 
   // ------------------------------------------------------------ step 1: pick
@@ -477,7 +499,8 @@ export class SpecialRedemptionService {
 
     // The raw code is delivered ONLY to the rider (in-app + push). It is
     // never persisted in any log or column.
-    emitRedemptionUpdate(normalizeRedemption((await pool.query(`SELECT * FROM special_redemptions WHERE id = $1`, [redemption.id])).rows[0]));
+    const fresh = await pool.query(`SELECT * FROM special_redemptions WHERE id = $1`, [redemption.id]);
+    emitRedemptionUpdate(normalizeRedemption(fresh.rows[0]), code);
     notifySpecialRewardReady(riderId, redemption.id, code).catch(() => undefined);
   }
 

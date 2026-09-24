@@ -704,9 +704,14 @@ export function setupSocketGateway(io: Server) {
         console.log(`[SOCKET] 🏁 Driver ${id} completed trip: ${validated.data}`);
         try {
           // Server-side proximity gate with grace period:
-          // - Must be within DRIVER_DESTINATION_PROXIMITY_M of destination
-          // - Grace period: 60s once within 1.5x proximity
-          // - Wait timer: 30s if within 2x proximity
+          // - AT the destination (within DRIVER_DESTINATION_PROXIMITY_M):
+          //   allow immediately — the client already requires this radius
+          //   to enable the COMPLETE TRIP button. The old gate forced a
+          //   30-60s wait even standing on the destination pin, which the
+          //   driver app swallowed silently and left the ride IN_PROGRESS
+          //   forever (both apps stuck on the ride screen).
+          // - Close (within 1.5x): grace period after DRIVER_PROXIMITY_GRACE_S
+          // - Nearby (within 2x): wait timer after DRIVER_WAIT_TIMER_S
           const trip: any = await RideService.getCurrentRide(id, UserRole.DRIVER);
           if (!trip || trip.id !== tripId) {
             socket.emit('error', 'You are not assigned to this trip.');
@@ -721,14 +726,16 @@ export function setupSocketGateway(io: Server) {
           const strict = env.DRIVER_DESTINATION_PROXIMITY_M;
           const graceDist = strict * 1.5;
           const waitDist = strict * 2;
-          const graceS = 60;
-          const waitTimerS = 30;
+          const graceS = env.DRIVER_PROXIMITY_GRACE_S;
+          const waitTimerS = env.DRIVER_WAIT_TIMER_S;
 
           // Track arrival time
           const arrivalKey = `arrival:${tripId}`;
           let arrival = driverArrivalTimes.get(arrivalKey) || { destinationArrivedAt: undefined };
           
-          if (dist <= graceDist) {
+          if (dist <= strict) {
+            console.log(`[SOCKET] completeTrip: at destination (${Math.round(dist)}m <= ${strict}m), allowing complete`);
+          } else if (dist <= graceDist) {
             if (!arrival.destinationArrivedAt) {
               arrival.destinationArrivedAt = Date.now();
               driverArrivalTimes.set(arrivalKey, arrival);

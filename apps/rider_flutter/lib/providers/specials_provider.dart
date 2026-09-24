@@ -16,7 +16,7 @@ class SpecialsProvider extends ChangeNotifier {
   SpecialsProvider({RideProvider? ride}) {
     _ride = ride;
     _ride?.specialRedemptionUpdates.listen((update) {
-      refresh();
+      _onRedemptionUpdate(update);
     });
     _ride?.notificationPing.listen((_) => refresh());
   }
@@ -25,6 +25,55 @@ class SpecialsProvider extends ChangeNotifier {
 
   List<SponsorSpecial> _sponsors = [];
   List<SponsorSpecial> get sponsors => _sponsors;
+
+  /// Open validation cards — one per completed special ride awaiting the
+  /// sponsor's code entry (WAITING_FOR_SPONSOR) or awaiting the reward
+  /// choice (SPONSOR_VALIDATED / REWARD_SELECTED / REWARD_FAILED). Renders
+  /// the Explore "SPECIAL CODES" section; newest first.
+  List<SpecialRedemption> _pending = [];
+  List<SpecialRedemption> get pending => _pending;
+
+  /// Cards whose one-time code was delivered live (socket) or recovered
+  /// from notification history. The raw code is never persisted (spec §99).
+  final Map<String, String> _codes = {};
+  String? codeFor(String redemptionId) => _codes[redemptionId];
+  void stashCodeFor(String redemptionId, String code) {
+    if (redemptionId.isEmpty || code.isEmpty) return;
+    _codes[redemptionId] = code;
+  }
+
+  /// Queued "your special code is ready" notices (ride completed). The
+  /// active screen consumes exactly one per redemption so the full code
+  /// card pops right after the ride ends without re-popping on rebuilds.
+  final List<String> _readyQueue = [];
+  String? consumeReadyNotice() =>
+      _readyQueue.isNotEmpty ? _readyQueue.removeAt(0) : null;
+
+  /// Queued "the business validated your visit" notices (SPONSOR_VALIDATED).
+  /// Consumed by Explore to pop the congratulations + reward-choice dialog.
+  final List<String> _rewardQueue = [];
+  String? consumeRewardNotice() =>
+      _rewardQueue.isNotEmpty ? _rewardQueue.removeAt(0) : null;
+
+  /// Live redemption transition pushed by the backend (code issued →
+  /// sponsor validated → reward processed). Stashes the one-time code when
+  /// the ride completes and queues the "pop a dialog" notices.
+  void _onRedemptionUpdate(Map<String, dynamic> update) {
+    final id = update['id']?.toString();
+    final status = update['status']?.toString();
+    if (id == null || id.isEmpty) return;
+    final code = update['code']?.toString();
+    if (code != null && code.isNotEmpty) {
+      stashCodeFor(id, code);
+      if (status == 'WAITING_FOR_SPONSOR') {
+        _readyQueue.add(id);
+      }
+    }
+    if (status == 'SPONSOR_VALIDATED' || status == 'REWARD_SELECTED') {
+      _rewardQueue.add(id);
+    }
+    refresh();
+  }
 
   int _count = 0;
   int get count => _count;
@@ -66,6 +115,11 @@ class SpecialsProvider extends ChangeNotifier {
 
   /// Full refresh: count + discovery + intro state + resumable redemption.
   /// When [lat]/[lng] are provided they become the persistent geo origin.
+  ///
+  /// The validation-code cards load SEPARATELY (see [_loadPendingCodes]):
+  /// a failure there (e.g. an older backend without the /pending route)
+  /// must NEVER take down the core SPECIALS section — the critical list is
+  /// the eligible sponsors.
   Future<void> refresh({double? lat, double? lng}) async {
     if (lat != null && lng != null) {
       _geoLat = lat;
@@ -96,6 +150,39 @@ class SpecialsProvider extends ChangeNotifier {
     } finally {
       _loading = false;
       notifyListeners();
+      _loadPendingCodes();
+    }
+  }
+
+  /// Loads the open validation-code cards independently of the core
+  /// refresh. Non-fatal: on any failure (older backend, transient error)
+  /// the section simply stays hidden and retries on the next refresh.
+  Future<void> _loadPendingCodes() async {
+    try {
+      _pending = await SpecialsService.pendingRedemptions();
+      notifyListeners();
+    } catch (_) {
+      _pending = [];
+    }
+    _recoverPendingCodes();
+  }
+
+  /// Backfills the one-time codes for pending cards that arrived without a
+  /// live socket delivery (app restart, backgrounded completion). Reads the
+  /// rider's own notification history; best-effort and non-blocking.
+  Future<void> _recoverPendingCodes() async {
+    for (final r in _pending) {
+      if (r.status != 'WAITING_FOR_SPONSOR') continue;
+      if (_codes.containsKey(r.id)) continue;
+      try {
+        final code = await SpecialsService.recoverCode(r.id);
+        if (code != null && code.isNotEmpty) {
+          stashCodeFor(r.id, code);
+          notifyListeners();
+        }
+      } catch (_) {
+        // Best-effort — the code can also be recovered on the card screen.
+      }
     }
   }
 
@@ -181,6 +268,7 @@ class SpecialsProvider extends ChangeNotifier {
       _current = await SpecialsService.currentRedemption();
       notifyListeners();
     } catch (_) {}
+    _loadPendingCodes();
   }
 
   /// True while the rider may attach this redemption to a new ride.

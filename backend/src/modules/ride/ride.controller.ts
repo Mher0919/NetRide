@@ -33,6 +33,10 @@ const RequestRideSchema = z.object({
   promoCode: z.string().trim().min(2).max(32).optional(),
   applyCredits: z.boolean().optional(),
   creditUseCents: z.number().int().min(1).optional(),
+  // SPECIALS: the rider's open redemption (CREATED) attached to this ride.
+  // Mirrors the socket requestRide payload so both request paths carry the
+  // special ride end-to-end (discount snapshot + sponsor budget reserve).
+  specialRedemptionId: z.string().uuid().optional(),
 });
 
 const EstimateRideSchema = z.object({
@@ -78,7 +82,7 @@ export class RideController {
         validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined,
         validatedData.isScheduled,
         validatedData.idempotencyKey,
-        { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents },
+        { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents, specialRedemptionId: validatedData.specialRedemptionId },
         validatedData.favoritePriority
       );
       res.status(201).json(trip);
@@ -211,11 +215,20 @@ export class RideController {
   static async getCurrent(req: any, res: Response) {
     try {
       const userId = req.user?.id;
-      const role = req.user?.role;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-      const activeRole = role === 'DRIVER' ? UserRole.DRIVER : UserRole.RIDER;
-      const trip = await RideService.getCurrentRide(userId, activeRole);
+      // The JWT's `role` claim freezes the account's ORIGINAL signup role —
+      // a dual-role user (rider who later became a driver, or vice versa)
+      // gets a RIDER token even while driving. The socket gateway resolves
+      // the active app role from the connection context; the HTTP layer has
+      // no such hint, so this endpoint checks BOTH hats and returns the
+      // active ride whichever side it belongs to (a user can never be
+      // mid-ride as driver AND rider at the same time).
+      const trips = await Promise.all([
+        RideService.getCurrentRide(userId, UserRole.RIDER),
+        RideService.getCurrentRide(userId, UserRole.DRIVER),
+      ]);
+      const trip = trips.find((t) => t != null) ?? null;
       if (!trip) return res.json({ trip: null });
       if (trip.status === 'COMPLETED' || trip.status === 'CANCELLED') {
         return res.json({ trip: null });
