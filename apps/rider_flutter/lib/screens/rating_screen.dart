@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -20,6 +21,7 @@ class _RatingScreenState extends State<RatingScreen> {
   final _commentController = TextEditingController();
 
   void _submit() async {
+    if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
     final rideProvider = Provider.of<RideProvider>(context, listen: false);
     try {
@@ -40,9 +42,37 @@ class _RatingScreenState extends State<RatingScreen> {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Thank you for your feedback!')));
       }
+    } on DioException catch (e) {
+      // A rejected submit must NEVER trap the rider on this page. Surface
+      // the server's real reason, and treat an "already rated" reply as
+      // success (the rating was recorded on a previous attempt — retrying
+      // against the idempotent backend returns 200, but older backends
+      // answer 400 and the rider must still be able to move on).
+      final serverMsg = e.response?.data is Map
+          ? (e.response!.data as Map)['error']?.toString()
+          : null;
+      final alreadyRated =
+          serverMsg != null && serverMsg.toLowerCase().contains('already rated');
+      if (alreadyRated) {
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Thank you for your feedback!')),
+          );
+        }
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(serverMsg ?? 'Failed to submit. Please try again.')),
+        );
+        setState(() => _isSubmitting = false);
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to submit: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to submit. Please try again.')),
+        );
         setState(() => _isSubmitting = false);
       }
     }

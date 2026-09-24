@@ -14,8 +14,14 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
     const { amount } = req.body;
     const riderId = req.user!.id;
 
-    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) < 0) {
+    if (amount == null || isNaN(parseFloat(amount)) || parseFloat(amount) < 0) {
         return res.status(400).json({ error: 'A valid tip amount is required.' });
+    }
+    const numericAmount = parseFloat(amount);
+    // A zero tip is a no-op success — the app's rating screen can re-submit
+    // a zero-tip state and must never be trapped on a 400 for "no tip".
+    if (numericAmount === 0) {
+        return res.json({ message: 'Tip successfully added.' });
     }
 
     try {

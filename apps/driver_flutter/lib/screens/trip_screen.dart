@@ -667,12 +667,25 @@ class _TripScreenState extends State<TripScreen> {
                                 listen: false);
                         // Rating is best-effort — the trip is already
                         // finished, a rating failure must never block it.
+                        // The backend is idempotent: an "already rated"
+                        // retry answers 200, so this can never trap.
                         try {
                           await provider.rateRide(
                             trip.id,
                             selectedRating,
                             reviewController.text.trim(),
                           );
+                        } on DioException catch (rateErr) {
+                          debugPrint(
+                              '[TRIP] Rating rider failed (non-blocking): $rateErr');
+                          final serverMsg =
+                              rateErr.response?.data is Map
+                                  ? (rateErr.response!.data as Map)['error']
+                                          ?.toString()
+                                  : null;
+                          if (mounted && serverMsg != null) {
+                            showSnackBar(serverMsg);
+                          }
                         } catch (rateErr) {
                           debugPrint(
                               '[TRIP] Rating rider failed (non-blocking): $rateErr');

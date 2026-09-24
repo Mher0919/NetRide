@@ -115,7 +115,14 @@ export class RideService {
         'SELECT id FROM ratings WHERE ride_id = $1 AND rater_id = $2',
         [data.ride_id, data.rater_id]
       );
-      if (existingRating.rows.length > 0) throw new Error('You have already rated this ride');
+      if (existingRating.rows.length > 0) {
+        // IDEMPOTENT (mirrors cancelTrip): a double-tap, a retry after a
+        // lost response, or a re-submit from a re-rendered rating screen
+        // must NEVER trap the user on a 400. The existing rating IS the
+        // answer — return it as success.
+        await client.query('COMMIT');
+        return { id: existingRating.rows[0].id, ride_id: data.ride_id, rater_id: data.rater_id, alreadyRated: true };
+      }
 
       // 3. Create Rating
       // Flag for admin review when a low rating (<3) is left with a note.
