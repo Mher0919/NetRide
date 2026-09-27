@@ -143,10 +143,12 @@ struct LoginView: View {
     private func finishOAuth() async {
         guard let user = SupabaseManager.shared.client.auth.currentUser else { return }
         let meta = user.userMetadata
-        let fullName = (meta["full_name"] as? String) ?? (meta["name"] as? String) ?? "NetRide Driver"
-        let avatar = (meta["avatar_url"] as? String) ?? (meta["picture"] as? String)
-        guard let session = SupabaseManager.shared.client.auth.currentSession,
-              let accessToken = session.accessToken else { return }
+        let fullName = (meta["full_name"]?.stringValue)
+            ?? (meta["name"]?.stringValue)
+            ?? "NetRide Driver"
+        let avatar = (meta["avatar_url"]?.stringValue) ?? (meta["picture"]?.stringValue)
+        guard let session = SupabaseManager.shared.client.auth.currentSession else { return }
+        let accessToken = session.accessToken
         do {
             let res = try await AuthService.loginWithOAuth(
                 email: user.email ?? "",

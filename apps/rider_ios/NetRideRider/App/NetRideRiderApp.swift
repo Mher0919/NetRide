@@ -27,19 +27,22 @@ struct NetRideRiderApp: App {
     }
 
     private func bootstrap() {
-        let token = SessionStore.shared.jwtToken
+        let storedToken = SessionStore.shared.jwtToken
 
         // Restore / refresh session on cold start.
-        if let token, AuthService.isJwtExpired(token) {
+        if let token = storedToken, AuthService.isJwtExpired(token) {
             Task {
-                if let session = try? await SupabaseManager.shared.client.auth.refreshSession(),
-                   let email = session.user?.email {
-                    let meta = session.user?.userMetadata ?? [:]
-                    let fullName = (meta["full_name"] as? String) ?? (meta["name"] as? String) ?? "NetRide Rider"
-                    let avatar = (meta["avatar_url"] as? String) ?? (meta["picture"] as? String)
-                    if let accessToken = session.accessToken,
-                       let res = try? await AuthService.loginWithOAuth(
-                        email: email, fullName: fullName, profileImageUrl: avatar, role: "RIDER", token: accessToken
+                if let session = try? await SupabaseManager.shared.client.auth.refreshSession() {
+                    let user = session.user
+                    let email = user.email
+                    let meta = user.userMetadata
+                    let fullName = (meta["full_name"]?.stringValue)
+                        ?? (meta["name"]?.stringValue)
+                        ?? "NetRide Rider"
+                    let avatar = (meta["avatar_url"]?.stringValue) ?? (meta["picture"]?.stringValue)
+                    let accessToken = session.accessToken
+                    if let res = try? await AuthService.loginWithOAuth(
+                        email: email ?? "", fullName: fullName, profileImageUrl: avatar, role: "RIDER", token: accessToken
                        ) {
                         _ = res
                         AuthService.isAuthenticated = true
@@ -53,7 +56,7 @@ struct NetRideRiderApp: App {
                     await AuthService.logout()
                 }
             }
-        } else if token == nil, SupabaseManager.shared.hasSession {
+        } else if storedToken == nil, SupabaseManager.shared.hasSession {
             Task {
                 _ = await AuthService.syncWithBackend()
                 if let t = SessionStore.shared.jwtToken {
@@ -62,7 +65,7 @@ struct NetRideRiderApp: App {
                 }
                 resolveStartup(forcePostAuth: true)
             }
-        } else if let token {
+        } else if let token = storedToken {
             AuthService.isAuthenticated = true
             rideProvider.initSocket(token: token)
             NotificationService.shared.registerDevice()

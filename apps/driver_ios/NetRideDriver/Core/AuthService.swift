@@ -132,7 +132,7 @@ enum AuthService {
         role: String = "DRIVER",
         token: String
     ) async throws -> [String: Any] {
-        var body: [String: Any] = [
+        let body: [String: Any] = [
             "email": email,
             "full_name": fullName,
             "profile_image_url": profileImageUrl as Any,
@@ -156,13 +156,13 @@ enum AuthService {
         do {
             let auth = SupabaseManager.shared.client.auth
             let session = try await auth.refreshSession()
-            guard let user = session.user else { return false }
+            let user = session.user
             let meta = user.userMetadata
-            let fullName = (meta["full_name"] as? String)
-                ?? (meta["name"] as? String)
+            let fullName = (meta["full_name"]?.stringValue)
+                ?? (meta["name"]?.stringValue)
                 ?? "NetRide Driver"
-            let avatar = (meta["avatar_url"] as? String) ?? (meta["picture"] as? String)
-            guard let accessToken = session.accessToken else { return false }
+            let avatar = (meta["avatar_url"]?.stringValue) ?? (meta["picture"]?.stringValue)
+            let accessToken = session.accessToken
             _ = try await loginWithOAuth(
                 email: user.email ?? "",
                 fullName: fullName,

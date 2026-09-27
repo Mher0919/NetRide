@@ -42,7 +42,19 @@ Native SwiftUI port of `apps/rider_flutter`. Same app logic, same backend
 4. **(Optional) Push notifications** — drop `GoogleService-Info.plist` into
    `NetRideRider/App/`. Without it the app degrades gracefully (no crash).
 
-5. Set your Apple **Development Team** in Xcode before building to a device.
+5. Set your Apple **Development Team** in Xcode before building to a device:
+   open `NetRideRider.xcodeproj` → select the `NetRideRider` target →
+   **Signing & Capabilities** → choose your team. If Xcode shows
+   *"Update to recommended settings"*, accepting it is safe.
+
+## Signing
+
+`CODE_SIGN_STYLE` is `Automatic` and the bundle id is `com.netride.rider`.
+The only required step on your Mac is selecting your **Development Team** in
+the target's Signing & Capabilities pane (the "requires a development team"
+error disappears once you do). For on-device push notifications you'll also
+need the `aps-environment` capability (already declared in
+`NetRideRider.entitlements`) and a signing team with push enabled.
 
 ## Architecture
 
