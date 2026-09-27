@@ -172,6 +172,34 @@ struct Trip: Equatable {
         if lower.hasSuffix("@netride.test") || lower.hasSuffix("@netride.dev") { return true }
         return lower.range(of: #"(^|\+)(test|sandbox|dev)([-_.]|$)"#, options: .regularExpression) != nil
     }
+
+    static func == (lhs: Trip, rhs: Trip) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.riderId == rhs.riderId &&
+        lhs.driverId == rhs.driverId &&
+        lhs.status == rhs.status &&
+        lhs.pickup == rhs.pickup &&
+        lhs.destination == rhs.destination &&
+        lhs.fareAmount == rhs.fareAmount &&
+        lhs.tipAmount == rhs.tipAmount &&
+        lhs.initialMaxFare == rhs.initialMaxFare &&
+        lhs.savingLikelihood == rhs.savingLikelihood &&
+        lhs.riderInfo == rhs.riderInfo &&
+        lhs.driverInfo == rhs.driverInfo &&
+        lhs.calculatedPrice == rhs.calculatedPrice &&
+        lhs.driverEarningsCents == rhs.driverEarningsCents &&
+        lhs.tripDistanceMeters == rhs.tripDistanceMeters &&
+        lhs.tripDurationSeconds == rhs.tripDurationSeconds &&
+        lhs.driverToPickupEta == rhs.driverToPickupEta &&
+        lhs.driverToPickupDistance == rhs.driverToPickupDistance &&
+        lhs.driverPricePerMile == rhs.driverPricePerMile &&
+        lhs.offerId == rhs.offerId &&
+        lhs.expiresAt == rhs.expiresAt &&
+        lhs.requestedAt == rhs.requestedAt &&
+        lhs.cancelledBy == rhs.cancelledBy &&
+        lhs.cancellationReasonCode == rhs.cancellationReasonCode &&
+        lhs.cancellationReasonText == rhs.cancellationReasonText
+    }
 }
 
 enum DriverStatus: String {

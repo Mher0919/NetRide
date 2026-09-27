@@ -27,7 +27,7 @@ final class NavigationService: ObservableObject {
     private var lastAnnouncedStep = -1
     private var lastAnnouncedThreshold = ""
 
-    private let voice = NavigationVoiceService()
+    private let voice = NavigationVoiceService.instance
 
     // MARK: - Start
 

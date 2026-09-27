@@ -113,7 +113,7 @@ struct RouteSummary {
     var trafficDurationSeconds: Double?
     var cachedAt: Date
 
-    var needsRefresh(maxAge: TimeInterval = 15 * 60) -> Bool {
+    func needsRefresh(maxAge: TimeInterval = 15 * 60) -> Bool {
         Date().timeIntervalSince(cachedAt) > maxAge
     }
 }

@@ -57,10 +57,10 @@ struct LoginView: View {
                     if !showEmailForm {
                         VStack(spacing: 12) {
                             AppButton(title: "Continue with Google", icon: "g.circle.fill", style: .outlined) {
-                                oauth(provider: .google)
+                                oauth(google: true)
                             }
                             AppButton(title: "Continue with Apple", icon: "apple.logo", style: .outlined) {
-                                oauth(provider: .apple)
+                                oauth(google: false)
                             }
                             AppButton(title: "Continue with Email", icon: "envelope.fill") {
                                 withAnimation { showEmailForm = true }
@@ -119,17 +119,18 @@ struct LoginView: View {
         }
     }
 
-    private func oauth(provider: OAuthProvider) {
+    private func oauth(google: Bool) {
         isLoading = true
         errorMessage = nil
         Task {
             do {
                 let redirectTo = URL(string: "io.supabase.netride://login-callback/")!
-                _ = try await SupabaseManager.shared.client.auth.signInWithOAuth(
-                    provider: provider,
-                    redirectTo: redirectTo,
-                    queryParams: ["access_type": "offline"]
-                )
+                let auth = SupabaseManager.shared.client.auth
+                if google {
+                    _ = try await auth.signInWithOAuth(provider: .google, redirectTo: redirectTo)
+                } else {
+                    _ = try await auth.signInWithOAuth(provider: .apple, redirectTo: redirectTo)
+                }
                 try await Task.sleep(nanoseconds: 1_000_000_000)
                 await finishOAuth()
             } catch {

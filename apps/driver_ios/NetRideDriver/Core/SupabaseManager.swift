@@ -2,7 +2,7 @@ import Foundation
 import Supabase
 
 /// Singleton Supabase client (mirrors Supabase.initialize in driver main.dart).
-enum SupabaseManager {
+final class SupabaseManager {
     static let shared = SupabaseManager()
 
     let client: SupabaseClient
