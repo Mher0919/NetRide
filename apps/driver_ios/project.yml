@@ -1,0 +1,59 @@
+name: NetRideDriver
+options:
+  bundleIdPrefix: com.netride
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  SocketIO:
+    url: https://github.com/socketio/socket.io-client-swift.git
+    from: 16.0.1
+  Supabase:
+    url: https://github.com/supabase/supabase-swift.git
+    from: 2.0.0
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    from: 10.0.0
+
+targets:
+  NetRideDriver:
+    type: application
+    platform: iOS
+    sources:
+      - path: NetRideDriver
+        excludes:
+          - App/Info.plist
+          - App/NetRideDriver.entitlements
+      - path: .env
+        buildPhase: resources
+    dependencies:
+      - package: SocketIO
+        product: SocketIO
+      - package: Supabase
+        product: Supabase
+      - package: Firebase
+        product: FirebaseMessaging
+        optional: true
+    entitlements:
+      path: NetRideDriver/App/NetRideDriver.entitlements
+      properties:
+        aps-environment: development
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.netride.driver
+        PRODUCT_NAME: NetRideDriver
+        INFOPLIST_FILE: NetRideDriver/App/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: NetRide Driver
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SWIFT_EMIT_LOC_STRINGS: NO
