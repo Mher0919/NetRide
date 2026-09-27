@@ -67,5 +67,15 @@
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>SUPABASE_URL</key>
+	<string>https://lpcnkfqagpouwzikedzl.supabase.co</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>sb_publishable_RYFofFEfO7FT2WUuvYghSA_M-a_DZV5</string>
+	<key>GOOGLE_CLIENT_ID_IOS</key>
+	<string>your_ios_client_id</string>
+	<key>GOOGLE_CLIENT_ID_WEB</key>
+	<string>your_web_client_id</string>
+	<key>API_BASE_URL</key>
+	<string>https://netride.onrender.com</string>
 </dict>
 </plist>

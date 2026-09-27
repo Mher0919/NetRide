@@ -34,7 +34,7 @@ targets:
         excludes:
           - App/Info.plist
           - App/NetRideDriver.entitlements
-      - path: .env
+      - path: env
         buildPhase: resources
     dependencies:
       - package: SocketIO

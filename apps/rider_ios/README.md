@@ -19,7 +19,7 @@ Native SwiftUI port of `apps/rider_flutter`. Same app logic, same backend
    open NetRideRider.xcodeproj
    ```
 
-2. **Configure `.env`** (already included, matches the Flutter app):
+2. **Configure `env`** (included, matches the Flutter app — note: no leading dot):
 
    ```
    SUPABASE_URL=https://lpcnkfqagpouwzikedzl.supabase.co
@@ -29,7 +29,11 @@ Native SwiftUI port of `apps/rider_flutter`. Same app logic, same backend
    API_BASE_URL=https://netride.onrender.com
    ```
 
-   The `.env` file is bundled as a resource and parsed at startup by `EnvConfig`.
+   The file is deliberately named `env` (no dot): OneDrive renames dotfiles
+   (`.env` → `env`) on macOS sync, and Xcode's "Copy Bundle Resources" phase
+   silently skips hidden files. `EnvConfig` searches for `env`, `NetRide.env`,
+   `netride.env`, then `.env`. If the file is missing entirely it falls back to
+   the values baked into `Info.plist` (already present), so the app always boots.
 
 3. **OAuth redirect** — the URL scheme `io.supabase.netride` is already declared
    in `Info.plist`. Add it to your Supabase project's **Redirect URLs**:
