@@ -24,7 +24,7 @@ import WarningIcon from '@mui/icons-material/Warning';
 import StarIcon from '@mui/icons-material/Star';
 import { useNavigate, useParams, Link as RouterLink } from 'react-router-dom';
 import api from '../api';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 
 const RideAudit: React.FC = () => {
   const { id } = useParams<{ id: string }>();

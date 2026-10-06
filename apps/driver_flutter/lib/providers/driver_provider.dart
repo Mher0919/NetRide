@@ -44,6 +44,12 @@ class DriverProvider with ChangeNotifier {
   /// driver sees "Ride cancelled / who / why" instead of a null ride.
   models.Trip? _lastCancelledTrip;
 
+  /// The authoritative COMPLETED trip payload (server-attached
+  /// `driver_earnings_cents` included), kept briefly so the completion
+  /// dialog shows the real take-home instead of falling back to the gross
+  /// rider fare. Cleared when the next ride context begins.
+  models.Trip? _lastCompletedTrip;
+
   /// True when the driver's own cancel emit could not be confirmed by the
   /// server within the fallback window (offline / socket error). The UI
   /// shows this as "cancellation request failed / connection lost".
@@ -124,6 +130,7 @@ class DriverProvider with ChangeNotifier {
   models.Trip? get currentTrip => _currentTrip;
   models.Trip? get incomingRequest => _incomingRequest;
   models.Trip? get lastCancelledTrip => _lastCancelledTrip;
+  models.Trip? get lastCompletedTrip => _lastCompletedTrip;
   bool get cancelConfirmFailed => _cancelConfirmFailed;
   String? get lastCancelError => _lastCancelError;
   bool get isConnected => _isConnected;
@@ -493,6 +500,7 @@ class DriverProvider with ChangeNotifier {
       // A brand-new offer means the previous ride context is over — any
       // still-tracked settled ids are stale (bounded memory too).
       _settledTripIds.clear();
+      _lastCompletedTrip = null;
       notifyListeners();
     });
 
@@ -528,6 +536,10 @@ class DriverProvider with ChangeNotifier {
         if (_incomingRequest?.id == trip.id) {
           _incomingRequest = null;
         }
+        // Capture the authoritative completion payload (carries
+        // driver_earnings_cents) BEFORE clearing the active trip — the
+        // completion dialog reads it right after this update arrives.
+        _lastCompletedTrip = trip;
         _settledTripIds.add(trip.id);
         _currentTrip = null;
         _status = models.DriverStatus.online;
@@ -851,6 +863,7 @@ class DriverProvider with ChangeNotifier {
     if (_incomingRequest != null && _incomingRequest!.id == tripId) {
       _currentTrip = _incomingRequest;
       _incomingRequest = null;
+      _lastCompletedTrip = null;
       _status = models.DriverStatus.onTrip;
       notifyListeners();
     }
@@ -928,6 +941,7 @@ class DriverProvider with ChangeNotifier {
   /// to the normal online/home screen.
   void ackCancelled() {
     _lastCancelledTrip = null;
+    _lastCompletedTrip = null;
     _cancelConfirmFailed = false;
     _lastCancelError = null;
     _cancelling = false;

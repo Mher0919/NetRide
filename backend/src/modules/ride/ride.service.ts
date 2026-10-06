@@ -134,7 +134,11 @@ export class RideService {
         [data.ride_id, data.rater_id, target_id, target_role, data.rating, data.review_text, flagged]
       );
 
-      // 4. Update Target Rating (Moving Average of last 100)
+      // 4. Update Target Rating (moving average of the most recent 100
+      // ratings, including the one just inserted above). Previously a
+      // target with fewer than 100 ratings was forced to 5.0, which threw
+      // away a real first rating — a 1-star driver (or rider) looked
+      // perfect until their 100th rating.
       const lastRatings = await client.query(
         `SELECT rating FROM ratings WHERE target_id = $1 ORDER BY created_at DESC LIMIT 100`,
         [target_id]
@@ -146,7 +150,7 @@ export class RideService {
       )).rows[0].count);
 
       let newRating = 5.0;
-      if (totalRatingsCount >= 100) {
+      if (lastRatings.rows.length > 0) {
         const sum = lastRatings.rows.reduce((acc: number, curr: any) => acc + curr.rating, 0);
         newRating = parseFloat((sum / lastRatings.rows.length).toFixed(1));
       }
@@ -1254,7 +1258,10 @@ export class RideService {
   }
 
   static async getHistory(userId: string, role: string): Promise<Trip[]> {
-    if (role === 'driver') {
+    // JWT roles are uppercase ('DRIVER'/'RIDER'); a lower-case equality
+    // check here silently routed drivers through the RIDER query, so their
+    // history (and any client rollup built on it) came back empty.
+    if ((role ?? '').toUpperCase() === 'DRIVER') {
       return RideRepository.findByDriverId(userId);
     }
     return RideRepository.findByRiderId(userId);

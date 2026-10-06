@@ -1154,6 +1154,14 @@ class _MapScreenState extends State<MapScreen>
                                     tag: 'search_container',
                                     child: _buildWhereToCard(theme),
                                   ),
+                                  // Small breathing room below the destination
+                                  // cards: the greeting/cards stay pinned to the
+                                  // top, while recents, specials and the map sit
+                                  // slightly lower. The rest of the spare height
+                                  // stays at the bottom, so short pages (no
+                                  // specials) feel balanced instead of having all
+                                  // the empty space under the map.
+                                  const SizedBox(height: 28),
                                   if (_recentSearches.isNotEmpty) ...[
                                     const SizedBox(height: 14),
                                     _buildRecentSearches(theme),

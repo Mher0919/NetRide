@@ -856,9 +856,45 @@ export class DriverService {
        FROM payouts WHERE driver_id = $1 ORDER BY requested_at DESC LIMIT 5`,
       [userId]
     );
+
+    // Trailing-7-day rollup from the SETTLED financial ledger (the same
+    // source that funded the wallet credits) so the driver app's "THIS
+    // WEEK" card can never drift from the balance. `driver_share_cents`
+    // is the fare take-home; `tip_cents` is the tip captured at
+    // completion. Tips added AFTER completion land as TIP_CREDIT wallet
+    // credits instead, so they are summed separately (never double-counted).
+    const weekRes = await pool.query(
+      `SELECT
+         COALESCE(SUM(driver_share_cents), 0) AS earnings_cents,
+         COALESCE(SUM(tip_cents), 0)          AS tip_cents,
+         COUNT(*)                             AS rides
+       FROM financial_transactions
+       WHERE driver_id = $1 AND status = 'SETTLED' AND type = 'RIDE_COMPLETION'
+         AND completed_at >= NOW() - INTERVAL '7 days'`,
+      [userId]
+    );
+    const afterTipRes = await pool.query(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS cents
+       FROM payouts
+       WHERE driver_id = $1 AND method = 'TIP_CREDIT'
+         AND (processed_at >= NOW() - INTERVAL '7 days'
+              OR (processed_at IS NULL AND requested_at >= NOW() - INTERVAL '7 days'))`,
+      [userId]
+    );
+    const week = weekRes.rows[0] ?? {};
+
     return {
       balance_cents: Number(wallet?.balance_cents ?? 0),
       lifetime_earnings_cents: Number(wallet?.lifetime_earnings_cents ?? 0),
+      // Server-computed "This Week" (last 7 days) — the driver app renders
+      // these directly; it never sums ride fares client-side.
+      this_week: {
+        earnings_cents: Number(week.earnings_cents ?? 0),
+        tips_cents:
+          Number(week.tip_cents ?? 0) +
+          Number(afterTipRes.rows[0]?.cents ?? 0),
+        rides: Number(week.rides ?? 0),
+      },
       payout_card: cardSummary,
       // pg returns BIGINT columns as strings — normalize to numbers so the
       // mobile client never hits a `String is not subtype of num` cast error.

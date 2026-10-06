@@ -5,6 +5,7 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 import { getIo } from '../../gateway/io-handle';
 import { isTestEmail } from '../../utils/testUser';
 import { DriverService } from '../driver/driver.service';
+import { getRevenueAllocationForRide } from '../../services/pricing.service';
 
 const router = Router();
 
@@ -178,6 +179,18 @@ router.post('/:rideId/complete-test', authMiddleware, async (req: AuthRequest, r
             );
         } catch (err: any) {
             console.warn(`[RIDE] ⚠️ complete-test wallet credit failed: ${err.message}`);
+        }
+
+        // Mirror the real completion flow: ride the driver's 60% share on the
+        // payload so the driver app's completion dialog never has to fall
+        // back to showing the gross fare as the driver's earnings.
+        try {
+          const allocation = await getRevenueAllocationForRide(rideId);
+          if (allocation) {
+            (updated as any).driver_earnings_cents = allocation.driverShareCents;
+          }
+        } catch (err: any) {
+          console.warn(`[RIDE] ⚠️ complete-test allocation lookup failed: ${err.message}`);
         }
 
         getIo().to(`rider:${ride.rider_id}`).emit('tripUpdate', updated);

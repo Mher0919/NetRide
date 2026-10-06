@@ -17,7 +17,7 @@ import {
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useNavigate } from 'react-router-dom';
 import { getRides } from '../api/admin';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 import { io } from 'socket.io-client';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000';

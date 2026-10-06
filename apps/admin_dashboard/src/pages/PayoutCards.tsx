@@ -26,7 +26,7 @@ import {
 import CheckIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import CreditCardIcon from '@mui/icons-material/CreditCard';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 import api from '../api';
 import { listPayoutCards, approvePayoutCard, rejectPayoutCard } from '../api/admin';
 

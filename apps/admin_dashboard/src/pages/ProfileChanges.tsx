@@ -16,7 +16,7 @@ import {
   Stack,
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 import { listProfileChanges } from '../api/admin';
 
 const STATUS_TABS: Array<{ value: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL'; label: string }> = [

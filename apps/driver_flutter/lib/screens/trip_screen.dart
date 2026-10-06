@@ -562,14 +562,23 @@ class _TripScreenState extends State<TripScreen> {
     }
 
     if (!mounted) return;
+    // Prefer the authoritative COMPLETED payload (it carries the server's
+    // `driver_earnings_cents`) over the stale pre-completion `trip` object,
+    // whose split fields are empty and would make the dialog fall back to
+    // the gross rider fare.
+    final completedTrip = driverProvider.lastCompletedTrip;
+    final earningsTrip =
+        (completedTrip != null && completedTrip.id == trip.id)
+            ? completedTrip
+            : trip;
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (_) => TripCompletedDialog(
-        fareAmount: trip.fareAmount ?? 0.0,
-        tipAmount: trip.tipAmount ?? 0.0,
+        fareAmount: earningsTrip.fareAmount ?? 0.0,
+        tipAmount: earningsTrip.tipAmount ?? 0.0,
         isDriver: true,
-        driverEarningsCents: trip.driverEarningsCents,
+        driverEarningsCents: earningsTrip.driverEarningsCents,
       ),
     );
     if (!mounted) return;
@@ -657,50 +666,66 @@ class _TripScreenState extends State<TripScreen> {
           actions: [
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
-                onPressed: isSubmitting
-                    ? null
-                    : () async {
-                        setState(() => isSubmitting = true);
-                        final provider =
-                            Provider.of<DriverProvider>(dialogContext,
-                                listen: false);
-                        // Rating is best-effort — the trip is already
-                        // finished, a rating failure must never block it.
-                        // The backend is idempotent: an "already rated"
-                        // retry answers 200, so this can never trap.
-                        try {
-                          await provider.rateRide(
-                            trip.id,
-                            selectedRating,
-                            reviewController.text.trim(),
-                          );
-                        } on DioException catch (rateErr) {
-                          debugPrint(
-                              '[TRIP] Rating rider failed (non-blocking): $rateErr');
-                          final serverMsg =
-                              rateErr.response?.data is Map
-                                  ? (rateErr.response!.data as Map)['error']
-                                          ?.toString()
-                                  : null;
-                          if (mounted && serverMsg != null) {
-                            showSnackBar(serverMsg);
-                          }
-                        } catch (rateErr) {
-                          debugPrint(
-                              '[TRIP] Rating rider failed (non-blocking): $rateErr');
-                        }
-                        if (dialogContext.mounted) {
-                          Navigator.pop(dialogContext);
-                        }
-                      },
-                child: isSubmitting
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Text('SUBMIT RATING'),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ElevatedButton(
+                    onPressed: isSubmitting
+                        ? null
+                        : () async {
+                            setState(() => isSubmitting = true);
+                            final provider =
+                                Provider.of<DriverProvider>(dialogContext,
+                                    listen: false);
+                            // Rating is best-effort — the trip is already
+                            // finished, a rating failure must never block it.
+                            // The backend is idempotent: an "already rated"
+                            // retry answers 200, so this can never trap.
+                            try {
+                              await provider.rateRide(
+                                trip.id,
+                                selectedRating,
+                                reviewController.text.trim(),
+                              );
+                            } on DioException catch (rateErr) {
+                              debugPrint(
+                                  '[TRIP] Rating rider failed (non-blocking): $rateErr');
+                              final serverMsg =
+                                  rateErr.response?.data is Map
+                                      ? (rateErr.response!.data as Map)['error']
+                                              ?.toString()
+                                      : null;
+                              if (mounted && serverMsg != null) {
+                                showSnackBar(serverMsg);
+                              }
+                            } catch (rateErr) {
+                              debugPrint(
+                                  '[TRIP] Rating rider failed (non-blocking): $rateErr');
+                            }
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                            }
+                          },
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    child: isSubmitting
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : const Text('SUBMIT RATING'),
+                  ),
+                  // Feedback is optional — the ride already completed
+                  // server-side; never trap the driver on this dialog.
+                  TextButton(
+                    onPressed: isSubmitting
+                        ? null
+                        : () => Navigator.pop(dialogContext),
+                    child: const Text('Skip for now'),
+                  ),
+                ],
               ),
             ),
           ],

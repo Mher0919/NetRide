@@ -24,7 +24,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { getDriverEarnings } from '../api/admin';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 
 const fmtUSD = (cents: any) => '$' + (Number(cents ?? 0) / 100).toFixed(2);
 
@@ -135,8 +135,10 @@ const EarningsPanel: React.FC<EarningsPanelProps> = ({ userId }) => {
           </Box>
 
           {chartData.length > 0 ? (
-            <Box sx={{ height: 220 }}>
-              <ResponsiveContainer width="100%" height="100%">
+            <Box sx={{ height: 220, width: '100%', minWidth: 0 }}>
+              {/* Explicit numeric height: avoids Recharts' first-paint
+                  “width(-1) and height(-1)” measurement warning. */}
+              <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={chartData} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} />

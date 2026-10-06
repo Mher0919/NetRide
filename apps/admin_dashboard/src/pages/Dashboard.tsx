@@ -131,7 +131,9 @@ const Dashboard: React.FC = () => {
             <Chip label="Live Data" size="small" sx={{ fontWeight: 700, bgcolor: 'secondary.main', color: 'white' }} />
           </Box>
           <Box sx={{ height: 500, width: '100%', minWidth: 0 }}>
-            <ResponsiveContainer width="100%" height="100%">
+            {/* Explicit numeric height: avoids Recharts' first-paint
+                “width(-1) and height(-1)” measurement warning. */}
+            <ResponsiveContainer width="100%" height={500}>
               <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                 <XAxis 

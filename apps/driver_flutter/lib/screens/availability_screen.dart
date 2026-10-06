@@ -56,7 +56,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   /// Last known good heading (geolocator reports NaN before a fix).
   double _lastHeading = 0;
 
-  // Weekly earnings (computed client-side from /ride/history).
+  // Weekly earnings (server-computed in GET /driver/wallet -> this_week).
   bool _earningsLoading = true;
   double _weeklyFare = 0;
   double _weeklyTips = 0;
@@ -91,35 +91,22 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     }
   }
 
-  /// Pulls the driver's completed rides from the history API and rolls up
-  /// fares + tips for the trailing 7 days ("This Week").
+  /// Pulls the driver's wallet summary. The server rolls up the trailing
+  /// 7 days from the SETTLED financial ledger (driver share + tips), so
+  /// "THIS WEEK" matches exactly what was credited to the balance — the
+  /// app never sums fares itself.
   Future<void> _loadWeeklyEarnings() async {
     try {
-      final res = await ApiService.dio.get('/ride/history');
-      final raw = res.data;
-      if (raw is! List) throw Exception('Unexpected history payload');
-      final weekStart = DateTime.now().subtract(const Duration(days: 7));
-      double fare = 0, tips = 0;
-      int rides = 0;
-      for (final item in raw) {
-        if (item is! Map) continue;
-        try {
-          final t = models.Trip.fromJson(Map<String, dynamic>.from(item));
-          if (t.status != models.TripStatus.COMPLETED) continue;
-          final ts = t.requestedAt;
-          if (ts == null || !ts.isAfter(weekStart)) continue;
-          fare += t.fareAmount ?? 0;
-          tips += t.tipAmount ?? 0;
-          rides++;
-        } catch (_) {
-          // Skip malformed history rows — never let a UI summary crash.
-        }
-      }
+      final wallet = await UserService.getWallet();
+      final weekRaw = wallet['this_week'];
+      final week = weekRaw is Map
+          ? Map<String, dynamic>.from(weekRaw)
+          : const <String, dynamic>{};
       if (mounted) {
         setState(() {
-          _weeklyFare = fare;
-          _weeklyTips = tips;
-          _weeklyRides = rides;
+          _weeklyFare = _moneyFromCents(week['earnings_cents']);
+          _weeklyTips = _moneyFromCents(week['tips_cents']);
+          _weeklyRides = (week['rides'] as num?)?.toInt() ?? 0;
           _earningsLoading = false;
         });
       }
@@ -127,6 +114,14 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       debugPrint('Error loading weekly earnings: $e');
       if (mounted) setState(() => _earningsLoading = false);
     }
+  }
+
+  /// BIGINT/Decimal-safe money helper: pg serializes BIGINT as a string,
+  /// so accept both num and String and never throw on either.
+  double _moneyFromCents(dynamic cents) {
+    if (cents is num) return cents / 100.0;
+    if (cents is String) return (double.tryParse(cents) ?? 0) / 100.0;
+    return 0.0;
   }
 
   // ── Profile / compliance ──────────────────────────────────────────
@@ -1188,7 +1183,9 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
               Text(
                 _earningsLoading
                     ? '—'
-                    : '\$${_weeklyFare.toStringAsFixed(2)}',
+                    // Total take-home for the week (driver share + tips);
+                    // the Tips row below is the breakdown.
+                    : '\$${(_weeklyFare + _weeklyTips).toStringAsFixed(2)}',
                 style: const TextStyle(
                   fontSize: 30,
                   fontWeight: FontWeight.w700,

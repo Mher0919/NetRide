@@ -22,7 +22,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { SpeedingBadge } from './SpeedingBadge';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 
 interface UserTableProps {
   role: 'RIDER' | 'DRIVER';

@@ -7,8 +7,10 @@ class TripCompletedDialog extends StatefulWidget {
   final double tipAmount;
   final double? initialMaxFare;
   final bool isDriver;
-  /// Server-computed 60% driver share in cents. Null on stale payloads —
-  /// falls back to the full fare (old pre-split behavior).
+  /// Server-computed 60% driver share in cents. Populated from the
+  /// authoritative COMPLETED trip payload. Null only for legacy rides with
+  /// no persisted revenue allocation — then the full fare is shown, matching
+  /// the wallet's own legacy fallback (no split existed to apply).
   final int? driverEarningsCents;
 
   const TripCompletedDialog({

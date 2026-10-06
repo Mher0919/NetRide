@@ -55,7 +55,7 @@ import {
 import { SpeedingBadge } from '../components/SpeedingBadge';
 import EarningsPanel from '../components/EarningsPanel';
 import GroupIcon from '@mui/icons-material/Groups';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 
 const UserDetail: React.FC = () => {
   const { id, section } = useParams();

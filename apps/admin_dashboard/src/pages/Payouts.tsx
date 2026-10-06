@@ -25,7 +25,7 @@ import {
 } from '@mui/material';
 import CheckIcon from '@mui/icons-material/CheckCircle';
 import PaidIcon from '@mui/icons-material/Paid';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 import api from '../api';
 import { listPayouts, markPayoutPaid } from '../api/admin';
 

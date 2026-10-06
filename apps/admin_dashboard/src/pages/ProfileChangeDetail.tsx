@@ -24,7 +24,7 @@ import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import CheckIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import BackIcon from '@mui/icons-material/ArrowBack';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 import api from '../api';
 import { approveProfileChange, rejectProfileChange } from '../api/admin';
 

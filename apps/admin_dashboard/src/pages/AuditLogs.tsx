@@ -12,7 +12,7 @@ import {
   type GridRenderCellParams 
 } from '@mui/x-data-grid';
 import api from '../api';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 
 const AuditLogs: React.FC = () => {
   const [logs, setLogs] = useState([]);

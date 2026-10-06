@@ -20,7 +20,7 @@ import AuditIcon from '@mui/icons-material/History';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getRideById, getRideRoutes, getRideLedger, cancelRideByAdmin, completeRideByAdmin } from '../api/admin';
 import RideMap from '../components/RideMap';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 import { io } from 'socket.io-client';
 import CancelIcon from '@mui/icons-material/Cancel';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';

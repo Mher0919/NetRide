@@ -31,7 +31,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { getRevenueAnalytics, getRegions, upsertRegion } from '../api/admin';
-import { format } from 'date-fns';
+import { format } from '../utils/date';
 
 const fmtUSD = (cents: any) =>
   ((cents ?? 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -222,7 +222,9 @@ const RevenueAnalytics: React.FC = () => {
 
           {chartData.length > 0 && (
             <Box sx={{ height: 260, mt: 3 }}>
-              <ResponsiveContainer width="100%" height="100%">
+              {/* Explicit numeric height: avoids Recharts' first-paint
+                  “width(-1) and height(-1)” measurement warning. */}
+              <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={chartData} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} />
