@@ -52,7 +52,11 @@ const envSchema = z.object({
   // ---- Legacy dispatch config ----------------------------------------------
   DRIVER_MATCH_RADIUS_KM: z.union([z.string(), z.number()]).transform(Number).default(5),
   DRIVER_ACCEPT_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(15000),
-  DRIVER_PICKUP_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(15),
+  // Radius (meters) inside which a driver may pick up the rider. Matches
+  // the destination radius (100m): GPS accuracy + parking variance made a
+  // 15m gate reject drivers standing right at the rider. The driver app
+  // enables PICK UP RIDER at the same 100m.
+  DRIVER_PICKUP_PROXIMITY_M: z.union([z.string(), z.number()]).transform(Number).default(100),
   // Radius (meters) inside which a driver may complete the ride. 100m is
   // the practical drop-off zone: GPS accuracy + parking variance. The
   // driver app enables COMPLETE TRIP at the same 100m.

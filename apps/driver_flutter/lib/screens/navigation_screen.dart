@@ -9,7 +9,6 @@ import '../providers/driver_provider.dart';
 import '../components/smooth_rider_marker.dart';
 import '../components/navigation/bottom_sheet_card.dart';
 import '../components/navigation/lane_guidance.dart';
-import '../components/navigation/routing_options_bar.dart';
 import '../components/navigation/speed_hud.dart';
 import '../components/navigation/top_maneuver_card.dart';
 import '../services/gps_tracker.dart';
@@ -255,15 +254,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
                         rerouteStage == RerouteStage.backendRequest,
                       ),
                     ],
-                    const SizedBox(height: 10),
-                    RoutingOptionsBar(
-                      primaryRoad: currentStep?.name ?? '',
-                      isFreeway: _isFreewayName(currentStep?.name ?? ''),
-                      onRefresh: () {
-                        final last = GpsTracker.instance.lastFix;
-                        if (last != null) nav.requestReroute(last.position);
-                      },
-                    ),
                   ],
                 ),
               ),
@@ -469,14 +459,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
       color: Color(0xFFC65A5A),
       size: 30,
     );
-  }
-
-  bool _isFreewayName(String name) {
-    if (name.isEmpty) return false;
-    return RegExp(
-            r'\b(I-\d+|US-\d+|SR-\d+|CA-\d+|\bFwy\b|\bFreeway\b|\bInterstate\b|\bExpressway\b)',
-            caseSensitive: false)
-        .hasMatch(name);
   }
 
   String _capitalize(String? s) {

@@ -711,7 +711,12 @@ class _TripScreenState extends State<TripScreen> {
 
   // ---- Proximity helpers ------------------------------------------------
 
-  static const double kPickupProximityM = 15;
+  // Pickup radius: matches the destination drop-off zone (100m). GPS
+  // accuracy + parking variance mean a 15m gate would keep the button
+  // greyed out even when the driver is standing at the rider, so pick up
+  // enables at the same practical radius the server allows
+  // (DRIVER_PICKUP_PROXIMITY_M).
+  static const double kPickupProximityM = 100;
   // Destination radius: GPS accuracy + parking variance. 100m is the
   // practical drop-off zone — the button enables and the server allows
   // completion at the same radius (DRIVER_DESTINATION_PROXIMITY_M).

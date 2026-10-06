@@ -1059,7 +1059,11 @@ class _MapScreenState extends State<MapScreen>
                     // rest of the page collapses and the map fills the
                     // screen (still scrollable as one page).
                     Expanded(
-                      child: SingleChildScrollView(
+                      child: LayoutBuilder(
+                        builder: (context, viewport) {
+                          final vpHeight = viewport.maxHeight;
+                          final vpInsets = MediaQuery.paddingOf(context);
+                          return SingleChildScrollView(
                         physics: const BouncingScrollPhysics(),
                         padding: const EdgeInsets.only(bottom: 24),
                         child: SafeArea(
@@ -1068,8 +1072,28 @@ class _MapScreenState extends State<MapScreen>
                               horizontal: 20,
                               vertical: 10,
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                            // When the page content is shorter than the
+                            // viewport (e.g. no active specials), fill the
+                            // height and center the content so the map stays
+                            // near the middle instead of drifting up with
+                            // blank space beneath it.
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: _mapExpanded
+                                    ? 0
+                                    : math.max(
+                                        0.0,
+                                        vpHeight -
+                                            vpInsets.top -
+                                            vpInsets.bottom,
+                                      ),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: _mapExpanded
+                                    ? MainAxisAlignment.start
+                                    : MainAxisAlignment.center,
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.stretch,
                               children: [
                                 if (!_mapExpanded) ...[
                                   Row(
@@ -1494,9 +1518,12 @@ class _MapScreenState extends State<MapScreen>
                           ),
                         ),
                       ),
+                    );
+                      },
                     ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
 
                 // Part 2: back arrow — only in full-screen map mode (B/C) AND when the
                 // choose-your-ride panel is closed. The panel has no top-left

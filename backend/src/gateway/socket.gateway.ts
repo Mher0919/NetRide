@@ -485,7 +485,7 @@ export function setupSocketGateway(io: Server) {
           }
 
           // Driver ARRIVED at pickup: once the driver enters the pickup
-          // grace zone, the rider gets a real phone notification. Guarded
+          // radius, the rider gets a real phone notification. Guarded
           // by a Redis NX key + DB event_id dedup → exactly one per trip.
           if (currentTrip.status === TripStatus.ACCEPTED && currentTrip.rider_id) {
             try {
@@ -493,7 +493,7 @@ export function setupSocketGateway(io: Server) {
                 { lat: validated.data.lat, lng: validated.data.lng },
                 currentTrip.pickup,
               );
-              if (distToPickup <= env.DRIVER_PICKUP_PROXIMITY_M * 2) {
+              if (distToPickup <= env.DRIVER_PICKUP_PROXIMITY_M) {
                 notifyDriverArrived(
                   currentTrip.rider_id,
                   currentTrip.id,
