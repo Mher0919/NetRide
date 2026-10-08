@@ -278,7 +278,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
           Positioned(
             right: 16,
-            bottom: 322,
+            // Raised above the trip screen's "⋯" action menu (bottom: 322)
+            // so the two floating controls stack without overlapping.
+            bottom: 378,
             child: FloatingActionButton(
               heroTag: 'nav_locate_fab',
               mini: true,

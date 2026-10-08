@@ -587,30 +587,22 @@ class _TripScreenState extends State<TripScreen> {
                         ),
                       ),
                       const SizedBox(width: 16),
-                      if (rideProvider.status == models.TripStatus.ACCEPTED ||
-                          rideProvider.status == models.TripStatus.IN_PROGRESS)
-                        TextButton.icon(
-                          onPressed: () =>
-                              _showCancelDialog(context, rideProvider),
-                          icon: const Icon(
-                            Icons.close,
-                            color: Color(0xFFC65A5A),
-                            size: 18,
-                          ),
-                          label: const Text(
-                            'Cancel',
-                            style: TextStyle(
-                              color: Color(0xFFC65A5A),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
                       _ChatCallButtons(
                         tripId: rideProvider.tripId ?? '',
                         peerName: driver.name.isNotEmpty
                             ? driver.name
                             : 'Your driver',
                       ),
+                      // Ride actions live in a "⋯" menu on the far right
+                      // instead of a full-width inline Cancel button.
+                      if (rideProvider.status == models.TripStatus.ACCEPTED ||
+                          rideProvider.status == models.TripStatus.IN_PROGRESS) ...[
+                        const SizedBox(width: 12),
+                        _RideActionMenu(
+                          onCancel: () =>
+                              _showCancelDialog(context, rideProvider),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -1010,6 +1002,58 @@ class _ChatCallButtons extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Compact "⋯" ride actions menu shown on the far right of the bottom
+/// controls. Holds the Cancel Ride action — mirrors the driver app.
+class _RideActionMenu extends StatelessWidget {
+  final VoidCallback onCancel;
+
+  const _RideActionMenu({required this.onCancel});
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Ride actions',
+      color: Colors.white,
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      offset: const Offset(0, -64),
+      onSelected: (value) {
+        if (value == 'cancel') onCancel();
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'cancel',
+          child: Row(
+            children: [
+              Icon(Icons.cancel_outlined, size: 20, color: Color(0xFFC65A5A)),
+              SizedBox(width: 10),
+              Text(
+                'Cancel Ride',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF2F3A32),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F4EF),
+          borderRadius: BorderRadius.circular(50),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: const Icon(
+          Icons.more_horiz_rounded,
+          size: 22,
+          color: Color(0xFF2F3A32),
+        ),
+      ),
     );
   }
 }

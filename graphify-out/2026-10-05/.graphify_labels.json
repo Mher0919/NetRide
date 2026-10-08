@@ -475,13 +475,18 @@
   "473": ".requestOnDemandPayout",
   "474": ".submitProfileChange",
   "475": ".getCurrentProfileChange",
+  "476": ".requestEmailChange",
+  "477": ".requestOnDemandPayout",
   "478": ".metadataOutput",
   "479": "RatingView",
   "480": "PhoneUtils",
   "481": "wallet-cap.ts",
+  "482": ".getCurrentProfileChange",
+  "483": ".getPendingVehicleSubmissions",
   "484": "Error",
   "485": "Location",
   "486": "Void",
   "487": "CGFloat",
-  "488": "OAuthProvider"
+  "488": "OAuthProvider",
+  "489": "../components/navigation/routing_options_bar.dart"
 }

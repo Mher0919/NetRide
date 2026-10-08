@@ -387,44 +387,16 @@ class _TripScreenState extends State<TripScreen> {
           onChat: () => _openChat(context, trip),
           onCall: () => _dialParticipant(context, trip),
         ),
-        // Cancel button — only visible before pickup (ACCEPTED status)
+        // Ride actions menu (⋯ bottom-right) — holds Cancel Ride. Keeps the
+        // top of the navigation screen free of overlapping controls; only
+        // available before pickup (ACCEPTED status), like the old pills.
         if (trip.status == models.TripStatus.ACCEPTED)
           Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
             right: 16,
-            child: SafeArea(
-              child: GestureDetector(
-                onTap: () => _showCancelDialog(context, driverProvider, trip),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFC65A5A),
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.close, color: Colors.white, size: 16),
-                      SizedBox(width: 6),
-                      Text(
-                        'Cancel',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            bottom: 322,
+            child: _RideActionMenu(
+              onCancel: () =>
+                  _showCancelDialog(context, driverProvider, trip),
             ),
           ),
         if (!_isActionInRange(trip, driverProvider,
@@ -848,6 +820,64 @@ class _TripScreenState extends State<TripScreen> {
       debugPrint('[TRIP] Dial failed: $e');
       showSnackBar('Unable to open the phone app.');
     }
+  }
+}
+
+/// Compact "⋯" ride actions menu (bottom-right of the ride screen). Holds
+/// the pre-pickup Cancel Ride action so the top of the navigation view
+/// stays free of overlapping buttons.
+class _RideActionMenu extends StatelessWidget {
+  final VoidCallback onCancel;
+
+  const _RideActionMenu({required this.onCancel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      elevation: 4,
+      shadowColor: Colors.black.withOpacity(0.2),
+      child: PopupMenuButton<String>(
+        tooltip: 'Ride actions',
+        color: Colors.white,
+        elevation: 4,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        // Open the menu directly above the button (bottom-right corner).
+        offset: const Offset(0, -64),
+        onSelected: (value) {
+          if (value == 'cancel') onCancel();
+        },
+        itemBuilder: (context) => [
+          const PopupMenuItem(
+            value: 'cancel',
+            child: Row(
+              children: [
+                Icon(Icons.cancel_outlined, size: 20, color: Color(0xFFC65A5A)),
+                SizedBox(width: 10),
+                Text(
+                  'Cancel Ride',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF2F3A32),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        child: const Padding(
+          padding: EdgeInsets.all(12),
+          child: Icon(
+            Icons.more_horiz_rounded,
+            size: 22,
+            color: Color(0xFF2F3A32),
+          ),
+        ),
+      ),
+    );
   }
 }
 

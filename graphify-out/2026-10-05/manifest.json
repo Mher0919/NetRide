@@ -259,11 +259,6 @@
     "ast_hash": "9569763401239ca187feb2e34b3f1d73",
     "semantic_hash": ""
   },
-  "apps/driver_flutter/lib/components/navigation/routing_options_bar.dart": {
-    "mtime": 1786261869.6757665,
-    "ast_hash": "df1a2fb39d9ff5044fd7540bc366a9a2",
-    "semantic_hash": ""
-  },
   "apps/driver_flutter/lib/components/navigation/speed_hud.dart": {
     "mtime": 1786261869.6767676,
     "ast_hash": "fba95067527ca7fbbb0ff18f33c9a665",
@@ -350,8 +345,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/navigation_screen.dart": {
-    "mtime": 1790215514.381315,
-    "ast_hash": "0197a976d3ba8ddf7e9b1f94f47fb550",
+    "mtime": 1791263275.603224,
+    "ast_hash": "f23a521fd89c6b9ff83764df669793ba",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/onboarding_screen.dart": {
@@ -395,8 +390,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/trip_screen.dart": {
-    "mtime": 1790220035.5612707,
-    "ast_hash": "ffc017a6ceb89645056753771e537c5b",
+    "mtime": 1791263266.1581485,
+    "ast_hash": "733cee3fd9f7449dd3e5e5d68a004715",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/vehicle_inspection_screen.dart": {
@@ -740,8 +735,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/map_screen.dart": {
-    "mtime": 1790232039.7317088,
-    "ast_hash": "b62fc83fd05a370845d38ef76bb27426",
+    "mtime": 1791263303.859457,
+    "ast_hash": "7cb60628ae7d838e24269847b7a1b2db",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/onboarding_screen.dart": {
@@ -1230,8 +1225,8 @@
     "semantic_hash": ""
   },
   "backend/src/config/env.ts": {
-    "mtime": 1790215495.4863422,
-    "ast_hash": "f447f19e65da56d59ddfe2a8606175e7",
+    "mtime": 1791263150.391186,
+    "ast_hash": "4b520d4bd0e270e0f03a5a56ad149f78",
     "semantic_hash": ""
   },
   "backend/src/config/redis.ts": {
@@ -1250,8 +1245,8 @@
     "semantic_hash": ""
   },
   "backend/src/gateway/socket.gateway.ts": {
-    "mtime": 1790126552.4471262,
-    "ast_hash": "2e4ab11aba199cdd41230b0c998ef47e",
+    "mtime": 1791263153.641814,
+    "ast_hash": "8a494cca7dd763bf9788bb27db69b565",
     "semantic_hash": ""
   },
   "backend/src/gateway/socket.middleware.ts": {
