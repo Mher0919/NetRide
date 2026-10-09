@@ -37,6 +37,8 @@ const RequestRideSchema = z.object({
   // Mirrors the socket requestRide payload so both request paths carry the
   // special ride end-to-end (discount snapshot + sponsor budget reserve).
   specialRedemptionId: z.string().uuid().optional(),
+  // Explicit consent to the conditional no-show additional charge.
+  specialTermsAccepted: z.boolean().optional(),
 });
 
 const EstimateRideSchema = z.object({
@@ -82,13 +84,15 @@ export class RideController {
         validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined,
         validatedData.isScheduled,
         validatedData.idempotencyKey,
-        { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents, specialRedemptionId: validatedData.specialRedemptionId },
+        { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents, specialRedemptionId: validatedData.specialRedemptionId, specialTermsAccepted: validatedData.specialTermsAccepted },
         validatedData.favoritePriority
       );
       res.status(201).json(trip);
     } catch (error: any) {
       console.error(`[RIDE] ❌ Request error: ${error.message}`);
-      res.status(400).json({ error: error.message || 'Unable to process your ride request.' });
+      const body: Record<string, string> = { error: error.message || 'Unable to process your ride request.' };
+      if (error?.code) body.code = error.code;
+      res.status(error?.code === 'PAYMENT_METHOD_REQUIRED' ? 402 : 400).json(body);
     }
   }
 

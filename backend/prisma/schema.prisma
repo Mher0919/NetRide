@@ -563,6 +563,8 @@ enum PayoutMethod {
   ON_DEMAND
   RIDE_CREDIT
   TIP_CREDIT
+  SPONSOR_CREDIT
+  SPECIAL_TOPUP
 
   @@map("payout_method")
 }

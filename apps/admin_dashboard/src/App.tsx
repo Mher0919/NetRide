@@ -27,6 +27,7 @@ import Credits from './pages/Credits';
 import FleetPartners from './pages/FleetPartners';
 import Pricing from './pages/Pricing';
 import Revenue from './pages/Revenue';
+import Payments from './pages/Payments';
 import Reports from './pages/Reports';
 import Sponsors from './pages/Sponsors';
 import NotFound from './pages/NotFound';
@@ -91,6 +92,7 @@ const App: React.FC = () => {
               <Route path="pricing" element={<Pricing />} />
               <Route path="revenue" element={<Revenue />} />
               <Route path="reports" element={<Reports />} />
+              <Route path="payments" element={<Payments />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

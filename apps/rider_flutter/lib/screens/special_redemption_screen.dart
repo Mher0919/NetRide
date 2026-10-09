@@ -1,14 +1,14 @@
-// lib/screens/special_redemption_screen.dart
+﻿// lib/screens/special_redemption_screen.dart
 //
-// The rider's active redemption — a single card that walks the lifecycle:
-//   CREATED             → book a ride to the business
-//   RIDE_PENDING        → discount applied, ride in progress
-//   WAITING_FOR_SPONSOR → show your one-time 6-digit code + "I got verified"
-//   SPONSOR_VALIDATED   → choose REFUND (wallet) or CREDITS (+10% bonus)
-//   REWARD_COMPLETED    → done
-//   CANCELLED / EXPIRED → terminal with reason
+// The rider's active redemption â€” a single card that walks the lifecycle:
+//   CREATED             â†’ book a ride to the business
+//   RIDE_PENDING        â†’ discount applied, ride in progress
+//   WAITING_FOR_SPONSOR â†’ show your one-time 6-digit code + "I got verified"
+//   SPONSOR_VALIDATED   â†’ choose REFUND (wallet) or CREDITS (+10% bonus)
+//   REWARD_COMPLETED    â†’ done
+//   CANCELLED / EXPIRED â†’ terminal with reason
 // The raw code is never persisted; it arrives via push data or is recovered
-// from in-app notification history (spec §99).
+// from in-app notification history (spec Â§99).
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -23,7 +23,7 @@ class SpecialRedemptionScreen extends StatefulWidget {
   /// Code delivered by a tapped `special_reward_ready` push, if any.
   final String? code;
 
-  /// Which validation card to render. Null → the rider's current (latest)
+  /// Which validation card to render. Null â†’ the rider's current (latest)
   /// redemption. Set when opened from an Explore "SPECIAL CODES" card so
   /// multiple pending cards each show THEIR OWN code.
   final String? redemptionId;
@@ -235,7 +235,7 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
       case 'SPONSOR_VALIDATED':
       case 'REWARD_SELECTED':
       case 'REWARD_FAILED':
-        return _rewardBody(specials, r);
+        return _validatedBody(specials, r);
       case 'REWARD_COMPLETED':
         return _completedBody(r);
       case 'CANCELLED':
@@ -341,7 +341,7 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text(
-                  'Your code was sent as a notification — open the latest '
+                  'Your code was sent as a notification â€” open the latest '
                   '"Your special is ready" notification to see it.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, height: 1.4),
@@ -350,7 +350,7 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
             const SizedBox(height: 12),
             if (r.validationExpiresAt != null)
               Text(
-                'Expires ${DateFormat('h:mm a · MMM d').format(r.validationExpiresAt!)}',
+                'Expires ${DateFormat('h:mm a Â· MMM d').format(r.validationExpiresAt!)}',
                 style: TextStyle(
                   fontSize: 12,
                   color: const Color(0xFF2F3A32).withOpacity(0.55),
@@ -398,73 +398,34 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
     ];
   }
 
-  // ------------------------------------------------- SPONSOR_VALIDATED
-  List<Widget> _rewardBody(SpecialsProvider specials, SpecialRedemption r) {
+  // ------------------------------------------------ SPONSOR_VALIDATED
+  // NEW MODEL: the sponsor's validation settles the special server-side
+  // (no money is sent back to the rider). This screen re-reads the state
+  // and transitions to the settled view.
+  List<Widget> _validatedBody(SpecialsProvider specials, SpecialRedemption r) {
     final D = r.calculatedDiscountCents;
-    final credits = r.rewardAmountCents ?? (D + (D ~/ 10));
     return [
       _infoCard(
-        '${r.sponsorName} confirmed your visit. Choose how to collect your '
-        'savings:',
+        '${r.sponsorName} confirmed your visit. Your discount of '
+        '${formatCents2(D)} is applied to the ride.',
         icon: Icons.check_circle_rounded,
       ),
       const SizedBox(height: 14),
-      _rewardOption(
-        title: 'Cash back to wallet',
-        amount: formatCents2(D),
-        subtitle: 'Your wallet balance',
-        icon: Icons.account_balance_wallet_rounded,
-        onTap: specials.busy ? null : () => _chooseReward(specials, 'REFUND'),
-      ),
-      const SizedBox(height: 12),
-      _rewardOption(
-        title: 'Ride credits',
-        amount: formatCents2(credits),
-        subtitle: '+10% bonus — spend on any ride',
-        icon: Icons.bolt_rounded,
-        onTap: specials.busy ? null : () => _chooseReward(specials, 'CREDITS'),
-        highlighted: true,
+      OutlinedButton.icon(
+        onPressed: specials.busy ? null : () => _refreshSettled(specials),
+        icon: const Icon(Icons.refresh_rounded, size: 18),
+        label: Text(specials.busy ? 'Confirmingâ€¦' : 'Check status'),
       ),
     ];
   }
 
-  Future<void> _chooseReward(SpecialsProvider specials, String choice) async {
-    final r = specials.current;
-    if (r == null) return;
-    final amount = choice == 'REFUND'
-        ? formatCents2(r.calculatedDiscountCents)
-        : formatCents2(r.rewardAmountCents ?? (r.calculatedDiscountCents + (r.calculatedDiscountCents ~/ 10)));
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Collect your reward?'),
-        content: Text(
-          choice == 'REFUND'
-              ? '$amount will be refunded to your wallet.'
-              : '$amount in ride credits will be added to your account.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Not yet'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF5B7760),
-            ),
-            child: const Text('Yes, collect'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await specials.chooseReward(choice);
+  Future<void> _refreshSettled(SpecialsProvider specials) async {
+    await specials.refreshSettlementState();
   }
 
   // --------------------------------------------------- REWARD_COMPLETED
   List<Widget> _completedBody(SpecialRedemption r) {
-    final isRefund = r.rewardChoice == 'REFUND';
+    final D = r.calculatedDiscountCents;
     return [
       Container(
         padding: const EdgeInsets.all(24),
@@ -479,18 +440,23 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
                 color: Color(0xFF5B7760), size: 44),
             const SizedBox(height: 12),
             const Text(
-              'Reward collected',
+              'Visit confirmed',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
             Text(
-              isRefund
-                  ? '${formatCents2(r.rewardAmountCents ?? 0)} was refunded to '
-                      'your wallet.'
-                  : '${formatCents2(r.rewardAmountCents ?? 0)} in ride credits '
-                      'was added to your account.',
+              'Your ${formatCents2(D)} discount was applied to the ride.',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 14, height: 1.4),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'No refund or credit is issued for specials.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: const Color(0xFF2F3A32).withOpacity(0.55),
+              ),
             ),
           ],
         ),
@@ -517,85 +483,13 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
     return [
       _infoCard(
         'Your validation code expired before the business could confirm the '
-        'visit. Pick a new special any time.',
+        'visit. The sponsor does not fund this ride, and the remaining fare '
+        'may be charged to your payment method. Pick a new special any time.',
         icon: Icons.timer_off_rounded,
       ),
     ];
   }
 
-  Widget _rewardOption({
-    required String title,
-    required String amount,
-    required String subtitle,
-    required IconData icon,
-    required VoidCallback? onTap,
-    bool highlighted = false,
-  }) {
-    return Material(
-      color: highlighted ? const Color(0xFF5B7760) : Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: highlighted
-                ? null
-                : Border.all(color: const Color(0xFFE3DDD4)),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                color: highlighted
-                    ? Colors.white
-                    : const Color(0xFF5B7760),
-                size: 28,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color:
-                            highlighted ? Colors.white : const Color(0xFF2F3A32),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: highlighted
-                            ? Colors.white.withOpacity(0.8)
-                            : const Color(0xFF2F3A32).withOpacity(0.55),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                amount,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color:
-                      highlighted ? Colors.white : const Color(0xFF5B7760),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _infoCard(String message, {IconData icon = Icons.info_rounded}) {
     return Container(

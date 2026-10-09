@@ -1661,7 +1661,9 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                _expired ? 'REQUEST EXPIRED' : 'NEW RIDE REQUEST',
+                _expired
+                    ? 'REQUEST EXPIRED'
+                    : (req.specialAttached ? 'NEW SPECIAL RIDE REQUEST' : 'NEW RIDE REQUEST'),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
@@ -1681,6 +1683,40 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
               ),
             ],
           ),
+          // SPECIAL clarity: the rider pays a discounted price funded by a
+          // sponsor; driver earnings are ALWAYS computed from the ORIGINAL
+          // fare by the backend (never from the rider's discounted price).
+          if (req.specialAttached) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF5B7760).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.local_activity_rounded,
+                      size: 15, color: Color(0xFF5B7760)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      req.riderPaymentCents != null &&
+                              req.sponsorSubsidyCents != null
+                          ? 'Sponsored ride: rider pays \$${(req.riderPaymentCents! / 100).toStringAsFixed(2)} '
+                              '(\$${(req.sponsorSubsidyCents! / 100).toStringAsFixed(2)} '
+                              'sponsored). Your earnings are based on the full fare.'
+                          : 'Sponsored ride: your earnings are based on the full fare.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: const Color(0xFF2F3A32).withOpacity(0.75),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
 
           // ---- Route thumbnail + addresses --------------------------------

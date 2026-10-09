@@ -90,6 +90,9 @@ function socketConnect(token, role) {
     destination: { lat: 34.0195, lng: -118.4912, address: 'Santa Monica' },
     vehicle_class: 'CORE',
     specialRedemptionId: redemptionId,
+    // Explicit consent to the conditional no-show additional charge
+    // (server-enforced since the payments integration).
+    specialTermsAccepted: true,
   }, riderToken);
   const tripId = req.body?.id;
   ok('special ride request created', (req.status === 200 || req.status === 201) && !!tripId, `id=${tripId}`);
@@ -143,27 +146,39 @@ function socketConnect(token, role) {
   ok('wrong code rejected', wrong.status === 400, `status=${wrong.status} ${wrong.text}`);
 
   const validate = await http('POST', '/api/sponsor/validations/validate', { code, confirmed: true }, sponsorToken);
-  ok('correct code validated', validate.status === 200 && validate.body?.redemption?.status === 'SPONSOR_VALIDATED', `status=${validate.body?.redemption?.status}`);
+  ok('correct code validated (and settlement auto-completed)',
+    validate.status === 200
+    && ['SPONSOR_VALIDATED', 'REWARD_COMPLETED'].includes(validate.body?.redemption?.status),
+    `status=${validate.body?.redemption?.status}`);
   ok('unconfirmed validation rejected', true); // double-confirm enforced server-side
   const noConfirm = await http('POST', '/api/sponsor/validations/validate', { code, confirmed: false }, sponsorToken);
   ok('validation without confirm flag rejected', noConfirm.status === 400, `status=${noConfirm.status}`);
-  const validatedEvt = riderEvents.find((e) => e.ev === 'specialRedemptionUpdate' && e.d?.status === 'SPONSOR_VALIDATED');
-  ok('socket SPONSOR_VALIDATED received', !!validatedEvt);
+  const validatedEvt = riderEvents.find((e) => e.ev === 'specialRedemptionUpdate' && ['SPONSOR_VALIDATED','REWARD_COMPLETED'].includes(e.d?.status));
+  ok('socket settlement update received', !!validatedEvt, validatedEvt ? JSON.stringify(validatedEvt.d).slice(0, 120) : '');
 
-  console.log('═══ PHASE 7: REWARD CHOICE (CREDITS) ═══');
+  console.log('═══ PHASE 7: AUTOMATIC SETTLEMENT (NEW MODEL — no rider reward) ═══');
   const creditsBefore = await http('GET', '/api/credits', null, riderToken);
   const beforeCents = creditsBefore.body?.balance_cents ?? 0;
-  const reward = await http('POST', `/api/specials/redemptions/${redemptionId}/reward`, { choice: 'CREDITS', confirmed: true }, riderToken);
-  const settled = reward.body?.redemption;
-  ok('reward settled', reward.status === 200 && settled?.status === 'REWARD_COMPLETED', `status=${settled?.status}`);
-  ok('credits reward = $5.50 (10% bonus)', settled?.reward_amount_cents === 550, `cents=${settled?.reward_amount_cents}`);
+  const walletBefore = await http('GET', '/api/wallet', null, riderToken);
+  const walletBeforeCents = walletBefore.body?.balance_cents ?? 0;
+
+  // Validation settles the special immediately: the sponsor's $5 is debited
+  // from the funded budget and NO money is sent back to the rider.
+  const curAfter = await http('GET', '/api/specials/redemptions/current', null, riderToken);
+  const settled = curAfter.body?.redemption;
+  ok('validation settles automatically → REWARD_COMPLETED', settled?.status === 'REWARD_COMPLETED', `status=${settled?.status}`);
+  ok('no reward choice recorded', settled?.reward_choice == null, `choice=${settled?.reward_choice}`);
+  ok('sponsor portion recorded ($5 funded)', settled?.sponsor_funded_cents === 500, `funded=${settled?.sponsor_funded_cents}`);
 
   const pendingAfter = await http('GET', '/api/specials/redemptions/pending', null, riderToken);
   ok('validation card gone from pending', (pendingAfter.body?.redemptions || []).length === 0, `count=${(pendingAfter.body?.redemptions || []).length}`);
 
   const creditsAfter = await http('GET', '/api/credits', null, riderToken);
   const afterCents = creditsAfter.body?.balance_cents ?? 0;
-  ok('ride credits increased by 550', afterCents - beforeCents === 550, `delta=${afterCents - beforeCents}`);
+  ok('ride credits UNCHANGED (no reward credited)', afterCents === beforeCents, `delta=${afterCents - beforeCents}`);
+  const walletAfter = await http('GET', '/api/wallet', null, riderToken);
+  const walletAfterCents = walletAfter.body?.balance_cents ?? 0;
+  ok('wallet UNCHANGED (no cash back)', walletAfterCents === walletBeforeCents, `delta=${walletAfterCents - walletBeforeCents}`);
 
   console.log('═══ PHASE 8: CLEANUP ═══');
   driverSocket.emit('goOffline');

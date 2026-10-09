@@ -24,4 +24,9 @@ router.get('/sponsor/customers', authMiddleware, sponsorMiddleware, SponsorPorta
 router.get('/sponsor/settings', authMiddleware, sponsorMiddleware, SponsorPortalController.getSettings);
 router.patch('/sponsor/settings', authMiddleware, sponsorMiddleware, SponsorPortalController.updateSettings);
 
+// Budget funding via Stripe Checkout (the sponsor pays; the budget is only
+// credited from the verified webhook, never from this redirect).
+router.get('/sponsor/funding', authMiddleware, sponsorMiddleware, SponsorPortalController.fundingHistory);
+router.post('/sponsor/funding/session', authMiddleware, sponsorMiddleware, SponsorPortalController.createFundingSession);
+
 export default router;

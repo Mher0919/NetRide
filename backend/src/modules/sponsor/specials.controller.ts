@@ -215,22 +215,6 @@ export class SpecialsController {
     }
   }
 
-  /** POST /api/specials/redemptions/:id/reward — rider picks REFUND or CREDITS. */
-  static async chooseReward(req: AuthRequest, res: Response) {
-    try {
-      const { choice, confirmed } = req.body ?? {};
-      const redemption = await SpecialRedemptionService.riderChooseReward(
-        req.params.id,
-        req.user!.id,
-        choice,
-        { confirmed },
-      );
-      res.json({ redemption });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  }
-
   /** POST /api/specials/intro-seen — rider saw the SPECIALS intro (persisted §94). */
   static async markIntroSeen(req: AuthRequest, res: Response) {
     try {

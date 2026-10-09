@@ -178,6 +178,29 @@ const envSchema = z.object({
   SPONSOR_LEDGER_ENFORCED: z.union([z.string(), z.number()]).transform(Number).default(1),
   CORS_ORIGINS: z.string().optional(),
   SPONSOR_PORTAL_URL: z.string().optional(),
+
+  // ---- Stripe (Connect: separate charges and transfers) --------------------
+  // All optional: when STRIPE_SECRET_KEY is unset every Stripe-backed path
+  // degrades to an explicit "payments not configured" state — the legacy
+  // wallet flow keeps working and no fake payment is ever recorded.
+  // Use TEST keys (sk_test_… / pk_test_…) everywhere except a deliberate
+  // production activation.
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  // Optional Connect OAuth client id (only needed for the OAuth flow; the
+  // Express onboarding used here does not require it).
+  STRIPE_CONNECT_CLIENT_ID: z.string().optional(),
+  // Hard interlock: live keys (sk_live_…) are refused unless this is 'true'
+  // AND NODE_ENV=production. Prevents a test/dev process ever touching live.
+  STRIPE_ALLOW_LIVE: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  // Default currency for all Stripe amounts (lowercase ISO-4217).
+  STRIPE_CURRENCY: z.string().default('usd'),
+  // Public base URL of this backend, used to build Stripe return URLs
+  // (e.g. https://netride.onrender.com). Falls back to APP_URL.
+  PUBLIC_BACKEND_URL: z.string().optional(),
+  // Deep link the mobile apps listen for after a Stripe Checkout return.
+  MOBILE_PAYMENT_RETURN_URL: z.string().default('netride://payments/return'),
 });
 
 const parsed = envSchema.safeParse(process.env);

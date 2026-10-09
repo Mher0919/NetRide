@@ -411,8 +411,88 @@ export class SponsorService {
     }
   }
 
-  static async setStatus(id: string, status: SponsorStatus, actor?: { id?: string; role?: string }): Promise<SponsorRow> {
-    if (!['ACTIVE', 'INACTIVE', 'SUSPENDED', 'DEPLETED'].includes(status)) {
+  /**
+   * Credits a sponsor's prepaid budget from a REAL, verified funding source
+   * (a settled Stripe Checkout payment). Semantically the same budget movement
+   * as an admin credit but written to the ledger with the Stripe reference and
+   * an idempotency key, so a duplicate webhook can never double-fund.
+   *
+   * Idempotency is enforced by the ledger's unique idempotency_key: the ledger
+   * row is inserted first; when it already exists the budget is untouched.
+   */
+  static async creditFundedBudget(
+    id: string,
+    amountCents: number,
+    opts: {
+      reason: string;
+      referenceType?: string;
+      referenceId?: string | null;
+      idempotencyKey: string;
+      actorRole?: string;
+    },
+  ): Promise<string | null> {
+    const amount = Math.round(amountCents);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Funding amount must be positive');
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const entry = await client.query(
+        `INSERT INTO sponsor_ledger_entries
+           (sponsor_id, type, amount_cents, direction, reference_type,
+            reference_id, reason, actor_role, balance_after_cents, idempotency_key)
+         VALUES ($1, 'BUDGET_ADJUSTMENT', $2, 'CREDIT', $3, $4, $5, $6, 0, $7)
+         ON CONFLICT (idempotency_key) DO NOTHING
+         RETURNING id`,
+        [
+          id,
+          amount,
+          opts.referenceType ?? 'stripe_payment',
+          opts.referenceId ?? null,
+          opts.reason.slice(0, 500),
+          opts.actorRole ?? 'SPONSOR',
+          opts.idempotencyKey,
+        ],
+      );
+      if (entry.rows.length === 0) {
+        await client.query('COMMIT');
+        return null; // already funded under this key — no double credit
+      }
+
+      const upd = await client.query(
+        `UPDATE sponsors
+         SET remaining_budget_cents = remaining_budget_cents + $2,
+             initial_budget_cents = initial_budget_cents + $2,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING remaining_budget_cents`,
+        [id, amount],
+      );
+      if (upd.rows.length === 0) throw new Error('Sponsor not found');
+      await client.query(
+        `UPDATE sponsor_ledger_entries SET balance_after_cents = $2 WHERE id = $1`,
+        [entry.rows[0].id, upd.rows[0].remaining_budget_cents],
+      );
+      await client.query('COMMIT');
+
+      AuditEventsService.record({
+        actorRole: opts.actorRole ?? 'SPONSOR',
+        action: 'sponsor_budget_funded',
+        entityType: 'sponsor',
+        entityId: id,
+        details: { amountCents: amount, reference: opts.referenceId ?? null },
+      }).catch(() => undefined);
+
+      return entry.rows[0].id;
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  static async setStatus(id: string, status: SponsorStatus, actor?: { id?: string; role?: string }): Promise<SponsorRow> {    if (!['ACTIVE', 'INACTIVE', 'SUSPENDED', 'DEPLETED'].includes(status)) {
       throw new Error('Invalid sponsor status');
     }
     const res = await pool.query(

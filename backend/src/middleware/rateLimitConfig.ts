@@ -183,6 +183,58 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     user: { max: 60, windowMs: MINUTE },
     ip: { max: 120, windowMs: MINUTE },
   },
+
+  // Payments (Stripe) — abuse prevention on money endpoints
+  'POST /api/payments/setup-session': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 30, windowMs: HOUR },
+  },
+  'POST /api/payments/wallet/topup-session': {
+    user: { max: 20, windowMs: HOUR },
+    ip: { max: 60, windowMs: HOUR },
+  },
+  'POST /api/payments/consent': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 30, windowMs: HOUR },
+  },
+  'GET /api/payments/methods': {
+    user: { max: 60, windowMs: MINUTE },
+  },
+  'DELETE /api/payments/methods/:id': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 30, windowMs: HOUR },
+  },
+  'POST /api/payments/connect/onboarding': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 30, windowMs: HOUR },
+  },
+  // Sponsor code validation — strict (6-digit secret; anti-brute-force).
+  'POST /api/sponsor/validations/validate': {
+    user: { max: 10, windowMs: MINUTE },
+    ip: { max: 30, windowMs: MINUTE },
+  },
+  // Sponsor budget funding
+  'POST /api/sponsor/funding/session': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 30, windowMs: HOUR },
+  },
+  // Admin financial actions
+  'POST /api/admin/payments/:id/reconcile': {
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 120, windowMs: MINUTE },
+  },
+  'POST /api/admin/payments/:id/refund': {
+    user: { max: 20, windowMs: HOUR },
+    ip: { max: 40, windowMs: HOUR },
+  },
+  'POST /api/admin/payments/rides/:rideId/retry-additional-charge': {
+    user: { max: 30, windowMs: HOUR },
+    ip: { max: 60, windowMs: HOUR },
+  },
+  'POST /api/admin/payments/payouts/:payoutId/transfer': {
+    user: { max: 60, windowMs: HOUR },
+    ip: { max: 120, windowMs: HOUR },
+  },
 };
 
 export const DEFAULT_USER_LIMIT: RateLimitRule = { max: 100, windowMs: MINUTE };

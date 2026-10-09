@@ -6,9 +6,11 @@
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
+import '../services/payments_service.dart';
 
 class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key});
@@ -139,6 +141,8 @@ class _WalletScreenState extends State<WalletScreen> {
             ),
           ),
           const SizedBox(height: 24),
+          _buildStripeSection(),
+          const SizedBox(height: 24),
           Text(
             'Payment history',
             style: TextStyle(
@@ -234,6 +238,138 @@ class _WalletScreenState extends State<WalletScreen> {
         ],
       ),
     );
+  }
+
+  // --------------------------------------------------- Stripe card section
+
+  /// Saved-card + top-up section. Stripe Checkout is hosted by Stripe; the
+  /// app only opens the URL and later reads server-verified state.
+  Widget _buildStripeSection() {
+    return FutureBuilder<PaymentProfile>(
+      future: PaymentsService.getProfile(),
+      builder: (context, snapshot) {
+        final profile =
+            snapshot.hasData ? snapshot.data! : const PaymentProfile(
+                  configured: false,
+                  mode: 'unconfigured',
+                  offSessionConsent: false,
+                );
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF7F4EF),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.credit_card_rounded,
+                      size: 18, color: Color(0xFF5B7760)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      profile.hasCard ? profile.cardLabel : 'No card on file',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2F3A32),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Your card is used to top up the wallet and, only with your '
+                'consent, to collect the remaining fare if a sponsor code is '
+                'not validated before its deadline.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF2F3A32)),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed:
+                        profile.hasCard ? null : () => _openCardSetup(),
+                    icon: const Icon(Icons.add_card_rounded, size: 18),
+                    label: Text(profile.hasCard
+                        ? 'Replace card'
+                        : 'Add payment card'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _openTopUp(),
+                    icon: const Icon(Icons.wallet_rounded, size: 18),
+                    label: const Text('Add funds'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openCardSetup() async {
+    try {
+      final url = await PaymentsService.startCardSetup();
+      if (!mounted) return;
+      final ok = await launchUrl(Uri.parse(url),
+          mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the card setup page.')),
+        );
+      }
+    } catch (_) {
+      // Payments not configured server-side — the wallet rail remains.
+    }
+  }
+
+  Future<void> _openTopUp() async {
+    final controller = TextEditingController();
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add funds'),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Amount (USD)',
+            prefixText: r'$ ',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, double.tryParse(controller.text)),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (amount == null || amount <= 0 || !mounted) return;
+    try {
+      final url = await PaymentsService.startWalletTopUp(
+          (amount * 100).round());
+      final ok = await launchUrl(Uri.parse(url),
+          mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the payment page.')),
+        );
+      }
+    } catch (_) {
+      // Payments not configured server-side — the wallet rail remains.
+    }
   }
 
   String _title(WalletTransaction t) {

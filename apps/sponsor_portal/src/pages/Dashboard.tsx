@@ -94,7 +94,7 @@ const SponsorDashboard: React.FC<{ data: PortalDashboard; onChanged: () => void 
           { label: 'Awaiting your code', value: String(stats.pendingValidations), hint: 'rides completed, code not yet validated' },
           { label: 'Redemptions', value: String(stats.redeemedCount), hint: 'rewarded visits' },
           { label: 'Discounts funded', value: fmtUSD(stats.redeemedDiscountCents), hint: 'rider discounts you funded' },
-          { label: 'Rewards paid to riders', value: fmtUSD(stats.rewardAmountCents), hint: 'cash back / credits' },
+          { label: 'Rider discounts applied', value: fmtUSD(stats.rewardAmountCents), hint: 'discount value settled on validated visits' },
         ].map((m) => (
           <Paper key={m.label} sx={{ p: 2.5, borderRadius: 3 }}>
             <Typography variant="caption" color="text.secondary">{m.label}</Typography>

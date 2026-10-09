@@ -10,9 +10,12 @@
 
 import { Request, Response } from 'express';
 import { pool } from '../../config/database';
+import { env } from '../../config/env';
 import { centsValue } from '../../services/financial-ledger.service';
 import { SponsorService, discountLabelFor } from './sponsor.service';
 import { SpecialRedemptionService } from './special-redemption.service';
+import { PaymentsService } from '../payments/payments.service';
+import { stripeMode, isStripeConfigured } from '../payments/stripe.client';
 
 export interface SponsorRequest extends Request {
   user?: { id: string; role: string; email: string };
@@ -208,6 +211,64 @@ export class SponsorPortalController {
       const sponsor = await SponsorService.update(req.sponsor!.id, patch);
       if (!sponsor) return res.status(404).json({ error: 'Sponsor not found' });
       res.json({ sponsor: { businessName: sponsor.business_name, email: sponsor.email, phone: sponsor.phone } });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  // --------------------------------------------------------------- funding
+
+  /**
+   * Budget + real Stripe funding history. NetRide admin funding adjustments
+   * remain visible in the sponsor ledger; this view is specifically the
+   * Stripe-collected top-ups.
+   */
+  static async fundingHistory(req: SponsorRequest, res: Response) {
+    try {
+      const sponsor = await SponsorService.findById(req.sponsor!.id);
+      if (!sponsor) return res.status(404).json({ error: 'Sponsor not found' });
+      const payments = await pool.query(
+        `SELECT id, amount_cents, currency, status, stripe_payment_intent_id,
+                stripe_checkout_session_id, failure_reason, created_at, succeeded_at
+         FROM stripe_payments
+         WHERE sponsor_id = $1 AND purpose = 'SPONSOR_BUDGET_TOPUP'
+         ORDER BY created_at DESC LIMIT 50`,
+        [req.sponsor!.id],
+      );
+      res.json({
+        configured: isStripeConfigured(),
+        mode: stripeMode(),
+        budget: {
+          initialBudgetCents: sponsor.initial_budget_cents,
+          remainingBudgetCents: sponsor.remaining_budget_cents,
+          reservedBudgetCents: sponsor.reserved_budget_cents,
+          usedBudgetCents: sponsor.used_budget_cents,
+          spendableBudgetCents: Math.max(0, sponsor.remaining_budget_cents - sponsor.reserved_budget_cents),
+        },
+        payments: payments.rows.map((r: any) => ({
+          ...r,
+          amount_cents: centsValue(r.amount_cents),
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  /** Starts a Stripe Checkout session that funds the sponsor's budget. */
+  static async createFundingSession(req: SponsorRequest, res: Response) {
+    try {
+      const amountCents = Math.round(Number(req.body?.amountCents ?? 0));
+      const portalBase = (env.SPONSOR_PORTAL_URL || env.PUBLIC_BACKEND_URL || env.APP_URL || '').replace(/\/$/, '');
+      const result = await PaymentsService.createSponsorTopUpSession({
+        sponsorId: req.sponsor!.id,
+        amountCents,
+        successUrl: `${portalBase}/funding?state=success`,
+        cancelUrl: `${portalBase}/funding?state=cancel`,
+        createdByUserId: req.user?.id ?? null,
+        idempotencyKey: typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : undefined,
+      });
+      res.json(result);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

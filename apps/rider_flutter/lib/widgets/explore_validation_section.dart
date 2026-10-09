@@ -354,7 +354,7 @@ class _ValidationCard extends StatelessWidget {
                       )
                     else if (!isWaiting)
                       Text(
-                        'Tap to collect',
+                        'Confirmed — see details',
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,

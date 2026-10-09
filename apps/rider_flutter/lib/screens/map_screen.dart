@@ -22,6 +22,7 @@ import '../services/search_history_service.dart';
 import '../models/search_result.dart';
 import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
+import '../services/payments_service.dart';
 import 'address_search_delegate.dart';
 import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
@@ -95,6 +96,10 @@ class _MapScreenState extends State<MapScreen>
 
   // Part 6 — Favorite Driver toggle state
   bool _favoriteDriverEnabled = false;
+  // EXPLICIT consent for the Special no-show fallback: if the sponsor code
+  // is not validated before the deadline, NetRide collects the remaining
+  // fare. Server-enforced — the backend refuses the special ride without it.
+  bool _specialTermsAccepted = false;
 
   // Part — SPECIALS: an active (CREATED / RIDE_PENDING) special redemption
   // discovered by the rider. Sent with the ride request so the backend
@@ -217,6 +222,9 @@ class _MapScreenState extends State<MapScreen>
     WidgetsBinding.instance.addObserver(this);
     _specialsProvider = context.read<SpecialsProvider>();
     _specialsProvider.addListener(_onSpecialSelectionChanged);
+    // Server booking gate: when the backend refuses a request because no
+    // payment card is saved, navigate the rider to the Payment Method page.
+    context.read<RideProvider>().addListener(_onRideProviderChanged);
     _specialsRefreshTimer = Timer.periodic(const Duration(minutes: 3), (_) {
       if (!mounted || !TickerMode.of(context)) return;
       context.read<SpecialsProvider>().refresh(
@@ -385,6 +393,7 @@ class _MapScreenState extends State<MapScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     RideIntent.instance.notifier.removeListener(_onRideIntent);
+    context.read<RideProvider>().removeListener(_onRideProviderChanged);
     _specialsProvider.removeListener(_onSpecialSelectionChanged);
     _specialsRefreshTimer?.cancel();
     _positionSubscription?.cancel();
@@ -852,7 +861,26 @@ class _MapScreenState extends State<MapScreen>
   /// disabled for special rides.
   bool get _specialAttached => _specialRedemptionId != null;
 
-  void _confirmRide() {
+  void _onRideProviderChanged() {
+    final ride = context.read<RideProvider>();
+    if (ride.paymentMethodRequired) {
+      ride.consumePaymentMethodRequired();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Add a payment card before requesting a ride. Your rides will '
+              'be charged to the card on file.',
+            ),
+          ),
+        );
+        _openWalletScreen();
+      });
+    }
+  }
+
+  Future<void> _confirmRide() async {
     if (_pickup == null || _destination == null) return;
     // SPECIALS: attach the rider's CREATED redemption (if any) so the
     // backend applies the sponsor discount inside the pricing transaction.
@@ -860,6 +888,40 @@ class _MapScreenState extends State<MapScreen>
     _specialRedemptionId = specials.canAttachToRide
         ? specials.current!.id
         : null;
+    if (_specialRedemptionId != null && !_specialTermsAccepted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please accept the Special terms: if the sponsor code is not '
+            'validated before the deadline, the remaining fare may be charged.',
+          ),
+        ),
+      );
+      return;
+    }
+    // Booking gate preflight: a saved card is required to request rides (the
+    // server enforces this too — this only improves the UX). Direct the
+    // rider to the Payment Method page instead of failing silently.
+    if (_specialRedemptionId == null) {
+      try {
+        final profile = await PaymentsService.getProfile();
+        if (profile.configured && !profile.hasCard) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Add a payment card before requesting a ride. Your rides will '
+                'be charged to the card on file.',
+              ),
+            ),
+          );
+          _openWalletScreen();
+          return;
+        }
+      } catch (_) {
+        // Stripe unconfigured or offline — the server remains authoritative.
+      }
+    }
     setState(() => _requesting = true);
     Provider.of<RideProvider>(context, listen: false).requestRide(
       _pickup!,
@@ -871,6 +933,7 @@ class _MapScreenState extends State<MapScreen>
       applyCredits: _creditsToUseCents > 0,
       creditUseCents: _creditsToUseCents > 0 ? _creditsToUseCents : null,
       specialRedemptionId: _specialRedemptionId,
+      specialTermsAccepted: _specialTermsAccepted,
     );
   }
 
@@ -2228,6 +2291,7 @@ class _MapScreenState extends State<MapScreen>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 34,
@@ -2262,6 +2326,33 @@ class _MapScreenState extends State<MapScreen>
                     fontSize: 11.5,
                     color: const Color(0xFF2F3A32).withOpacity(0.6),
                   ),
+                ),
+                const SizedBox(height: 10),
+                // REQUIRED consent for the conditional no-show charge:
+                // $label is only applied if the sponsor validates the visit
+                // code; otherwise the remaining fare is collected.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Checkbox(
+                      value: _specialTermsAccepted,
+                      onChanged: (v) => setState(() {
+                        _specialTermsAccepted = v ?? false;
+                      }),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    Expanded(
+                      child: Text(
+                        'I understand: if the sponsor code is not validated '
+                        'before the deadline, the remaining fare (up to the '
+                        'full ride price) may be charged to my payment method.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: const Color(0xFF2F3A32).withOpacity(0.75),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

@@ -12,6 +12,7 @@ import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../services/driver_payments_service.dart';
 import '../services/error_handler.dart';
 import '../utils/phone_utils.dart';
 import '../utils/pick_image.dart';
@@ -1090,6 +1091,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 24),
               _buildWalletCard(),
               const SizedBox(height: 24),
+              _buildStripeConnectCard(),
+              const SizedBox(height: 24),
               _buildSectionCard(
                 title: 'Account',
                 children: [
@@ -1416,6 +1419,99 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (v is num) return v.toInt();
     if (v is String) return int.tryParse(v.trim()) ?? 0;
     return 0;
+  }
+
+  /// Stripe Connect payout setup card: status is pulled live from Stripe,
+  /// never assumed from "the driver finished the onboarding form".
+  Widget _buildStripeConnectCard() {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: DriverPaymentsService.getConnectStatus(),
+      builder: (context, snap) {
+        final status = snap.data;
+        final configured = status?['configured'] == true;
+        final payoutReady = status?['payoutReady'] == true;
+        final label = !configured
+            ? 'Payouts are not configured yet on this server'
+            : payoutReady
+                ? 'Payouts enabled — you can receive transfers'
+                : 'Payout setup incomplete';
+        final color = !configured
+            ? const Color(0xFF6B6B6B)
+            : payoutReady
+                ? const Color(0xFF5B7760)
+                : const Color(0xFFC65A5A);
+        return _buildSectionCard(
+          title: 'Stripe payout account',
+          children: [
+            Row(
+              children: [
+                Icon(Icons.account_balance_rounded, color: color, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(label,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF2F3A32))),
+                ),
+              ],
+            ),
+            if (status?['disabledReason'] != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                status!['disabledReason'].toString(),
+                style: const TextStyle(fontSize: 12, color: Color(0xFFC65A5A)),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                TextButton(
+                  onPressed: () => _startStripeOnboarding(),
+                  child: Text(payoutReady ? 'Update payout info' : 'Set up payouts'),
+                ),
+                TextButton(
+                  onPressed: () => _refreshConnectStatus(),
+                  child: const Text('Check status'),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _startStripeOnboarding() async {
+    try {
+      final url = await DriverPaymentsService.startOnboarding();
+      if (!mounted) return;
+      final ok = await launchUrl(Uri.parse(url),
+          mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the onboarding page.')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Payout onboarding is not available right now.')),
+      );
+    }
+  }
+
+  Future<void> _refreshConnectStatus() async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text('Checking payout status with Stripe…'),
+          duration: Duration(seconds: 1)),
+    );
+    setState(() {});
   }
 
   /// Wallet summary card: balance, lifetime earnings, current payout card,

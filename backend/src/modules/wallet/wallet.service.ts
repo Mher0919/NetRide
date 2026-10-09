@@ -23,7 +23,8 @@ export type WalletTxType =
   | 'RIDE_PAYMENT'
   | 'RIDE_REFUND'
   | 'ADJUSTMENT'
-  | 'SPONSOR_REWARD';
+  | 'SPONSOR_REWARD'
+  | 'WALLET_TOPUP';
 
 export interface WalletAccount {
   user_id: string;
@@ -95,6 +96,7 @@ export class WalletService {
       rideId?: string;
       emitSocket?: boolean;
       client?: any;
+      stripePaymentIntentId?: string;
     } = {},
   ): Promise<WalletResult> {
     const delta = Math.round(deltaCents);
@@ -164,8 +166,8 @@ export class WalletService {
       const tx = await useClient.query(
         `INSERT INTO wallet_transactions
            (user_id, amount_cents, type, reference_type, reference_id, ride_id,
-            description, balance_after_cents, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            description, balance_after_cents, idempotency_key, stripe_payment_intent_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (idempotency_key) DO NOTHING
          RETURNING id`,
         [
@@ -178,6 +180,7 @@ export class WalletService {
           opts.description ?? null,
           balanceAfter,
           opts.idempotencyKey ?? null,
+          opts.stripePaymentIntentId ?? null,
         ],
       );
 

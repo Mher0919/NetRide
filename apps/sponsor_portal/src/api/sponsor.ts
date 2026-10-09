@@ -49,3 +49,40 @@ export const updatePortalSettings = async (data: Record<string, unknown>) => {
   const response = await api.patch('/sponsor/settings', data);
   return response.data;
 };
+
+// ----- Budget funding (Stripe) ---------------------------------------------
+
+export interface PortalFundingData {
+  configured: boolean;
+  mode: string;
+  budget: {
+    initialBudgetCents: number;
+    remainingBudgetCents: number;
+    reservedBudgetCents: number;
+    usedBudgetCents: number;
+    spendableBudgetCents: number;
+  };
+  payments: Array<{
+    id: string;
+    amount_cents: number;
+    currency: string;
+    status: string;
+    stripe_payment_intent_id: string | null;
+    failure_reason: string | null;
+    created_at: string;
+    succeeded_at: string | null;
+  }>;
+}
+
+export const getPortalFunding = async () => {
+  const response = await api.get<PortalFundingData>('/sponsor/funding');
+  return response.data;
+};
+
+export const createPortalFundingSession = async (amountCents: number, idempotencyKey?: string) => {
+  const response = await api.post<{ url: string; paymentRowId: string }>('/sponsor/funding/session', {
+    amountCents,
+    idempotencyKey,
+  });
+  return response.data;
+};

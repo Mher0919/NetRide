@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard';
 import Validations from './pages/Validations';
 import Customers from './pages/Customers';
 import Settings from './pages/Settings';
+import Funding from './pages/Funding';
 import MainLayout from './components/MainLayout';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -60,6 +61,7 @@ const App: React.FC = () => {
               <Route path="validations" element={<Validations />} />
               <Route path="customers" element={<Customers />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="funding" element={<Funding />} />
             </Route>
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>

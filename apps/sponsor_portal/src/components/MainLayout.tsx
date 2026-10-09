@@ -24,6 +24,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import ValidationIcon from '@mui/icons-material/VerifiedUser';
 import CustomersIcon from '@mui/icons-material/People';
+import BudgetIcon from '@mui/icons-material/AccountBalanceWallet';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LogoutIcon from '@mui/icons-material/Logout';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
@@ -55,6 +56,7 @@ const MainLayout: React.FC = () => {
       ? [
           { text: 'Validations', icon: <ValidationIcon />, path: '/validations' },
           { text: 'Customers', icon: <CustomersIcon />, path: '/customers' },
+          { text: 'Budget & funding', icon: <BudgetIcon />, path: '/funding' },
           { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
         ]
       : []),

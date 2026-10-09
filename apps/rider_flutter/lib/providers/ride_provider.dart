@@ -102,6 +102,16 @@ class RideProvider with ChangeNotifier {
   String? _requestFailure;
   String? get requestFailure => _requestFailure;
 
+  /// Server signaled that a saved payment method is required before booking.
+  bool _paymentMethodRequired = false;
+  bool get paymentMethodRequired => _paymentMethodRequired;
+
+  /// Consumed by the map screen after it navigates the rider to add a card.
+  void consumePaymentMethodRequired() {
+    _paymentMethodRequired = false;
+    notifyListeners();
+  }
+
   /// Dismiss the last request failure (the rider closed the error card).
   void clearRequestFailure() {
     if (_requestFailure == null) return;
@@ -414,6 +424,16 @@ class RideProvider with ChangeNotifier {
       notifyListeners();
     });
 
+    // Booking gate: no saved payment method. The map screen listens for
+    // this and navigates the rider to the Payment Method page to add a card.
+    _socket!.on('paymentMethodRequired', (data) {
+      debugPrint('[RIDE] paymentMethodRequired: $data');
+      _paymentMethodRequired = true;
+      _requestFailure = null;
+      _status = TripStatus.IDLE;
+      notifyListeners();
+    });
+
     // Cancellation rejected server-side (e.g. missing reason / not in a
     // cancellable state). The REST confirm path surfaces the same message
     // when the socket one arrived first — never a silent hang.
@@ -451,6 +471,7 @@ class RideProvider with ChangeNotifier {
     bool applyCredits = false,
     int? creditUseCents,
     String? specialRedemptionId,
+    bool specialTermsAccepted = false,
   }) {
     debugPrint(
       '[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}',
@@ -481,6 +502,10 @@ class RideProvider with ChangeNotifier {
         'creditUseCents': creditUseCents,
       if (specialRedemptionId != null && specialRedemptionId.isNotEmpty)
         'specialRedemptionId': specialRedemptionId,
+      // Explicit consent to the conditional no-show additional charge
+      // (server-enforced; the ride request fails without it).
+      if (specialRedemptionId != null && specialRedemptionId.isNotEmpty)
+        'specialTermsAccepted': specialTermsAccepted,
     });
 
     if (!isScheduled) {

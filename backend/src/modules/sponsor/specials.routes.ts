@@ -19,7 +19,6 @@ router.post('/specials/intro-seen', authMiddleware, riderMiddleware, SpecialsCon
 router.get('/specials/redemptions/current', authMiddleware, riderMiddleware, SpecialsController.currentRedemption);
 router.get('/specials/redemptions/pending', authMiddleware, riderMiddleware, SpecialsController.pendingRedemptions);
 router.post('/specials/redemptions/:id/verified', authMiddleware, riderMiddleware, SpecialsController.markVerified);
-router.post('/specials/redemptions/:id/reward', authMiddleware, riderMiddleware, SpecialsController.chooseReward);
 
 // GET /specials — discovery (bounded geo queries, paginated, spec §125).
 router.get('/specials', SpecialsController.list);

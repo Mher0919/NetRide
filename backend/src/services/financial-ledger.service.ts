@@ -64,6 +64,15 @@ export interface RideCompletionInput {
   paymentProvider?: string;
   paymentReference?: string;
   completedAt: Date;
+  // ---- Stripe / Specials separation (migration 052) -----------------------
+  originalFareCents?: number;
+  riderShareCents?: number;
+  sponsorSubsidyCents?: number;
+  sponsorCollectedCents?: number;
+  additionalRiderChargeCents?: number;
+  stripePaymentIntentId?: string | null;
+  sponsorContributionStatus?: string;
+  additionalChargeStatus?: string;
 }
 
 export class FinancialLedgerService {
@@ -88,11 +97,15 @@ export class FinancialLedgerService {
          tip_cents, wallet_payment_cents, amount_owed_cents,
          driver_share_cents, platform_share_cents, netride_share_cents,
          payment_provider, payment_reference, idempotency_key,
-         completed_at, settled_at
+         completed_at, settled_at,
+         original_fare_cents, rider_share_cents, sponsor_subsidy_cents,
+         sponsor_collected_cents, additional_rider_charge_cents,
+         stripe_payment_intent_id, sponsor_contribution_status, additional_charge_status
        ) VALUES (
          $1, $2, $3, 'RIDE_COMPLETION', $4, 'USD',
          $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-         $15, $16, $17, $18, $19
+         $15, $16, $17, $18, $19,
+         $20, $21, $22, $23, $24, $25, $26, $27
        )
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING id, status`,
@@ -116,6 +129,14 @@ export class FinancialLedgerService {
         `ride_completion:${input.rideId}`,
         input.completedAt,
         status === 'SETTLED' ? input.completedAt : null,
+        centsValue(input.originalFareCents ?? input.fareCents),
+        centsValue(input.riderShareCents ?? input.fareCents),
+        centsValue(input.sponsorSubsidyCents ?? 0),
+        centsValue(input.sponsorCollectedCents ?? 0),
+        centsValue(input.additionalRiderChargeCents ?? 0),
+        input.stripePaymentIntentId ?? null,
+        input.sponsorContributionStatus ?? 'NONE',
+        input.additionalChargeStatus ?? 'NONE',
       ]
     );
 
@@ -123,6 +144,50 @@ export class FinancialLedgerService {
       created: res.rowCount === 1,
       row: res.rows[0],
     };
+  }
+
+  /**
+   * Applies settlement-component updates to the single RIDE_COMPLETION row.
+   * Only the provided fields change; used by the Special redemption/expiry
+   * flows (sponsor collected, additional rider charge, settlement status).
+   */
+  static async applySettlementComponents(args: {
+    rideId: string;
+    originalFareCents?: number;
+    riderShareCents?: number;
+    sponsorSubsidyCents?: number;
+    sponsorCollectedCents?: number;
+    additionalRiderChargeCents?: number;
+    driverSettledCents?: number;
+    settlementStatus?: string;
+    stripePaymentIntentId?: string | null;
+    sponsorContributionStatus?: string;
+    additionalChargeStatus?: string;
+  }): Promise<void> {
+    const sets: string[] = [];
+    const values: unknown[] = [args.rideId];
+    const push = (col: string, value: unknown) => {
+      values.push(value);
+      sets.push(`${col} = $${values.length}`);
+    };
+    if (args.originalFareCents !== undefined) push('original_fare_cents', centsValue(args.originalFareCents));
+    if (args.riderShareCents !== undefined) push('rider_share_cents', centsValue(args.riderShareCents));
+    if (args.sponsorSubsidyCents !== undefined) push('sponsor_subsidy_cents', centsValue(args.sponsorSubsidyCents));
+    if (args.sponsorCollectedCents !== undefined) push('sponsor_collected_cents', centsValue(args.sponsorCollectedCents));
+    if (args.additionalRiderChargeCents !== undefined) push('additional_rider_charge_cents', centsValue(args.additionalRiderChargeCents));
+    if (args.stripePaymentIntentId !== undefined) push('stripe_payment_intent_id', args.stripePaymentIntentId);
+    if (args.sponsorContributionStatus !== undefined) push('sponsor_contribution_status', args.sponsorContributionStatus);
+    if (args.additionalChargeStatus !== undefined) push('additional_charge_status', args.additionalChargeStatus);
+    if (args.settlementStatus !== undefined) {
+      push('status', args.settlementStatus === 'SETTLED' ? 'SETTLED' : 'PENDING_CAPTURE');
+      if (args.settlementStatus === 'SETTLED') sets.push(`settled_at = COALESCE(settled_at, NOW())`);
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = NOW()');
+    await pool.query(
+      `UPDATE financial_transactions SET ${sets.join(', ')} WHERE ride_id = $1 AND type = 'RIDE_COMPLETION'`,
+      values,
+    );
   }
 
   /**

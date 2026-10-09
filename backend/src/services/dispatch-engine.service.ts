@@ -1,4 +1,5 @@
 import { Server } from 'socket.io';
+import { pool } from '../config/database';
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { RideRepository } from '../modules/ride/ride.repository';
@@ -190,6 +191,33 @@ export class DispatchEngine {
     // decide — operational info + their own earnings. The rider's gross fare
     // (calculated_price, fare_amount, initial_max_fare) and any internal
     // allocation (fleet/NetRide shares) are NEVER sent to driver clients.
+    // For special rides the earnings are always computed from the ORIGINAL
+    // fare; sponsor_subsidy_cents is included so the UI can explain the
+    // difference between the rider's discounted price and the driver's
+    // take-home without ever doing client-side math.
+    const specialInfo = await (async () => {
+      try {
+        const res = await pool.query(
+          `SELECT r.sponsor_discount_cents, r.final_payment_cents
+           FROM rides r
+           JOIN special_redemptions s ON s.ride_id = r.id
+           WHERE r.id = $1
+             AND s.status IN ('RIDE_PENDING','WAITING_FOR_SPONSOR','SPONSOR_VALIDATED')
+           LIMIT 1`,
+          [trip.id],
+        );
+        const row = res.rows[0];
+        if (!row) return null;
+        return {
+          special_attached: true,
+          sponsor_subsidy_cents: Number(row.sponsor_discount_cents ?? 0),
+          rider_payment_cents: Number(row.final_payment_cents ?? 0),
+        };
+      } catch {
+        return null;
+      }
+    })();
+
     io.to(`driver:${driverId}`).emit('newTripRequest', {
       id: trip.id,
       rider_id: trip.rider_id,
@@ -209,6 +237,7 @@ export class DispatchEngine {
       driver_to_pickup_distance: driverToPickupRoute ? driverToPickupRoute.distance : null,
       expires_at: offer.expiresAt,
       offerId: offer.offerId,
+      ...(specialInfo ?? {}),
     });
 
     return DispatchEngine._waitForOfferResponse(rideId, driverId, offer.offerId);

@@ -97,6 +97,10 @@ export const RequestRideSchema = z.object({
   // sponsor on the SPECIALS page. Attaches this ride to the redemption and
   // snapshots/reserves the discount server-side only.
   specialRedemptionId: z.string().uuid().optional(),
+  // Explicit consent to the conditional additional charge: if the sponsor
+  // code is not validated before the deadline, NetRide may collect the
+  // remaining (sponsor-subsidised) fare. Enforced server-side.
+  specialTermsAccepted: z.boolean().optional(),
 });
 
 export const RiderDestinationChangedSchema = z.object({

@@ -987,7 +987,7 @@ export function setupSocketGateway(io: Server) {
         }
       });
 
-      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; favoritePriority?: boolean; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean; creditUseCents?: number; specialRedemptionId?: string }) => {
+      socket.on('requestRide', async (data: { pickup: Location & { address: string }; destination: Location & { address: string }; favoritePriority?: boolean; idempotencyKey?: string; promoCode?: string; applyCredits?: boolean; creditUseCents?: number; specialRedemptionId?: string; specialTermsAccepted?: boolean }) => {
         const validated = validate(RequestRideSchema, data, socket, 'requestRide');
         if (!validated.success || !validated.data) return;
         
@@ -1000,7 +1000,7 @@ export function setupSocketGateway(io: Server) {
             undefined,
             false,
             data.idempotencyKey,
-            { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents, specialRedemptionId: data.specialRedemptionId },
+            { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents, specialRedemptionId: data.specialRedemptionId, specialTermsAccepted: data.specialTermsAccepted },
             validated.data.favoritePriority
           );
           setCachedCurrentRide(id, UserRole.RIDER, trip);
@@ -1017,6 +1017,10 @@ export function setupSocketGateway(io: Server) {
           }).catch(() => undefined);
         } catch (err: any) {
           console.error(`[SOCKET] ❌ Request ride failed: ${err.message}`);
+          // Dedicated event so the rider app can navigate to add a card.
+          if (err?.code === 'PAYMENT_METHOD_REQUIRED') {
+            socket.emit('paymentMethodRequired', { message: err.message });
+          }
           socket.emit('error', err.message);
         }
       });

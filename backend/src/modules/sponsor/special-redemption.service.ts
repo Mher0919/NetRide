@@ -18,16 +18,16 @@
 //   EXPIRED             validation code expired without use.
 //   REWARD_FAILED       settlement failed; safe to retry exactly once.
 //
-// Financial settlement (spec §34-37):
+// Financial settlement — NEW MODEL (no money is ever sent back to the rider):
 //   D = calculated_discount_cents snapshot at ride request.
-//   sponsor ledger  = one DISCOUNT_REDEEMED(-D) row (partial unique per
-//                     redemption → a double settle can never debit twice)
-//   driver ledger   = one payouts(SPONSOR_CREDIT) row = 60% of D
-//   NetRide share   = 40% of D (recorded on the redemption)
-//   rider REFUND    = +D to the ride wallet (idempotency key specialReward:
-//                     {redemptionId}; wallet_transactions SPONSOR_REWARD)
-//   rider CREDITS   = +D×1.10 to ride credits (extra 0.10D is a NetRide
-//                     expense — netride_bonus_cents, never from the sponsor)
+//   rider  = pays the discounted fare at ride completion (wallet / card).
+//   driver = paid commission from the ORIGINAL fare at completion (never
+//            from the discounted amount); a true-up only covers legacy rides.
+//   sponsor ledger = one DISCOUNT_REDEEMED(-D) row (partial unique per
+//                    redemption → a double settle can never debit twice)
+//   settlement happens automatically when the sponsor validates the code.
+//   If the code expires without validation, the sponsor pays nothing and the
+//   rider is charged the remaining fare (see RideSettlementService).
 //
 // Idempotency discipline: every money movement carries its own idempotency
 // key; every state transition is guarded by status checks; every table has
@@ -40,14 +40,13 @@ import { getIo } from '../../gateway/io-handle';
 import { env } from '../../config/env';
 import { centsValue } from '../../services/financial-ledger.service';
 import { AuditEventsService } from '../../services/audit-events.service';
-import { WalletService } from '../wallet/wallet.service';
-import { CreditsService } from '../credits/credits.service';
+import { RideSettlementService } from '../payments/ride-settlement.service';
 import {
   SponsorService,
   computeSponsorDiscount,
   discountLabelFor,
 } from './sponsor.service';
-import { notifySpecialRewardReady, notifySpecialRewardCredited, notifySpecialRefunded } from './special-notifications';
+import { notifySpecialRewardReady, notifySpecialSettled } from './special-notifications';
 
 export type RedemptionStatus =
   | 'CREATED'
@@ -350,7 +349,7 @@ export class SpecialRedemptionService {
    */
   static async attachToRideRequest(
     client: any,
-    args: { riderId: string; rideId: string; fareCents: number; specialRedemptionId?: string | null },
+    args: { riderId: string; rideId: string; fareCents: number; specialRedemptionId?: string | null; specialTermsAccepted?: boolean },
   ): Promise<{ redemption: RedemptionRow | null; discountCents: number; sponsorDiscountCents: number }> {
     const { riderId, rideId, fareCents } = args;
     if (!args.specialRedemptionId) return { redemption: null, discountCents: 0, sponsorDiscountCents: 0 };
@@ -439,10 +438,19 @@ export class SpecialRedemptionService {
     await client.query(
       `UPDATE rides
        SET sponsor_discount_cents = $2,
-           final_payment_cents = GREATEST(0, final_payment_cents - $2)
+           final_payment_cents = GREATEST(0, final_payment_cents - $2),
+           special_terms_accepted_at = CASE WHEN $3 THEN NOW() ELSE special_terms_accepted_at END
        WHERE id = $1`,
-      [rideId, discount],
+      [rideId, discount, args.specialTermsAccepted === true],
     );
+
+    // Explicit consent gate (financial rule): the rider must have accepted
+    // that if the sponsor code is not validated before the deadline NetRide
+    // may collect the remaining fare. Without recorded consent we abort the
+    // whole ride request rather than create an uncollectable special ride.
+    if (args.specialTermsAccepted !== true) {
+      throw new Error('Please accept the Special terms before requesting this ride.');
+    }
 
     AuditEventsService.record({
       actorId: riderId,
@@ -596,10 +604,21 @@ export class SpecialRedemptionService {
       entityId: redemption.id,
       details: { rideId: redemption.ride_id },
     }).catch(() => undefined);
-    notifySpecialRewardReady(redemption.rider_id, redemption.id, null).catch(() => undefined);
-    const validated = normalizeRedemption(res.rows[0]);
-    emitRedemptionUpdate(validated);
-    return validated;
+
+    // NEW MODEL: validation settles the special immediately (sponsor budget
+    // consumed, components recorded). No money is ever sent back to the
+    // rider. Settlement failures leave REWARD_FAILED and are retried by the
+    // reconciliation sweep.
+    try {
+      const settled = await this.settleValidatedRedemption(redemption.id);
+      emitRedemptionUpdate(settled);
+      return settled;
+    } catch (settleErr: any) {
+      console.error(`[SPECIAL] ⚠️ validation settlement failed for ${redemption.id}: ${settleErr.message}`);
+      const validated = normalizeRedemption(res.rows[0]);
+      emitRedemptionUpdate(validated);
+      return validated;
+    }
   }
 
   /**
@@ -651,43 +670,34 @@ export class SpecialRedemptionService {
     return normalizeRedemption(res.rows[0]);
   }
 
-  // ------------------------------------------------------------ step 5: reward
+  // ------------------------------------------------------- step 5: settle
 
   /**
-   * Rider chooses the reward. Only AFTER the sponsor validated. Two options:
-   * REFUND (D back to the wallet) or CREDITS (D×1.10 ride credits; the extra
-   * 0.10D is a NetRide expense). Settlement is atomic + idempotent: retries
-   * after a crash are exact no-ops, and the ledger rows can never double.
+   * Settles a validated special — NEW MODEL (no money is ever sent back to
+   * the rider). The rider's discounted fare was already collected at ride
+   * completion; the sponsor's contribution is consumed from the funded
+   * budget; the driver was already paid commission from the ORIGINAL fare at
+   * completion (this path only tops the driver up for legacy rides that were
+   * settled from the discounted fare).
+   *
+   * Runs automatically when the sponsor validates the code. Atomic +
+   * idempotent: retries after a crash are exact no-ops.
    */
-  static async riderChooseReward(
-    redemptionId: string,
-    riderId: string,
-    choice: 'REFUND' | 'CREDITS',
-    opts: { confirmed?: boolean } = {},
-  ): Promise<RedemptionRow> {
-    if (!['REFUND', 'CREDITS'].includes(choice)) throw new Error('Invalid reward choice');
-    if (!opts.confirmed) throw new Error('Please confirm your reward choice');
-
+  static async settleValidatedRedemption(redemptionId: string): Promise<RedemptionRow> {
     const redemption = await this.findById(redemptionId);
-    if (!redemption || redemption.rider_id !== riderId) throw new Error('Redemption not found');
+    if (!redemption) throw new Error('Redemption not found');
 
     // Already settled → return the final state (idempotent).
     if (redemption.status === 'REWARD_COMPLETED') return redemption;
-    if (redemption.status !== 'SPONSOR_VALIDATED') {
-      if (redemption.status === 'REWARD_FAILED') {
-        // Safe to retry a failed settlement exactly once per choice.
-      } else {
-        throw new Error('Your sponsor has not validated this visit yet');
-      }
+    if (redemption.status !== 'SPONSOR_VALIDATED' && redemption.status !== 'REWARD_FAILED') {
+      throw new Error('Your sponsor has not validated this visit yet');
     }
 
     const D = redemption.calculated_discount_cents;
-    if (D <= 0) throw new Error('This special has no redeemable value');
+    if (D <= 0) throw new Error('This special has no settleable value');
 
     const driverAllocation = roundCents(D * env.SPONSOR_DRIVER_SHARE);
     const netrideAllocation = D - driverAllocation;
-    const rewardAmount = choice === 'REFUND' ? D : roundCents(D * env.SPONSOR_CREDIT_BONUS);
-    const netrideBonus = choice === 'CREDITS' ? rewardAmount - D : 0;
 
     const client = await pool.connect();
     try {
@@ -712,9 +722,9 @@ export class SpecialRedemptionService {
            (sponsor_id, type, amount_cents, direction, reference_type,
             reference_id, reason, actor_user_id, actor_role, balance_after_cents)
          VALUES ($1, 'DISCOUNT_REDEEMED', $2, 'DEBIT', 'special_redemption', $3,
-                 'Special redemption settlement', $4, 'RIDER', $5)
+                 'Special redemption settlement', $4, 'SPONSOR', $5)
          ON CONFLICT (reference_id) WHERE type = 'DISCOUNT_REDEEMED' DO NOTHING`,
-        [redemption.sponsor_id, D, redemption.id, riderId, sponsorUpd.rows[0].remaining_budget_cents],
+        [redemption.sponsor_id, D, redemption.id, redemption.sponsor_validated_by ?? null, sponsorUpd.rows[0].remaining_budget_cents],
       );
       await client.query(
         `UPDATE sponsors SET status = 'DEPLETED', updated_at = NOW()
@@ -722,79 +732,23 @@ export class SpecialRedemptionService {
         [redemption.sponsor_id],
       );
 
-      // --- 2. Driver share (60%) — SPONSOR_CREDIT payout, idempotent. ---
-      if (redemption.driver_id && driverAllocation > 0) {
-        await client.query(
-          `INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`,
-          [redemption.driver_id],
-        );
-        await client.query(
-          `UPDATE driver_wallets
-           SET balance_cents = balance_cents + $2,
-               lifetime_earnings_cents = lifetime_earnings_cents + $2,
-               updated_at = NOW()
-           WHERE driver_id = $1`,
-          [redemption.driver_id, driverAllocation],
-        );
-        await client.query(
-          `INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id, notes)
-           VALUES ($1, $2, 0, $2, 'PAID', 'SPONSOR_CREDIT', $3, $4)
-           ON CONFLICT (ride_id) WHERE method = 'SPONSOR_CREDIT' DO NOTHING`,
-          [redemption.driver_id, driverAllocation, redemption.ride_id, `Sponsor special redemption ${redemption.id}`],
-        );
-      }
+      // --- 2. Drive none / no rider money movement. The rider NEVER gets a
+      // refund or credits for a special (old model removed). The discount was
+      // applied to the fare at booking; the sponsor now funds it.
 
-      // --- 3. Rider benefit (REFUND → wallet / CREDITS → credits). ---
-      const idempotencyKey = `specialReward:${redemption.id}`;
-      let walletTxId: string | null = null;
-      let creditTxId: string | null = null;
-      if (choice === 'REFUND') {
-        const walletPost = await WalletService.post(
-          redemption.rider_id,
-          rewardAmount,
-          'SPONSOR_REWARD',
-          {
-            idempotencyKey,
-            description: `Special reward: money back for your visit to ${redemption.sponsor_name}`,
-            referenceType: 'special_redemption',
-            referenceId: redemption.id,
-            rideId: redemption.ride_id ?? undefined,
-            emitSocket: true,
-            client,
-          },
-        );
-        walletTxId = walletPost.transaction_id || null;
-      } else {
-        const creditPost = await CreditsService.post(
-          redemption.rider_id,
-          rewardAmount,
-          'SPONSOR_REWARD',
-          {
-            idempotencyKey,
-            description: `Special reward: ${redemption.sponsor_name} credits (${fmt(D)} + ${fmt(netrideBonus)} bonus)`,
-            referenceType: 'special_redemption',
-            referenceId: redemption.id,
-            rideId: redemption.ride_id ?? undefined,
-            emitSocket: true,
-            client,
-          },
-        );
-        creditTxId = creditPost.transaction_id || null;
-      }
-
-      // --- 4. Mark the redemption settled (idempotent transition). ---
+      // --- 3. Mark the redemption settled (idempotent transition). ---
       const redemptionUpd = await client.query(
         `UPDATE special_redemptions
-         SET status = 'REWARD_COMPLETED', reward_choice = $2,
-             reward_amount_cents = $3, sponsor_funded_cents = $4,
-             driver_allocation_cents = $5, netride_allocation_cents = $6,
-             netride_bonus_cents = $7, wallet_transaction_id = $8,
-             credit_transaction_id = $9, sponsor_settled_at = NOW(),
+         SET status = 'REWARD_COMPLETED', reward_choice = NULL,
+             reward_amount_cents = NULL, sponsor_funded_cents = $2,
+             driver_allocation_cents = $3, netride_allocation_cents = $4,
+             netride_bonus_cents = NULL, wallet_transaction_id = NULL,
+             credit_transaction_id = NULL, sponsor_settled_at = NOW(),
              reward_processed_at = NOW(), reward_failed_reason = NULL,
              updated_at = NOW()
          WHERE id = $1 AND status IN ('SPONSOR_VALIDATED', 'REWARD_SELECTED', 'REWARD_FAILED')
          RETURNING *`,
-        [redemption.id, choice, rewardAmount, D, driverAllocation, netrideAllocation, netrideBonus, walletTxId, creditTxId],
+        [redemption.id, D, driverAllocation, netrideAllocation],
       );
       if (redemptionUpd.rows.length === 0) {
         throw new Error('This special has already been settled');
@@ -802,20 +756,31 @@ export class SpecialRedemptionService {
 
       await client.query('COMMIT');
 
+      // Post-commit component recording + driver true-up (idempotent). A
+      // failure is surfaced by the reconciliation sweep that scans
+      // REWARD_COMPLETED/REWARD_FAILED redemptions whose breakdown has not
+      // recorded the sponsor contribution yet.
+      try {
+        await RideSettlementService.onSpecialRedemptionSettled({
+          redemptionId: redemption.id,
+          rideId: redemption.ride_id,
+          sponsorFundedCents: D,
+          driverId: redemption.driver_id,
+        });
+      } catch (settleErr: any) {
+        console.error(`[SPECIAL] ⚠️ settlement components failed for ${redemption.id}: ${settleErr.message}`);
+      }
+
       AuditEventsService.record({
-        actorId: riderId,
-        actorRole: 'RIDER',
-        action: 'special_reward_settled',
+        actorId: redemption.sponsor_validated_by ?? null,
+        actorRole: 'SPONSOR',
+        action: 'special_settled',
         entityType: 'special_redemption',
         entityId: redemption.id,
-        details: { choice, rewardAmountCents: rewardAmount, sponsorFundedCents: D },
+        details: { sponsorFundedCents: D },
       }).catch(() => undefined);
 
-      if (choice === 'REFUND') {
-        notifySpecialRefunded(redemption.rider_id, redemption.id, rewardAmount).catch(() => undefined);
-      } else {
-        notifySpecialRewardCredited(redemption.rider_id, redemption.id, rewardAmount).catch(() => undefined);
-      }
+      notifySpecialSettled(redemption.rider_id, redemption.id, D).catch(() => undefined);
       const settled = normalizeRedemption(redemptionUpd.rows[0]);
       emitRedemptionUpdate(settled);
       return settled;
@@ -883,12 +848,17 @@ export class SpecialRedemptionService {
   }
 
   private static async expireRedemption(id: string, reason: string): Promise<void> {
-    await pool.query(
+    // Atomic claim: only one expiry worker can transition the redemption.
+    const claim = await pool.query(
       `UPDATE special_redemptions
        SET status = 'EXPIRED', updated_at = NOW()
-       WHERE id = $1 AND status = 'WAITING_FOR_SPONSOR'`,
+       WHERE id = $1 AND status = 'WAITING_FOR_SPONSOR'
+       RETURNING id, ride_id, rider_id`,
       [id],
     );
+    if (claim.rows.length === 0) return; // already expired / settled elsewhere
+    const row = claim.rows[0];
+
     await this.releaseReservedBudget(id, 'EXPIRATION', reason);
     AuditEventsService.record({
       action: 'special_redemption_expired',
@@ -896,6 +866,61 @@ export class SpecialRedemptionService {
       entityId: id,
       details: { reason },
     }).catch(() => undefined);
+
+    // No-show fallback: the sponsor does not fund the expired redemption and
+    // the rider becomes responsible for the remaining fare. Idempotent and
+    // retried by the expiry sweep.
+    if (row.ride_id) {
+      try {
+        await RideSettlementService.onSpecialExpired({
+          redemptionId: id,
+          rideId: row.ride_id,
+          riderId: row.rider_id,
+        });
+      } catch (err: any) {
+        console.error(`[SPECIAL] ⚠️ additional charge failed for expired ${id}: ${err.message}`);
+      }
+    }
+  }
+
+  /**
+   * Reconciliation sweep: SPONSOR_VALIDATED / REWARD_FAILED / REWARD_COMPLETED
+   * redemptions whose fare breakdown has not yet recorded the sponsor
+   * contribution (e.g. a crash between the settlement transaction and the
+   * component write). Idempotent.
+   */
+  static async reconcileSettledRedemptions(): Promise<number> {
+    const res = await pool.query(
+      `SELECT s.id, s.ride_id, s.rider_id, s.driver_id, s.calculated_discount_cents
+       FROM special_redemptions s
+       LEFT JOIN ride_fare_breakdowns b ON b.ride_id = s.ride_id
+       WHERE s.status IN ('SPONSOR_VALIDATED', 'REWARD_FAILED', 'REWARD_COMPLETED')
+         AND s.ride_id IS NOT NULL
+         AND s.calculated_discount_cents > 0
+         AND (b.sponsor_collected_cents IS NULL OR b.sponsor_collected_cents < s.calculated_discount_cents)
+       ORDER BY s.updated_at ASC
+       LIMIT 25`,
+    );
+    let processed = 0;
+    for (const row of res.rows) {
+      try {
+        if (row.status !== 'REWARD_COMPLETED') {
+          // Retry the settlement itself (REWARD_FAILED or a crash left it
+          // validated-but-unsettled); component recording follows.
+          await this.settleValidatedRedemption(row.id);
+        }
+        await RideSettlementService.onSpecialRedemptionSettled({
+          redemptionId: row.id,
+          rideId: row.ride_id,
+          sponsorFundedCents: Number(row.calculated_discount_cents),
+          driverId: row.driver_id,
+        });
+        processed++;
+      } catch (err: any) {
+        console.error(`[SPECIAL] ⚠️ reconciliation failed for ${row.id}: ${err.message}`);
+      }
+    }
+    return processed;
   }
 
   /** Releases a reserved budget hold back to the sponsor (REVERSAL/EXPIRATION). */

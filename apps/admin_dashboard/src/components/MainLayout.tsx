@@ -40,6 +40,7 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import PriceChangeIcon from '@mui/icons-material/PriceChange';
 import PaidIcon from '@mui/icons-material/Paid';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
 import FlagIcon from '@mui/icons-material/Flag';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -124,6 +125,7 @@ const MainLayout: React.FC = () => {
     { text: 'Sponsors', icon: <StorefrontIcon />, path: '/sponsors' },
     { text: 'Pricing', icon: <PriceChangeIcon />, path: '/pricing' },
     { text: 'Revenue', icon: <PaidIcon />, path: '/revenue' },
+    { text: 'Payments', icon: <CreditCardIcon />, path: '/payments' },
     { text: 'Reports', icon: <FlagIcon />, path: '/reports' },
     { text: 'Audit Logs', icon: <HistoryIcon />, path: '/logs' },
   ];

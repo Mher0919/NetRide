@@ -240,19 +240,17 @@ class SpecialsProvider extends ChangeNotifier {
     }
   }
 
-  /// Step 5 — reward choice (REFUND | CREDITS), server-confirmed.
-  Future<SpecialRedemption?> chooseReward(String choice) async {
+  /// Step 5 — settlement. NEW MODEL: the special settles automatically the
+  /// moment the sponsor validates the code (no reward to collect), so this
+  /// only re-reads the server state so the UI can render REWARD_COMPLETED.
+  Future<SpecialRedemption?> refreshSettlementState() async {
     final r = _current;
     if (r == null) return null;
     _busy = true;
     _error = null;
     notifyListeners();
     try {
-      final redemption = await SpecialsService.chooseReward(
-        r.id,
-        choice,
-        confirmed: true,
-      );
+      final redemption = await SpecialsService.getCurrentRedemption();
       _current = redemption;
       return redemption;
     } catch (e) {

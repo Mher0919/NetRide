@@ -43,8 +43,7 @@ export type NotificationType =
   | 'referral_linked'
   | 'referral_reward'
   | 'special_reward_ready'
-  | 'special_reward_credited'
-  | 'special_refunded';
+  | 'special_settled';
 
 /** Money formatting used in every notification copy ($X.YZ). */
 export function fmtMoney(cents: number): string {
@@ -70,8 +69,7 @@ export const NOTIFICATION_META: Record<NotificationType, { channel: string; rout
   referral_linked: { channel: 'referral', route: '/credits' },
   referral_reward: { channel: 'referral', route: '/credits' },
   special_reward_ready: { channel: 'special', route: '/trip' },
-  special_reward_credited: { channel: 'special', route: '/credits' },
-  special_refunded: { channel: 'special', route: '/wallet' },
+  special_settled: { channel: 'special', route: '/trip' },
 };
 
 export interface NotifyArgs {

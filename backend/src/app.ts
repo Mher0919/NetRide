@@ -57,7 +57,11 @@ import sponsorPortalRoutes from './modules/sponsor/sponsor-portal.routes';
 import adminSponsorRoutes from './modules/sponsor/admin-sponsor.routes';
 import partnerPortalRoutes from './modules/partner/partner-portal.routes';
 import portalRoutes from './modules/portal/portal.routes';
+import paymentsRoutes from './modules/payments/payments.routes';
+import adminPaymentsRoutes from './modules/payments/admin-payments.routes';
+import { PaymentsController as StripeWebhookController } from './modules/payments/payments.controller';
 import { SpecialRedemptionService } from './modules/sponsor/special-redemption.service';
+import { RideSettlementService } from './modules/payments/ride-settlement.service';
 import { GeospatialService } from './modules/geospatial/geospatial.service';
 import { UploadService } from './services/upload.service';
 import { SpeedingDetector } from './services/speeding_detector';
@@ -141,6 +145,16 @@ app.use(cors({
 // instead of the proxy IP. This fixes rate-limit key collisions
 // where all users share one rate-limit bucket behind Render.
 app.set('trust proxy', 1);
+// Stripe webhook FIRST: signature verification needs the raw request bytes,
+// so this route must be registered before the global JSON body parser. The
+// handler verifies the signature with Stripe's official library using
+// STRIPE_WEBHOOK_SECRET. No auth middleware — Stripe authenticates by
+// signature.
+app.post(
+  '/api/payments/webhook',
+  express.raw({ type: 'application/json', limit: '2mb' }),
+  StripeWebhookController.webhook,
+);
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ limit: '8mb', extended: true }));
 // Request-id + child logger context. Mount BEFORE rate-limit so even
@@ -271,6 +285,8 @@ app.use('/api', sponsorPortalRoutes);
 app.use('/api/partner', partnerPortalRoutes);
 app.use('/api', portalRoutes);
 app.use('/api/admin', adminSponsorRoutes);
+app.use('/api/payments', paymentsRoutes);
+app.use('/api/admin/payments', adminPaymentsRoutes);
 app.post('/api/upload', UploadService.upload);
 
 // Global Error Handler
@@ -813,11 +829,20 @@ export function startServer(): void {
   });
 
   // Special redemption hygiene (Every 5 minutes): expire stale validation
-  // codes and release the reserved budget (spec §28/§69).
+  // codes, release the reserved budget (spec §28/§69), collect the remaining
+  // fare from riders whose special was never validated, and reconcile any
+  // REWARD_COMPLETED redemption whose settlement components were not
+  // recorded (crash between redemption tx and component write).
   setInterval(() => {
     SpecialRedemptionService.expireStaleRedemptions()
       .then((n) => { if (n > 0) logger.info({ expired: n }, 'cron_special_redemptions_expired'); })
       .catch((err: any) => logger.error({ err: err.message }, 'cron_special_redemptions_error'));
+    RideSettlementService.sweepExpiredAdditionalCharges()
+      .then((n) => { if (n > 0) logger.info({ retried: n }, 'cron_special_expiry_retry' ); })
+      .catch((err: any) => logger.error({ err: err.message }, 'cron_special_expiry_retry_error'));
+    SpecialRedemptionService.reconcileSettledRedemptions()
+      .then((n) => { if (n > 0) logger.info({ reconciled: n }, 'cron_special_settlement_reconcile'); })
+      .catch((err: any) => logger.error({ err: err.message }, 'cron_special_settlement_reconcile_error'));
   }, 5 * 60 * 1000);
 
   // Scheduled Rides Job (Every 1 minute)

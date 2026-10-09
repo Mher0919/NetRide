@@ -9,7 +9,10 @@
 //   POST /api/specials/:id/redemption      → step 1: rider picks a sponsor
 //   GET  /api/specials/redemptions/current → resumable redemption on restart
 //   POST /api/specials/redemptions/:id/verified → step 4: "I got verified"
-//   POST /api/specials/redemptions/:id/reward   → step 5: REFUND or CREDITS
+//
+// Settlement happens automatically when the sponsor validates the code —
+// there is NO rider-facing reward step (the old REFUND/CREDITS flow was
+// removed; the rider never receives money back for a special).
 
 import 'package:dio/dio.dart';
 import '../models/special_models.dart';
@@ -90,20 +93,10 @@ class SpecialsService {
     return SpecialRedemption.fromJson(json as Map<String, dynamic>);
   }
 
-  /// Step 5 — reward choice: REFUND (D back to wallet) or CREDITS (D×1.10).
-  /// Both are idempotent; the backend settles atomically.
-  static Future<SpecialRedemption> chooseReward(
-    String redemptionId,
-    String choice, {
-    required bool confirmed,
-  }) async {
-    final res = await ApiService.dio.post(
-      'specials/redemptions/$redemptionId/reward',
-      data: {'choice': choice, 'confirmed': confirmed},
-    );
-    final json = (res.data as Map<String, dynamic>)['redemption'];
-    return SpecialRedemption.fromJson(json as Map<String, dynamic>);
-  }
+  /// Current settlement state (NEW MODEL: the special settles automatically
+  /// when the sponsor validates the code — there is no reward to collect).
+  static Future<SpecialRedemption?> getCurrentRedemption() =>
+      currentRedemption();
 
   /// Recovers the one-time validation code from in-app notification history
   /// (delivered only to this rider via `special_reward_ready`; spec §99).

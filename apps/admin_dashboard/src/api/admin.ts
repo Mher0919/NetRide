@@ -590,3 +590,50 @@ export const searchGoogleBusinesses = async (params: { q: string; lat?: number; 
   const response = await api.get('/places/text-search', { params });
   return response.data as GoogleBusinessResponse;
 };
+
+// ----- Payments / Stripe oversight -----------------------------------------
+
+export const getPaymentsConfig = async () => {
+  const response = await api.get('/payments/config');
+  return response.data;
+};
+
+export const getPaymentsOverview = async () => {
+  const response = await api.get('/admin/payments/overview');
+  return response.data;
+};
+
+export const listPaymentSettlements = async (params: { settlementStatus?: string; issues?: boolean; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/payments/settlements', { params });
+  return response.data as { settlements: any[] };
+};
+
+export const listPayments = async (params: { status?: string; purpose?: string; limit?: number; offset?: number } = {}) => {
+  const response = await api.get('/admin/payments', { params });
+  return response.data as { payments: any[] };
+};
+
+export const listPaymentEvents = async () => {
+  const response = await api.get('/admin/payments/events');
+  return response.data as { events: any[] };
+};
+
+export const reconcilePayment = async (id: string) => {
+  const response = await api.post(`/admin/payments/${id}/reconcile`);
+  return response.data;
+};
+
+export const refundPayment = async (id: string, amountCents?: number, reason?: string) => {
+  const response = await api.post(`/admin/payments/${id}/refund`, { amountCents, reason });
+  return response.data;
+};
+
+export const retryAdditionalCharge = async (rideId: string) => {
+  const response = await api.post(`/admin/payments/rides/${rideId}/retry-additional-charge`);
+  return response.data;
+};
+
+export const transferPayout = async (payoutId: string) => {
+  const response = await api.post(`/admin/payments/payouts/${payoutId}/transfer`);
+  return response.data;
+};

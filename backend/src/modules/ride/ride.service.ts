@@ -15,6 +15,9 @@ import { getIo } from '../../gateway/io-handle';
 import { pool } from '../../config/database';
 import { redis } from '../../config/redis';
 import { createPriceSnapshot, computeEstimate, getSnapshotForRide, persistRevenueAllocation, getRevenueAllocationForRide } from '../../services/pricing.service';
+import { RideSettlementService } from '../payments/ride-settlement.service';
+import { getFareBreakdown } from '../payments/fare-breakdown.service';
+import { PaymentsService } from '../payments/payments.service';
 import { NavigationService, CachedRoutePayload } from '../../services/navigation.service';
 import { RouteStoreService, haversineMeters } from '../../services/route-store.service';
 import { SpeedingDetector } from '../../services/speeding_detector';
@@ -186,12 +189,17 @@ export class RideService {
     scheduledAt?: Date,
     isScheduled: boolean = false,
     idempotencyKey?: string,
-    rewards: { promoCode?: string; applyCredits?: boolean; creditUseCents?: number; specialRedemptionId?: string } = {},
+    rewards: { promoCode?: string; applyCredits?: boolean; creditUseCents?: number; specialRedemptionId?: string; specialTermsAccepted?: boolean } = {},
     favoritePriority: boolean = false
   ): Promise<Trip> {
     return traceAsync('RideService.requestRide', async () => {
       const traceId = getCurrentTraceId();
       console.log(`[RIDE] New request from rider ${riderId}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
+
+      // Booking gate: a saved payment card is required before any ride can
+      // be requested (server-authoritative — the client only redirects).
+      // Seeded test accounts keep the legacy wallet rail for the sandbox.
+      await PaymentsService.assertRiderPaymentMethod(riderId);
 
       // Idempotency: if key provided, check for existing ride
       if (idempotencyKey) {
@@ -283,6 +291,7 @@ export class RideService {
             rideId: tripId,
             fareCents: Math.round(breakdown.totalFare * 100),
             specialRedemptionId: rewards.specialRedemptionId,
+            specialTermsAccepted: rewards.specialTermsAccepted === true,
           });
         }
 
@@ -492,6 +501,12 @@ export class RideService {
     // when this write is missing.
     persistRevenueAllocation(tripId, driverId, Math.round(finalFare * 100))
       .catch((err: any) => console.error(`[RIDE] ⚠️ Revenue allocation persist failed: ${err.message}`));
+
+    // Immutable fare breakdown (original fare, rider/sponsor components,
+    // driver earnings from the ORIGINAL fare). Snapshotted once the driver is
+    // known; later campaign/commission edits can never rewrite it.
+    RideSettlementService.snapshotOnAccept(tripId, driverId)
+      .catch((err: any) => console.error(`[RIDE] ⚠️ Fare breakdown snapshot failed: ${err.message}`));
 
     // Cache active trip for trajectory buffering
     await redis.set(`driver:${driverId}:active_trip`, tripId, 'EX', 14400); // 4h safety TTL
@@ -778,11 +793,14 @@ export class RideService {
       // Idempotent (ride_completion:{rideId} idempotency key + partial unique
       // index on ride_id). Settled only when the full amount due is covered;
       // a shortfall is recorded as PENDING_CAPTURE with the outstanding
-      // cents so failed/short payments stay explicit.
+      // cents so failed/short payments stay explicit. The immutable fare
+      // breakdown (original fare / rider share / sponsor subsidy / driver
+      // earnings) is written alongside as separate, traceable components.
       try {
         const tipCents = Math.round(
           parseFloat((updatedTrip as any).tip_amount ?? '0') * 100
         );
+        const breakdown = await getFareBreakdown(tripId);
         await FinancialLedgerService.recordRideCompletion({
           rideId: tripId,
           riderId: updatedTrip.rider_id,
@@ -799,7 +817,18 @@ export class RideService {
           paymentProvider: 'wallet',
           paymentReference: tripId,
           completedAt: updatedTrip.completed_at ? new Date(updatedTrip.completed_at) : new Date(),
+          originalFareCents: breakdown ? Number(breakdown.original_fare_cents) : dueCents,
+          riderShareCents: breakdown ? Number(breakdown.rider_share_cents) : dueCents,
+          sponsorSubsidyCents: breakdown ? Number(breakdown.sponsor_subsidy_cents) : 0,
+          sponsorCollectedCents: 0,
+          additionalRiderChargeCents: 0,
+          sponsorContributionStatus: breakdown && Number(breakdown.sponsor_subsidy_cents) > 0 ? 'RESERVED' : 'NONE',
+          additionalChargeStatus: 'NONE',
         });
+
+        // Stripe shortfall collection (saved card, off-session) + sponsor
+        // reservation state. Non-blocking and fully idempotent.
+        await RideSettlementService.onRideCompleted(tripId);
       } catch (err: any) {
         console.warn(
           `[RIDE] ⚠️ Financial ledger write failed (non-blocking) for trip ${tripId}: ${err.message}`
