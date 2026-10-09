@@ -30,6 +30,8 @@ require('./src/modules/reporting/__tests__/report-reasons.unit.test.ts');
 require('./src/modules/sponsor/__tests__/sponsor-discount.unit.test.ts');
 require('./src/modules/sponsor/__tests__/sponsor-auth.unit.test.ts');
 require('./src/modules/sponsor/__tests__/forgot-password.unit.test.ts');
+require('./src/modules/google-places/__tests__/google-places.unit.test.ts');
+require('./src/modules/sponsor/__tests__/google-association.unit.test.ts');
 require('./src/modules/portal/__tests__/portal-2fa.unit.test.ts');
 require('./src/modules/auth/__tests__/otp.unit.test.ts');
 require('./src/modules/auth/__tests__/auth-enumeration.unit.test.ts');

@@ -17,6 +17,7 @@ router.post('/partners', AdminRewardsController.createPartner);
 router.get('/partners/export', AdminRewardsController.exportPartners);
 router.get('/partners/:id', AdminRewardsController.getPartner);
 router.patch('/partners/:id', AdminRewardsController.updatePartner);
+router.delete('/partners/:id', AdminRewardsController.deletePartner);
 router.post('/partners/:id/status/:status', AdminRewardsController.setPartnerStatus);
 router.get('/partners/:id/commissions', AdminRewardsController.listPartnerCommissions);
 router.get('/partners/:id/rides/export', AdminRewardsController.exportPartnerRides);

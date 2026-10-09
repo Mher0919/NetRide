@@ -8,94 +8,20 @@
 //   ├── Search / Map / Recents
 //   ├── SPECIALS                      ← this widget (hidden when 0 active)
 //   │   ├── category filter chips
-//   │   └── deal cards (name · type · distance · discount)
+//   │   └── premium deal cards (photo · discount · name · rating · distance)
 //   └── other Explore content
 //
 // Visibility rule (backend is the source of truth):
 //     showSpecials = activeSpecials.isNotEmpty
 //
-// The widget renders NOTHING — no heading, no placeholder, no empty card —
-// when the backend's eligible-special list is empty. The same eligible list
-// drives the map sponsor markers (map_screen.dart), so both surfaces always
-// agree. Filtering operates ONLY on that eligible list: an inactive sponsor
-// can never resurface through a filter chip.
+// Tapping a card opens the SAME SpecialBusinessSheet the map markers open
+// (spec §13) — no navigation to a separate page.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
-
-/// Friendly category label for a sponsor business type (spec: Food, Drink,
-/// Club, Cafe, Shopping, Entertainment…). Unknown types get the raw value.
-String specialCategoryLabel(String? type) {
-  if (type == null || type.isEmpty) return 'Other';
-  const labels = {
-    'RESTAURANT': 'Food',
-    'BAR': 'Drink',
-    'CLUB': 'Club',
-    'CAFE': 'Cafe',
-    'RETAIL': 'Shopping',
-    'SHOPPING': 'Shopping',
-    'ENTERTAINMENT': 'Entertainment',
-    'EVENTS': 'Events',
-    'SERVICES': 'Services',
-    'MEDICAL': 'Medical',
-    'FITNESS': 'Fitness',
-    'EDUCATION': 'Education',
-    'AUTO': 'Auto',
-    'OTHER': 'Other',
-  };
-  return labels[type] ?? type;
-}
-
-IconData specialTypeIcon(String? type) {
-  switch (type) {
-    case 'RESTAURANT':
-      return Icons.restaurant_rounded;
-    case 'CAFE':
-      return Icons.local_cafe_rounded;
-    case 'RETAIL':
-    case 'SHOPPING':
-      return Icons.shopping_bag_rounded;
-    case 'SERVICES':
-      return Icons.content_cut_rounded;
-    case 'CLUB':
-    case 'ENTERTAINMENT':
-    case 'EVENTS':
-      return Icons.theater_comedy_rounded;
-    case 'MEDICAL':
-      return Icons.local_hospital_rounded;
-    case 'FITNESS':
-      return Icons.fitness_center_rounded;
-    case 'EDUCATION':
-      return Icons.school_rounded;
-    case 'AUTO':
-      return Icons.directions_car_rounded;
-    default:
-      return Icons.storefront_rounded;
-  }
-}
-
-/// Discount copy straight from backend-configured values (never hardcoded).
-/// Always ends in "off" so the rider sees the actual deal ("$5.00 off" /
-/// "25% off"), never a bare number.
-String specialDiscountLabel(SponsorSpecial s) {
-  final label = s.discount.label;
-  if (label.isNotEmpty) {
-    return label.toLowerCase().endsWith('off') ? label : '$label off';
-  }
-  if (s.discount.type == 'PERCENT' && s.discount.percent != null) {
-    final base = '${s.discount.percent}% off';
-    final cap = s.discount.fixedAmountCents;
-    return (cap != null && cap > 0)
-        ? '$base (up to ${formatCents2(cap)})'
-        : base;
-  }
-  if (s.discount.fixedAmountCents != null && s.discount.fixedAmountCents! > 0) {
-    return '${formatCents2(s.discount.fixedAmountCents!)} off';
-  }
-  return 'Save on your ride';
-}
+import 'special_business_sheet.dart';
+import 'special_card.dart';
 
 class ExploreSpecialsSection extends StatefulWidget {
   const ExploreSpecialsSection({super.key});
@@ -126,6 +52,11 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
           );
         final active = closest.take(5).toList();
         if (active.isEmpty) return const SizedBox.shrink();
+
+        // Warm the Google photos for visible cards (max 5, once each).
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) specials.hydrateCardPhotos(active);
+        });
 
         final categories = active
             .map((s) => specialCategoryLabel(s.businessType))
@@ -182,7 +113,7 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
                 'Ride there, get money back.',
                 style: TextStyle(
                   fontSize: 12,
-                  color: const Color(0xFF2F3A32).withOpacity(0.6),
+                  color: const Color(0xFF2F3A32).withValues(alpha: 0.6),
                 ),
               ),
               if (categories.isNotEmpty) ...[
@@ -232,7 +163,7 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
                         'No $selected specials right now',
                         style: TextStyle(
                           fontSize: 12.5,
-                          color: const Color(0xFF2F3A32).withOpacity(0.6),
+                          color: const Color(0xFF2F3A32).withValues(alpha: 0.6),
                         ),
                       ),
                     ],
@@ -240,14 +171,24 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
                 )
               else
                 SizedBox(
-                  height: 118,
+                  height: 208,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(vertical: 2),
                     itemCount: shown.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 10),
-                    itemBuilder: (context, i) =>
-                        _SponsorDealCard(sponsor: shown[i]),
+                    separatorBuilder: (_, _) => const SizedBox(width: 12),
+                    itemBuilder: (context, i) {
+                      final s = shown[i];
+                      final selectedNow = context.select<SpecialsProvider, bool>(
+                        (p) => p.selectedSpecialId == s.id,
+                      );
+                      return SpecialCard(
+                        sponsor: s,
+                        selected: selectedNow,
+                        onTap: () => SpecialBusinessSheet.show(context, sponsor: s),
+                      );
+                    },
                   ),
                 ),
             ],
@@ -293,124 +234,6 @@ class _FilterChipLabel extends StatelessWidget {
               fontSize: 12,
               fontWeight: FontWeight.w700,
               color: selected ? Colors.white : const Color(0xFF2F3A32),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SponsorDealCard extends StatelessWidget {
-  const _SponsorDealCard({required this.sponsor});
-
-  final SponsorSpecial sponsor;
-
-  String _distanceLabel() {
-    final km = sponsor.kmAway;
-    if (km != null && km > 0) {
-      final miles = km * 0.621371;
-      return '${miles < 10 ? miles.toStringAsFixed(1) : miles.round()} mi';
-    }
-    final place = [
-      sponsor.city,
-      sponsor.state,
-    ].where((v) => v?.isNotEmpty ?? false).join(', ');
-    return place.isEmpty ? 'Local' : place;
-  }
-
-  String _typeAndDistance() {
-    final type = specialCategoryLabel(sponsor.businessType);
-    return '$type · ${_distanceLabel()}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 236,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE3DDD4)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () {
-            Navigator.of(
-              context,
-            ).pushNamed('/special-detail', arguments: {'id': sponsor.id});
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF5B7760).withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        specialTypeIcon(sponsor.businessType),
-                        color: const Color(0xFF5B7760),
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            sponsor.businessName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF2F3A32),
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _typeAndDistance(),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: const Color(0xFF2F3A32).withOpacity(0.55),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  specialDiscountLabel(sponsor),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF5B7760),
-                  ),
-                ),
-              ],
             ),
           ),
         ),

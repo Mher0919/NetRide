@@ -32,14 +32,20 @@ import {
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import SponsorLocationPicker from '../components/SponsorLocationPicker';
+import GoogleBusinessSelector, {
+  suggestionFromSponsor,
+  type GoogleBusinessSelection,
+} from '../components/GoogleBusinessSelector';
 import {
   listSponsors,
   createSponsor,
   updateSponsor,
+  deleteSponsor,
   getSponsor,
   setSponsorStatus,
   adjustSponsorBudget,
@@ -112,6 +118,7 @@ const Sponsors: React.FC = () => {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [form, setForm] = React.useState(emptyForm);
+  const [createGoogle, setCreateGoogle] = React.useState<GoogleBusinessSelection | null>(null);
 
   const [selected, setSelected] = React.useState<Record<string, unknown> | null>(null);
   const [detail, setDetail] = React.useState<Record<string, unknown> | null>(null);
@@ -127,6 +134,11 @@ const Sponsors: React.FC = () => {
   const [editOpen, setEditOpen] = React.useState(false);
   const [editSaving, setEditSaving] = React.useState(false);
   const [editForm, setEditForm] = React.useState(emptyForm);
+  const [editGoogle, setEditGoogle] = React.useState<GoogleBusinessSelection | null>(null);
+  const [editGoogleDirty, setEditGoogleDirty] = React.useState(false);
+
+  const [deleteTarget, setDeleteTarget] = React.useState<Record<string, unknown> | null>(null);
+  const [deleteLoading, setDeleteLoading] = React.useState(false);
 
   const [snack, setSnack] = React.useState<SnackState>({
     open: false,
@@ -190,6 +202,7 @@ const Sponsors: React.FC = () => {
 
   const openCreate = () => {
     setForm(emptyForm);
+    setCreateGoogle(null);
     setCreateOpen(true);
   };
 
@@ -255,6 +268,8 @@ const Sponsors: React.FC = () => {
         specialsEnabled: true,
         latitude: lat,
         longitude: lng,
+        googlePlaceId: createGoogle?.placeId ?? null,
+        googleSelectionToken: createGoogle?.selectionToken || undefined,
       });
       notify('Sponsor created');
       setCreateOpen(false);
@@ -274,6 +289,23 @@ const Sponsors: React.FC = () => {
       if (selected?.id === sponsor.id) loadDetail(sponsor.id);
     } catch (err: unknown) {
       notify(errMsg(err, 'Status change failed'), 'error');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      const id = deleteTarget.id as string;
+      await deleteSponsor(id);
+      if (selected?.id === id) setSelected(null);
+      setDeleteTarget(null);
+      notify('Sponsor permanently deleted');
+      fetchData();
+    } catch (err: unknown) {
+      notify(errMsg(err, 'Failed to delete sponsor'), 'error');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -359,6 +391,8 @@ const Sponsors: React.FC = () => {
       latitude: sponsor.latitude != null ? String(sponsor.latitude) : '',
       longitude: sponsor.longitude != null ? String(sponsor.longitude) : '',
     });
+    setEditGoogle(suggestionFromSponsor(sponsor));
+    setEditGoogleDirty(false);
     setEditOpen(true);
   };
 
@@ -420,6 +454,12 @@ const Sponsors: React.FC = () => {
         discountFixedAmountCents: editForm.discountType === 'FIXED_AMOUNT' ? Math.round(Number(editForm.discountFixedAmountCents)) : undefined,
         latitude: lat,
         longitude: lng,
+        ...(editGoogleDirty
+          ? {
+              googlePlaceId: editGoogle?.placeId ?? null,
+              googleSelectionToken: editGoogle?.selectionToken || undefined,
+            }
+          : {}),
       });
       notify('Sponsor updated');
       setEditOpen(false);
@@ -531,7 +571,9 @@ const Sponsors: React.FC = () => {
                         </Box>
                         <Box>
                           <Typography variant="body2" sx={{ fontWeight: 700 }}>{s.business_name}</Typography>
-                          <Typography variant="caption" color="text.secondary">{s.city ?? '—'}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {s.google_place_id ? 'Google-connected' : 'Manual'} · {s.city ?? '—'}
+                          </Typography>
                         </Box>
                       </Box>
                     </TableCell>
@@ -564,6 +606,11 @@ const Sponsors: React.FC = () => {
                         ) : (
                           <Button size="small" onClick={() => handleStatusChange(s, 'ACTIVE')}>Activate</Button>
                         )}
+                        <Tooltip title="Delete sponsor permanently">
+                          <IconButton size="small" onClick={() => setDeleteTarget(s)}>
+                            <DeleteIcon fontSize="small" color="error" />
+                          </IconButton>
+                        </Tooltip>
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -610,6 +657,15 @@ const Sponsors: React.FC = () => {
                 setForm({ ...form, latitude: loc.latitude == null ? '' : String(loc.latitude), longitude: loc.longitude == null ? '' : String(loc.longitude) })
               }
               address={[form.address, form.city, form.state, form.country].filter(Boolean).join(', ')}
+            />
+            <GoogleBusinessSelector
+              location={{
+                latitude: form.latitude === '' ? null : Number(form.latitude),
+                longitude: form.longitude === '' ? null : Number(form.longitude),
+              }}
+              value={createGoogle}
+              onChange={setCreateGoogle}
+              disabled={saving}
             />
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Discount</Typography>
@@ -773,6 +829,46 @@ const Sponsors: React.FC = () => {
                           </Typography>
                         )}
                       </Stack>
+                    </Paper>
+
+                    <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Google Business</Typography>
+                      {sponsor.google_place_id ? (
+                        <Stack spacing={0.5}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <StorefrontIcon fontSize="small" sx={{ color: '#2E7D32' }} />
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                              {sponsor.google_business_name ?? sponsor.business_name}
+                            </Typography>
+                            <Chip size="small" label="Connected to Google Maps" sx={{ bgcolor: '#E5F0EB', color: '#2E7D32', fontWeight: 700, fontSize: 10 }} />
+                          </Stack>
+                          {sponsor.google_business_category && (
+                            <Typography variant="caption" color="text.secondary">{sponsor.google_business_category}</Typography>
+                          )}
+                          {sponsor.google_business_address && (
+                            <Typography variant="caption" color="text.secondary">{sponsor.google_business_address}</Typography>
+                          )}
+                          <Typography variant="caption" color="text.secondary">
+                            Place ID: {String(sponsor.google_place_id)}
+                          </Typography>
+                          <Box>
+                            <Button size="small" onClick={openEdit} sx={{ textTransform: 'none', fontWeight: 700, px: 0 }}>
+                              Change business
+                            </Button>
+                          </Box>
+                        </Stack>
+                      ) : (
+                        <Stack spacing={1}>
+                          <Typography variant="body2" color="text.secondary">
+                            Manually configured — this Special is not linked to a Google business.
+                          </Typography>
+                          <Box>
+                            <Button size="small" variant="outlined" onClick={openEdit} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                              Connect a Google business
+                            </Button>
+                          </Box>
+                        </Stack>
+                      )}
                     </Paper>
                   </Stack>
                 )}
@@ -1015,6 +1111,18 @@ const Sponsors: React.FC = () => {
               }
               address={[editForm.address, editForm.city, editForm.state, editForm.country].filter(Boolean).join(', ')}
             />
+            <GoogleBusinessSelector
+              location={{
+                latitude: editForm.latitude === '' ? null : Number(editForm.latitude),
+                longitude: editForm.longitude === '' ? null : Number(editForm.longitude),
+              }}
+              value={editGoogle}
+              onChange={(v) => {
+                setEditGoogle(v);
+                setEditGoogleDirty(true);
+              }}
+              disabled={editSaving}
+            />
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Discount</Typography>
             <TextField
@@ -1066,6 +1174,25 @@ const Sponsors: React.FC = () => {
           <Button onClick={() => setEditOpen(false)} disabled={editSaving}>Cancel</Button>
           <Button variant="contained" disabled={editSaving} onClick={handleEdit}>
             {editSaving ? 'Saving…' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteTarget} onClose={() => !deleteLoading && setDeleteTarget(null)} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: 800 }}>Delete sponsor permanently?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Are you sure you want to delete <b>{String(deleteTarget?.business_name ?? '')}</b>? This cannot be undone.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Its budget ledger, special redemptions and portal account will be permanently deleted.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>No</Button>
+          <Button variant="contained" color="error" onClick={handleDelete} disabled={deleteLoading}>
+            {deleteLoading ? <CircularProgress size={20} color="inherit" /> : 'Yes, delete'}
           </Button>
         </DialogActions>
       </Dialog>

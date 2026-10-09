@@ -42,6 +42,9 @@ class SponsorSpecial {
   final double? longitude;
   final String? logoUrl;
   final String? coverImageUrl;
+  final String? googlePlaceId;
+  final String? googleBusinessName;
+  final String? googleBusinessCategory;
   final SponsorDiscount discount;
   final double? kmAway;
   final String status;
@@ -58,10 +61,16 @@ class SponsorSpecial {
     this.longitude,
     this.logoUrl,
     this.coverImageUrl,
+    this.googlePlaceId,
+    this.googleBusinessName,
+    this.googleBusinessCategory,
     required this.discount,
     this.kmAway,
     required this.status,
   });
+
+  bool get isGoogleConnected =>
+      googlePlaceId != null && googlePlaceId!.isNotEmpty;
 
   factory SponsorSpecial.fromJson(Map<String, dynamic> json) =>
       SponsorSpecial(
@@ -76,6 +85,9 @@ class SponsorSpecial {
         longitude: (json['longitude'] as num?)?.toDouble(),
         logoUrl: json['logoUrl'] as String?,
         coverImageUrl: json['coverImageUrl'] as String?,
+        googlePlaceId: json['googlePlaceId'] as String?,
+        googleBusinessName: json['googleBusinessName'] as String?,
+        googleBusinessCategory: json['googleBusinessCategory'] as String?,
         discount: SponsorDiscount.fromJson(
             (json['discount'] as Map<String, dynamic>?) ?? const {}),
         kmAway: (json['kmAway'] as num?)?.toDouble(),

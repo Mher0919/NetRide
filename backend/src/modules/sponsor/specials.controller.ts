@@ -7,11 +7,19 @@ import { Request, Response } from 'express';
 import { pool } from '../../config/database';
 import { SponsorService, discountLabelFor } from './sponsor.service';
 import { SpecialRedemptionService } from './special-redemption.service';
+import {
+  GooglePlacesError,
+  GooglePlacesService,
+  isValidPlaceId,
+  type GoogleBusiness,
+  type PlaceLevel,
+} from '../google-places/google-places.service';
 import { AuthRequest } from '../../middleware/auth.middleware';
 
 function publicSponsor(sponsor: any) {
   const { id, business_name, business_type, business_description, address, city,
           state, latitude, longitude, logo_url, cover_image_url,
+          google_place_id, google_business_name, google_business_category,
           discount_type, discount_percent, max_discount_percent,
           discount_fixed_amount_cents, status } = sponsor;
   const kmAway = sponsor.km_away != null ? Number(sponsor.km_away) : null;
@@ -19,6 +27,9 @@ function publicSponsor(sponsor: any) {
     id, businessName: business_name, businessType: business_type,
     businessDescription: business_description, address, city, state,
     latitude, longitude, logoUrl: logo_url, coverImageUrl: cover_image_url,
+    googlePlaceId: google_place_id ?? null,
+    googleBusinessName: google_business_name ?? null,
+    googleBusinessCategory: google_business_category ?? null,
     discount: {
       type: discount_type,
       percent: discount_percent,
@@ -28,6 +39,32 @@ function publicSponsor(sponsor: any) {
     },
     kmAway,
     status,
+  };
+}
+
+/** Minimal cached identity used when Google is unreachable (spec §21). */
+function fallbackGoogleBusiness(sponsor: any): GoogleBusiness {
+  return {
+    placeId: sponsor.google_place_id ?? '',
+    name: sponsor.google_business_name || sponsor.business_name,
+    category: sponsor.google_business_category ?? null,
+    address: sponsor.google_business_address ?? sponsor.address ?? null,
+    shortAddress: null,
+    latitude: sponsor.google_business_latitude ?? sponsor.latitude ?? null,
+    longitude: sponsor.google_business_longitude ?? sponsor.longitude ?? null,
+    rating: null,
+    reviewCount: null,
+    priceLevel: null,
+    businessStatus: null,
+    googleMapsUri: null,
+    openNow: null,
+    weekdayDescriptions: [],
+    phone: sponsor.phone ?? null,
+    website: null,
+    photos: [],
+    reviews: [],
+    level: 'basic',
+    attribution: 'Powered by Google',
   };
 }
 
@@ -67,6 +104,72 @@ export class SpecialsController {
         return res.status(404).json({ error: 'Special not found' });
       }
       res.json({ sponsor: publicSponsor(sponsor), available: eligible });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  /** GET /api/specials/:id/business — Google business info for the rider sheet.
+   *
+   *  `level=basic` (default) loads identity/rating/photo only; `level=full`
+   *  adds hours/phone/website/reviews when the sheet is expanded (field-mask
+   *  tiering, spec §22). When Google is unavailable the endpoint still
+   *  returns 200 with the cached identity so the admin-created Special keeps
+   *  working (spec §21) — `googleAvailable: false` flags the degradation.
+   */
+  static async getBusiness(req: AuthRequest, res: Response) {
+    try {
+      const level: PlaceLevel = req.query.level === 'full' ? 'full' : 'basic';
+      const sponsor = await SponsorService.findById(req.params.id);
+      if (!sponsor) return res.status(404).json({ error: 'Special not found' });
+
+      const placeId = sponsor.google_place_id;
+      if (!isValidPlaceId(placeId)) {
+        return res.json({ business: null, googleAvailable: true, manual: true });
+      }
+
+      try {
+        const business = await GooglePlacesService.getDetails(placeId, level);
+        pool.query(
+          `UPDATE sponsors
+              SET google_business_name = $2,
+                  google_business_category = $3,
+                  google_business_latitude = $4,
+                  google_business_longitude = $5,
+                  google_business_address = $6,
+                  google_places_synced_at = NOW()
+            WHERE id = $1 AND google_place_id = $7`,
+          [
+            sponsor.id,
+            business.name,
+            business.category,
+            business.latitude,
+            business.longitude,
+            business.address,
+            placeId,
+          ],
+        ).catch((err: any) => {
+          console.warn('[SPECIALS] Google business cache refresh failed:', err?.message);
+        });
+        return res.json({ business, googleAvailable: true, manual: false });
+      } catch (err: any) {
+        if (err instanceof GooglePlacesError && err.code === 'INVALID_PLACE_ID') {
+          console.warn(`[SPECIALS] Stale Google Place ID on sponsor ${sponsor.id}`);
+          return res.json({
+            business: fallbackGoogleBusiness(sponsor),
+            googleAvailable: false,
+            manual: false,
+            error: 'Business information is currently unavailable.',
+          });
+        }
+        console.error('[SPECIALS] Google business lookup failed:', err?.message);
+        return res.json({
+          business: fallbackGoogleBusiness(sponsor),
+          googleAvailable: false,
+          manual: false,
+          error: 'Business information is currently unavailable.',
+        });
+      }
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

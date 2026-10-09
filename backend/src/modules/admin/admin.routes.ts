@@ -74,6 +74,7 @@ router.post('/users/:id/request-vehicle-resubmission', AdminController.requestVe
 router.get('/fleets', AdminController.listFleets);
 router.post('/fleets', AdminController.createFleet);
 router.patch('/fleets/:id', AdminController.updateFleet);
+router.delete('/fleets/:id', AdminController.deleteFleet);
 router.patch('/drivers/:id/fleet', AdminController.assignDriverFleet);
 
 // Pricing profiles + revenue visibility (041)

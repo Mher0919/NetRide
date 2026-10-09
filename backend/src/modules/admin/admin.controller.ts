@@ -146,6 +146,79 @@ export class AdminController {
     }
   }
 
+  /**
+   * Permanently deletes a fleet partner: assigned drivers are unassigned and
+   * revenue snapshots are detached (FKs have no ON DELETE rule), and the
+   * fleet portal account cascades away. Snapshot financial data itself is
+   * preserved — only the fleet attribution is removed.
+   */
+  static async deleteFleet(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const fleetRes = await client.query(
+        `SELECT id, name FROM fleet_partners WHERE id = $1 FOR UPDATE`,
+        [id],
+      );
+      if (!fleetRes.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Fleet partner not found.' });
+      }
+      const fleet = fleetRes.rows[0];
+
+      const counts = await client.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM drivers WHERE fleet_id = $1) AS driver_count,
+           (SELECT COUNT(*)::int FROM ride_price_snapshots WHERE driver_fleet_id = $1) AS ride_count`,
+        [id],
+      );
+      const portal = await client.query(`SELECT user_id FROM fleet_portal_accounts WHERE fleet_id = $1`, [id]);
+      const portalUserId: string | null = portal.rows[0]?.user_id ?? null;
+
+      await client.query(`UPDATE drivers SET fleet_id = NULL WHERE fleet_id = $1`, [id]);
+      await client.query(`UPDATE ride_price_snapshots SET driver_fleet_id = NULL WHERE driver_fleet_id = $1`, [id]);
+      await client.query(`DELETE FROM fleet_partners WHERE id = $1`, [id]);
+
+      if (portalUserId) {
+        const shared = await client.query(
+          `SELECT 1 FROM partners WHERE user_id = $1
+           UNION ALL
+           SELECT 1 FROM sponsor_portal_accounts WHERE user_id = $1
+           LIMIT 1`,
+          [portalUserId],
+        );
+        if (shared.rows.length === 0) {
+          await client.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [portalUserId]);
+        }
+      }
+
+      await client.query('COMMIT');
+      invalidateRevenueCache();
+
+      await AuditEventsService.record({
+        actorId: req.user!.id,
+        actorRole: 'ADMIN',
+        action: 'FLEET_DELETED',
+        entityType: 'FLEET',
+        entityId: id,
+        details: {
+          name: fleet.name,
+          drivers_unassigned: counts.rows[0].driver_count,
+          rides_detached: counts.rows[0].ride_count,
+        },
+      });
+
+      res.json({ deleted: true });
+    } catch (error: any) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      console.error(`[ADMIN] ❌ Fleet delete error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to delete fleet partner.' });
+    } finally {
+      client.release();
+    }
+  }
+
   /** Assign (fleet_id) or unassign (null) a driver to/from a fleet. */
   static async assignDriverFleet(req: AuthRequest, res: Response) {
     const { id } = req.params;

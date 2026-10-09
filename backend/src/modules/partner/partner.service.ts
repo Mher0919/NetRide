@@ -235,6 +235,69 @@ static async create(input: PartnerInput, adminId: string) {
     return normalizePartner(res.rows[0]);
   }
 
+  /**
+   * Permanently deletes a partner. Promo codes survive but are unlinked
+   * (ON DELETE SET NULL); commission history cascades away with the partner.
+   * A dedicated portal login is deactivated unless it is shared with another
+   * sponsor/fleet portal account.
+   */
+  static async remove(id: string, adminId: string) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const partnerRes = await client.query(
+        `SELECT id, name, contact_email, user_id FROM partners WHERE id = $1 FOR UPDATE`,
+        [id],
+      );
+      if (partnerRes.rows.length === 0) throw new Error('Partner not found');
+      const partner = partnerRes.rows[0];
+
+      const counts = await client.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM promo_codes WHERE partner_id = $1) AS promo_count,
+           (SELECT COUNT(*)::int FROM partner_commissions WHERE partner_id = $1) AS commission_count`,
+        [id],
+      );
+
+      await client.query(`DELETE FROM partners WHERE id = $1`, [id]);
+
+      if (partner.user_id) {
+        const shared = await client.query(
+          `SELECT 1 FROM sponsor_portal_accounts WHERE user_id = $1
+           UNION ALL
+           SELECT 1 FROM fleet_portal_accounts WHERE user_id = $1
+           LIMIT 1`,
+          [partner.user_id],
+        );
+        if (shared.rows.length === 0) {
+          await client.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [partner.user_id]);
+        }
+      }
+
+      await client.query('COMMIT');
+
+      await AuditEventsService.record({
+        actorId: adminId,
+        actorRole: 'ADMIN',
+        action: 'PARTNER_DELETED',
+        entityType: 'PARTNER',
+        entityId: id,
+        details: {
+          name: partner.name,
+          email: partner.contact_email,
+          promos_unlinked: counts.rows[0].promo_count,
+          commissions_deleted: counts.rows[0].commission_count,
+        },
+      });
+      return { deleted: true };
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   /** Stats for a partner: earnings + promo + ride aggregates. */
   static async stats(id: string) {
     const partner = await this.getById(id);

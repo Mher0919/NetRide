@@ -6,6 +6,14 @@ const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000') + '/ap
 // API_URL already includes /api, so API_ORIGIN is just the origin.
 const API_ORIGIN = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
 
+// Resolve a backend-relative URL (e.g. /api/places/photo?...) to an absolute
+// URL usable by <img>. Absolute URLs pass through untouched.
+export function resolveApiUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+  return API_ORIGIN + (path.startsWith('/') ? path : `/${path}`);
+}
+
 const api = axios.create({
   baseURL: API_URL,
   headers: {

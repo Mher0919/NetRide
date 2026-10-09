@@ -115,6 +115,16 @@ export class AdminRewardsController {
     }
   }
 
+  static async deletePartner(req: any, res: Response) {
+    try {
+      const result = await PartnerService.remove(req.params.id, req.user.id);
+      res.json(result);
+    } catch (err: any) {
+      const notFound = err.message === 'Partner not found';
+      res.status(notFound ? 404 : 400).json({ error: err.message || 'Unable to delete partner' });
+    }
+  }
+
   static async listPartnerCommissions(req: any, res: Response) {
     try {
       const limit = parseInt(req.query.limit ?? '50');

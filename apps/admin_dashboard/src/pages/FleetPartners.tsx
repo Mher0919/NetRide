@@ -24,6 +24,7 @@ import {
   InputAdornment,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import PowerIcon from '@mui/icons-material/PowerSettingsNew';
 import GroupsIcon from '@mui/icons-material/Groups';
@@ -34,6 +35,7 @@ import {
   listFleets,
   createFleet,
   updateFleet,
+  deleteFleet,
   assignDriverFleet,
   getUsers,
   createFleetPortalAccount,
@@ -71,6 +73,9 @@ const FleetPartners: React.FC = () => {
   const [portalEmail, setPortalEmail] = React.useState('');
   const [portalResult, setPortalResult] = React.useState<{ email: string; temporaryPassword: string } | null>(null);
   const [portalLoading, setPortalLoading] = React.useState(false);
+
+  const [deleteTarget, setDeleteTarget] = React.useState<{ id: string; name?: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = React.useState(false);
 
   const [snack, setSnack] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
@@ -147,6 +152,22 @@ const FleetPartners: React.FC = () => {
       fetchData();
     } catch (err: any) {
       setSnack({ open: true, message: err?.response?.data?.error || 'Failed to update fleet', severity: 'error' });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      await deleteFleet(deleteTarget.id);
+      setDeleteTarget(null);
+      setSnack({ open: true, message: 'Fleet partner permanently deleted', severity: 'success' });
+      fetchData();
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setSnack({ open: true, message: msg || 'Failed to delete fleet', severity: 'error' });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -345,6 +366,9 @@ const FleetPartners: React.FC = () => {
                         <IconButton size="small" title="Edit" onClick={() => openEdit(f)}>
                           <EditIcon fontSize="small" />
                         </IconButton>
+                        <IconButton size="small" title="Delete permanently" onClick={() => setDeleteTarget(f)}>
+                          <DeleteIcon fontSize="small" color="error" />
+                        </IconButton>
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -536,6 +560,33 @@ const FleetPartners: React.FC = () => {
             </Button>
           )}
           <Button onClick={() => setPortalTarget(null)} sx={{ textTransform: 'none' }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteTarget} onClose={() => !deleteLoading && setDeleteTarget(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Delete fleet partner permanently?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Are you sure you want to delete <b>{deleteTarget?.name}</b>? This cannot be undone.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Assigned drivers will be unassigned and its portal account will be permanently deleted.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={deleteLoading} sx={{ textTransform: 'none' }}>
+            No
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleDelete}
+            disabled={deleteLoading}
+            sx={{ textTransform: 'none' }}
+          >
+            {deleteLoading ? <CircularProgress size={20} color="inherit" /> : 'Yes, delete'}
+          </Button>
         </DialogActions>
       </Dialog>
 

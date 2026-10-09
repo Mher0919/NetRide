@@ -30,6 +30,8 @@ import '../components/driver_cancelled_dialog.dart';
 import '../widgets/branded_map_tile.dart';
 import '../widgets/explore_specials_section.dart';
 import '../widgets/explore_validation_section.dart';
+import '../widgets/special_business_sheet.dart';
+import '../widgets/special_card.dart';
 import 'wallet_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -126,6 +128,13 @@ class _MapScreenState extends State<MapScreen>
   static const double _sheetMinHeight = 96;
   static const double _sheetMaxFraction = 0.62;
 
+  // Smooth camera pan used when a Special is selected (spec §14/§28).
+  late final AnimationController _cameraMoveController;
+  LatLng? _cameraMoveFrom;
+  LatLng? _cameraMoveTo;
+  double _cameraMoveFromZoom = 15;
+  double _cameraMoveToZoom = 15;
+
   // Explore: recent searches shown under the destination card. The backend
   // search-history store is the single source of truth (same one the
   // address-search delegate reads inside the search screen).
@@ -139,10 +148,75 @@ class _MapScreenState extends State<MapScreen>
   /// far below "excessive polling" and only ONE endpoint behind the scene.
   Timer? _specialsRefreshTimer;
 
+  /// Selected-special synchronization (spec §14/§15/§30): the provider is
+  /// the single source of truth. When a Special is selected (from a card or
+  /// a map marker) the explore map expands and smoothly centers on it; the
+  /// red selected marker styling is derived from the same id.
+  late final SpecialsProvider _specialsProvider;
+  String? _lastSelectedSpecialId;
+
+  void _onSpecialSelectionChanged() {
+    final id = _specialsProvider.selectedSpecialId;
+    if (id == _lastSelectedSpecialId) return;
+    _lastSelectedSpecialId = id;
+    if (id == null) return;
+    SponsorSpecial? sponsor;
+    for (final s in _specialsProvider.sponsors) {
+      if (s.id == id) {
+        sponsor = s;
+        break;
+      }
+    }
+    final lat = sponsor?.latitude;
+    final lng = sponsor?.longitude;
+    if (lat == null || lng == null) return;
+    _expandMap();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isMapReady) return;
+      try {
+        final zoom = math.max(_mapController.camera.zoom, 15.0);
+        _animateMapTo(LatLng(lat, lng), zoom);
+        setState(() => _shouldFollowUser = false);
+      } catch (e) {
+        debugPrint('[EXPLORE] focus special failed: $e');
+      }
+    });
+  }
+
+  /// Eases the camera to [target] instead of jumping (spec §28).
+  void _animateMapTo(LatLng target, double zoom) {
+    try {
+      _cameraMoveFrom = _mapController.camera.center;
+      _cameraMoveFromZoom = _mapController.camera.zoom;
+    } catch (_) {
+      _cameraMoveFrom = null;
+    }
+    _cameraMoveTo = target;
+    _cameraMoveToZoom = zoom;
+    _cameraMoveController.forward(from: 0);
+  }
+
+  void _tickCameraMove() {
+    final from = _cameraMoveFrom;
+    final to = _cameraMoveTo;
+    if (from == null || to == null || !_isMapReady) return;
+    final t = Curves.easeOutCubic.transform(_cameraMoveController.value);
+    final lat = from.latitude + (to.latitude - from.latitude) * t;
+    final lng = from.longitude + (to.longitude - from.longitude) * t;
+    final zoom = _cameraMoveFromZoom + (_cameraMoveToZoom - _cameraMoveFromZoom) * t;
+    try {
+      _mapController.move(LatLng(lat, lng), zoom);
+    } catch (_) {
+      // Map detached mid-animation — nothing to do.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _specialsProvider = context.read<SpecialsProvider>();
+    _specialsProvider.addListener(_onSpecialSelectionChanged);
     _specialsRefreshTimer = Timer.periodic(const Duration(minutes: 3), (_) {
       if (!mounted || !TickerMode.of(context)) return;
       context.read<SpecialsProvider>().refresh(
@@ -154,6 +228,10 @@ class _MapScreenState extends State<MapScreen>
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
+    _cameraMoveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    )..addListener(_tickCameraMove);
     _creditsShakeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
@@ -307,12 +385,14 @@ class _MapScreenState extends State<MapScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     RideIntent.instance.notifier.removeListener(_onRideIntent);
+    _specialsProvider.removeListener(_onSpecialSelectionChanged);
     _specialsRefreshTimer?.cancel();
     _positionSubscription?.cancel();
     _geohashTimer?.cancel();
     _cameraFitTimer?.cancel();
     _creditsZeroTimer?.cancel();
     _sheetController.dispose();
+    _cameraMoveController.dispose();
     _creditsShakeController.dispose();
     _promoCodeController.dispose();
     _customCreditController.dispose();
@@ -767,7 +847,7 @@ class _MapScreenState extends State<MapScreen>
   int get _totalSavedCents => _promoDiscountCents + _creditsToUseCents;
 
   /// A special (sponsor deal) is attached to this ride: the redemption was
-  /// created on the special-detail page and this map attaches it to the
+  /// created from the business bottom sheet and this map attaches it to the
   /// request, so the backend applies the sponsor discount. Promo codes are
   /// disabled for special rides.
   bool get _specialAttached => _specialRedemptionId != null;
@@ -967,6 +1047,11 @@ class _MapScreenState extends State<MapScreen>
               .where((x) => x.latitude != null && x.longitude != null)
               .toList(),
         );
+    // The selected special id drives the red marker AND the card highlight
+    // from one place (spec §15/§30).
+    final selectedSponsorId = context.select<SpecialsProvider, String?>(
+      (s) => s.selectedSpecialId,
+    );
 
     // When a driver accepts, leave the map and go to the active trip
     // screen. Covers BOTH the initial request (`_requesting`) and a resumed
@@ -1405,22 +1490,31 @@ class _MapScreenState extends State<MapScreen>
                                                               s.latitude!,
                                                               s.longitude!,
                                                             ),
-                                                            width: 36,
-                                                            height: 36,
+                                                            width:
+                                                                selectedSponsorId ==
+                                                                    s.id
+                                                                ? 48
+                                                                : 36,
+                                                            height:
+                                                                selectedSponsorId ==
+                                                                    s.id
+                                                                ? 48
+                                                                : 36,
                                                             child: GestureDetector(
+                                                              behavior:
+                                                                  HitTestBehavior
+                                                                      .opaque,
                                                               onTap: () =>
-                                                                  Navigator.of(
+                                                                  SpecialBusinessSheet.show(
                                                                     context,
-                                                                  ).pushNamed(
-                                                                    '/special-detail',
-                                                                    arguments: {
-                                                                      'id':
-                                                                          s.id,
-                                                                    },
+                                                                    sponsor: s,
                                                                   ),
                                                               child:
                                                                   _buildSponsorMarker(
                                                                     s,
+                                                                    selected:
+                                                                        selectedSponsorId ==
+                                                                        s.id,
                                                                   ),
                                                             ),
                                                           ),
@@ -3233,29 +3327,48 @@ class _MapScreenState extends State<MapScreen>
   /// Specials sponsor map pin. Rendered ONLY for sponsors present in the
   /// backend's eligible active-specials list — the same list as the Explore
   /// SPECIALS section, so zero active specials means zero markers.
-  Widget _buildSponsorMarker(SponsorSpecial s) {
-    return Container(
-      width: 30,
-      height: 30,
-      decoration: BoxDecoration(
-        color: const Color(0xFF5B7760),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 8,
-            color: Colors.black.withOpacity(0.25),
-            offset: const Offset(0, 3),
+  ///
+  /// The selected business gets a clearly visible RED marker (spec §15);
+  /// unselected markers keep the brand green. Movement between selections is
+  /// driven entirely by `SpecialsProvider.selectedSpecialId`.
+  Widget _buildSponsorMarker(SponsorSpecial s, {required bool selected}) {
+    final color = selected ? const Color(0xFFD64545) : const Color(0xFF5B7760);
+    final size = selected ? 38.0 : 30.0;
+    final marker = Semantics(
+      button: true,
+      label: 'Special at ${s.businessName}',
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: selected ? 3 : 2),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: selected ? 12 : 8,
+              color: Colors.black.withValues(alpha: selected ? 0.35 : 0.25),
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Icon(
+            specialTypeIcon(s.businessType),
+            color: Colors.white,
+            size: selected ? 19 : 15,
           ),
-        ],
-      ),
-      child: Center(
-        child: Icon(
-          specialTypeIcon(s.businessType),
-          color: Colors.white,
-          size: 15,
         ),
       ),
+    );
+    if (!selected) return marker;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.72, end: 1.0),
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutBack,
+      builder: (context, scale, child) =>
+          Transform.scale(scale: scale, child: child),
+      child: marker,
     );
   }
 }

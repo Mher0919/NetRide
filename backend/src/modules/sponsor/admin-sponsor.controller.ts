@@ -9,6 +9,10 @@ import { pool } from '../../config/database';
 import { centsValue } from '../../services/financial-ledger.service';
 import { SponsorService, discountLabelFor, SponsorStatus } from './sponsor.service';
 import { SpecialRedemptionService } from './special-redemption.service';
+import {
+  GooglePlacesService,
+  isValidPlaceId,
+} from '../google-places/google-places.service';
 
 interface AdminReq extends Request {
   user?: { id: string; role: string; email: string };
@@ -17,6 +21,64 @@ interface AdminReq extends Request {
 const VALID_BUSINESS_TYPES = [
   'RESTAURANT', 'CAFE', 'RETAIL', 'BAR', 'SERVICES', 'MEDICAL', 'AUTO', 'OTHER',
 ];
+
+export interface GoogleAssociation {
+  googlePlaceId: string | null;
+  googleBusinessName: string | null;
+  googleBusinessCategory: string | null;
+  googleBusinessLatitude: number | null;
+  googleBusinessLongitude: number | null;
+  googleBusinessAddress: string | null;
+  googlePlacesSyncedAt: Date | null;
+}
+
+export type GoogleAssociationResult =
+  | { error: string }
+  | { value: GoogleAssociation }
+  | { skip: true };
+
+/**
+ * Validates the client's Google business association without trusting any
+ * client-supplied Place ID or metadata (spec §24): the Place ID must be a
+ * real Google Place ID AND carry a valid HMAC selection token that THIS
+ * backend issued from a live Google response. Everything stored comes from
+ * the verified token, never from the request body's free-form fields.
+ */
+export function parseGoogleAssociation(body: any): GoogleAssociationResult {
+  const placeId = body?.googlePlaceId;
+  if (placeId === undefined) return { skip: true };
+  if (placeId === null || placeId === '') {
+    return {
+      value: {
+        googlePlaceId: null,
+        googleBusinessName: null,
+        googleBusinessCategory: null,
+        googleBusinessLatitude: null,
+        googleBusinessLongitude: null,
+        googleBusinessAddress: null,
+        googlePlacesSyncedAt: null,
+      },
+    };
+  }
+  if (!isValidPlaceId(placeId)) {
+    return { error: 'Invalid Google Place ID.' };
+  }
+  const payload = GooglePlacesService.verifySelectionToken(body?.googleSelectionToken);
+  if (!payload || payload.p !== placeId) {
+    return { error: 'The selected Google business could not be verified. Please select it again.' };
+  }
+  return {
+    value: {
+      googlePlaceId: payload.p,
+      googleBusinessName: payload.n ? payload.n.slice(0, 200) : null,
+      googleBusinessCategory: payload.c ? payload.c.slice(0, 120) : null,
+      googleBusinessLatitude: payload.la,
+      googleBusinessLongitude: payload.ln,
+      googleBusinessAddress: payload.a ? payload.a.slice(0, 400) : null,
+      googlePlacesSyncedAt: new Date(),
+    },
+  };
+}
 
 export class AdminSponsorController {
   // ---------------------------------------------------------------- CRUD
@@ -103,6 +165,12 @@ export class AdminSponsorController {
         return res.status(400).json({ error: 'Both latitude and longitude are required together' });
       }
 
+      const googleAssociation = parseGoogleAssociation(b);
+      if ('error' in googleAssociation) {
+        return res.status(400).json({ error: googleAssociation.error });
+      }
+      const google = 'value' in googleAssociation ? googleAssociation.value : null;
+
       const sponsor = await SponsorService.create({
         businessName: b.businessName,
         businessType: b.businessType,
@@ -120,6 +188,13 @@ export class AdminSponsorController {
         longitude: lng,
         logoUrl: b.logoUrl ?? null,
         coverImageUrl: b.coverImageUrl ?? null,
+        googlePlaceId: google?.googlePlaceId ?? null,
+        googleBusinessName: google?.googleBusinessName ?? null,
+        googleBusinessCategory: google?.googleBusinessCategory ?? null,
+        googleBusinessLatitude: google?.googleBusinessLatitude ?? null,
+        googleBusinessLongitude: google?.googleBusinessLongitude ?? null,
+        googleBusinessAddress: google?.googleBusinessAddress ?? null,
+        googlePlacesSyncedAt: google?.googlePlacesSyncedAt ?? null,
         discountType: b.discountType,
         discountPercent: b.discountPercent,
         maxDiscountPercent: b.maxDiscountPercent,
@@ -180,6 +255,21 @@ export class AdminSponsorController {
         patch.longitude = lng;
       }
 
+      const googleAssociation = parseGoogleAssociation(b);
+      if ('error' in googleAssociation) {
+        return res.status(400).json({ error: googleAssociation.error });
+      }
+      if ('value' in googleAssociation) {
+        const g = googleAssociation.value;
+        patch.google_place_id = g.googlePlaceId;
+        patch.google_business_name = g.googleBusinessName;
+        patch.google_business_category = g.googleBusinessCategory;
+        patch.google_business_latitude = g.googleBusinessLatitude;
+        patch.google_business_longitude = g.googleBusinessLongitude;
+        patch.google_business_address = g.googleBusinessAddress;
+        patch.google_places_synced_at = g.googlePlacesSyncedAt;
+      }
+
       const sponsor = await SponsorService.update(req.params.id, patch);
       if (!sponsor) return res.status(404).json({ error: 'Sponsor not found' });
       res.json({ sponsor });
@@ -195,6 +285,16 @@ export class AdminSponsorController {
       res.json({ sponsor });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
+    }
+  }
+
+  static async remove(req: AdminReq, res: Response) {
+    try {
+      const result = await SponsorService.deleteById(req.params.id, { id: req.user!.id, role: 'ADMIN' });
+      res.json(result);
+    } catch (err: any) {
+      const notFound = err.message === 'Sponsor not found';
+      res.status(notFound ? 404 : 400).json({ error: err.message || 'Unable to delete sponsor' });
     }
   }
 

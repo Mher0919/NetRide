@@ -45,6 +45,13 @@ export interface SponsorRow {
   longitude: number | null;
   logo_url: string | null;
   cover_image_url: string | null;
+  google_place_id: string | null;
+  google_business_name: string | null;
+  google_business_category: string | null;
+  google_business_latitude: number | null;
+  google_business_longitude: number | null;
+  google_business_address: string | null;
+  google_places_synced_at: Date | null;
   discount_type: SponsorshipDiscountType;
   discount_percent: number | null;
   max_discount_percent: number;
@@ -108,6 +115,13 @@ export function normalizeSponsor(r: any): SponsorRow {
     longitude: r.longitude != null ? Number(r.longitude) : null,
     logo_url: r.logo_url,
     cover_image_url: r.cover_image_url,
+    google_place_id: r.google_place_id ?? null,
+    google_business_name: r.google_business_name ?? null,
+    google_business_category: r.google_business_category ?? null,
+    google_business_latitude: r.google_business_latitude != null ? Number(r.google_business_latitude) : null,
+    google_business_longitude: r.google_business_longitude != null ? Number(r.google_business_longitude) : null,
+    google_business_address: r.google_business_address ?? null,
+    google_places_synced_at: r.google_places_synced_at ?? null,
     discount_type: r.discount_type,
     discount_percent: r.discount_percent != null ? Number(r.discount_percent) : null,
     max_discount_percent: Number(r.max_discount_percent),
@@ -128,6 +142,9 @@ const SPONSOR_COLUMNS = `
   SELECT id, business_name, business_type, business_description, manager_name,
          phone, email, other_contact_info, address, city, state, postal_code,
          country, latitude, longitude, logo_url, cover_image_url,
+         google_place_id, google_business_name, google_business_category,
+         google_business_latitude, google_business_longitude,
+         google_business_address, google_places_synced_at,
          discount_type, discount_percent, max_discount_percent,
          discount_fixed_amount_cents, initial_budget_cents,
          remaining_budget_cents, reserved_budget_cents, used_budget_cents,
@@ -152,6 +169,13 @@ export interface SponsorCreateInput {
   longitude?: number | null;
   logoUrl?: string | null;
   coverImageUrl?: string | null;
+  googlePlaceId?: string | null;
+  googleBusinessName?: string | null;
+  googleBusinessCategory?: string | null;
+  googleBusinessLatitude?: number | null;
+  googleBusinessLongitude?: number | null;
+  googleBusinessAddress?: string | null;
+  googlePlacesSyncedAt?: Date | null;
   discountType: SponsorshipDiscountType;
   discountPercent?: number | null;
   maxDiscountPercent?: number;
@@ -184,16 +208,20 @@ export class SponsorService {
     try {
       await client.query('BEGIN');
       const res = await client.query(
-        `INSERT INTO sponsors (
+         `INSERT INTO sponsors (
            business_name, business_type, business_description, manager_name,
            phone, email, other_contact_info, address, city, state, postal_code,
            country, latitude, longitude, logo_url, cover_image_url,
+           google_place_id, google_business_name, google_business_category,
+           google_business_latitude, google_business_longitude,
+           google_business_address, google_places_synced_at,
            discount_type, discount_percent, max_discount_percent,
            discount_fixed_amount_cents, initial_budget_cents,
            remaining_budget_cents, reserved_budget_cents, used_budget_cents,
            status
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-                   $17,$18,$19,$20,$21,$22,0,0,'INACTIVE')
+                   $17,$18,$19,$20,$21,$22,$23,
+                   $24,$25,$26,$27,$28,$29,0,0,'INACTIVE')
          RETURNING *`,
         [
           input.businessName.trim(),
@@ -212,6 +240,13 @@ export class SponsorService {
           input.longitude ?? null,
           input.logoUrl ?? null,
           input.coverImageUrl ?? null,
+          input.googlePlaceId ?? null,
+          input.googleBusinessName ?? null,
+          input.googleBusinessCategory ?? null,
+          input.googleBusinessLatitude ?? null,
+          input.googleBusinessLongitude ?? null,
+          input.googleBusinessAddress ?? null,
+          input.googlePlacesSyncedAt ?? null,
           input.discountType,
           input.discountType === 'PERCENTAGE' ? Number(input.discountPercent ?? 0) : null,
           Math.max(1, Math.min(100, Number(input.maxDiscountPercent ?? 90))),
@@ -268,6 +303,9 @@ export class SponsorService {
       'postal_code', 'country', 'latitude', 'longitude', 'logo_url',
       'cover_image_url', 'discount_type', 'discount_percent',
       'max_discount_percent', 'discount_fixed_amount_cents',
+      'google_place_id', 'google_business_name', 'google_business_category',
+      'google_business_latitude', 'google_business_longitude',
+      'google_business_address', 'google_places_synced_at',
       'specials_enabled', 'map_listing_enabled',
     ];
     const sets: string[] = [];
@@ -391,6 +429,76 @@ export class SponsorService {
       details: { status },
     }).catch(() => undefined);
     return normalizeSponsor(res.rows[0]);
+  }
+
+  /**
+   * Permanently deletes a sponsor AND its financial history: special
+   * redemptions (no ON DELETE rule), budget ledger rows and portal account
+   * all go with it. A dedicated portal login is deactivated unless it is
+   * shared with another partner/fleet portal account.
+   */
+  static async deleteById(id: string, actor?: { id?: string; role?: string }): Promise<{ deleted: true }> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const sponsorRes = await client.query(
+        `SELECT id, business_name FROM sponsors WHERE id = $1 FOR UPDATE`,
+        [id],
+      );
+      if (sponsorRes.rows.length === 0) throw new Error('Sponsor not found');
+      const sponsor = sponsorRes.rows[0];
+
+      const counts = await client.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM special_redemptions WHERE sponsor_id = $1) AS redemption_count,
+           (SELECT COUNT(*)::int FROM sponsor_ledger_entries WHERE sponsor_id = $1) AS ledger_count`,
+        [id],
+      );
+      const portal = await client.query(
+        `SELECT user_id FROM sponsor_portal_accounts WHERE sponsor_id = $1`,
+        [id],
+      );
+      const portalUserId: string | null = portal.rows[0]?.user_id ?? null;
+
+      // special_redemptions has no ON DELETE cascade — remove it explicitly
+      // BEFORE the sponsor (ledger + portal rows cascade on their own).
+      await client.query(`DELETE FROM special_redemptions WHERE sponsor_id = $1`, [id]);
+      await client.query(`DELETE FROM sponsors WHERE id = $1`, [id]);
+
+      if (portalUserId) {
+        const shared = await client.query(
+          `SELECT 1 FROM partners WHERE user_id = $1
+           UNION ALL
+           SELECT 1 FROM fleet_portal_accounts WHERE user_id = $1
+           LIMIT 1`,
+          [portalUserId],
+        );
+        if (shared.rows.length === 0) {
+          await client.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [portalUserId]);
+        }
+      }
+
+      await client.query('COMMIT');
+
+      await AuditEventsService.record({
+        actorId: actor?.id ?? null,
+        actorRole: actor?.role ?? 'ADMIN',
+        action: 'SPONSOR_DELETED',
+        entityType: 'SPONSOR',
+        entityId: id,
+        details: {
+          businessName: sponsor.business_name,
+          redemptions_deleted: counts.rows[0].redemption_count,
+          ledger_entries_deleted: counts.rows[0].ledger_count,
+        },
+      });
+      return { deleted: true };
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   /**

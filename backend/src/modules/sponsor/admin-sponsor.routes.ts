@@ -16,6 +16,7 @@ router.post('/sponsors', AdminSponsorController.create);
 router.get('/sponsors/redemptions', AdminSponsorController.listRedemptions);
 router.get('/sponsors/:id', AdminSponsorController.getOne);
 router.patch('/sponsors/:id', AdminSponsorController.update);
+router.delete('/sponsors/:id', AdminSponsorController.remove);
 router.post('/sponsors/:id/status/:status', AdminSponsorController.setStatus);
 router.post('/sponsors/:id/budget/adjust', AdminSponsorController.adjustBudget);
 router.get('/sponsors/:id/ledger', AdminSponsorController.getLedger);

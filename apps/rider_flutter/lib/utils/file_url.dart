@@ -27,3 +27,21 @@ String resolveFileUrl(String url) {
 
   return url;
 }
+
+/// Resolves any backend-relative URL (e.g. the signed Google photo proxy at
+/// `/api/places/photo?...`) to a fully-qualified URL for the current
+/// environment. Stale absolute URLs pointing at our own /api/ endpoints are
+/// re-resolved so development hosts never leak into production builds.
+String resolveApiUrl(String url) {
+  if (url.isEmpty) return url;
+  if (url.startsWith('/api/')) {
+    final base = ApiService.baseUrl.replaceAll(RegExp(r'/api/?$'), '');
+    return '$base$url';
+  }
+  final match = RegExp(r'^https?://[^/]+(/api/)').firstMatch(url);
+  if (match != null) {
+    final base = ApiService.baseUrl.replaceAll(RegExp(r'/api/?$'), '');
+    return '$base${match.group(1)}${url.substring(match.end)}';
+  }
+  return url;
+}

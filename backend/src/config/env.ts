@@ -12,6 +12,12 @@ const envSchema = z.object({
   JWT_SECRET: z.string(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
   GOOGLE_ROUTES_API_KEY: z.string().optional(),
+  // ---- Google Places API (New) ---------------------------------------------
+  // Preferred key for Google business information (SPECIALS). Falls back to
+  // GOOGLE_MAPS_API_KEY, then GOOGLE_ROUTES_API_KEY. Server-side only — the
+  // key must never be exposed to clients. Enable "Places API (New)" plus
+  // billing on the project that owns this key.
+  GOOGLE_PLACES_API_KEY: z.string().optional(),
   // ---- Routing engine: A* (PRIMARY) ----------------------------------------
   // Self-hosted A* routing engine. Loads preprocessed graph from disk.
   // Fast, free, and runs entirely in-memory. No external API calls.

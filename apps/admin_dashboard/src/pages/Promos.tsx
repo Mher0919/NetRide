@@ -225,7 +225,7 @@ const Promos: React.FC = () => {
     try {
       await deletePromo(deleteTarget.id);
       setDeleteTarget(null);
-      setSnack({ open: true, message: 'Promo deleted', severity: 'success' });
+      setSnack({ open: true, message: 'Promo permanently deleted', severity: 'success' });
       fetchData();
     } catch (err: any) {
       setSnack({ open: true, message: err?.response?.data?.error || 'Failed to delete promo', severity: 'error' });
@@ -499,17 +499,17 @@ const Promos: React.FC = () => {
       </Drawer>
 
       {/* Delete dialog */}
-      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} fullWidth maxWidth="xs">
-        <DialogTitle>Delete promo</DialogTitle>
+      <Dialog open={!!deleteTarget} onClose={() => !actionLoading && setDeleteTarget(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Delete promo code permanently?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            Delete <b>{deleteTarget?.code}</b>? This cannot be undone.
+            Are you sure you want to delete <b>{deleteTarget?.code}</b>? This cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteTarget(null)} sx={{ textTransform: 'none' }}>Cancel</Button>
+          <Button onClick={() => setDeleteTarget(null)} disabled={actionLoading} sx={{ textTransform: 'none' }}>No</Button>
           <Button variant="contained" color="error" onClick={handleDelete} disabled={actionLoading} sx={{ textTransform: 'none' }}>
-            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Delete'}
+            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Yes, delete'}
           </Button>
         </DialogActions>
       </Dialog>

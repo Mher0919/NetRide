@@ -24,7 +24,6 @@ import 'services/user_service.dart';
 import 'services/sound_service.dart';
 import 'services/notification_service.dart';
 import 'screens/credits_screen.dart';
-import 'screens/special_detail_screen.dart';
 import 'screens/special_redemption_screen.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -333,11 +332,6 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
               case '/reset-password':
                 final args = settings.arguments as Map<String, dynamic>?;
                 page = ResetPasswordScreen(token: args?['token']);
-                break;
-              case '/special-detail':
-                final args = settings.arguments as Map<String, dynamic>?;
-                page = SpecialDetailScreen(
-                    sponsorId: args?['id'] as String? ?? '');
                 break;
               case '/special-redemption':
                 final args = settings.arguments as Map<String, dynamic>?;

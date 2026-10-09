@@ -27,6 +27,7 @@ import {
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
@@ -34,6 +35,7 @@ import {
   listPartners,
   createPartner,
   updatePartner,
+  deletePartner,
   getPartner,
   setPartnerStatus,
   getPartnerCommissions,
@@ -97,6 +99,9 @@ const Partners: React.FC = () => {
   const [markTarget, setMarkTarget] = React.useState<any>(null);
   const [markRef, setMarkRef] = React.useState('');
   const [actionLoading, setActionLoading] = React.useState(false);
+
+  const [deleteTarget, setDeleteTarget] = React.useState<{ id: string; name?: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = React.useState(false);
 
   const [showCreatePassword, setShowCreatePassword] = React.useState(false);
   const [showEditPassword, setShowEditPassword] = React.useState(false);
@@ -195,6 +200,23 @@ const Partners: React.FC = () => {
       fetchData();
     } catch (err: any) {
       setSnack({ open: true, message: err?.response?.data?.error || 'Status change failed', severity: 'error' });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      await deletePartner(deleteTarget.id);
+      if (selected?.id === deleteTarget.id) setSelected(null);
+      setDeleteTarget(null);
+      setSnack({ open: true, message: 'Partner permanently deleted', severity: 'success' });
+      fetchData();
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setSnack({ open: true, message: msg || 'Failed to delete partner', severity: 'error' });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -397,6 +419,9 @@ const Partners: React.FC = () => {
                               Archive
                             </Button>
                           )}
+                          <IconButton size="small" title="Delete permanently" onClick={() => setDeleteTarget(p)}>
+                            <DeleteIcon fontSize="small" color="error" />
+                          </IconButton>
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -642,6 +667,34 @@ const Partners: React.FC = () => {
             sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none' }}
           >
             {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Confirm'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteTarget} onClose={() => !deleteLoading && setDeleteTarget(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Delete partner permanently?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Are you sure you want to delete <b>{deleteTarget?.name}</b>? This cannot be undone.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Its commission history and portal account will be permanently deleted. Its promo
+            codes will remain but will no longer be linked to a partner.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={deleteLoading} sx={{ textTransform: 'none' }}>
+            No
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleDelete}
+            disabled={deleteLoading}
+            sx={{ textTransform: 'none' }}
+          >
+            {deleteLoading ? <CircularProgress size={20} color="inherit" /> : 'Yes, delete'}
           </Button>
         </DialogActions>
       </Dialog>

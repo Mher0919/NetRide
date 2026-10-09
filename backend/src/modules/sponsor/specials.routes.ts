@@ -24,6 +24,10 @@ router.post('/specials/redemptions/:id/reward', authMiddleware, riderMiddleware,
 // GET /specials — discovery (bounded geo queries, paginated, spec §125).
 router.get('/specials', SpecialsController.list);
 
+// Google business detail for the rider sheet. Authenticated (rider/admin) so
+// anonymous traffic cannot drive up Places API cost.
+router.get('/specials/:id/business', authMiddleware, SpecialsController.getBusiness);
+
 // POST /specials/:id/redemption + GET /specials/:id — UUID-only params.
 router.get('/specials/:id', SpecialsController.getOne);
 router.post('/specials/:id/redemption', authMiddleware, riderMiddleware, SpecialsController.createRedemption);

@@ -262,6 +262,11 @@ export const updatePartner = async (id: string, data: Record<string, unknown>) =
   return response.data;
 };
 
+export const deletePartner = async (id: string) => {
+  const response = await api.delete(`/admin/partners/${id}`);
+  return response.data as { deleted: boolean };
+};
+
 export const setPartnerStatus = async (id: string, status: string) => {
   const response = await api.post(`/admin/partners/${id}/status/${status}`);
   return response.data;
@@ -403,6 +408,11 @@ export const updateFleet = async (id: string, data: Record<string, unknown>) => 
   return response.data as { fleet: any };
 };
 
+export const deleteFleet = async (id: string) => {
+  const response = await api.delete(`/admin/fleets/${id}`);
+  return response.data as { deleted: boolean };
+};
+
 export const assignDriverFleet = async (driverId: string, fleetId: string | null) => {
   const response = await api.patch(`/admin/drivers/${driverId}/fleet`, { fleet_id: fleetId });
   return response.data as { driver_id: string; fleet_id: string | null };
@@ -496,6 +506,11 @@ export const setSponsorStatus = async (id: string, status: string) => {
   return response.data as { sponsor: Record<string, unknown> };
 };
 
+export const deleteSponsor = async (id: string) => {
+  const response = await api.delete(`/admin/sponsors/${id}`);
+  return response.data as { deleted: boolean };
+};
+
 export const adjustSponsorBudget = async (id: string, amountCents: number, reason: string, direction: 'CREDIT' | 'DEBIT' = 'CREDIT') => {
   const response = await api.post(`/admin/sponsors/${id}/budget/adjust`, { amount_cents: amountCents, reason, direction });
   return response.data;
@@ -534,4 +549,44 @@ export const resetSponsorPortalPassword = async (id: string) => {
 export const disableSponsorPortalAccount = async (id: string) => {
   const response = await api.post(`/admin/sponsors/${id}/portal-account/disable`);
   return response.data;
+};
+
+// ----- Google business association (Places API via backend proxy) -----------
+
+export interface GoogleBusinessSuggestion {
+  placeId: string;
+  name: string;
+  category: string | null;
+  address: string | null;
+  shortAddress: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  rating: number | null;
+  reviewCount: number | null;
+  distanceMiles: number | null;
+  photoUrl: string | null;
+  photoAttribution: { displayName: string; uri: string | null } | null;
+  selectionToken: string;
+}
+
+export interface GoogleBusinessResponse {
+  businesses: GoogleBusinessSuggestion[];
+  googleAvailable: boolean;
+  error?: string;
+  code?: string;
+}
+
+export const getNearbyGoogleBusinesses = async (params: {
+  lat: number;
+  lng: number;
+  radius?: number;
+  limit?: number;
+}) => {
+  const response = await api.get('/places/nearby', { params });
+  return response.data as GoogleBusinessResponse;
+};
+
+export const searchGoogleBusinesses = async (params: { q: string; lat?: number; lng?: number }) => {
+  const response = await api.get('/places/text-search', { params });
+  return response.data as GoogleBusinessResponse;
 };

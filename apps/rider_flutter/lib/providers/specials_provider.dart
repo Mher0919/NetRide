@@ -8,7 +8,9 @@
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import '../models/google_business.dart';
 import '../models/special_models.dart';
+import '../services/business_place_service.dart';
 import '../services/specials_service.dart';
 import 'ride_provider.dart';
 
@@ -275,6 +277,121 @@ class SpecialsProvider extends ChangeNotifier {
   bool get canAttachToRide {
     final r = _current;
     return r != null && r.status == 'CREATED';
+  }
+
+  // ================================================================
+  // SELECTED SPECIAL — the single source of truth (spec §30)
+  //
+  // `selectedSpecialId` drives the red map marker, the highlighted Special
+  // card and the business bottom sheet. There is never independent selection
+  // state in the map, the card or the sheet.
+  // ================================================================
+
+  String? _selectedSpecialId;
+  String? get selectedSpecialId => _selectedSpecialId;
+
+  void selectSpecial(String id) {
+    if (id.isEmpty || _selectedSpecialId == id) return;
+    _selectedSpecialId = id;
+    notifyListeners();
+  }
+
+  void clearSelection() {
+    if (_selectedSpecialId == null) return;
+    _selectedSpecialId = null;
+    notifyListeners();
+  }
+
+  // ================================================================
+  // GOOGLE BUSINESS DATA (server-proxied Places API)
+  // ================================================================
+
+  final Map<String, GoogleBusinessResult> _businessBySpecial = {};
+  final Map<String, bool> _businessLoading = {};
+  final Map<String, bool> _businessFullRequested = {};
+  final Set<String> _photoHydrationRequested = {};
+
+  /// Cached Google business for a Special, or null while unknown.
+  GoogleBusinessResult? businessFor(String sponsorId) =>
+      _businessBySpecial[sponsorId];
+  bool businessLoading(String sponsorId) =>
+      _businessLoading[sponsorId] == true;
+
+  /// Loads Google business info for a Special (deduped per request level).
+  /// Never throws — a failure is cached as an "unavailable" result so the
+  /// sheet can render the admin Special with a graceful notice.
+  Future<GoogleBusinessResult?> ensureBusiness(
+    String sponsorId, {
+    String level = 'basic',
+    bool force = false,
+  }) async {
+    if (sponsorId.isEmpty) return null;
+    final existing = _businessBySpecial[sponsorId];
+    if (!force && existing != null) {
+      final satisfied = existing.manual ||
+          (existing.business != null &&
+              (level == 'basic' || existing.business!.isFull));
+      if (satisfied || _businessLoading[sponsorId] == true) return existing;
+    }
+    if (_businessLoading[sponsorId] == true) return existing;
+
+    // A previous failure (no business, not manual) should be retried rather
+    // than served from the client cache.
+    final retryAfterFailure =
+        existing != null && existing.business == null && !existing.manual;
+
+    _businessLoading[sponsorId] = true;
+    notifyListeners();
+    try {
+      final result = await BusinessPlaceService.fetchForSpecial(
+        sponsorId,
+        level: level,
+        force: force || retryAfterFailure,
+      );
+      _businessBySpecial[sponsorId] = result;
+      return result;
+    } catch (e) {
+      debugPrint('[SPECIALS] business fetch failed for $sponsorId: $e');
+      if (existing == null) {
+        _businessBySpecial[sponsorId] = GoogleBusinessResult.unavailable;
+      }
+      return _businessBySpecial[sponsorId];
+    } finally {
+      _businessLoading[sponsorId] = false;
+      notifyListeners();
+    }
+  }
+
+  /// Upgrades a Special's Google info to `full` (hours, phone, website,
+  /// reviews) exactly once — used when the bottom sheet is expanded.
+  Future<void> ensureFullBusiness(String sponsorId) async {
+    if (_businessFullRequested[sponsorId] == true) return;
+    _businessFullRequested[sponsorId] = true;
+    final current = _businessBySpecial[sponsorId];
+    if (current?.manual == true) return;
+    if (current?.business?.isFull == true) return;
+    await ensureBusiness(sponsorId, level: 'full', force: true);
+  }
+
+  /// Warms the basic Google photo for the visible Special cards so the
+  /// redesigned cards can use real business imagery (spec §12). Best-effort,
+  /// at most one request per Special per session, and only for cards that
+  /// have no admin-provided cover image.
+  void hydrateCardPhotos(Iterable<SponsorSpecial> sponsors) {
+    var started = 0;
+    for (final s in sponsors) {
+      if (started >= 5) break;
+      if (!s.isGoogleConnected) continue;
+      if (s.coverImageUrl?.isNotEmpty == true) continue;
+      if (_photoHydrationRequested.contains(s.id)) continue;
+      if (_businessBySpecial.containsKey(s.id) ||
+          _businessLoading[s.id] == true) {
+        continue;
+      }
+      _photoHydrationRequested.add(s.id);
+      started++;
+      ensureBusiness(s.id);
+    }
   }
 
   String friendlyFrom(Object e) {
