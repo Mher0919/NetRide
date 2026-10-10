@@ -1,4 +1,4 @@
-import 'package:dio/dio.dart';
+﻿import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
@@ -49,7 +50,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isSaving = false;
   bool _isEditing = false;
   bool _isSendingEmailLink = false;
-  bool _isSubmittingCard = false;
   bool _isRequestingPayout = false;
   bool _isVerified = false;
   bool _hasPassword = false;
@@ -178,7 +178,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _hasDocumentActionRequired =
             reqs.any((r) => (r as Map)['status'] == 'resubmission_required');
       } catch (e) {
-        debugPrint('[PROFILE] ❌ Doc req fetch error: $e');
+        debugPrint('[PROFILE] âŒ Doc req fetch error: $e');
       }
     } catch (e) {
       if (e is DioException && e.response?.statusCode == 404) {
@@ -190,9 +190,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      debugPrint('[PROFILE] ❌ _fetchProfile error: $e');
+      debugPrint('[PROFILE] âŒ _fetchProfile error: $e');
       if (e is FormatException) {
-        debugPrint('[PROFILE]   ⚠️ FormatException details: ${e.message}');
+        debugPrint('[PROFILE]   âš ï¸ FormatException details: ${e.message}');
       }
 
       setState(() {
@@ -336,17 +336,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
       final code = e.response?.statusCode;
       if (code == 429) return 'Too many requests. Please wait and try again later.';
-      if (code == 413) return 'Image is too large — please choose a smaller one.';
+      if (code == 413) return 'Image is too large â€” please choose a smaller one.';
     }
     final s = e.toString().toLowerCase();
     if (s.contains('429') || s.contains('too many') || s.contains('rate limit')) {
       return 'Too many requests. Please wait and try again later.';
     }
     if (s.contains('413') || s.contains('too large')) {
-      return 'Image is too large — please choose a smaller one.';
+      return 'Image is too large â€” please choose a smaller one.';
     }
     if (s.contains('network') || s.contains('timeout') || s.contains('socket')) {
-      return 'Network error — please check your connection and try again.';
+      return 'Network error â€” please check your connection and try again.';
     }
     return 'Failed to upload image. Please try again.';
   }
@@ -726,7 +726,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // Detect locally-unsaved changes for direct-edit fields.
       // Fields that have already been submitted for admin review
-      // (_pendingSubmittedValues) are skipped entirely — they are
+      // (_pendingSubmittedValues) are skipped entirely â€” they are
       // tracked separately and must not be re-submitted here.
       void checkField(String key, dynamic current) {
         if (_pendingSubmittedValues.containsKey(key)) return;
@@ -757,7 +757,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // CASE 2 / CASE 4: Only direct fields changed (possibly alongside
       // a pending reviewed change, which is being ignored above).
-      // Save via PATCH — no admin approval needed, no conflict.
+      // Save via PATCH â€” no admin approval needed, no conflict.
       await UserService.updateProfile(directChanges);
       setState(() {
         _isSaving = false;
@@ -806,7 +806,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           maxLines: 3,
           maxLength: 500,
           decoration: const InputDecoration(
-            hintText: 'Tell the admin why you need this change…',
+            hintText: 'Tell the admin why you need this changeâ€¦',
             border: OutlineInputBorder(),
           ),
         ),
@@ -973,7 +973,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_hasPendingChange) _buildPendingChangeBanner(),
-              // Document-action banner removed — handled by availability_screen
+              // Document-action banner removed â€” handled by availability_screen
               _buildProfileHeader(theme),
               const SizedBox(height: 32),
               _buildSectionCard(
@@ -1401,7 +1401,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 SizedBox(height: 2),
                 Text(
-                  'An admin is reviewing your recent edit. You can keep editing — new submissions queue after the current one is reviewed.',
+                  'An admin is reviewing your recent edit. You can keep editing â€” new submissions queue after the current one is reviewed.',
                   style: TextStyle(color: Color(0xFF7A2A2A), fontSize: 12, height: 1.35),
                 ),
               ],
@@ -1433,7 +1433,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final label = !configured
             ? 'Payouts are not configured yet on this server'
             : payoutReady
-                ? 'Payouts enabled — you can receive transfers'
+                ? 'Payouts enabled â€” you can receive transfers'
                 : 'Payout setup incomplete';
         final color = !configured
             ? const Color(0xFF6B6B6B)
@@ -1488,13 +1488,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final url = await DriverPaymentsService.startOnboarding();
       if (!mounted) return;
-      final ok = await launchUrl(Uri.parse(url),
-          mode: LaunchMode.externalApplication);
-      if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open the onboarding page.')),
-        );
-      }
+      // Open the Stripe-hosted onboarding INSIDE the app so the driver never
+      // leaves NetRide and never has to enter payout details into a NetRide
+      // form. Stripe is responsible for identity verification + payout
+      // eligibility; NetRide only synchronizes the result.
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => StripeConnectOnboardingWebView(
+            url: url,
+            onDone: () => _refreshConnectStatus(),
+          ),
+        ),
+      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1508,7 +1514,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-          content: Text('Checking payout status with Stripe…'),
+          content: Text('Checking payout status with Stripeâ€¦'),
           duration: Duration(seconds: 1)),
     );
     setState(() {});
@@ -1537,9 +1543,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final lifetimeCents = _centsValue(w['lifetime_earnings_cents']);
         final balance = NumberFormat.simpleCurrency(name: 'USD').format(balanceCents / 100);
         final lifetime = NumberFormat.simpleCurrency(name: 'USD').format(lifetimeCents / 100);
-        final card = w['payout_card'] as Map<String, dynamic>?;
-        final cardLast4 = card?['last4']?.toString();
-        final cardBrand = card?['brand']?.toString().toUpperCase() ?? '';
         final payouts = (w['recent_payouts'] as List?) ?? const [];
         // Weekly manual-withdrawal availability (server-computed; window
         // always opens Monday 00:00 UTC, one withdrawal per week).
@@ -1586,20 +1589,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
             const Divider(height: 32),
-            _buildProfileRow(
-              icon: Icons.credit_card_rounded,
-              title: cardLast4 != null && cardLast4.isNotEmpty
-                  ? 'Payout card · $cardBrand •••• $cardLast4'
-                  : 'No payout card',
-              trailing: cardLast4 != null
-                  ? TextButton(
-                      onPressed: _showPayoutCardDialog,
-                      child: const Text('Replace', style: TextStyle(fontWeight: FontWeight.w700)),
-                    )
-                  : TextButton(
-                      onPressed: _showPayoutCardDialog,
-                      child: const Text('Add card', style: TextStyle(fontWeight: FontWeight.w700)),
+            // Payout account: managed by Stripe Connect, never a NetRide
+            // card form. The driver's payout destination is whatever they
+            // configured (or will configure) in Stripe's onboarding.
+            FutureBuilder<Map<String, dynamic>>(
+              future: DriverPaymentsService.getConnectStatus(),
+              builder: (context, connSnap) {
+                final conn = connSnap.data;
+                final configured = conn?['configured'] == true;
+                final payoutReady = conn?['payoutReady'] == true;
+                final label = !configured
+                    ? 'Payout account unavailable'
+                    : payoutReady
+                        ? 'Payout account ready (Stripe)'
+                        : 'Payout setup incomplete';
+                return _buildProfileRow(
+                  icon: Icons.account_balance_rounded,
+                  title: label,
+                  subtitle: !configured
+                      ? null
+                      : payoutReady
+                          ? 'Transfers land in your Stripe payout account'
+                          : 'Finish setup to receive payouts',
+                  trailing: TextButton(
+                    onPressed: _startStripeOnboarding,
+                    child: Text(
+                      payoutReady ? 'Update' : 'Set up payouts',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
+                  ),
+                );
+              },
             ),
             const Divider(height: 32),
             _buildProfileRow(
@@ -1689,174 +1709,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ----- Payout card dialog (Luhn-checked, then discarded on server) ------
-
-  Future<void> _showPayoutCardDialog() async {
-    final cardNum = TextEditingController();
-    final expM = TextEditingController();
-    final expY = TextEditingController();
-    final name = TextEditingController(text: _nameController.text);
-    final zip = TextEditingController();
-    final cvc = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, setStateDialog) {
-          String? brand;
-          final digits = cardNum.text.replaceAll(RegExp(r'\D'), '');
-          if (digits.startsWith('4')) {
-            brand = 'Visa';
-          } else if (digits.startsWith(RegExp(r'^(5[1-5]|2(2[2-9]|[3-6]\d|7[01])|720)'))) {
-            brand = 'Mastercard';
-          } else if (digits.startsWith(RegExp(r'^3[47]'))) {
-            brand = 'Amex';
-          } else if (digits.startsWith(RegExp(r'^(6011|65|64[4-9]|622)'))) {
-            brand = 'Discover';
-          }
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('Add payout card', style: TextStyle(fontWeight: FontWeight.w800)),
-            content: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      'Your card is only used to receive payouts. We never store the full card number or security code.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B), height: 1.35),
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: cardNum,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: 'Card number',
-                        suffixText: brand,
-                      ),
-                      onChanged: (_) => setStateDialog(() {}),
-                      validator: (v) {
-                        final d = (v ?? '').replaceAll(RegExp(r'\D'), '');
-                        if (d.length < 13 || d.length > 19) return 'Enter a valid card number';
-                        if (!_luhnOk(d)) return 'That card number isn\'t valid';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: expM,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(labelText: 'Exp. MM'),
-                            validator: (v) {
-                              final n = int.tryParse((v ?? '').trim());
-                              if (n == null || n < 1 || n > 12) return '1-12';
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextFormField(
-                            controller: expY,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(labelText: 'Exp. YYYY'),
-                            validator: (v) {
-                              final n = int.tryParse((v ?? '').trim());
-                              if (n == null || n < 2025 || n > 2099) return '2025-2099';
-                              return null;
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: name,
-                      decoration: const InputDecoration(labelText: 'Cardholder name'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: zip,
-                      decoration: const InputDecoration(labelText: 'ZIP / Postal code'),
-                      validator: (v) => (v == null || v.trim().length < 3) ? 'Required' : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: cvc,
-                      keyboardType: TextInputType.number,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: 'Security code (CVC)'),
-                      validator: (v) {
-                        final d = (v ?? '').trim();
-                        if (d.length < 3 || d.length > 4) return '3-4 digits';
-                        return null;
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-              FilledButton(
-                onPressed: _isSubmittingCard
-                    ? null
-                    : () async {
-                        setState(() => _isSubmittingCard = true);
-                        if (!(formKey.currentState?.validate() ?? false)) {
-                          if (mounted) setState(() => _isSubmittingCard = false);
-                          return;
-                        }
-                        try {
-                          await UserService.addPayoutCard({
-                            'card_number': cardNum.text.replaceAll(RegExp(r'\D'), ''),
-                            'exp_month': int.parse(expM.text.trim()),
-                            'exp_year': int.parse(expY.text.trim()),
-                            'cardholder_name': name.text.trim(),
-                            'zip': zip.text.trim(),
-                            'cvc': cvc.text.trim(),
-                          });
-                          if (mounted) {
-                            Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Card submitted — awaiting admin approval.'),
-                                backgroundColor: Color(0xFF5B7760),
-                              ),
-                            );
-                            setState(() {});
-                          }
-                        } catch (e) {
-                          final msg = _friendlyError(e.toString());
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
-                            );
-                          }
-                        } finally {
-                          if (mounted) setState(() => _isSubmittingCard = false);
-                        }
-                      },
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B7760),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: _isSubmittingCard
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Submit for review'),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
 
   // ----- On-demand payout dialog (5% fee preview) -------------------------
 
@@ -1917,7 +1769,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           bold: true),
                       const SizedBox(height: 6),
                       const Text(
-                        'Tip: weekly auto-payouts on Mondays have no fee.',
+                        'Transferred automatically to your Stripe payout account.',
                         style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B)),
                       ),
                     ],
@@ -1938,7 +1790,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Navigator.pop(ctx);
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Payout requested. An admin will process it shortly.'),
+                                content: Text('Payout requested — it is being transferred to your Stripe payout account automatically.'),
                                 backgroundColor: Color(0xFF5B7760),
                               ),
                             );
@@ -1950,6 +1802,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text(msg), backgroundColor: const Color(0xFFC65A5A)),
                             );
+                            if (msg.contains('CONNECT_SETUP_REQUIRED')) {
+                              _startStripeOnboarding();
+                            }
                           }
                         } finally {
                           if (mounted) setState(() => _isRequestingPayout = false);
@@ -1981,24 +1836,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// Standard Luhn check for client-side validation. Server re-validates
-  /// and discards the PAN immediately; this is purely a UX gate.
-  bool _luhnOk(String digits) {
-    if (digits.length < 13 || digits.length > 19) return false;
-    int sum = 0;
-    bool alt = false;
-    for (int i = digits.length - 1; i >= 0; i--) {
-      int d = int.parse(digits[i]);
-      if (alt) {
-        d *= 2;
-        if (d > 9) d -= 9;
-      }
-      sum += d;
-      alt = !alt;
-    }
-    return sum % 10 == 0;
-  }
-
   /// Tiny helper reused for rows inside the Wallet card so we don't have
   /// to invent a new component for this section.
   Widget _buildProfileRow({
@@ -2024,6 +1861,79 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         if (trailing != null) trailing,
       ],
+    );
+  }
+}
+
+/// Stripe Connect onboarding opened INSIDE the driver app. Stripe's hosted
+/// onboarding page runs in a web view; NetRide collects no bank/card data.
+/// The driver returns to the app when done (or cancels) and the profile
+/// re-syncs the account state from Stripe.
+class StripeConnectOnboardingWebView extends StatefulWidget {
+  const StripeConnectOnboardingWebView({
+    super.key,
+    required this.url,
+    this.onDone,
+  });
+
+  final String url;
+  final VoidCallback? onDone;
+
+  @override
+  State<StripeConnectOnboardingWebView> createState() =>
+      _StripeConnectOnboardingWebViewState();
+}
+
+class _StripeConnectOnboardingWebViewState
+    extends State<StripeConnectOnboardingWebView> {
+  bool _loaded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: const Text(
+          'Payout setup',
+          style: TextStyle(
+            color: Color(0xFF2F3A32),
+            fontWeight: FontWeight.w700,
+            fontSize: 17,
+          ),
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Color(0xFF2F3A32)),
+          onPressed: () {
+            widget.onDone?.call();
+            Navigator.of(context).pop();
+          },
+        ),
+      ),
+      body: Stack(
+        children: [
+          WebViewWidget(
+            controller: WebViewController()
+              ..setJavaScriptMode(JavaScriptMode.unrestricted)
+              ..setNavigationDelegate(
+                NavigationDelegate(
+                  onPageFinished: (_) {
+                    if (mounted) setState(() => _loaded = true);
+                  },
+                ),
+              )
+              ..loadRequest(Uri.parse(widget.url)),
+          ),
+          if (!_loaded)
+            const Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF5B7760),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

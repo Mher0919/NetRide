@@ -21,18 +21,32 @@ import {
   CircularProgress,
   Stack,
   Divider,
+  IconButton,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
 } from '@mui/material';
 import AddCardIcon from '@mui/icons-material/AddCard';
 import SavingsIcon from '@mui/icons-material/Savings';
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { loadStripe, type Stripe } from '@stripe/stripe-js';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import {
   getPortalFunding,
-  createPortalFundingSession,
-  getPortalPaymentMethod,
-  createPortalCardSetupSession,
+  listPortalPaymentMethods,
+  createPortalSetupIntent,
+  confirmPortalSetupIntent,
+  setPortalDefaultMethod,
+  removePortalPaymentMethod,
+  createPortalFundingIntent,
+  confirmPortalFundingIntent,
   getPortalWithdrawals,
   requestPortalWithdrawal,
   type PortalFundingData,
   type SponsorWithdrawalState,
+  type PortalPaymentMethod,
 } from '../api/sponsor';
 
 const fmtUSD = (cents: number) =>
@@ -61,9 +75,12 @@ interface WithdrawalRow {
   completed_at: string | null;
 }
 
+const cardLabel = (m: PortalPaymentMethod) =>
+  `${(m.brand ?? 'CARD').toUpperCase()} •••• ${m.last4 ?? ''}${m.expMonth ? ` (${String(m.expMonth).padStart(2, '0')}/${(m.expYear ?? 0) % 100})` : ''}`;
+
 const Funding: React.FC = () => {
   const [data, setData] = React.useState<PortalFundingData | null>(null);
-  const [card, setCard] = React.useState<{ brand: string | null; last4: string } | null>(null);
+  const [methods, setMethods] = React.useState<PortalPaymentMethod[]>([]);
   const [wState, setWState] = React.useState<SponsorWithdrawalState | null>(null);
   const [withdrawals, setWithdrawals] = React.useState<WithdrawalRow[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -72,7 +89,8 @@ const Funding: React.FC = () => {
   const [withdrawOpen, setWithdrawOpen] = React.useState(false);
   const [withdrawAmount, setWithdrawAmount] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
-  const [snack, setSnack] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+  const [addCardOpen, setAddCardOpen] = React.useState(false);
+  const [snack, setSnack] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' }>({
     open: false,
     message: '',
     severity: 'success',
@@ -83,11 +101,11 @@ const Funding: React.FC = () => {
     try {
       const [funding, pm, wd] = await Promise.all([
         getPortalFunding(),
-        getPortalPaymentMethod().catch(() => null),
+        listPortalPaymentMethods().catch(() => [] as PortalPaymentMethod[]),
         getPortalWithdrawals().catch(() => null),
       ]);
       setData(funding);
-      setCard(pm?.card ?? null);
+      setMethods(pm);
       setWState(wd?.state ?? null);
       setWithdrawals(wd?.withdrawals ?? []);
     } catch {
@@ -98,8 +116,38 @@ const Funding: React.FC = () => {
   };
 
   React.useEffect(() => {
-    load();
+    // Deferred so the initial `loading` state stays visible (avoids a
+    // synchronous setState inside the effect body).
+    const t = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(t);
   }, []);
+
+  const defaultMethod = methods.find((m) => m.isDefault) ?? null;
+
+  const makeDefault = async (m: PortalPaymentMethod) => {
+    try {
+      await setPortalDefaultMethod(m.id);
+      setSnack({ open: true, message: 'Default payment method updated.', severity: 'success' });
+      await load();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Update failed';
+      setSnack({ open: true, message: msg, severity: 'error' });
+    }
+  };
+
+  const removeCard = async (m: PortalPaymentMethod) => {
+    if (!window.confirm(`Remove ${cardLabel(m)}?`)) return;
+    try {
+      await removePortalPaymentMethod(m.id);
+      setSnack({ open: true, message: 'Payment method removed.', severity: 'success' });
+      await load();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Remove failed';
+      setSnack({ open: true, message: msg, severity: 'error' });
+    }
+  };
 
   const startFunding = async () => {
     const amountCents = Math.round(Number(amount) * 100);
@@ -109,27 +157,61 @@ const Funding: React.FC = () => {
     }
     setSubmitting(true);
     try {
-      const res = await createPortalFundingSession(amountCents);
-      // Checkout is Stripe-hosted; the budget is only credited from the
-      // verified webhook, never from this redirect.
-      window.location.assign(res.url);
+      const intent = await createPortalFundingIntent(amountCents);
+      if (!intent.publishableKey) {
+        setSnack({ open: true, message: 'Secure payments are not configured yet.', severity: 'error' });
+        return;
+      }
+      const stripe = await loadStripe(intent.publishableKey);
+      setFundingStripe(stripe);
+      setFundingIntent({ ...intent, publishableKey: intent.publishableKey });
+      setFundingCents(amountCents);
+      setOpen(false);
+      setAmount('');
+      setFundingOpen(true);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Funding session failed';
       setSnack({ open: true, message: msg, severity: 'error' });
+    } finally {
       setSubmitting(false);
     }
   };
 
+  // In-dashboard card-entry flow state (Stripe Elements).
+  const [cardSetup, setCardSetup] = React.useState<{
+    setupIntentClientSecret: string;
+    publishableKey: string;
+    setupIntentId?: string;
+  } | null>(null);
+  const [cardStripe, setCardStripe] = React.useState<Stripe | null>(null);
+
+  const [fundingIntent, setFundingIntent] = React.useState<{
+    paymentRowId: string;
+    clientSecret: string;
+    paymentIntentId: string;
+    publishableKey: string;
+  } | null>(null);
+  const [fundingCents, setFundingCents] = React.useState(0);
+  const [fundingOpen, setFundingOpen] = React.useState(false);
+  const [fundingStripe, setFundingStripe] = React.useState<Stripe | null>(null);
+
   const addCard = async () => {
     setSubmitting(true);
     try {
-      const res = await createPortalCardSetupSession();
-      window.location.assign(res.url);
-      // Card is saved on Stripe's side; the payment profile refreshes on
-      // return via the webhook.
+      const setup = await createPortalSetupIntent();
+      if (!setup.publishableKey) {
+        setSnack({ open: true, message: 'Secure payments are not configured yet.', severity: 'error' });
+        setSubmitting(false);
+        return;
+      }
+      const stripe = await loadStripe(setup.publishableKey);
+      setCardSetup({ ...setup, publishableKey: setup.publishableKey });
+      setCardStripe(stripe);
+      setAddCardOpen(true);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Card setup failed';
       setSnack({ open: true, message: msg, severity: 'error' });
+    } finally {
       setSubmitting(false);
     }
   };
@@ -172,7 +254,7 @@ const Funding: React.FC = () => {
             Budget &amp; funding
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Add funds with a card and withdraw unused budget manually (once per week — the next window always opens Monday).
+            Add funds with a card, manage saved payment methods, and withdraw unused budget manually (once per week — the next window always opens Monday).
           </Typography>
         </Box>
         {data && (
@@ -205,20 +287,60 @@ const Funding: React.FC = () => {
           <Paper sx={{ p: 2.5, borderRadius: 3, mb: 3 }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
               <Box>
-                <Typography variant="caption" color="text.secondary">Saved card</Typography>
+                <Typography variant="caption" color="text.secondary">Saved payment method</Typography>
                 <Typography variant="body1" sx={{ fontWeight: 700 }}>
-                  {card
-                    ? `${(card.brand ?? '').toUpperCase()} •••• ${card.last4}`
-                    : 'No card saved yet'}
+                  {defaultMethod ? cardLabel(defaultMethod) : 'No card saved yet'}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   Used to pay top-ups and to receive withdrawals (refunded to the funding card).
+                  Adding a card never charges it — charges only happen when you fund the budget.
                 </Typography>
               </Box>
               <Button variant="outlined" startIcon={<AddCardIcon />} disabled={submitting} onClick={addCard}>
-                {card ? 'Replace card' : 'Add card'}
+                {defaultMethod ? 'Add another card' : 'Add card'}
               </Button>
             </Stack>
+
+            {methods.length > 1 && (
+              <>
+                <Divider sx={{ my: 1.5 }} />
+                <List dense disablePadding>
+                  {methods.map((m) => (
+                    <ListItem key={m.id} disableGutters sx={{ px: 0 }}>
+                      <ListItemText
+                        primary={
+                          <>
+                            {cardLabel(m)}{' '}
+                            {m.isDefault && (
+                              <Chip
+                                size="small"
+                                icon={<CheckCircleIcon />}
+                                label="Default"
+                                sx={{ ml: 1, height: 20, '& .MuiChip-label': { fontSize: 11 }, color: 'success.main' }}
+                              />
+                            )}
+                          </>
+                        }
+                        secondary={m.isDefault ? 'Used for payments and refunds' : 'Not in use'}
+                      />
+                      <ListItemSecondaryAction>
+                        {!m.isDefault && (
+                          <Button size="small" onClick={() => makeDefault(m)}>
+                            Make default
+                          </Button>
+                        )}
+                        {!m.isDefault && (
+                          <IconButton size="small" color="error" onClick={() => removeCard(m)}>
+                            <DeleteOutlinedIcon fontSize="small" />
+                          </IconButton>
+                        )}
+                      </ListItemSecondaryAction>
+                    </ListItem>
+                  ))}
+                </List>
+              </>
+            )}
+
             <Divider sx={{ my: 2 }} />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
               <Box>
@@ -342,7 +464,7 @@ const Funding: React.FC = () => {
         <DialogTitle sx={{ fontWeight: 800 }}>Add funds</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            You will be redirected to Stripe Checkout. Your budget is credited only after the payment is confirmed.
+            The card payment happens in this dashboard — no external redirect. Your budget is credited only after the payment is confirmed.
           </Typography>
           <TextField
             autoFocus
@@ -356,10 +478,64 @@ const Funding: React.FC = () => {
         <DialogActions>
           <Button onClick={() => setOpen(false)}>Cancel</Button>
           <Button variant="contained" disabled={submitting} onClick={startFunding}>
-            Continue to payment
+            Continue
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* In-dashboard card payment (Payment Element) */}
+      {fundingIntent && fundingStripe && (
+        <Dialog open={fundingOpen} onClose={() => !submitting && setFundingOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle sx={{ fontWeight: 800 }}>Pay {fmtUSD(fundingCents)}</DialogTitle>
+          <DialogContent>
+            <Elements
+              stripe={fundingStripe}
+              options={{ clientSecret: fundingIntent.clientSecret, appearance: { theme: 'stripe' } }}
+            >
+              <FundPaymentForm
+                paymentRowId={fundingIntent.paymentRowId}
+                onDone={async () => {
+                  setFundingOpen(false);
+                  setSnack({ open: true, message: 'Budget funded — payment confirmed.', severity: 'success' });
+                  await load();
+                }}
+                onError={(msg: string) => setSnack({ open: true, message: msg, severity: 'error' })}
+              />
+            </Elements>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setFundingOpen(false)}>Cancel</Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
+      {/* In-dashboard card entry (Payment Element + SetupIntent) */}
+      {cardSetup && cardStripe && (
+        <Dialog open={addCardOpen} onClose={() => !submitting && setAddCardOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle sx={{ fontWeight: 800 }}>Add payment card</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Card details are entered securely with Stripe inside this dashboard. Adding a card never charges it.
+            </Typography>
+            <Elements
+              stripe={cardStripe}
+              options={{ clientSecret: cardSetup.setupIntentClientSecret, appearance: { theme: 'stripe' } }}
+            >
+              <CardSetupForm
+                onDone={async () => {
+                  setAddCardOpen(false);
+                  setSnack({ open: true, message: 'Payment card saved.', severity: 'success' });
+                  await load();
+                }}
+                onError={(msg: string) => setSnack({ open: true, message: msg, severity: 'error' })}
+              />
+            </Elements>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setAddCardOpen(false)}>Cancel</Button>
+          </DialogActions>
+        </Dialog>
+      )}
 
       <Dialog open={withdrawOpen} onClose={() => setWithdrawOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ fontWeight: 800 }}>Withdraw funds</DialogTitle>
@@ -396,6 +572,104 @@ const Funding: React.FC = () => {
           {snack.message}
         </Alert>
       </Snackbar>
+    </Box>
+  );
+};
+
+const CardSetupForm: React.FC<{ onDone: () => Promise<void> | void; onError: (msg: string) => void }> = ({
+  onDone,
+  onError,
+}) => {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [busy, setBusy] = React.useState(false);
+
+  const submit = async () => {
+    if (!stripe || !elements) return;
+    setBusy(true);
+    try {
+      const { error, setupIntent } = await stripe.confirmSetup({
+        elements,
+        redirect: 'if_required',
+      });
+      if (error) {
+        onError(error.message ?? 'Card setup failed');
+        return;
+      }
+      if (setupIntent?.id) {
+        await confirmPortalSetupIntent(setupIntent.id);
+      }
+      await onDone();
+    } catch (err: unknown) {
+      onError((err as Error)?.message ?? 'Card setup failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Box>
+      <PaymentElement />
+      <Button
+        fullWidth
+        variant="contained"
+        disabled={busy || !stripe}
+        onClick={submit}
+        sx={{ mt: 2 }}
+      >
+        {busy ? <CircularProgress size={20} color="inherit" /> : 'Save card'}
+      </Button>
+    </Box>
+  );
+};
+
+const FundPaymentForm: React.FC<{
+  paymentRowId: string;
+  onDone: () => Promise<void> | void;
+  onError: (msg: string) => void;
+}> = ({ paymentRowId, onDone, onError }) => {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [busy, setBusy] = React.useState(false);
+
+  const submit = async () => {
+    if (!stripe || !elements) return;
+    setBusy(true);
+    try {
+      const { error, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        redirect: 'if_required',
+        confirmParams: {
+          return_url: `${window.location.origin}/funding`,
+        },
+      });
+      if (error) {
+        onError(error.message ?? 'Payment failed');
+        return;
+      }
+      if (paymentIntent) {
+        await confirmPortalFundingIntent(paymentRowId, paymentIntent.id);
+      }
+      await onDone();
+    } catch (err: unknown) {
+      onError((err as Error)?.message ?? 'Payment failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Box>
+      <PaymentElement />
+      <Button
+        fullWidth
+        variant="contained"
+        disabled={busy || !stripe}
+        onClick={submit}
+        sx={{ mt: 2 }}
+      >
+        {busy ? <CircularProgress size={20} color="inherit" /> : 'Pay now'}
+      </Button>
     </Box>
   );
 };

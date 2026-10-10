@@ -86,11 +86,10 @@ class UserService {
     }
   }
 
-  // ---- Wallet + payout cards ---------------------------------------------
+  // ---- Wallet + payouts ----------------------------------------------------
 
-  /// Returns a wallet summary including balance, lifetime earnings, the
-  /// currently-approved payout card (masked), and the 5 most recent
-  /// payouts.
+  /// Returns a wallet summary including balance, lifetime earnings and the
+  /// 5 most recent payouts.
   static Future<Map<String, dynamic>> getWallet() async {
     try {
       final response = await ApiService.dio.get('/driver/wallet');
@@ -102,27 +101,9 @@ class UserService {
     }
   }
 
-  /// Submits a payout card for admin approval. The server Luhn-validates
-  /// the PAN and discards it immediately; only last4/brand/exp/name/zip
-  /// are stored. CVC is discarded after validation.
-  static Future<Map<String, dynamic>> addPayoutCard(
-      Map<String, dynamic> card) async {
-    try {
-      final response = await ApiService.dio.post(
-        '/driver/payout-cards',
-        data: card,
-      );
-      return (response.data is Map)
-          ? Map<String, dynamic>.from(response.data as Map)
-          : <String, dynamic>{};
-    } catch (e) {
-      rethrow;
-    }
-  }
-
-  /// Requests an on-demand payout of `amountCents` to the driver's
-  /// approved payout card. Server debits the wallet and inserts a PENDING
-  /// ON_DEMAND payout (5% fee).
+  /// Requests an on-demand payout of `amountCents`. Server debits the
+  /// wallet, verifies the driver's Stripe Connect payout eligibility, and
+  /// transfers the funds automatically (5% fee).
   static Future<Map<String, dynamic>> requestOnDemandPayout(
       int amountCents) async {
     try {

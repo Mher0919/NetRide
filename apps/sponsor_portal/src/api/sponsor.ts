@@ -87,6 +87,69 @@ export const createPortalFundingSession = async (amountCents: number, idempotenc
   return response.data;
 };
 
+export interface PortalPaymentMethod {
+  id: string;
+  brand: string | null;
+  last4: string | null;
+  expMonth: number | null;
+  expYear: number | null;
+  isDefault: boolean;
+}
+
+/** Saved payment methods (non-sensitive metadata) for this sponsor. */
+export const listPortalPaymentMethods = async (): Promise<PortalPaymentMethod[]> => {
+  const response = await api.get<{ methods: PortalPaymentMethod[] }>('/sponsor/payment-methods');
+  return response.data.methods ?? [];
+};
+
+/** SetupIntent client secret for the in-dashboard Payment Element. */
+export const createPortalSetupIntent = async () => {
+  const response = await api.post<{
+    setupIntentClientSecret: string;
+    customerId: string;
+    publishableKey: string | null;
+    mode: string;
+  }>('/sponsor/payment-method/setup-intent');
+  return response.data;
+};
+
+export const confirmPortalSetupIntent = async (setupIntentId: string) => {
+  const response = await api.post<{ applied: boolean }>('/sponsor/payment-method/setup-intent/confirm', {
+    setupIntentId,
+  });
+  return response.data;
+};
+
+export const setPortalDefaultMethod = async (paymentMethodId: string) => {
+  const response = await api.post<{ success: boolean }>(`/sponsor/payment-methods/${paymentMethodId}/default`);
+  return response.data;
+};
+
+export const removePortalPaymentMethod = async (paymentMethodId: string) => {
+  const response = await api.delete<{ success: boolean }>(`/sponsor/payment-methods/${paymentMethodId}`);
+  return response.data;
+};
+
+/** PaymentIntent client secret for the in-dashboard "Add funds" flow. */
+export const createPortalFundingIntent = async (amountCents: number, idempotencyKey?: string) => {
+  const response = await api.post<{
+    paymentRowId: string;
+    clientSecret: string;
+    paymentIntentId: string;
+    publishableKey: string | null;
+    mode: string;
+  }>('/sponsor/funding/intent', { amountCents, idempotencyKey });
+  return response.data;
+};
+
+export const confirmPortalFundingIntent = async (paymentRowId: string, paymentIntentId: string) => {
+  const response = await api.post<{ status: string; reconciling: boolean }>(
+    `/sponsor/funding/intent/${paymentRowId}/confirm`,
+    { paymentIntentId },
+  );
+  return response.data;
+};
+
 // ----- Managed card + manual withdrawals -----------------------------------
 
 export interface SponsorWithdrawalState {

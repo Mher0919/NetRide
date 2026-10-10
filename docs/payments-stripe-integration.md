@@ -306,9 +306,103 @@ production.
   per row for future expansion.
 - **Chargeback handling**: `charge.refunded` marks payments refunded; full
   dispute workflows (dispute evidence, loss accounting) are not automated.
-- **Weekly payout sweep** is retired: payouts are manual only (driver
-  Withdraw button), one per week, window opens Monday 00:00 UTC; driver
-  payouts are paid out manually or via the Connect transfer action. Sponsor
-  withdrawals are Stripe refunds of funding charges — cards older than
-  Stripe's refund window (or disputed top-ups) surface as FAILED withdrawal
-  rows retried by the sweep cron and flagged for manual admin attention.
+- **Weekly payout sweep** is retired in its old form: payouts are still
+  created by the driver pressing Withdraw (one per week, window opens Monday
+  00:00 UTC), but the transfer is now executed **automatically** against the
+  driver's Connect account (see §7). Sponsor withdrawals are Stripe refunds
+  of funding charges — cards older than Stripe's refund window (or disputed
+  top-ups) surface as FAILED withdrawal rows retried by the sweep cron and
+  flagged for manual admin attention.
+
+---
+
+## 7. In-app Stripe surfaces + automatic payouts (2026-10)
+
+This iteration moved every payment surface inside NetRide and removed the
+admin payment UI. Money rules, commission math, settlement state and the
+weekly withdrawal windows are **unchanged**.
+
+### 7.1 Rider app — native PaymentSheet card entry
+
+- `POST /api/payments/setup-intent` issues a SetupIntent client secret
+  (`usage=off_session`, metadata `kind=CARD_SETUP`) **and** a customer-scoped
+  ephemeral key. The rider app passes both to Stripe's native PaymentSheet
+  (`flutter_stripe`); the rider never leaves the app and NetRide never sees
+  card data.
+- `POST /api/payments/setup-intent/confirm` (server-side, idempotent) and the
+  existing `setup_intent.succeeded` webhook both persist the saved card
+  (brand/last4/expiry + default flag + off-session consent).
+- Saved methods: `GET /api/payments/methods` (brand/last4/exp + `isDefault`),
+  `POST /api/payments/methods/:id/default`, `DELETE /api/payments/methods/:id`
+  (the default cannot be removed). All scoped to the authenticated rider.
+- **Add Funds is removed from the Rider app.** Adding a card never deposits
+  money, creates a wallet balance or charges the card. The legacy backend
+  top-up endpoints remain for historical reconciliation only.
+- Off-session charges for ride fares and the Special expiry additional charge
+  are unchanged and keep working off the saved default method.
+
+### 7.2 Colab dashboard — Stripe Elements in-dashboard
+
+- `POST /api/sponsor/payment-method/setup-intent` → Payment Element in a
+  dialog (no external Checkout redirect). `setup_intent.succeeded` webhook +
+  `POST /api/sponsor/payment-method/setup-intent/confirm` persist the card.
+- `GET /api/sponsor/payment-methods`, `POST /api/sponsor/payment-methods/:id/default`,
+  `DELETE /api/sponsor/payment-methods/:id`.
+- **Add funds** also happens in-dashboard: `POST /api/sponsor/funding/intent`
+  creates a PaymentIntent on the sponsor's Stripe Customer and returns the
+  client secret; the Payment Element confirms it; the existing
+  `payment_intent.succeeded` webhook (or `POST /api/sponsor/funding/intent/:id/confirm`)
+  credits the budget exactly once (idempotency-keyed ledger entry).
+  Adding a card never charges the sponsor.
+
+### 7.3 Driver app — in-app Connect payout setup
+
+- `POST /api/payments/connect/onboarding` returns the single-use Stripe
+  account link, which the driver app now opens in an **in-app web view**
+  (`webview_flutter`) instead of an external browser. NetRide still never
+  collects bank/card details (no payout-card form — the legacy
+  `POST /driver/payout-cards` endpoint and NetRide payout-card collection
+  were removed).
+- Eligibility is always taken from Stripe's live `payouts_enabled`
+  (`account.updated` webhooks + `?sync=true` reads). No Admin approval step.
+
+### 7.4 Automatic payouts (no Admin button)
+
+- `POST /driver/wallet/request-payout` keeps the weekly window and 5% fee,
+  verifies Connect payout eligibility against Stripe **before** debiting the
+  wallet, then executes the Transfer **automatically** (idempotency key
+  `payout-transfer:{payoutId}` + stored `stripe_transfer_id`).
+- A 5-minute cron (`sweepDriverPayouts`) retries PENDING payouts whose
+  transfer is still outstanding (Stripe temporarily unavailable, account
+  restrictions, interrupted onboarding). Nothing is ever marked paid from a
+  client callback; `transfer.created/failed/reversed` webhooks update state.
+- The Admin UI no longer has Payments / Payouts / Payout Cards screens. All
+  backend financial records, webhook handling, repayment APIs and audit
+  trails remain intact; Stripe's Dashboard is the operational view.
+
+### 7.5 Verification
+
+- `cd backend && node run-stripe-e2e.cjs` now covers the in-app flows against
+  real test-mode Stripe: SetupIntent + ephemeral key, server-side setup
+  confirmation, saved-method list/default/detach, off-session charge,
+  sponsor card entry + funding intent + budget credit (and the webhook
+  ordering race where the status flips before the credit claim), and driver
+  Connect gating. Run: **29 passed / 0 failed** (test mode, `sk_test_…`).
+
+---
+
+## 8. External setup still required (remaining)
+
+1. **Stripe Dashboard → Settings → Developers → API policies → Features:
+   enable "Accounts v1 support"** (`feat_accounts_v1_support`). New Express
+   connected accounts are currently refused by Stripe policy on this test
+   platform account ("Stripe no longer recommends Accounts v1…"). Until this
+   is enabled, account creation fails with
+   `CONNECT_ACCOUNT_CREATION_BLOCKED` and drivers cannot onboard; every other
+   money path (rider + sponsor) already runs green in test mode.
+2. **Webhook subscriptions** for active sync: `setup_intent.succeeded`,
+   `payment_intent.succeeded`/`.payment_failed`/`.canceled`,
+   `checkout.session.completed`, `charge.refunded`, `account.updated`,
+   `transfer.created|updated|failed|reversed`.
+3. **Live-mode activation** remains deliberate: live keys refuse to run
+   unless `STRIPE_ALLOW_LIVE=true` and `NODE_ENV=production`.

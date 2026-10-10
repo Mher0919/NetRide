@@ -30,6 +30,25 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
+import 'services/payments_service.dart';
+
+/// Stripe PaymentSheet bootstrap: the publishable key is fetched from the
+/// backend (never hard-coded in the app) and Stripe's SDK is initialized
+/// once. Card details are only ever collected inside Stripe's PaymentSheet.
+Future<void> _initStripe() async {
+  try {
+    final config = await PaymentsService.getConfig();
+    final publishableKey = config['publishableKey'] as String?;
+    if (publishableKey != null && publishableKey.isNotEmpty) {
+      Stripe.publishableKey = publishableKey;
+      await Stripe.instance.applySettings();
+      debugPrint('[STRIPE] ✅ PaymentSheet initialized (${config['mode']})');
+    }
+  } catch (e) {
+    debugPrint('[STRIPE] ⚠️ Stripe init skipped (not configured / offline): $e');
+  }
+}
 
 /// Set when a signed-in rider's account is blocked, so the app routes
 /// straight to the standalone blocked-account screen on startup.
@@ -144,6 +163,7 @@ void main() async {
   // phone. Safe to call on every cold start — server upserts per token.
   if (token != null) {
     await NotificationService.instance.registerDevice();
+    await _initStripe();
   }
 
   if (token != null) {

@@ -3,12 +3,13 @@ import { EmailService } from '../../services/email.service';
 import { prisma } from '../../services/prisma.service';
 import { redis } from '../../config/redis';
 import { env } from '../../config/env';
-import { maskCardNumber, detectCardBrand, isValidLuhn } from '../../utils/card';
+import { detectCardBrand, isValidLuhn } from '../../utils/card';
 import {
   getRevenueAllocationForRide,
   computeRevenueAllocation,
 } from '../../services/pricing.service';
-import { driverWithdrawalState, assertDriverCanWithdraw } from '../payments/withdrawal.service';
+import { driverWithdrawalState, assertDriverCanWithdraw, executeDriverPayout } from '../payments/withdrawal.service';
+import { ConnectService } from '../payments/connect.service';
 
 export class DriverService {
   static async getProfile(userId: string) {
@@ -799,46 +800,6 @@ export class DriverService {
   // Wallet + payout cards + payouts (020)
   // ============================================================
 
-  static async addPayoutCard(userId: string, payload: any) {
-    const digits = String(payload.card_number).replace(/\D/g, '');
-    if (!isValidLuhn(digits)) throw new Error('INVALID_CARD: Card number failed validation.');
-    const brand = detectCardBrand(digits);
-    const l4 = digits.slice(-4);
-
-    const ins = await pool.query(
-      `INSERT INTO payout_cards (driver_id, brand, last4, exp_month, exp_year, cardholder_name, zip, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING') RETURNING id, created_at`,
-      [userId, brand, l4, payload.exp_month, payload.exp_year, payload.cardholder_name.trim(), payload.zip.trim()]
-    );
-
-    // Make sure the wallet row exists so an admin approval can attach a card.
-    await pool.query(
-      `INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`,
-      [userId]
-    );
-
-    // Notify admin
-    try {
-      const driverInfo = await pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [userId]);
-      await EmailService.sendPayoutCardNotice(
-        { email: env.ADMIN_NOTIFY_EMAIL || '' },
-        { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' },
-        { id: ins.rows[0].id, brand, last4: l4 }
-      );
-    } catch (e: any) {
-      console.warn('[DRIVER] ⚠️ Payout-card admin notice failed:', e.message);
-    }
-
-    return {
-      card_id: ins.rows[0].id,
-      status: 'PENDING',
-      brand,
-      last4: l4,
-      exp_month: payload.exp_month,
-      exp_year: payload.exp_year,
-    };
-  }
-
   static async getWallet(userId: string) {
     // Ensure the wallet row exists.
     await pool.query(
@@ -847,11 +808,6 @@ export class DriverService {
     );
     const wRes = await pool.query(`SELECT * FROM driver_wallets WHERE driver_id = $1`, [userId]);
     const wallet = wRes.rows[0];
-    let cardSummary: any = null;
-    if (wallet?.payout_card_id) {
-      const cRes = await pool.query(`SELECT id, brand, last4, exp_month, exp_year, cardholder_name, status FROM payout_cards WHERE id = $1`, [wallet.payout_card_id]);
-      cardSummary = cRes.rows[0] ?? null;
-    }
     const pRes = await pool.query(
       `SELECT id, amount_cents, fee_cents, net_cents, status, method, requested_at, processed_at, reference, notes
        FROM payouts WHERE driver_id = $1 ORDER BY requested_at DESC LIMIT 5`,
@@ -896,7 +852,6 @@ export class DriverService {
           Number(afterTipRes.rows[0]?.cents ?? 0),
         rides: Number(week.rides ?? 0),
       },
-      payout_card: cardSummary,
       // Weekly manual-withdrawal availability (defaults to eligible when the
       // state read fails — the request endpoint still enforces it).
       withdrawal: await driverWithdrawalState(userId).catch(() => ({ eligible: true, nextAvailableAt: new Date() })),
@@ -923,9 +878,9 @@ export class DriverService {
       throw new Error(`MIN_PAYOUT: Minimum on-demand payout is $${MIN_PAYOUT_CENTS / 100}.`);
     }
 
-    // Weekly rule (manual only): one withdrawal per calendar week; the
-    // window opens every Monday 00:00 UTC regardless of when the last
-    // withdrawal happened. The automatic WEEKLY_AUTO sweep is retired.
+    // Weekly rule (existing): one withdrawal per calendar week; the window
+    // opens every Monday 00:00 UTC regardless of when the last withdrawal
+    // happened.
     await assertDriverCanWithdraw(userId);
 
     await pool.query(
@@ -934,9 +889,30 @@ export class DriverService {
     );
     const wRes = await pool.query(`SELECT * FROM driver_wallets WHERE driver_id = $1`, [userId]);
     const wallet = wRes.rows[0];
-    if (!wallet?.payout_card_id) throw new Error('NO_PAYOUT_CARD: Add a payout card before requesting a payout.');
     if (Number(wallet.balance_cents) < amountCents) {
       throw new Error('INSUFFICIENT_BALANCE: Requested amount exceeds your wallet balance.');
+    }
+
+    // Payouts go to the driver's Stripe Connect account — NetRide never
+    // collects bank/card payout details. Make sure the connected account
+    // exists (created once, reused on every later request), then check
+    // Stripe's LIVE state for payout eligibility BEFORE the wallet is
+    // debited. A driver whose verification is incomplete or restricted is
+    // told to finish payout setup; their balance is untouched.
+    const { accountId } = await ConnectService.ensureAccount(userId);
+    try {
+      const status = await ConnectService.syncAccountStatus(userId);
+      if (!status.payoutsEnabled) {
+        throw new Error(
+          'CONNECT_SETUP_REQUIRED: Finish your Stripe payout setup before requesting a payout.',
+        );
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('CONNECT_SETUP_REQUIRED')) throw err;
+      // Stripe API temporarily unavailable: the eligibility decision is
+      // deferred — the payout row (if created) is processed automatically
+      // by the retry sweep once Stripe is reachable again.
+      console.warn(`[DRIVER] ⚠️ Connect status sync failed for ${userId}: ${err?.message}`);
     }
 
     const fee = Math.round(amountCents * 0.05);
@@ -954,9 +930,9 @@ export class DriverService {
       );
       if (!upd.rowCount) throw new Error('INSUFFICIENT_BALANCE: Insufficient wallet balance.');
       const ins = await client.query(
-        `INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method)
-         VALUES ($1, $2, $3, $4, 'PENDING', 'ON_DEMAND') RETURNING id, requested_at`,
-        [userId, amountCents, fee, net]
+        `INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, notes)
+         VALUES ($1, $2, $3, $4, 'PENDING', 'ON_DEMAND', 'Stripe Connect account ' || $5) RETURNING id, requested_at`,
+        [userId, amountCents, fee, net, accountId]
       );
       payoutId = ins.rows[0].id;
       await client.query('COMMIT');
@@ -967,25 +943,30 @@ export class DriverService {
       client.release();
     }
 
-    // Admin notification
-    try {
-      const driverInfo = await pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [userId]);
-      await EmailService.sendPayoutRequestedNotice(
-        { email: env.ADMIN_NOTIFY_EMAIL || '' },
-        { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' },
-        { id: payoutId, amount_cents: amountCents, fee_cents: fee, net_cents: net, method: 'ON_DEMAND' }
-      );
-    } catch (e: any) {
-      console.warn('[DRIVER] ⚠️ Payout-request admin notice failed:', e.message);
-    }
+    // AUTOMATIC transfer: no Admin approval step. The transfer only runs if
+    // Stripe's live account state says payouts are enabled; otherwise the
+    // row stays PENDING and an automatic sweep retries it once the account
+    // is eligible.
+    const transfer = await executeDriverPayout({
+      payoutId,
+      driverId: userId,
+      amountCents: net,
+      description: 'NetRide on-demand payout',
+    });
 
     return {
       payout_id: payoutId,
       amount_cents: amountCents,
       fee_cents: fee,
       net_cents: net,
-      status: 'PENDING',
+      status: transfer.transferred ? 'PAID' : 'PENDING',
       method: 'ON_DEMAND',
+      transfer: {
+        transferred: transfer.transferred,
+        transferId: transfer.transferId ?? null,
+        reason: transfer.reason ?? null,
+        requiresPayoutSetup: !transfer.transferred && (transfer.reason === 'payouts_not_enabled' || transfer.reason === 'no_connect_account'),
+      },
     };
   }
 

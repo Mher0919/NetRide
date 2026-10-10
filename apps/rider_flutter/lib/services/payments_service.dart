@@ -1,10 +1,10 @@
 // lib/services/payments_service.dart
 //
 // Stripe payment surface for the rider app. All financial decisions stay
-// server-side; these endpoints only open Stripe-hosted Checkout pages and
-// read server-verified payment state.
+// server-side; card entry happens inside the app through Stripe's native
+// PaymentSheet (the backend issues a SetupIntent client_secret + an
+// ephemeral key scoped to this rider's Stripe Customer).
 
-import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 import 'api_service.dart';
 
@@ -53,6 +53,74 @@ class PaymentProfile {
   }
 }
 
+/// Non-sensitive metadata for one saved payment method.
+class SavedPaymentMethod {
+  final String id;
+  final String? brand;
+  final String? last4;
+  final int? expMonth;
+  final int? expYear;
+  final bool isDefault;
+
+  const SavedPaymentMethod({
+    required this.id,
+    this.brand,
+    this.last4,
+    this.expMonth,
+    this.expYear,
+    required this.isDefault,
+  });
+
+  String get label {
+    final b = (brand ?? '').isNotEmpty ? brand!.toUpperCase() : 'Card';
+    final exp = (expMonth != null && expYear != null)
+        ? ' ${expMonth!.toString().padLeft(2, '0')}/${expYear! % 100}'
+        : '';
+    return '$b ••••$last4$exp';
+  }
+
+  factory SavedPaymentMethod.fromJson(Map<String, dynamic> json) {
+    return SavedPaymentMethod(
+      id: json['id'] as String,
+      brand: json['brand'] as String?,
+      last4: json['last4'] as String?,
+      expMonth: json['exp_month'] as int?,
+      expYear: json['exp_year'] as int?,
+      isDefault: json['isDefault'] as bool? ?? false,
+    );
+  }
+}
+
+/// Server response for POST /payments/setup-intent (PaymentSheet inputs).
+class PaymentSheetInit {
+  final String setupIntentId;
+  final String setupIntentClientSecret;
+  final String ephemeralKey;
+  final String customerId;
+  final String? publishableKey;
+  final String mode;
+
+  const PaymentSheetInit({
+    required this.setupIntentId,
+    required this.setupIntentClientSecret,
+    required this.ephemeralKey,
+    required this.customerId,
+    this.publishableKey,
+    required this.mode,
+  });
+
+  factory PaymentSheetInit.fromJson(Map<String, dynamic> json) {
+    return PaymentSheetInit(
+      setupIntentId: json['setupIntentId'] as String,
+      setupIntentClientSecret: json['setupIntentClientSecret'] as String,
+      ephemeralKey: json['ephemeralKey'] as String,
+      customerId: json['customerId'] as String,
+      publishableKey: json['publishableKey'] as String?,
+      mode: json['mode'] as String? ?? 'unconfigured',
+    );
+  }
+}
+
 class RidePaymentStatus {
   final String rideStatus;
   final String? settlementStatus;
@@ -89,27 +157,52 @@ class RidePaymentStatus {
 class PaymentsService {
   static final _fmt = NumberFormat.currency(symbol: r'$');
 
+  /// Non-secret Stripe configuration for the authenticated rider.
+  static Future<Map<String, dynamic>> getConfig() async {
+    final res = await ApiService.dio.get('/payments/config');
+    return Map<String, dynamic>.from(res.data as Map);
+  }
+
   /// Server-verified payment profile (saved card, consent, mode).
   static Future<PaymentProfile> getProfile() async {
     final res = await ApiService.dio.get('/payments/profile');
     return PaymentProfile.fromJson(res.data as Map<String, dynamic>);
   }
 
-  /// Opens Stripe-hosted Checkout to save a card (consent included).
-  /// Returns the checkout URL; the rider completes it in the browser.
-  static Future<String> startCardSetup({bool consent = true}) async {
-    final res = await ApiService.dio.post('/payments/setup-session', data: {
+  /// Asks the backend for a SetupIntent + ephemeral key so the rider can
+  /// enter their card inside the app via Stripe's PaymentSheet.
+  static Future<PaymentSheetInit> createSetupIntent({bool consent = true}) async {
+    final res = await ApiService.dio.post('/payments/setup-intent', data: {
       'consent': consent,
     });
-    return (res.data as Map<String, dynamic>)['url'] as String;
+    return PaymentSheetInit.fromJson(res.data as Map<String, dynamic>);
   }
 
-  /// Stripe-hosted Checkout to add funds to the wallet.
-  static Future<String> startWalletTopUp(int amountCents) async {
-    final res = await ApiService.dio.post('/payments/wallet/topup-session', data: {
-      'amountCents': amountCents,
+  /// Server-side confirmation of the completed SetupIntent (idempotent; the
+  /// webhook is the durable source of truth).
+  static Future<void> confirmSetupIntent(String setupIntentId) async {
+    await ApiService.dio.post('/payments/setup-intent/confirm', data: {
+      'setupIntentId': setupIntentId,
     });
-    return (res.data as Map<String, dynamic>)['url'] as String;
+  }
+
+  /// Saved payment methods (brand/last4/expiry + default flag).
+  static Future<List<SavedPaymentMethod>> listMethods() async {
+    final res = await ApiService.dio.get('/payments/methods');
+    final list = (res.data as Map<String, dynamic>)['methods'] as List? ?? [];
+    return list
+        .map((m) => SavedPaymentMethod.fromJson(m as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Sets the default saved card.
+  static Future<void> setDefaultMethod(String id) async {
+    await ApiService.dio.post('/payments/methods/$id/default');
+  }
+
+  /// Removes an eligible saved card (the default cannot be removed).
+  static Future<void> removeMethod(String id) async {
+    await ApiService.dio.delete('/payments/methods/$id');
   }
 
   /// Server-verified payment state for one of the rider's rides.

@@ -54,7 +54,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _fetchProfile() async {
-    setState(() => _state = ViewState.loading);
+    await _loadProfile(showLoading: true);
+  }
+
+  /// Pull-to-refresh entry point: re-fetches the profile from the backend
+  /// without clearing the current content. Failures keep existing data.
+  Future<void> _refreshProfile() => _loadProfile(showLoading: false);
+
+  Future<void> _loadProfile({bool showLoading = false}) async {
+    if (showLoading) setState(() => _state = ViewState.loading);
     try {
       final prefs = await SharedPreferences.getInstance();
       if (!prefs.containsKey('jwt_token')) {
@@ -443,11 +451,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetchProfile,
-        successWidget: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+        successWidget: RefreshIndicator(
+          color: const Color(0xFF5B7760),
+          onRefresh: _refreshProfile,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               _buildProfileHeader(theme),
               const SizedBox(height: 32),
               _buildSectionCard(
@@ -583,7 +595,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ],
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

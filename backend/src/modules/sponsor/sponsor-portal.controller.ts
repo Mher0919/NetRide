@@ -323,6 +323,117 @@ export class SponsorPortalController {
     }
   }
 
+  // ------------------------------------------- in-dashboard card management
+
+  /** SetupIntent for the in-dashboard Payment Element card-entry flow. */
+  static async createSetupIntent(req: SponsorRequest, res: Response) {
+    try {
+      const result = await PaymentsService.createSponsorSetupIntent(req.sponsor!.id);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  /** Server-side confirmation of a completed in-dashboard SetupIntent. */
+  static async confirmSetupIntent(req: SponsorRequest, res: Response) {
+    try {
+      const setupIntentId = typeof req.body?.setupIntentId === 'string' ? req.body.setupIntentId.trim() : '';
+      if (!setupIntentId) return res.status(400).json({ error: 'setupIntentId is required' });
+      const result = await PaymentsService.applySetupIntentSucceeded(setupIntentId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  /** Saved payment methods (non-sensitive metadata) for this sponsor. */
+  static async listPaymentMethods(req: SponsorRequest, res: Response) {
+    try {
+      const profile = await PaymentsService.sponsorPaymentProfile(req.sponsor!.id);
+      res.json({
+        configured: profile.configured,
+        mode: profile.mode,
+        methods: profile.methods,
+        defaultPaymentMethodId: profile.defaultPaymentMethodId,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  /** Changes the sponsor's default saved card. */
+  static async setDefaultPaymentMethod(req: SponsorRequest, res: Response) {
+    try {
+      const id = typeof req.params.id === 'string' ? req.params.id : '';
+      if (!id) return res.status(400).json({ error: 'Payment method id is required' });
+      await PaymentsService.setSponsorDefaultPaymentMethod(req.sponsor!.id, id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  /** Removes an eligible saved sponsor card (default may not be removed). */
+  static async detachPaymentMethod(req: SponsorRequest, res: Response) {
+    try {
+      const id = typeof req.params.id === 'string' ? req.params.id : '';
+      if (!id) return res.status(400).json({ error: 'Payment method id is required' });
+      await PaymentsService.detachSponsorPaymentMethod(req.sponsor!.id, id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  /**
+   * In-dashboard "Add funds": creates the PaymentIntent (sponsor customer
+   * attached) and returns the client secret for the Payment Element. The
+   * budget is credited only from the verified webhook or the explicit
+   * reconciliation below — never from a client callback.
+   */
+  static async createFundingIntent(req: SponsorRequest, res: Response) {
+    try {
+      const amountCents = Math.round(Number(req.body?.amountCents ?? 0));
+      const paymentMethodId = typeof req.body?.paymentMethodId === 'string' ? req.body.paymentMethodId : null;
+      const result = await PaymentsService.createSponsorFundingIntent({
+        sponsorId: req.sponsor!.id,
+        amountCents,
+        paymentMethodId,
+        idempotencyKey: typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : undefined,
+      });
+      res.json({
+        ...result,
+        publishableKey: env.STRIPE_PUBLISHABLE_KEY ?? null,
+        mode: stripeMode(),
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  /**
+   * Optional post-confirm reconciliation: after the Elements flow reports
+   * success, the portal asks the backend to re-read the PaymentIntent and
+   * credit the budget. Idempotent; the webhook remains the durable path.
+   */
+  static async confirmFundingIntent(req: SponsorRequest, res: Response) {
+    try {
+      const paymentRowId = typeof req.params.paymentRowId === 'string' ? req.params.paymentRowId : '';
+      const paymentIntentId = typeof req.body?.paymentIntentId === 'string' ? req.body.paymentIntentId : null;
+      if (!paymentRowId) return res.status(400).json({ error: 'paymentRowId is required' });
+      const owned = await pool.query(
+        `SELECT id FROM stripe_payments WHERE id = $1 AND sponsor_id = $2 AND purpose = 'SPONSOR_BUDGET_TOPUP'`,
+        [paymentRowId, req.sponsor!.id],
+      );
+      if (owned.rows.length === 0) return res.status(404).json({ error: 'Funding payment not found' });
+      const result = await PaymentsService.reconcileSponsorFundingIntent(paymentRowId, paymentIntentId);
+      res.json({ ...result, reconciling: result.status === 'unknown' });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
   // -------------------------------------------------- manual withdrawals
 
   /** Withdrawal history + weekly availability (window opens every Monday). */

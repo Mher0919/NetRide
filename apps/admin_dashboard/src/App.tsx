@@ -17,8 +17,6 @@ import RideAudit from './pages/RideAudit';
 import SpeedingViolations from './pages/SpeedingViolations';
 import ProfileChanges from './pages/ProfileChanges';
 import ProfileChangeDetail from './pages/ProfileChangeDetail';
-import PayoutCards from './pages/PayoutCards';
-import Payouts from './pages/Payouts';
 import FlaggedRatings from './pages/FlaggedRatings';
 import Partners from './pages/Partners';
 import Promos from './pages/Promos';
@@ -27,7 +25,6 @@ import Credits from './pages/Credits';
 import FleetPartners from './pages/FleetPartners';
 import Pricing from './pages/Pricing';
 import Revenue from './pages/Revenue';
-import Payments from './pages/Payments';
 import Reports from './pages/Reports';
 import Sponsors from './pages/Sponsors';
 import NotFound from './pages/NotFound';
@@ -80,8 +77,6 @@ const App: React.FC = () => {
               <Route path="speeding" element={<SpeedingViolations />} />
               <Route path="profile-changes" element={<ProfileChanges />} />
               <Route path="profile-changes/:id" element={<ProfileChangeDetail />} />
-              <Route path="payout-cards" element={<PayoutCards />} />
-              <Route path="payouts" element={<Payouts />} />
               <Route path="ratings/flagged" element={<FlaggedRatings />} />
               <Route path="partners" element={<Partners />} />
               <Route path="promos" element={<Promos />} />
@@ -92,7 +87,6 @@ const App: React.FC = () => {
               <Route path="pricing" element={<Pricing />} />
               <Route path="revenue" element={<Revenue />} />
               <Route path="reports" element={<Reports />} />
-              <Route path="payments" element={<Payments />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

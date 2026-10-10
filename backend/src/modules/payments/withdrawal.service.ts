@@ -16,6 +16,7 @@
 import { pool } from '../../config/database';
 import { AuditEventsService } from '../../services/audit-events.service';
 import { tryGetStripeGateway } from './stripe.gateway';
+import { ConnectService } from './connect.service';
 import { centsValue } from '../../services/financial-ledger.service';
 
 // ---------------------------------------------------------------------------
@@ -134,6 +135,96 @@ export async function listSponsorWithdrawals(sponsorId: string, limit = 50, offs
     amount_cents: centsValue(r.amount_cents),
     refund_ids: Array.isArray(r.refund_ids) ? r.refund_ids : [],
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Automatic driver payout execution (Stripe Connect)
+// ---------------------------------------------------------------------------
+// NetRide never asks an Admin to approve a routine payout. When a driver
+// requests a payout the row is created (existing weekly rule), then the
+// transfer runs AUTOMATICALLY against the driver's connected account — the
+// account must be payout-enabled per Stripe's live `payouts_enabled` state,
+// which is re-verified from the Stripe API before every transfer.
+//
+// If the account is not eligible yet (incomplete onboarding, restrictions,
+// temporary API failure) the payout stays PENDING and the sweep below retries
+// it automatically. Failures are recorded truthfully; nothing is ever marked
+// paid from a client callback.
+
+export async function executeDriverPayout(args: {
+  payoutId: string;
+  driverId: string;
+  amountCents: number;
+  description?: string;
+}): Promise<{ transferred: boolean; transferId?: string; reason?: string }> {
+  const result = await ConnectService.transferPayout(args);
+  if (result.transferred && result.transferId) {
+    await pool.query(
+      `UPDATE payouts SET status = 'PAID', processed_at = COALESCE(processed_at, NOW()) WHERE id = $1`,
+      [args.payoutId],
+    );
+    await AuditEventsService.record({
+      actorRole: 'SYSTEM',
+      action: 'driver_payout_auto_transferred',
+      entityType: 'payout',
+      entityId: args.payoutId,
+      details: { amountCents: args.amountCents, transferId: result.transferId },
+    }).catch(() => undefined);
+  } else {
+    await AuditEventsService.record({
+      actorRole: 'SYSTEM',
+      action: 'driver_payout_transfer_deferred',
+      entityType: 'payout',
+      entityId: args.payoutId,
+      details: { amountCents: args.amountCents, reason: result.reason ?? 'transfer_failed' },
+    }).catch(() => undefined);
+  }
+  return result;
+}
+
+/**
+ * Cron: processes PENDING driver payouts that have no Stripe transfer yet.
+ * Idempotent per payout (stored transfer id + Stripe idempotency key), safe
+ * under duplicate runs, retries BLOCKED/FAILED transfers after the account
+ * becomes eligible, and never transfers twice.
+ */
+export async function sweepDriverPayouts(): Promise<number> {
+  const res = await pool.query(
+    `SELECT id, driver_id, net_cents, amount_cents, notes, requested_at,
+            stripe_transfer_status
+     FROM payouts
+     WHERE status = 'PENDING'
+       AND method IN ('ON_DEMAND')
+       AND stripe_transfer_id IS NULL
+       AND updated_at < NOW() - INTERVAL '1 minute'
+     ORDER BY requested_at ASC
+     LIMIT 25`,
+  );
+  let processed = 0;
+  for (const row of res.rows) {
+    try {
+      const amountCents = centsValue(row.net_cents || row.amount_cents);
+      if (amountCents <= 0) {
+        await pool.query(
+          `UPDATE payouts SET stripe_transfer_status = 'FAILED',
+                  stripe_failure_reason = 'Non-positive payout amount', updated_at = NOW()
+           WHERE id = $1`,
+          [row.id],
+        );
+        continue;
+      }
+      const result = await executeDriverPayout({
+        payoutId: row.id,
+        driverId: row.driver_id,
+        amountCents,
+        description: row.notes ?? `NetRide ${row.stripe_transfer_status === 'BLOCKED' ? 'deferred' : 'on-demand'} payout`,
+      });
+      if (result.transferred) processed++;
+    } catch (err: any) {
+      console.warn(`[PAYOUT] ⚠️ automatic transfer retry failed for ${row.id}: ${err.message}`);
+    }
+  }
+  return processed;
 }
 
 /**

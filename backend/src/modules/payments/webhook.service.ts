@@ -66,51 +66,33 @@ export class StripeWebhookService {
 
       case 'setup_intent.succeeded': {
         const metadata = object.metadata ?? {};
-        if (metadata.kind === 'SPONSOR_CARD_SETUP' && metadata.sponsor_id) {
+        if (
+          (metadata.kind === 'SPONSOR_CARD_SETUP' && metadata.sponsor_id) ||
+          (metadata.kind === 'CARD_SETUP' && metadata.user_id)
+        ) {
           const gateway = tryGetStripeGateway();
           if (gateway) {
             const si = await gateway.retrieveSetupIntent(object.id);
             if (si.status === 'succeeded') {
-              const card = si.paymentMethod;
-              await pool.query(
-                `UPDATE sponsors
-                 SET stripe_customer_id = COALESCE($2, stripe_customer_id),
-                     default_payment_method_id = $3,
-                     card_brand = $4, card_last4 = $5,
-                     card_exp_month = $6, card_exp_year = $7,
-                     updated_payment_at = NOW(), updated_at = NOW()
-                 WHERE id = $1`,
-                [metadata.sponsor_id, si.customerId, si.paymentMethodId, card?.brand ?? null, card?.last4 ?? null, card?.expMonth ?? null, card?.expYear ?? null],
-              );
-            }
-          }
-          return 'processed';
-        }
-        if (metadata.kind === 'CARD_SETUP' && metadata.user_id) {
-          const gateway = tryGetStripeGateway();
-          if (gateway) {
-            const si = await gateway.retrieveSetupIntent(object.id);
-            if (si.status === 'succeeded') {
-              const consent = metadata.off_session_consent === 'true';
-              await pool.query(
-                `UPDATE stripe_customers
-                 SET default_payment_method_id = $2,
-                     card_brand = $3, card_last4 = $4,
-                     card_exp_month = $5, card_exp_year = $6,
-                     off_session_consent = CASE WHEN $7 THEN TRUE ELSE off_session_consent END,
-                     off_session_consent_at = CASE WHEN $7 THEN NOW() ELSE off_session_consent_at END,
-                     updated_at = NOW()
-                 WHERE user_id = $1`,
-                [
-                  metadata.user_id,
-                  si.paymentMethodId,
-                  si.paymentMethod?.brand ?? null,
-                  si.paymentMethod?.last4 ?? null,
-                  si.paymentMethod?.expMonth ?? null,
-                  si.paymentMethod?.expYear ?? null,
-                  consent,
-                ],
-              );
+              if (metadata.kind === 'SPONSOR_CARD_SETUP') {
+                const card = si.paymentMethod;
+                await pool.query(
+                  `UPDATE sponsors
+                   SET stripe_customer_id = COALESCE($2, stripe_customer_id),
+                       default_payment_method_id = $3,
+                       card_brand = $4, card_last4 = $5,
+                       card_exp_month = $6, card_exp_year = $7,
+                       updated_payment_at = NOW(), updated_at = NOW()
+                   WHERE id = $1`,
+                  [metadata.sponsor_id, si.customerId, si.paymentMethodId, card?.brand ?? null, card?.last4 ?? null, card?.expMonth ?? null, card?.expYear ?? null],
+                );
+              } else {
+                const consent = metadata.off_session_consent === 'true';
+                await PaymentsService.applySetupIntentResult(si);
+                if (consent && metadata.user_id) {
+                  await PaymentsService.recordOffSessionConsent(metadata.user_id).catch(() => undefined);
+                }
+              }
             }
           }
         }

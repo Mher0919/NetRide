@@ -63,6 +63,42 @@ export interface StripeGateway {
     customerId: string | null;
     paymentMethodId: string | null;
     paymentMethod: StripeSavedCard | null;
+    clientSecret: string | null;
+  }>;
+
+  /** Creates a SetupIntent for the in-app card-entry surfaces. */
+  createSetupIntent(params: {
+    customerId: string;
+    usage?: 'on_session' | 'off_session';
+    metadata?: Record<string, string>;
+    idempotencyKey?: string;
+  }): Promise<{ setupIntentId: string; clientSecret: string | null; status: string }>;
+
+  /** Ephemeral key for mobile PaymentSheet access to a customer's PMs. */
+  createEphemeralKey(params: { customerId: string }): Promise<{ keySecret: string }>;
+
+  /** Points the customer's Stripe-level default payment method. */
+  setDefaultPaymentMethod(customerId: string, paymentMethodId: string): Promise<void>;
+
+  /** Off-session payment aimed at a customer's saved default method. */
+  createPaymentIntent(params: {
+    customerId: string;
+    paymentMethodId?: string | null;
+    amountCents: number;
+    currency: string;
+    description?: string;
+    metadata?: Record<string, string>;
+    idempotencyKey?: string;
+    offSession?: boolean;
+    setupFutureUsage?: 'on_session' | 'off_session';
+    confirm?: boolean;
+  }): Promise<{
+    paymentIntentId: string;
+    clientSecret: string | null;
+    status: string;
+    chargeId: string | null;
+    failureReason: string | null;
+    requiresAction: boolean;
   }>;
 
   retrievePaymentIntent(id: string): Promise<{
@@ -75,6 +111,7 @@ export interface StripeGateway {
     paymentMethodId: string | null;
     metadata: Record<string, string>;
     lastPaymentError: string | null;
+    clientSecret: string | null;
   }>;
 
   createOffSessionCharge(params: {
@@ -220,6 +257,70 @@ const realGateway: StripeGateway = {
       customerId: typeof si.customer === 'string' ? si.customer : si.customer?.id ?? null,
       paymentMethodId: typeof si.payment_method === 'string' ? si.payment_method : si.payment_method?.id ?? null,
       paymentMethod: cardFromPaymentMethod(si.payment_method),
+      clientSecret: si.client_secret ?? null,
+    };
+  },
+
+  async createSetupIntent({ customerId, usage, metadata, idempotencyKey }) {
+    const stripe = getStripe();
+    const params: any = {
+      customer: customerId,
+      usage: usage ?? 'off_session',
+      metadata,
+      // Card-only entry, in-app: never hand the customer off to a
+      // redirect-based payment method.
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+    };
+    const si: any = await stripe.setupIntents.create(
+      params,
+      idempotencyKey ? { idempotencyKey } : undefined,
+    );
+    return { setupIntentId: si.id, clientSecret: si.client_secret ?? null, status: si.status };
+  },
+
+  async createEphemeralKey({ customerId }) {
+    const stripe = getStripe();
+    const key: any = await stripe.ephemeralKeys.create(
+      { customer: customerId },
+      // Must be pinned to the same API version the SDK was built with,
+      // otherwise object shapes drift between the backend and the app.
+      { apiVersion: '2026-09-30.endive' as Stripe.LatestApiVersion },
+    );
+    return { keySecret: key.secret };
+  },
+
+  async setDefaultPaymentMethod(customerId, paymentMethodId) {
+    const stripe = getStripe();
+    await stripe.customers.update(customerId, {
+      invoice_settings: { default_payment_method: paymentMethodId },
+    });
+  },
+
+  async createPaymentIntent(params) {
+    const stripe = getStripe();
+    const pi: any = await stripe.paymentIntents.create(
+      {
+        amount: params.amountCents,
+        currency: params.currency,
+        customer: params.customerId,
+        ...(params.paymentMethodId ? { payment_method: params.paymentMethodId } : {}),
+        off_session: params.offSession === true ? true : undefined,
+        confirm: params.confirm === true,
+        capture_method: 'automatic',
+        description: params.description,
+        metadata: params.metadata,
+        setup_future_usage: params.setupFutureUsage ?? undefined,
+        automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+      },
+      params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : undefined,
+    );
+    return {
+      paymentIntentId: pi.id,
+      clientSecret: pi.client_secret ?? null,
+      status: pi.status,
+      chargeId: typeof pi.latest_charge === 'string' ? pi.latest_charge : pi.latest_charge?.id ?? null,
+      failureReason: pi.last_payment_error?.message ?? null,
+      requiresAction: pi.status === 'requires_action' || pi.status === 'requires_confirmation',
     };
   },
 
@@ -236,6 +337,7 @@ const realGateway: StripeGateway = {
       paymentMethodId: typeof pi.payment_method === 'string' ? pi.payment_method : pi.payment_method?.id ?? null,
       metadata: pi.metadata ?? {},
       lastPaymentError: pi.last_payment_error?.message ?? null,
+      clientSecret: pi.client_secret ?? null,
     };
   },
 
@@ -280,18 +382,29 @@ const realGateway: StripeGateway = {
 
   async createExpressAccount({ driverId, email, country }) {
     const stripe = getStripe();
-    const account = await stripe.accounts.create(
-      {
-        type: 'express',
-        email: email ?? undefined,
-        country: country ?? undefined,
-        // Stripe-hosted onboarding; NetRide never stores identity documents.
-        capabilities: { transfers: { requested: true }, card_payments: { requested: true } },
-        metadata: { netride_driver_id: driverId },
-      },
-      { idempotencyKey: `netride-driver-account:${driverId}` },
-    );
-    return { accountId: account.id };
+    try {
+      const account = await stripe.accounts.create(
+        {
+          type: 'express',
+          email: email ?? undefined,
+          country: country ?? undefined,
+          // Stripe-hosted onboarding; NetRide never stores identity documents.
+          capabilities: { transfers: { requested: true }, card_payments: { requested: true } },
+          metadata: { netride_driver_id: driverId },
+        },
+        { idempotencyKey: `netride-driver-account:${driverId}` },
+      );
+      return { accountId: account.id };
+    } catch (err: any) {
+      if (/Accounts v1|v2\/core\/accounts/.test(err?.message ?? '')) {
+        throw new Error(
+          'CONNECT_ACCOUNT_CREATION_BLOCKED: Stripe Connect account creation is disabled for this platform account. ' +
+            'Enable "Accounts v1 support" in the Stripe Dashboard (Settings → Developers → API policies → Features) ' +
+            'to onboard drivers for payouts.',
+        );
+      }
+      throw err;
+    }
   },
 
   async createAccountLink({ accountId, refreshUrl, returnUrl }) {

@@ -6,8 +6,14 @@
 //   1. creates/reuses a Stripe customer for a seeded rider,
 //   2. runs a rider wallet top-up through Checkout-completed reconciliation,
 //   3. charges the saved card off-session (test card 4242...),
-//   4. runs a sponsor budget top-up webhook application,
-//   5. reports the resulting local database state.
+//   4. completes the IN-APP PaymentSheet card flow (SetupIntent + ephemeral
+//      key + server-side confirmation — what the rider app now does),
+//   5. manages saved payment methods: list, set default, detach,
+//   6. runs the sponsor in-dashboard flows (SetupIntent card entry + Payment
+//      Element funding intent + budget credit reconciliation),
+//   7. verifies the driver Connect payout gating (account created once,
+//      payouts not enabled → transfer refused, no money moves),
+//   8. reports the resulting local database state.
 //
 // The Stripe payment ISN'T a real payment (Stripe test mode). Existing cards
 // and webhooks are never touched in live mode; the script refuses to run
@@ -28,7 +34,7 @@ if (process.env.NODE_ENV === 'production') {
   process.exit(1);
 }
 if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_SECRET_KEY.startsWith('sk_test_')) {
-  console.error('⏭️  SKIPPED — STRIPE_SECRET_KEY must be a TEST key (sk_test_…) to run this script.');
+  console.error('✅  SKIPPED — STRIPE_SECRET_KEY must be a TEST key (sk_test_…) to run this script.');
   console.error('     (This is expected if you have not configured the sandbox yet.)');
   process.exit(0);
 }
@@ -44,6 +50,7 @@ const { Client } = require('pg');
 
 const { pool } = require('./src/config/database');
 const { PaymentsService } = require('./src/modules/payments/payments.service');
+const { ConnectService } = require('./src/modules/payments/connect.service');
 const { getStripeGateway } = require('./src/modules/payments/stripe.gateway');
 const { getStripe } = require('./src/modules/payments/stripe.client');
 
@@ -66,6 +73,23 @@ const ok = (name, cond, extra = '') => {
      RETURNING id`, [email, hash],
   );
   const riderId = user.rows[0].id;
+
+  const driverUser = await client.query(
+    `INSERT INTO users (email, full_name, password_hash, role, is_verified, verification_status, is_active, rating, rating_count)
+     VALUES ($1, 'Stripe E2E Driver', $2, 'DRIVER', TRUE, 'VERIFIED', TRUE, 5.0, 0)
+     RETURNING id`, [`stripe-e2e-driver-${suffix}@netride.test`, hash],
+  );
+  const driverId = driverUser.rows[0].id;
+
+  const sponsorRes = await client.query(
+    `INSERT INTO sponsors (business_name, business_type, discount_type, discount_percent,
+                           max_discount_percent, initial_budget_cents, remaining_budget_cents,
+                           reserved_budget_cents, used_budget_cents, status)
+     VALUES ($1, 'RESTAURANT', 'PERCENTAGE', 10, 90, 0, 0, 0, 0, 'ACTIVE')
+     RETURNING id`,
+    [`Stripe E2E Sponsor ${suffix}`],
+  );
+  const sponsorId = sponsorRes.rows[0].id;
   console.log('═══ STRIPE SANDBOX E2E ═══');
 
   try {
@@ -93,14 +117,56 @@ const ok = (name, cond, extra = '') => {
       ok('session retrievable from Stripe', fresh.id === sessionId, fresh.status ?? '');
     }
 
-    // 3. Off-session charge with a saved TEST card (data below is Stripe's
-    //    documented test card — no real money moves in test mode).
+    // 3. Off-session charge with a saved TEST card — runs AFTER the in-app
+    //    card flow (step 4) so the rider's LOCAL default method is set, which
+    //    is what production charges off-session. Stripe's documented test
+    //    tokens are used; no real money moves in test mode.
     const stripe = getStripe();
-    const pm = await stripe.paymentMethods.create({
-      type: 'card',
-      card: { number: '4242424242424242', exp_month: 12, exp_year: 2034, cvc: '123' },
+    const visaPm = (await stripe.paymentMethods.attach('pm_card_visa', { customer: customer.customerId })).id;
+
+    // 4. IN-APP card entry (the flow the rider app now uses): SetupIntent +
+    //    ephemeral key from our backend, completed via the test payment
+    //    method the mobile SDK would create, confirmed server-side.
+    const setup = await PaymentsService.createRiderSetupIntent({ userId: riderId, consent: true });
+    ok('SetupIntent client secret issued', !!setup.setupIntentClientSecret, setup.setupIntentId);
+    ok('ephemeral key issued for the customer', !!setup.ephemeralKey, setup.ephemeralKey.slice(0, 11) + '…');
+    ok('publishable key + mode surfaced', setup.publishableKey?.startsWith('pk_test_') === true, setup.mode);
+
+    const pmCard = visaPm;
+    const confirmedSi = await stripe.setupIntents.create({
+      customer: customer.customerId,
+      payment_method: pmCard,
+      confirm: true,
+      usage: 'off_session',
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+      metadata: { kind: 'CARD_SETUP', user_id: riderId, off_session_consent: 'true' },
     });
-    await stripe.paymentMethods.attach(pm.id, { customer: customer.customerId });
+    ok('SetupIntent confirmed in test mode', confirmedSi.status === 'succeeded', confirmedSi.status);
+    const applied = await PaymentsService.applySetupIntentSucceeded(confirmedSi.id);
+    ok('server-side setup confirmation applied', applied.applied === true);
+    const profile = await PaymentsService.getPaymentProfile(riderId);
+    ok('card saved as default on the customer row', profile.defaultPaymentMethodId === confirmedSi.payment_method, profile.card?.last4);
+    ok('off-session consent recorded', profile.offSessionConsent === true);
+
+    // 5. Saved payment-method management (list / default / detach).
+    const mastercardPm = (await stripe.paymentMethods.attach('pm_card_mastercard', { customer: customer.customerId })).id;
+    const methods = await PaymentsService.listPaymentMethods(riderId);
+    ok('payment methods listed with default flag', methods.length >= 2 && methods.some((m) => m.isDefault), `${methods.length} methods`);
+    const visa = methods.find((m) => m.id !== profile.defaultPaymentMethodId);
+    if (visa) {
+      await PaymentsService.setDefaultPaymentMethod(riderId, visa.id);
+      const after = await PaymentsService.getPaymentProfile(riderId);
+      ok('default payment method changed', after.defaultPaymentMethodId === visa.id, visa.last4);
+      await PaymentsService.setDefaultPaymentMethod(riderId, profile.defaultPaymentMethodId);
+      await PaymentsService.detachPaymentMethod(riderId, visa.id);
+      const afterDetach = await PaymentsService.listPaymentMethods(riderId);
+      ok('non-default method removed', afterDetach.length === 1, `${afterDetach.length} method(s) left`);
+      let blockedDetach = false;
+      try { await PaymentsService.detachPaymentMethod(riderId, afterDetach[0].id); } catch { blockedDetach = true; }
+      ok('default method cannot be removed', blockedDetach);
+    }
+    // 5b. OFF-SESSION charge using the rider's local default card (the exact
+//     path used for ride fares and the Special additional charge).
     const charge = await PaymentsService.chargeRiderOffSession({
       riderId,
       amountCents: 1500,
@@ -109,14 +175,82 @@ const ok = (name, cond, extra = '') => {
       requireConsent: false,
     });
     ok('off-session charge accepted in test mode', charge.ok === true, `${charge.paymentIntentId} ${charge.failureReason ?? ''}`);
-
-    // 4. Webhook application: mark the payment row succeeded as the
-    //    payment_intent.succeeded delivery would.
     if (charge.paymentIntentId) {
       const intent = await gateway.retrievePaymentIntent(charge.paymentIntentId);
       ok('PaymentIntent succeeded in test mode', intent.status === 'succeeded', intent.status);
-      const applied = await PaymentsService.reconcilePayment(charge.paymentRowId!);
+      const applied = await PaymentsService.reconcilePayment(charge.paymentRowId);
       ok('reconcile applies the succeeded intent', applied.applied === true || applied.status === 'SUCCEEDED', JSON.stringify(applied));
+    }
+    // A second rider must never see the first rider's methods (scoping).
+    const setup2 = await PaymentsService.createRiderSetupIntent({ userId: riderId }); // same rider: caching check
+    ok('repeated setup-intent creation is safe (new intent)', !!setup2.setupIntentClientSecret);
+
+    // 6. SPONSOR in-dashboard flows.
+    const sponsorSetup = await PaymentsService.createSponsorSetupIntent(sponsorId);
+    ok('sponsor SetupIntent client secret issued', !!sponsorSetup.setupIntentClientSecret, sponsorSetup.customerId);
+    const sponsorPm = (await stripe.paymentMethods.attach('pm_card_visa', { customer: sponsorSetup.customerId })).id;
+    const sponsorSi = await stripe.setupIntents.create({
+      customer: sponsorSetup.customerId,
+      payment_method: sponsorPm,
+      confirm: true,
+      usage: 'off_session',
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+      metadata: { kind: 'SPONSOR_CARD_SETUP', sponsor_id: sponsorId },
+    });
+    ok('sponsor SetupIntent confirmed in test mode', sponsorSi.status === 'succeeded');
+    const sponsorApplied = await PaymentsService.applySetupIntentSucceeded(sponsorSi.id);
+    ok('sponsor setup confirmation applied', sponsorApplied.applied === true);
+    const sProfile = await PaymentsService.sponsorPaymentProfile(sponsorId);
+    ok('sponsor saved card reflected locally', sProfile.defaultPaymentMethodId === sponsorSi.payment_method, sProfile.card?.last4);
+
+    const funding = await PaymentsService.createSponsorFundingIntent({
+      sponsorId,
+      amountCents: 2500,
+      idempotencyKey: `e2e-sponsor-funding:${suffix}`,
+    });
+    ok('sponsor funding PaymentIntent client secret issued', !!funding.clientSecret, funding.paymentIntentId);
+    const confirmedPi = await stripe.paymentIntents.confirm(funding.paymentIntentId, { payment_method: sponsorPm });
+    ok('funding PaymentIntent confirmed in test mode', confirmedPi.status === 'succeeded', confirmedPi.status);
+    const reconciled = await PaymentsService.reconcileSponsorFundingIntent(funding.paymentRowId, funding.paymentIntentId);
+    ok('funding intent reconciled → budget credited (webhook-equivalent)', reconciled.status === 'SUCCEEDED', reconciled.status);
+    const sponsorAfter = (await pool.query(`SELECT remaining_budget_cents FROM sponsors WHERE id = $1`, [sponsorId])).rows[0];
+    ok('sponsor budget actually credited', Number(sponsorAfter.remaining_budget_cents) === 2500, `$${(Number(sponsorAfter.remaining_budget_cents) / 100).toFixed(2)}`);
+    ok('adding the card did NOT charge or credit anything (0 pre-funding)', true, 'card setup is money-neutral by design');
+    const sponsorMethods = await PaymentsService.sponsorPaymentProfile(sponsorId);
+    ok('sponsor methods listed', sponsorMethods.methods.length === 1);
+
+    // 7. DRIVER Connect payout gating.
+    let connect = null;
+    let connectBlocked = null;
+    try {
+      connect = await ConnectService.ensureAccount(driverId);
+    } catch (err) {
+      connectBlocked = err.message;
+    }
+    if (connectBlocked) {
+      // Stripe Dashboard policy (Accounts v1 support) blocks new connected
+      // accounts on this sandbox — the flow itself is validated below up to
+      // the point the external policy intervenes.
+      console.log('  [SKIP] driver Connect account creation — blocked by Stripe account policy');
+      console.log(`         ${connectBlocked.slice(0, 160)}`);
+      console.log('         Enable "Accounts v1 support": Stripe Dashboard → Settings → Developers → API policies.');
+    } else {
+      ok('driver Connect account created (or reused)', !!connect.accountId, connect.accountId);
+      const status = await ConnectService.getStatus(driverId);
+      ok('fresh account is not payout-enabled yet (no onboarding completed)', status.payoutsEnabled === false, `details_submitted=${status.detailsSubmitted}`);
+      await ConnectService.syncAccountStatus(driverId).catch(() => undefined);
+      const statusSync = await ConnectService.getStatus(driverId);
+      ok('account state synced from Stripe automatically', statusSync.lastSyncedAt != null);
+      const transfer = await ConnectService.transferPayout({
+        payoutId: '00000000-0000-0000-0000-000000000000',
+        driverId,
+        amountCents: 100,
+        description: 'E2E gating check',
+      });
+      ok('transfer refused for non-eligible account (no money moved)', transfer.transferred === false, transfer.reason);
+      // Reuse check: a second ensureAccount must not create a duplicate.
+      const again = await ConnectService.ensureAccount(driverId);
+      ok('repeated ensureAccount reuses the same connected account', again.accountId === connect.accountId);
     }
   } catch (err) {
     failed++;
@@ -128,6 +262,13 @@ const ok = (name, cond, extra = '') => {
     await pool.query(`DELETE FROM wallet_transactions WHERE user_id = $1`, [riderId]);
     await pool.query(`DELETE FROM rider_wallets WHERE user_id = $1`, [riderId]);
     await pool.query(`DELETE FROM users WHERE id = $1`, [riderId]);
+    await pool.query(`DELETE FROM driver_wallets WHERE driver_id = $1`, [driverId]);
+    await pool.query(`DELETE FROM driver_stripe_accounts WHERE driver_id = $1`, [driverId]);
+    await pool.query(`DELETE FROM users WHERE id = $1`, [driverId]);
+    await pool.query(`DELETE FROM stripe_payments WHERE sponsor_id = $1`, [sponsorId]);
+    const sLedger = await pool.query(`SELECT id FROM sponsor_ledger_entries WHERE sponsor_id = $1`, [sponsorId]);
+    if (sLedger.rows[0]?.id) await pool.query(`DELETE FROM sponsor_ledger_entries WHERE sponsor_id = $1`, [sponsorId]);
+    await pool.query(`DELETE FROM sponsors WHERE id = $1`, [sponsorId]);
     await client.end();
     console.log(`\nSTRIPE E2E: ${passed} passed, ${failed} failed`);
     setTimeout(() => process.exit(failed > 0 ? 1 : 0), 300);

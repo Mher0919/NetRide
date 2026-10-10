@@ -25,7 +25,6 @@ router.post('/profile-changes', authMiddleware, DriverController.submitProfileCh
 router.get('/profile-changes/current', authMiddleware, DriverController.getCurrentProfileChange);
 
 // Wallet + payouts
-router.post('/payout-cards', authMiddleware, DriverController.addPayoutCard);
 router.get('/wallet', authMiddleware, DriverController.getWallet);
 router.post('/wallet/request-payout', authMiddleware, DriverController.requestOnDemandPayout);
 router.get('/payouts', authMiddleware, DriverController.listMyPayouts);

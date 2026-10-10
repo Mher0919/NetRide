@@ -39,6 +39,11 @@ dependencies:
   firebase_messaging: ^16.5.0
   flutter_local_notifications: ^22.3.0
 
+  # Stripe PaymentSheet — secure in-app card entry (rider payment methods).
+  # Card numbers/CVCs are collected by Stripe's SDK; NetRide only ever sees
+  # the brand/last4/expiry from its own backend.
+  flutter_stripe: ^11.4.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

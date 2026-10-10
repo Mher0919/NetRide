@@ -888,11 +888,18 @@ export function startServer(): void {
 
   // Manual sponsor budget withdrawals: replay refunds for PENDING/FAILED
   // requests (idempotent via per-charge refund keys).
-  import('./modules/payments/withdrawal.service').then(({ sweepSponsorWithdrawals }) => {
+  import('./modules/payments/withdrawal.service').then(({ sweepSponsorWithdrawals, sweepDriverPayouts }) => {
     setInterval(() => {
       sweepSponsorWithdrawals()
         .then((n) => { if (n > 0) logger.info({ retried: n }, 'cron_sponsor_withdrawals_retry'); })
         .catch((err: any) => logger.error({ err: err.message }, 'cron_sponsor_withdrawals_error'));
+      // AUTOMATIC driver payouts: requests are transferred immediately; this
+      // sweep retries payouts whose transfer is still pending because the
+      // connected account was not yet eligible or the Stripe API was
+      // temporarily unavailable. No Admin approval is involved.
+      sweepDriverPayouts()
+        .then((n) => { if (n > 0) logger.info({ transferred: n }, 'cron_driver_payouts_auto'); })
+        .catch((err: any) => logger.error({ err: err.message }, 'cron_driver_payouts_error'));
     }, 5 * 60 * 1000);
   });
   }

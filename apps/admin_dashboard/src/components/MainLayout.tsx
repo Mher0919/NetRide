@@ -30,8 +30,6 @@ import RouteIcon from '@mui/icons-material/Route';
 import CompletedIcon from '@mui/icons-material/CheckCircle';
 import SpeedingIcon from '@mui/icons-material/Speed';
 import ProfileIcon from '@mui/icons-material/Badge';
-import CardIcon from '@mui/icons-material/CreditCard';
-import WalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import HandshakeIcon from '@mui/icons-material/Handshake';
 import TagIcon from '@mui/icons-material/LocalOffer';
 import ShareIcon from '@mui/icons-material/Share';
@@ -40,11 +38,10 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import PriceChangeIcon from '@mui/icons-material/PriceChange';
 import PaidIcon from '@mui/icons-material/Paid';
-import CreditCardIcon from '@mui/icons-material/CreditCard';
 import FlagIcon from '@mui/icons-material/Flag';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getDangerousDrivers, listProfileChanges, listPayoutCards, listPayouts, getPendingDocumentReviewsCount } from '../api/admin';
+import { getDangerousDrivers, listProfileChanges, getPendingDocumentReviewsCount } from '../api/admin';
 
 const drawerWidth = 240;
 
@@ -58,8 +55,6 @@ const MainLayout: React.FC = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [dangerousCount, setDangerousCount] = React.useState(0);
   const [profileChangeCount, setProfileChangeCount] = React.useState(0);
-  const [payoutCardCount, setPayoutCardCount] = React.useState(0);
-  const [payoutCount, setPayoutCount] = React.useState(0);
   const [pendingDocReviewCount, setPendingDocReviewCount] = React.useState(0);
 
   React.useEffect(() => {
@@ -74,18 +69,6 @@ const MainLayout: React.FC = () => {
       try {
         const p = await listProfileChanges('PENDING');
         if (!cancelled) setProfileChangeCount(p?.count ?? 0);
-      } catch {
-        // Sidebar badge is decorative — fail silently.
-      }
-      try {
-        const pc = await listPayoutCards('PENDING');
-        if (!cancelled) setPayoutCardCount(pc?.count ?? 0);
-      } catch {
-        // Sidebar badge is decorative — fail silently.
-      }
-      try {
-        const po = await listPayouts('PENDING');
-        if (!cancelled) setPayoutCount(po?.count ?? 0);
       } catch {
         // Sidebar badge is decorative — fail silently.
       }
@@ -114,8 +97,6 @@ const MainLayout: React.FC = () => {
     { text: 'Drivers', icon: <DriverIcon />, path: '/drivers', badge: pendingDocReviewCount },
     { text: 'Speeding', icon: <SpeedingIcon />, path: '/speeding', badge: dangerousCount },
     { text: 'Profile Changes', icon: <ProfileIcon />, path: '/profile-changes', badge: profileChangeCount },
-    { text: 'Payout Cards', icon: <CardIcon />, path: '/payout-cards', badge: payoutCardCount },
-    { text: 'Payouts', icon: <WalletIcon />, path: '/payouts', badge: payoutCount },
     { text: 'Flagged Reviews', icon: <SpeedingIcon />, path: '/ratings/flagged' },
     { text: 'Partners', icon: <HandshakeIcon />, path: '/partners' },
     { text: 'Promo Codes', icon: <TagIcon />, path: '/promos' },
@@ -125,7 +106,6 @@ const MainLayout: React.FC = () => {
     { text: 'Sponsors', icon: <StorefrontIcon />, path: '/sponsors' },
     { text: 'Pricing', icon: <PriceChangeIcon />, path: '/pricing' },
     { text: 'Revenue', icon: <PaidIcon />, path: '/revenue' },
-    { text: 'Payments', icon: <CreditCardIcon />, path: '/payments' },
     { text: 'Reports', icon: <FlagIcon />, path: '/reports' },
     { text: 'Audit Logs', icon: <HistoryIcon />, path: '/logs' },
   ];

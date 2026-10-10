@@ -136,23 +136,6 @@ export const rejectProfileChange = async (id: string, reason: string) => {
   return response.data;
 };
 
-// ----- Payout cards ---------------------------------------------------------
-
-export const listPayoutCards = async (status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL' = 'PENDING') => {
-  const response = await api.get('/admin/payout-cards', { params: { status } });
-  return response.data as { cards: any[]; count: number };
-};
-
-export const approvePayoutCard = async (id: string) => {
-  const response = await api.post(`/admin/payout-cards/${id}/approve`);
-  return response.data;
-};
-
-export const rejectPayoutCard = async (id: string, reason: string) => {
-  const response = await api.post(`/admin/payout-cards/${id}/reject`, { reason });
-  return response.data;
-};
-
 /// Fetch the count of pending document reviews from dashboard stats.
 export const getPendingDocumentReviewsCount = async () => {
   try {
@@ -219,18 +202,6 @@ export const uploadUserDocument = async (userId: string, field: string, image: s
 export const deleteUserDocument = async (userId: string, field: string) => {
   const response = await api.delete(`/admin/users/${userId}/document`, { data: { field } });
   return response.data as { success: boolean };
-};
-
-// ----- Payouts --------------------------------------------------------------
-
-export const listPayouts = async (status: 'PENDING' | 'PAID' | 'ALL' = 'PENDING') => {
-  const response = await api.get('/admin/payouts', { params: { status } });
-  return response.data as { payouts: any[]; count: number };
-};
-
-export const markPayoutPaid = async (id: string, reference: string, notes?: string) => {
-  const response = await api.post(`/admin/payouts/${id}/mark-paid`, { reference, notes });
-  return response.data;
 };
 
 // ----- Flagged ride ratings ------------------------------------------------
@@ -608,51 +579,4 @@ export const getNearbyGoogleBusinesses = async (params: {
 export const searchGoogleBusinesses = async (params: { q: string; lat?: number; lng?: number }) => {
   const response = await api.get('/places/text-search', { params });
   return response.data as GoogleBusinessResponse;
-};
-
-// ----- Payments / Stripe oversight -----------------------------------------
-
-export const getPaymentsConfig = async () => {
-  const response = await api.get('/payments/config');
-  return response.data;
-};
-
-export const getPaymentsOverview = async () => {
-  const response = await api.get('/admin/payments/overview');
-  return response.data;
-};
-
-export const listPaymentSettlements = async (params: { settlementStatus?: string; issues?: boolean; limit?: number; offset?: number } = {}) => {
-  const response = await api.get('/admin/payments/settlements', { params });
-  return response.data as { settlements: any[] };
-};
-
-export const listPayments = async (params: { status?: string; purpose?: string; limit?: number; offset?: number } = {}) => {
-  const response = await api.get('/admin/payments', { params });
-  return response.data as { payments: any[] };
-};
-
-export const listPaymentEvents = async () => {
-  const response = await api.get('/admin/payments/events');
-  return response.data as { events: any[] };
-};
-
-export const reconcilePayment = async (id: string) => {
-  const response = await api.post(`/admin/payments/${id}/reconcile`);
-  return response.data;
-};
-
-export const refundPayment = async (id: string, amountCents?: number, reason?: string) => {
-  const response = await api.post(`/admin/payments/${id}/refund`, { amountCents, reason });
-  return response.data;
-};
-
-export const retryAdditionalCharge = async (rideId: string) => {
-  const response = await api.post(`/admin/payments/rides/${rideId}/retry-additional-charge`);
-  return response.data;
-};
-
-export const transferPayout = async (payoutId: string) => {
-  const response = await api.post(`/admin/payments/payouts/${payoutId}/transfer`);
-  return response.data;
 };

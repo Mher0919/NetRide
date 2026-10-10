@@ -33,6 +33,17 @@ router.post('/sponsor/funding/session', authMiddleware, sponsorMiddleware, Spons
 router.get('/sponsor/payment-method', authMiddleware, sponsorMiddleware, SponsorPortalController.getPaymentMethod);
 router.post('/sponsor/payment-method/card-setup-session', authMiddleware, sponsorMiddleware, SponsorPortalController.createCardSetupSession);
 
+// In-dashboard card management (Stripe Elements, no external redirect).
+router.post('/sponsor/payment-method/setup-intent', authMiddleware, sponsorMiddleware, SponsorPortalController.createSetupIntent);
+router.post('/sponsor/payment-method/setup-intent/confirm', authMiddleware, sponsorMiddleware, SponsorPortalController.confirmSetupIntent);
+router.get('/sponsor/payment-methods', authMiddleware, sponsorMiddleware, SponsorPortalController.listPaymentMethods);
+router.post('/sponsor/payment-methods/:id/default', authMiddleware, sponsorMiddleware, SponsorPortalController.setDefaultPaymentMethod);
+router.delete('/sponsor/payment-methods/:id', authMiddleware, sponsorMiddleware, SponsorPortalController.detachPaymentMethod);
+
+// In-dashboard funding (Payment Element, budget credited via webhook).
+router.post('/sponsor/funding/intent', authMiddleware, sponsorMiddleware, SponsorPortalController.createFundingIntent);
+router.post('/sponsor/funding/intent/:paymentRowId/confirm', authMiddleware, sponsorMiddleware, SponsorPortalController.confirmFundingIntent);
+
 // MANUAL withdrawals (once per week; window opens every Monday 00:00 UTC).
 router.get('/sponsor/withdrawals', authMiddleware, sponsorMiddleware, SponsorPortalController.withdrawals);
 router.post('/sponsor/withdrawals/request', authMiddleware, sponsorMiddleware, SponsorPortalController.requestWithdrawal);

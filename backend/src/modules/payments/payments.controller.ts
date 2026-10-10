@@ -31,6 +31,14 @@ const SetupSessionSchema = z.object({
   consent: z.boolean().default(false),
 });
 
+const SetupIntentSchema = z.object({
+  consent: z.boolean().default(true),
+});
+
+const ConfirmSetupIntentSchema = z.object({
+  setupIntentId: z.string().trim().min(1).max(200),
+});
+
 const TopUpSchema = z.object({
   amountCents: z.number().int().min(WALLET_TOPUP_MIN_CENTS).max(WALLET_TOPUP_MAX_CENTS),
   idempotencyKey: z.string().trim().min(8).max(128).optional(),
@@ -63,6 +71,37 @@ export class PaymentsController {
     }
   }
 
+  /**
+   * POST /api/payments/setup-intent — in-app PaymentSheet card entry.
+   * Returns a SetupIntent client_secret + ephemeral key scoped to the
+   * authenticated rider's Stripe Customer. The rider completes entry inside
+   * the NetRide app; the card is only persisted by the verified webhook or
+   * the explicit server-side confirmation below.
+   */
+  static async setupIntent(req: AuthRequest, res: Response) {
+    try {
+      const body = SetupIntentSchema.parse(req.body ?? {});
+      const result = await PaymentsService.createRiderSetupIntent({
+        userId: req.user!.id,
+        consent: body.consent,
+      });
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  /** POST /api/payments/setup-intent/confirm — server-side setup result. */
+  static async confirmSetupIntent(req: AuthRequest, res: Response) {
+    try {
+      const body = ConfirmSetupIntentSchema.parse(req.body ?? {});
+      const result = await PaymentsService.applySetupIntentSucceeded(body.setupIntentId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
   /** POST /api/payments/wallet/topup-session — Stripe Checkout wallet top-up. */
   static async walletTopUpSession(req: AuthRequest, res: Response) {
     try {
@@ -89,6 +128,16 @@ export class PaymentsController {
   static async detachMethod(req: AuthRequest, res: Response) {
     try {
       await PaymentsService.detachPaymentMethod(req.user!.id, req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  /** POST /api/payments/methods/:id/default — change the default saved card. */
+  static async setDefaultMethod(req: AuthRequest, res: Response) {
+    try {
+      await PaymentsService.setDefaultPaymentMethod(req.user!.id, req.params.id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(400).json({ error: err.message });

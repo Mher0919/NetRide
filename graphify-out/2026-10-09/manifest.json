@@ -355,8 +355,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/profile_screen.dart": {
-    "mtime": 1791523538.634719,
-    "ast_hash": "417fa6ddbe893fdcd4a35b51b3667be3",
+    "mtime": 1791528989.8003843,
+    "ast_hash": "f772892a843b317cd72a8283bda32cab",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/replace_vehicle_screen.dart": {
@@ -1175,8 +1175,8 @@
     "semantic_hash": ""
   },
   "backend/run-tests.cjs": {
-    "mtime": 1791521644.9588482,
-    "ast_hash": "568157a514e8d553e4c8688603922427",
+    "mtime": 1791529061.0164356,
+    "ast_hash": "855f0f9b982ff15a2bb8e1cfaad1a8ab",
     "semantic_hash": ""
   },
   "backend/scripts/build-osrm.sh": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "backend/src/app.ts": {
-    "mtime": 1791521566.1335666,
-    "ast_hash": "35cc80bbed550441fe40a510f3c10c1d",
+    "mtime": 1791528665.2737372,
+    "ast_hash": "d01d3b115f40ad872e06c34794cdab5e",
     "semantic_hash": ""
   },
   "backend/src/benchmark_routing.ts": {
@@ -1280,8 +1280,8 @@
     "semantic_hash": ""
   },
   "backend/src/middleware/rateLimitConfig.ts": {
-    "mtime": 1791521571.573278,
-    "ast_hash": "f9d06e5bc17f458e20e27a3e4730d897",
+    "mtime": 1791528831.3795054,
+    "ast_hash": "609dde7e4b2502e3be4251c0b39bcc4a",
     "semantic_hash": ""
   },
   "backend/src/middleware/resolveFileUrls.middleware.ts": {
@@ -1340,8 +1340,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/driver/driver.service.ts": {
-    "mtime": 1791265752.3102536,
-    "ast_hash": "b07fe62b1512b1c4344faa34e16444a1",
+    "mtime": 1791528615.4768505,
+    "ast_hash": "08d2858a39ed211bc5082cdf7e611742",
     "semantic_hash": ""
   },
   "backend/src/modules/geospatial/geospatial.routes.ts": {
@@ -1740,8 +1740,8 @@
     "semantic_hash": ""
   },
   "backend/src/services/weeklyPayouts.service.ts": {
-    "mtime": 1782682638.9929538,
-    "ast_hash": "33388ae390f6c87ca91a85d54a626dac",
+    "mtime": 1791528626.5863037,
+    "ast_hash": "8038278857e879c21fc10afa3ffb5bc4",
     "semantic_hash": ""
   },
   "backend/src/types/index.ts": {
@@ -3280,8 +3280,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/api/sponsor.ts": {
-    "mtime": 1791523054.842438,
-    "ast_hash": "b68d26dacff89d3ff232183a087ab2ed",
+    "mtime": 1791528861.206322,
+    "ast_hash": "b56af0d3aa930c3ce17de4c85b196fc6",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/components/MainLayout.tsx": {
@@ -3405,13 +3405,13 @@
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor-portal.controller.ts": {
-    "mtime": 1791521540.690689,
-    "ast_hash": "5e11d24ceee0a4cfd6227d0943e7bb54",
+    "mtime": 1791528817.9323654,
+    "ast_hash": "bf99312e9cbad5c2dbc51c9317c6eb41",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor-portal.routes.ts": {
-    "mtime": 1791521544.7777493,
-    "ast_hash": "5c3ed2c46adccffd616593dc35ed49b7",
+    "mtime": 1791528826.9728997,
+    "ast_hash": "ad30c02829b41a26689319af9fe6f28b",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor.service.ts": {
@@ -4505,8 +4505,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Funding.tsx": {
-    "mtime": 1791523076.7389388,
-    "ast_hash": "967e055ecfeec61f15141fa010e06f80",
+    "mtime": 1791528918.352053,
+    "ast_hash": "32d13fea064522f82271ed8917b7ce2f",
     "semantic_hash": ""
   },
   "backend/migrations/051_stripe_enums.sql": {
@@ -4525,8 +4525,8 @@
     "semantic_hash": ""
   },
   "backend/run-payments-integration.cjs": {
-    "mtime": 1791525583.2283063,
-    "ast_hash": "e1f623fbf20e0f598784c11b0ea2ede6",
+    "mtime": 1791529152.1438026,
+    "ast_hash": "f332ff82d434864908662bb21e8ece7b",
     "semantic_hash": ""
   },
   "backend/run-stripe-e2e.cjs": {
@@ -4580,8 +4580,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/payments/payments.service.ts": {
-    "mtime": 1791525200.856905,
-    "ast_hash": "b2e4a48a44fb9638e337d4f7fbc7b5c0",
+    "mtime": 1791528727.5912147,
+    "ast_hash": "6f012712454c9181a56ffde57cfcb454",
     "semantic_hash": ""
   },
   "backend/src/modules/payments/ride-settlement.service.ts": {
@@ -4600,13 +4600,28 @@
     "semantic_hash": ""
   },
   "backend/src/modules/payments/webhook.service.ts": {
-    "mtime": 1791521456.4363456,
-    "ast_hash": "ef4070086a600eab350b979614e82fab",
+    "mtime": 1791528794.561351,
+    "ast_hash": "6efbc1c02151fd40f0ca781435268856",
     "semantic_hash": ""
   },
   "docs/payments-stripe-integration.md": {
-    "mtime": 1791525907.2823422,
-    "ast_hash": "30d786e7ad994d270cab4c9c5bc610c6",
+    "mtime": 1791529404.0521076,
+    "ast_hash": "343593a7bb621c04995e6630255a6e8b",
+    "semantic_hash": ""
+  },
+  "backend/migrations/054_withdrawals.sql": {
+    "mtime": 1791528509.575573,
+    "ast_hash": "c7dfcc7baedccf9b0818e11c60507430",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/payments/__tests__/withdrawal.unit.test.ts": {
+    "mtime": 1791529067.7691584,
+    "ast_hash": "073102d20214448eef2a01861c358e7f",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/payments/withdrawal.service.ts": {
+    "mtime": 1791529036.6481478,
+    "ast_hash": "1afc064fd192ce101c15e8f8d2ea76d8",
     "semantic_hash": ""
   }
 }

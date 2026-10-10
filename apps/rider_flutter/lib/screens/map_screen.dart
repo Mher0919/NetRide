@@ -377,6 +377,28 @@ class _MapScreenState extends State<MapScreen>
     }
   }
 
+  /// Pull-to-refresh for the Explore (Home) tab: re-fetches the greeting
+  /// profile, recent searches, ride-credit options and the live SPECIALS
+  /// list (with the last known position). Keeps the current layout and
+  /// scroll position; failures keep the existing content.
+  Future<void> _refreshHome() async {
+    try {
+      await _fetchProfile();
+    } catch (_) {}
+    try {
+      await _loadRecentSearches();
+    } catch (_) {}
+    try {
+      await _loadRewardsOptions();
+    } catch (_) {}
+    try {
+      await context.read<SpecialsProvider>().refresh(
+        lat: _smoothedPosition?.latitude,
+        lng: _smoothedPosition?.longitude,
+      );
+    } catch (_) {}
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Admin deactivation while the app is backgrounded must reach Explore:
@@ -1211,8 +1233,12 @@ class _MapScreenState extends State<MapScreen>
                         builder: (context, viewport) {
                           final vpHeight = viewport.maxHeight;
                           final vpInsets = MediaQuery.paddingOf(context);
-                          return SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
+                          return RefreshIndicator(
+                        color: const Color(0xFF5B7760),
+                        onRefresh: _refreshHome,
+                        child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(
+                            parent: BouncingScrollPhysics()),
                         padding: const EdgeInsets.only(bottom: 24),
                         child: SafeArea(
                           child: Padding(
@@ -1683,7 +1709,8 @@ class _MapScreenState extends State<MapScreen>
                           ),
                         ),
                       ),
-                    );
+                    ),
+                  );
                       },
                     ),
                   ),

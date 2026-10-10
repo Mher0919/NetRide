@@ -24,7 +24,13 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _fetchHistory() async {
-    setState(() => _state = ViewState.loading);
+    // First load uses the full loading state; pull-to-refresh uses
+    // _refreshHistory below which keeps the current content visible.
+    _load(showLoading: true);
+  }
+
+  Future<void> _load({bool showLoading = false}) async {
+    if (showLoading) setState(() => _state = ViewState.loading);
     try {
       final prefs = await SharedPreferences.getInstance();
       if (!prefs.containsKey('jwt_token')) {
@@ -42,12 +48,20 @@ class _ActivityScreenState extends State<ActivityScreen> {
         _state = ViewState.success;
       });
     } catch (e) {
-      setState(() {
-        _state = ViewState.failure;
-        _errorMessage = 'Unable to fetch your activity history. Please check your connection and try again.';
-      });
+      // Refresh failures keep the existing list; only first-load failures
+      // flip to the error state.
+      if (showLoading) {
+        setState(() {
+          _state = ViewState.failure;
+          _errorMessage = 'Unable to fetch your activity history. Please check your connection and try again.';
+        });
+      }
     }
   }
+
+  /// Pull-to-refresh: re-fetches the latest ride history from the backend
+  /// without clearing the current list or losing the scroll position.
+  Future<void> _refreshHistory() => _load(showLoading: false);
 
   Future<void> _deleteActivity(String id) async {
     final confirmed = await showDialog<bool>(
@@ -105,16 +119,30 @@ class _ActivityScreenState extends State<ActivityScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetchHistory,
-        successWidget: _history.isEmpty
-            ? _buildEmptyState()
-            : ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                itemCount: _history.length,
-                itemBuilder: (context, index) {
-                  final ride = _history[index];
-                  return _buildRideCard(ride, theme);
-                },
-              ),
+        successWidget: RefreshIndicator(
+          color: const Color(0xFF5B7760),
+          onRefresh: _refreshHistory,
+          child: _history.isEmpty
+              ? LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: SizedBox(
+                      height: constraints.maxHeight,
+                      child: _buildEmptyState(),
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  itemCount: _history.length,
+                  itemBuilder: (context, index) {
+                    final ride = _history[index];
+                    return _buildRideCard(ride, theme);
+                  },
+                ),
+        ),
       ),
     );
   }

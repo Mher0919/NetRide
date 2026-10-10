@@ -162,7 +162,8 @@ export class PaymentsService {
     const profile = await this.getPaymentProfile(userId);
     const gateway = gatewayOrNull();
     if (!gateway || !profile.stripeCustomerId) return [];
-    return gateway.listPaymentMethods(profile.stripeCustomerId);
+    const methods = await gateway.listPaymentMethods(profile.stripeCustomerId);
+    return methods.map((m) => ({ ...m, isDefault: m.id === profile.defaultPaymentMethodId }));
   }
 
   static async detachPaymentMethod(userId: string, paymentMethodId: string): Promise<void> {
@@ -178,6 +179,146 @@ export class PaymentsService {
       throw new Error('Payment method not found for this account');
     }
     await gateway.detachPaymentMethod(paymentMethodId);
+    if (profile.defaultPaymentMethodId === paymentMethodId) {
+      await pool.query(
+        `UPDATE stripe_customers
+         SET default_payment_method_id = NULL, card_brand = NULL, card_last4 = NULL,
+             card_exp_month = NULL, card_exp_year = NULL, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId],
+      );
+    }
+  }
+
+  /** Changes the default saved card for the authenticated rider. */
+  static async setDefaultPaymentMethod(userId: string, paymentMethodId: string): Promise<void> {
+    const profile = await this.getPaymentProfile(userId);
+    const gateway = gatewayOrNull();
+    if (!gateway) throw new Error('Stripe is not configured');
+    if (!profile.stripeCustomerId) throw new Error('No payment profile');
+    const methods = await gateway.listPaymentMethods(profile.stripeCustomerId);
+    const chosen = methods.find((m) => m.id === paymentMethodId);
+    if (!chosen) throw new Error('Payment method not found for this account');
+
+    await gateway.setDefaultPaymentMethod(profile.stripeCustomerId, paymentMethodId);
+    await pool.query(
+      `UPDATE stripe_customers
+       SET default_payment_method_id = $2,
+           card_brand = $3, card_last4 = $4, card_exp_month = $5, card_exp_year = $6,
+           updated_at = NOW()
+       WHERE user_id = $1`,
+      [userId, paymentMethodId, chosen.brand, chosen.last4, chosen.expMonth, chosen.expYear],
+    );
+  }
+
+  /**
+   * Creates a SetupIntent for the in-app PaymentSheet card-entry flow.
+   * Keeps all secrets server-side: the client only receives the
+   * client_secret + an ephemeral key scoped to this customer.
+   */
+  static async createRiderSetupIntent(args: {
+    userId: string;
+    consent?: boolean;
+  }): Promise<{
+    setupIntentId: string;
+    setupIntentClientSecret: string;
+    ephemeralKey: string;
+    customerId: string;
+    publishableKey: string | null;
+    mode: string;
+    consentRecorded: boolean;
+  }> {
+    const gateway = gatewayOrNull();
+    if (!gateway) throw new Error('Stripe is not configured');
+    const customer = await this.ensureStripeCustomer(args.userId);
+    if (!customer) throw new Error('Stripe is not configured');
+
+    const consent = args.consent !== false;
+    const si = await gateway.createSetupIntent({
+      customerId: customer.customerId,
+      // Cards saved here may be charged off-session later (ride fares, the
+      // Special additional charge) — Stripe requires usage=off_session to
+      // keep them MIT-eligible.
+      usage: 'off_session',
+      metadata: {
+        kind: 'CARD_SETUP',
+        user_id: args.userId,
+        off_session_consent: consent ? 'true' : 'false',
+      },
+      idempotencyKey: `rider-setup:${args.userId}:${Date.now()}`,
+    });
+    if (!si.clientSecret) throw new Error('Stripe did not return a SetupIntent');
+    const key = await gateway.createEphemeralKey({ customerId: customer.customerId });
+
+    if (consent) {
+      await this.recordOffSessionConsent(args.userId).catch(() => undefined);
+    }
+
+    return {
+      setupIntentId: si.setupIntentId,
+      setupIntentClientSecret: si.clientSecret,
+      ephemeralKey: key.keySecret,
+      customerId: customer.customerId,
+      publishableKey: env.STRIPE_PUBLISHABLE_KEY ?? null,
+      mode: stripeMode(),
+      consentRecorded: consent,
+    };
+  }
+
+  /**
+   * Server-side confirmation of a completed SetupIntent. Called by the app
+   * right after the PaymentSheet succeeds (instant feedback) AND by the
+   * verified webhook — both paths are idempotent.
+   */
+  static async applySetupIntentSucceeded(setupIntentId: string): Promise<{ applied: boolean }> {
+    const gateway = gatewayOrNull();
+    if (!gateway) return { applied: false };
+    const si = await gateway.retrieveSetupIntent(setupIntentId);
+    if (si.status !== 'succeeded') return { applied: false };
+    await this.applySetupIntentResult(si);
+    return { applied: true };
+  }
+
+  /**
+   * Persists the card + default flag + consent from a succeeded SetupIntent.
+   * Shared by the webhook path and the in-app confirmation path.
+   */
+  static async applySetupIntentResult(si: {
+    customerId: string | null;
+    paymentMethodId: string | null;
+    paymentMethod: { brand: string | null; last4: string | null; expMonth: number | null; expYear: number | null } | null;
+  }): Promise<void> {
+    const row = await pool.query(
+      `SELECT user_id FROM stripe_customers WHERE stripe_customer_id = $1`,
+      [si.customerId],
+    );
+    if (row.rows[0]?.user_id) {
+      await pool.query(
+        `UPDATE stripe_customers
+         SET default_payment_method_id = COALESCE($2, default_payment_method_id),
+             card_brand = $3, card_last4 = $4,
+             card_exp_month = $5, card_exp_year = $6,
+             updated_at = NOW()
+         WHERE user_id = $1`,
+        [row.rows[0].user_id, si.paymentMethodId, si.paymentMethod?.brand ?? null, si.paymentMethod?.last4 ?? null, si.paymentMethod?.expMonth ?? null, si.paymentMethod?.expYear ?? null],
+      );
+      return;
+    }
+    const sponsorRow = await pool.query(
+      `SELECT id FROM sponsors WHERE stripe_customer_id = $1`,
+      [si.customerId],
+    );
+    if (sponsorRow.rows[0]?.id) {
+      await pool.query(
+        `UPDATE sponsors
+         SET default_payment_method_id = COALESCE($2, default_payment_method_id),
+             card_brand = $3, card_last4 = $4,
+             card_exp_month = $5, card_exp_year = $6,
+             updated_payment_at = NOW(), updated_at = NOW()
+         WHERE stripe_customer_id = $1`,
+        [si.customerId, si.paymentMethodId, si.paymentMethod?.brand ?? null, si.paymentMethod?.last4 ?? null, si.paymentMethod?.expMonth ?? null, si.paymentMethod?.expYear ?? null],
+      );
+    }
   }
 
   /** Explicit rider consent to conditional off-session charges. */
@@ -332,6 +473,217 @@ export class PaymentsService {
       [sponsorId, created.customerId],
     );
     return created.customerId;
+  }
+
+  // ---------------------------------------------- sponsor in-app card entry
+
+  static async sponsorPaymentProfile(sponsorId: string): Promise<{
+    configured: boolean;
+    mode: string;
+    stripeCustomerId: string | null;
+    defaultPaymentMethodId: string | null;
+    card: { brand: string | null; last4: string | null; expMonth: number | null; expYear: number | null } | null;
+    methods: Array<{ id: string; brand: string | null; last4: string | null; expMonth: number | null; expYear: number | null; isDefault: boolean }>;
+  }> {
+    const row = await pool.query(
+      `SELECT stripe_customer_id, default_payment_method_id, card_brand, card_last4,
+              card_exp_month, card_exp_year
+       FROM sponsors WHERE id = $1`,
+      [sponsorId],
+    );
+    const r = row.rows[0];
+    const gateway = gatewayOrNull();
+    let methods: Array<any> = [];
+    if (gateway && r?.stripe_customer_id) {
+      const list = await gateway.listPaymentMethods(r.stripe_customer_id);
+      methods = list.map((m) => ({ ...m, isDefault: m.id === r.default_payment_method_id }));
+    }
+    return {
+      configured: isStripeConfigured(),
+      mode: stripeMode(),
+      stripeCustomerId: r?.stripe_customer_id ?? null,
+      defaultPaymentMethodId: r?.default_payment_method_id ?? null,
+      card: r?.card_last4
+        ? { brand: r.card_brand, last4: r.card_last4, expMonth: r.card_exp_month, expYear: r.card_exp_year }
+        : null,
+      methods,
+    };
+  }
+
+  /** SetupIntent for the in-dashboard Payment Element card-entry flow. */
+  static async createSponsorSetupIntent(sponsorId: string): Promise<{
+    setupIntentClientSecret: string;
+    customerId: string;
+    publishableKey: string | null;
+    mode: string;
+  }> {
+    const gateway = gatewayOrNull();
+    if (!gateway) throw new Error('Stripe is not configured');
+    const customerId = await this.ensureSponsorStripeCustomer(sponsorId);
+    const si = await gateway.createSetupIntent({
+      customerId,
+      usage: 'off_session',
+      metadata: {
+        kind: 'SPONSOR_CARD_SETUP',
+        sponsor_id: sponsorId,
+      },
+      idempotencyKey: `sponsor-setup:${sponsorId}:${Date.now()}`,
+    });
+    if (!si.clientSecret) throw new Error('Stripe did not return a SetupIntent');
+    return {
+      setupIntentClientSecret: si.clientSecret,
+      customerId,
+      publishableKey: env.STRIPE_PUBLISHABLE_KEY ?? null,
+      mode: stripeMode(),
+    };
+  }
+
+  /** Changes the sponsor's default saved card (used for funding/refunds). */
+  static async setSponsorDefaultPaymentMethod(sponsorId: string, paymentMethodId: string): Promise<void> {
+    const gateway = gatewayOrNull();
+    if (!gateway) throw new Error('Stripe is not configured');
+    const row = await pool.query(
+      `SELECT stripe_customer_id FROM sponsors WHERE id = $1`,
+      [sponsorId],
+    );
+    const customerId = row.rows[0]?.stripe_customer_id;
+    if (!customerId) throw new Error('No payment profile');
+    const methods = await gateway.listPaymentMethods(customerId);
+    const chosen = methods.find((m) => m.id === paymentMethodId);
+    if (!chosen) throw new Error('Payment method not found for this account');
+
+    await gateway.setDefaultPaymentMethod(customerId, paymentMethodId);
+    await pool.query(
+      `UPDATE sponsors
+       SET default_payment_method_id = $2,
+           card_brand = $3, card_last4 = $4, card_exp_month = $5, card_exp_year = $6,
+           updated_payment_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [sponsorId, paymentMethodId, chosen.brand, chosen.last4, chosen.expMonth, chosen.expYear],
+    );
+  }
+
+  /** Removes an eligible saved sponsor card (the default may not be removed). */
+  static async detachSponsorPaymentMethod(sponsorId: string, paymentMethodId: string): Promise<void> {
+    const gateway = gatewayOrNull();
+    if (!gateway) throw new Error('Stripe is not configured');
+    const row = await pool.query(
+      `SELECT stripe_customer_id, default_payment_method_id FROM sponsors WHERE id = $1`,
+      [sponsorId],
+    );
+    const r = row.rows[0];
+    if (!r?.stripe_customer_id) throw new Error('No payment profile');
+    if (r.default_payment_method_id === paymentMethodId) {
+      throw new Error('The default payment method cannot be removed while it is in use');
+    }
+    const methods = await gateway.listPaymentMethods(r.stripe_customer_id);
+    if (!methods.some((m) => m.id === paymentMethodId)) {
+      throw new Error('Payment method not found for this account');
+    }
+    await gateway.detachPaymentMethod(paymentMethodId);
+  }
+
+  /**
+   * Creates the PaymentIntent behind the in-dashboard "Add funds" flow.
+   * The sponsor customer is attached so the card used is a saved/default
+   * method; the webhook (`payment_intent.succeeded` + metadata) credits the
+   * budget exactly like the existing Checkout flow — nothing is credited
+   * from a client callback.
+   */
+  static async createSponsorFundingIntent(args: {
+    sponsorId: string;
+    amountCents: number;
+    idempotencyKey?: string;
+    paymentMethodId?: string | null;
+  }): Promise<{ paymentRowId: string; clientSecret: string; paymentIntentId: string }> {
+    const amountCents = Math.round(args.amountCents);
+    if (!Number.isFinite(amountCents) || amountCents <= 0 || amountCents > 10_000_000) {
+      throw new Error('Invalid funding amount');
+    }
+    const gateway = gatewayOrNull();
+    if (!gateway) throw new Error('Stripe is not configured');
+
+    const sponsor = await pool.query(`SELECT id, business_name FROM sponsors WHERE id = $1`, [args.sponsorId]);
+    if (sponsor.rows.length === 0) throw new Error('Sponsor not found');
+    const customerId = await this.ensureSponsorStripeCustomer(args.sponsorId);
+
+    const idempotencyKey = args.idempotencyKey ?? `sponsor-intent:${args.sponsorId}:${Date.now()}`;
+    const insert = await pool.query(
+      `INSERT INTO stripe_payments
+         (purpose, sponsor_id, amount_cents, currency, status, stripe_customer_id, idempotency_key)
+       VALUES ('SPONSOR_BUDGET_TOPUP', $1, $2, $3, 'PENDING', $4, $5)
+       ON CONFLICT (idempotency_key) DO NOTHING
+       RETURNING id`,
+      [args.sponsorId, amountCents, env.STRIPE_CURRENCY, customerId, idempotencyKey],
+    );
+    if (insert.rows.length === 0) {
+      const existing = await pool.query(
+        `SELECT id, stripe_payment_intent_id FROM stripe_payments WHERE idempotency_key = $1`,
+        [idempotencyKey],
+      );
+      const row = existing.rows[0];
+      if (!row?.stripe_payment_intent_id) throw new Error('A funding payment with this idempotency key is already being processed');
+      const intent = await gateway.retrievePaymentIntent(row.stripe_payment_intent_id);
+      if (!intent.clientSecret) throw new Error('Funding payment already confirmed');
+      return { paymentRowId: row.id, clientSecret: intent.clientSecret, paymentIntentId: row.stripe_payment_intent_id };
+    }
+    const paymentRowId = insert.rows[0].id;
+
+    try {
+      const intent = await gateway.createPaymentIntent({
+        customerId,
+        paymentMethodId: args.paymentMethodId ?? null,
+        amountCents,
+        currency: env.STRIPE_CURRENCY,
+        description: `Sponsor budget funding — ${sponsor.rows[0].business_name}`,
+        metadata: {
+          purpose: 'SPONSOR_BUDGET_TOPUP',
+          stripe_payment_id: paymentRowId,
+          sponsor_id: args.sponsorId,
+        },
+        idempotencyKey: `sponsor-pi:${paymentRowId}`,
+        setupFutureUsage: args.paymentMethodId ? 'off_session' : undefined,
+      });
+      if (!intent.clientSecret) throw new Error('Stripe did not return a PaymentIntent');
+      await pool.query(
+        `UPDATE stripe_payments
+         SET stripe_payment_intent_id = $2, updated_at = NOW()
+         WHERE id = $1`,
+        [paymentRowId, intent.paymentIntentId],
+      );
+      return { paymentRowId, clientSecret: intent.clientSecret, paymentIntentId: intent.paymentIntentId };
+    } catch (err: any) {
+      await pool.query(
+        `UPDATE stripe_payments SET status = 'FAILED', failure_reason = $2, updated_at = NOW() WHERE id = $1`,
+        [paymentRowId, String(err.message).slice(0, 300)],
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Reconciles a sponsor funding PaymentIntent after the Elements flow
+   * confirms it in-browser (webhook remains the source of truth; this adds
+   * instant feedback and covers webhook-delivery gaps in dev/test).
+   */
+  static async reconcileSponsorFundingIntent(paymentRowId: string, paymentIntentId: string | null): Promise<{ status: string }> {
+    const gateway = gatewayOrNull();
+    if (!gateway) return { status: 'unknown' };
+    if (!paymentIntentId) return { status: 'unknown' };
+    const intent = await gateway.retrievePaymentIntent(paymentIntentId);
+    if (intent.status === 'succeeded') {
+      await this.applySponsorBudgetTopup({ stripePaymentId: paymentRowId, paymentIntentId });
+      return { status: 'SUCCEEDED' };
+    }
+    if (['requires_payment_method', 'canceled'].includes(intent.status)) {
+      await pool.query(
+        `UPDATE stripe_payments SET status = 'FAILED', failure_reason = $2, updated_at = NOW()
+         WHERE id = $1 AND status NOT IN ('SUCCEEDED','REFUNDED')`,
+        [paymentRowId, intent.lastPaymentError ?? intent.status],
+      );
+      return { status: 'FAILED' };
+    }
+    return { status: intent.status };
   }
 
   /** Stripe Checkout (mode=payment) funding a sponsor's prepaid budget. */
@@ -671,10 +1023,19 @@ export class PaymentsService {
     stripePaymentId: string;
     paymentIntentId: string | null;
   }): Promise<{ credited: boolean; amountCents: number }> {
+    // The claim tolerates a row already flipped to SUCCEEDED by an earlier
+    // webhook delivery as long as it was never credited (ledger/wallet ref
+    // missing): the webhook's generic status update and this credit path can
+    // legitimately interleave, and the idempotent post() below guarantees
+    // only one wallet credit per row no matter how many times this runs.
     const claim = await pool.query(
       `UPDATE stripe_payments
        SET status = 'PROCESSING', stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $2), updated_at = NOW()
-       WHERE id = $1 AND purpose = 'RIDER_WALLET_TOPUP' AND status IN ('PENDING','REQUIRES_ACTION','FAILED')
+       WHERE id = $1 AND purpose = 'RIDER_WALLET_TOPUP'
+         AND (status IN ('PENDING','REQUIRES_ACTION','FAILED')
+              OR (status = 'SUCCEEDED' AND NOT EXISTS (
+                    SELECT 1 FROM wallet_transactions wt
+                    WHERE wt.idempotency_key = 'wallet-topup:' || stripe_payments.id)))
        RETURNING id, user_id, amount_cents`,
       [args.stripePaymentId, args.paymentIntentId],
     );
@@ -710,10 +1071,15 @@ export class PaymentsService {
     stripePaymentId: string;
     paymentIntentId: string | null;
   }): Promise<{ credited: boolean; amountCents: number }> {
+    // Same claim tolerance as applyRiderWalletTopup: a webhook may have
+    // flipped the row to SUCCEEDED before this credit path ran; the ledger
+    // idempotency key guarantees a single budget credit per payment.
     const claim = await pool.query(
       `UPDATE stripe_payments
        SET status = 'PROCESSING', stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $2), updated_at = NOW()
-       WHERE id = $1 AND purpose = 'SPONSOR_BUDGET_TOPUP' AND status IN ('PENDING','REQUIRES_ACTION','FAILED')
+       WHERE id = $1 AND purpose = 'SPONSOR_BUDGET_TOPUP'
+         AND (status IN ('PENDING','REQUIRES_ACTION','FAILED')
+              OR (status = 'SUCCEEDED' AND ledger_entry_id IS NULL))
        RETURNING id, sponsor_id, amount_cents`,
       [args.stripePaymentId, args.paymentIntentId],
     );

@@ -89,15 +89,6 @@ const ProfileChangeRequestSchema = z.object({
   reason: z.string().min(1).max(500).optional(),
 });
 
-const PayoutCardSchema = z.object({
-  card_number: z.string().min(13).max(19),
-  exp_month: z.number().int().min(1).max(12),
-  exp_year: z.number().int().min(2024).max(2099),
-  cvc: z.string().regex(/^\d{3,4}$/),
-  cardholder_name: z.string().min(2).max(80),
-  zip: z.string().min(3).max(12),
-});
-
 const PayoutRequestSchema = z.object({
   amount_cents: z.number().int().positive().max(100_000_00),
 });
@@ -315,25 +306,6 @@ export class DriverController {
     }
   }
 
-  static async addPayoutCard(req: any, res: Response) {
-    try {
-      const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-
-      const validated = PayoutCardSchema.parse(req.body);
-      const result = await DriverService.addPayoutCard(userId, validated);
-      res.json(result);
-    } catch (error: any) {
-      if (error?.name === 'ZodError') {
-        return res.status(400).json({ error: 'Invalid card details.', details: error.errors });
-      }
-      const msg = error?.message ?? 'Failed to submit payout card.';
-      const code = msg.includes('INVALID_CARD') ? 400 : 400;
-      console.error(`[DRIVER] ❌ Add payout card error: ${msg}`);
-      res.status(code).json({ error: msg });
-    }
-  }
-
   static async getWallet(req: any, res: Response) {
     try {
       const userId = req.user?.id;
@@ -360,9 +332,10 @@ export class DriverController {
         return res.status(400).json({ error: 'Invalid payout request.' });
       }
       const msg = error?.message ?? 'Failed to request payout.';
-      const code = msg.includes('NO_PAYOUT_CARD') ? 403
+      const code = msg.includes('CONNECT_SETUP_REQUIRED') ? 403
         : msg.includes('INSUFFICIENT_BALANCE') ? 400
         : msg.includes('MIN_PAYOUT') ? 400
+        : msg.includes('WITHDRAWAL_UNAVAILABLE') ? 400
         : 400;
       console.error(`[DRIVER] ❌ Request payout error: ${msg}`);
       res.status(code).json({ error: msg });

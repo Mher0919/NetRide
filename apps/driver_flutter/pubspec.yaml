@@ -44,6 +44,11 @@ dependencies:
   firebase_messaging: ^16.5.0
   flutter_local_notifications: ^22.3.0
 
+  # Stripe Connect onboarding opened INSIDE the app (Stripe-hosted account
+  # onboarding page in an in-app web view). NetRide never collects bank or
+  # payout-card details from drivers.
+  webview_flutter: ^4.10.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
