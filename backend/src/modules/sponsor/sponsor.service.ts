@@ -808,20 +808,37 @@ export class SponsorService {
     return joined.rows.length > 0 ? normalizeSponsor(joined.rows[0]) : null;
   }
 
-  /** Creates (or resets) the sponsor's portal login. Role SPONSOR, bcrypt hash, never plaintext. */
+  /**
+   * Creates (or resets) the sponsor's portal login. One email = one user row,
+   * so a person can hold a sponsor and a partner dashboard under the same
+   * login. Supported modes:
+   *  - EXISTING (userId): link an existing user — their credentials are never
+   *    touched, so the identity shared with their partner dashboard stays the
+   *    same. No temporary password is issued.
+   *  - NEW (email): create a fresh user (errors if the email already exists).
+   *  - AUTO (email, legacy): attach by email when a user exists, otherwise
+   *    create one. Used only by older API clients.
+   */
   static async createPortalAccount(
     sponsorId: string,
-    email: string,
+    input: { email?: string; userId?: string; mode?: 'NEW' | 'EXISTING' | 'AUTO' },
     password: string,
     actor?: { id?: string; role?: string },
-  ): Promise<{ password: string }> {
+  ): Promise<{ password: string; email: string | null; linkedExisting: boolean; userId: string }> {
     const sponsor = await this.findById(sponsorId);
     if (!sponsor) throw new Error('Sponsor not found');
-    if (email.length < 5 || !email.includes('@')) throw new Error('A valid email is required');
     if (password.length < 8) throw new Error('Password must be at least 8 characters');
 
+    const mode = input.mode ?? (input.userId ? 'EXISTING' : 'AUTO');
+    const normalizedEmail = input.email?.trim().toLowerCase() ?? null;
+
+    if (mode === 'EXISTING' && !input.userId) throw new Error('Select an existing user to link (user_id is required).');
+    if (mode !== 'EXISTING' && (!normalizedEmail || normalizedEmail.length < 5 || !normalizedEmail.includes('@'))) {
+      throw new Error('A valid email is required');
+    }
+
     const bcrypt = await import('bcryptjs');
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = mode === 'EXISTING' ? null : await bcrypt.hash(password, 10);
 
     const client = await pool.connect();
     try {
@@ -831,40 +848,72 @@ export class SponsorService {
         [sponsorId],
       );
       let userId: string | null = existing.rows[0]?.user_id ?? null;
-      if (userId) {
+      let mustChangePassword = true;
+      let resolvedEmail = normalizedEmail;
+
+      if (mode === 'EXISTING') {
+        const userRes = await client.query(
+          `SELECT id, email FROM users WHERE id = $1`,
+          [input.userId],
+        );
+        if (userRes.rows.length === 0) throw new Error('The selected user no longer exists.');
+        userId = userRes.rows[0].id;
+        resolvedEmail = userRes.rows[0].email;
+        // The user already owns these credentials — never reset them, and
+        // never force a password change on the linked dashboard.
+        mustChangePassword = false;
+      } else if (mode === 'NEW') {
+        const dup = await client.query(`SELECT id FROM users WHERE email = $1`, [normalizedEmail]);
+        if (dup.rows.length > 0) {
+          throw new Error('An account with this email already exists. Choose "Use existing user" to link it instead.');
+        }
+        const userRes = await client.query(
+          `INSERT INTO users (email, password_hash, full_name, role, is_active)
+           VALUES ($1, $2, $3, 'SPONSOR', TRUE)
+           RETURNING id`,
+          [normalizedEmail, passwordHash, sponsor.business_name],
+        );
+        userId = userRes.rows[0].id;
+        mustChangePassword = true;
+      } else if (userId) {
+        // AUTO reset: an account already exists for this sponsor — reset the
+        // password of the currently linked user (legacy behaviour).
         await client.query(
           `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
           [passwordHash, userId],
         );
+        mustChangePassword = true;
       } else {
-        // Attach to an existing account if the email is already a portal
-        // login (a partner or fleet user who now also sponsors) — never
-        // overwrite their role or display name.
-        const byEmail = await client.query(`SELECT id FROM users WHERE email = $1`, [email.trim().toLowerCase()]);
+        // AUTO attach: link to an existing login by email (a partner or fleet
+        // user who now also sponsors) — never overwrite role or display name.
+        const byEmail = await client.query(`SELECT id FROM users WHERE email = $1`, [normalizedEmail]);
         if (byEmail.rows.length > 0) {
           userId = byEmail.rows[0].id;
           await client.query(
             `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
             [passwordHash, userId],
           );
+          mustChangePassword = true;
         } else {
           const userRes = await client.query(
             `INSERT INTO users (email, password_hash, full_name, role, is_active)
              VALUES ($1, $2, $3, 'SPONSOR', TRUE)
              RETURNING id`,
-            [email.trim().toLowerCase(), passwordHash, sponsor.business_name],
+            [normalizedEmail, passwordHash, sponsor.business_name],
           );
           userId = userRes.rows[0].id;
+          mustChangePassword = true;
         }
       }
+
       await client.query(
         `INSERT INTO sponsor_portal_accounts
            (sponsor_id, user_id, must_change_password, is_active, created_by_admin_id)
-         VALUES ($1, $2, TRUE, TRUE, $3)
+         VALUES ($1, $2, $3, TRUE, $4)
          ON CONFLICT (sponsor_id) DO UPDATE SET
-           user_id = EXCLUDED.user_id, must_change_password = TRUE,
+           user_id = EXCLUDED.user_id, must_change_password = EXCLUDED.must_change_password,
            is_active = TRUE, updated_at = NOW()`,
-        [sponsorId, userId, actor?.id ?? null],
+        [sponsorId, userId, mustChangePassword, actor?.id ?? null],
       );
       await client.query('COMMIT');
 
@@ -874,10 +923,15 @@ export class SponsorService {
         action: 'sponsor_portal_account_created',
         entityType: 'sponsor',
         entityId: sponsorId,
-        details: { email: email.trim().toLowerCase() },
+        details: { email: resolvedEmail, mode, linkedExisting: mode === 'EXISTING' },
       }).catch(() => undefined);
 
-      return { password };
+      return {
+        password: mustChangePassword ? password : '',
+        email: resolvedEmail,
+        linkedExisting: mode === 'EXISTING',
+        userId: userId!,
+      };
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch { /* noop */ }
       throw err;

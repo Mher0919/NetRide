@@ -11,20 +11,40 @@ import { CreditsService } from '../credits/credits.service';
 import { ReferralService } from '../referral/referral.service';
 import { AuditEventsService } from '../../services/audit-events.service';
 
-const PartnerCreateSchema = z.object({
+const PartnerBaseSchema = z.object({
   name: z.string().trim().min(2).max(200),
   business_type: z.string().trim().min(1).max(50),
   address: z.string().trim().max(500).optional().nullable(),
   contact_name: z.string().trim().max(200).optional().nullable(),
   contact_phone: z.string().trim().max(30).optional().nullable(),
   contact_email: z.string().trim().email().optional().nullable(),
-  email: z.string().trim().email(),
-  password: z.string().min(8),
+  // How the portal login is resolved: NEW creates a fresh user (email +
+  // password required), EXISTING links an already-existing user (user_id
+  // required) so the same person can be both partner and sponsor.
+  user_mode: z.enum(['NEW', 'EXISTING']).default('NEW'),
+  user_id: z.string().uuid().optional().nullable(),
+  email: z.string().trim().email().optional().nullable(),
+  password: z.string().min(8).optional().nullable(),
   commission_rate: z.number().min(0).max(1).default(0.10),
   notes: z.string().max(2000).optional().nullable(),
 });
 
-const PartnerUpdateSchema = PartnerCreateSchema.partial().partial();
+const PartnerCreateSchema = PartnerBaseSchema.superRefine((value, ctx) => {
+  if (value.user_mode === 'EXISTING') {
+    if (!value.user_id) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['user_id'], message: 'Select an existing user to link.' });
+    }
+  } else {
+    if (!value.email) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['email'], message: 'A login email is required.' });
+    }
+    if (!value.password) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['password'], message: 'A login password is required.' });
+    }
+  }
+});
+
+const PartnerUpdateSchema = PartnerBaseSchema.partial().partial();
 
 const PromoCreateSchema = z.object({
   code: z.string().trim().min(2).max(32).transform((v) => v.toUpperCase()),
@@ -81,6 +101,32 @@ export class AdminRewardsController {
       res.status(201).json(partner);
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Unable to create partner' });
+    }
+  }
+
+  /**
+   * Search users that can be linked to a new partner / sponsor dashboard.
+   * Returns which portal accounts each user already owns so the admin can
+   * confidently pick the same identity (one email may be both).
+   */
+  static async searchPortalUsers(req: any, res: Response) {
+    try {
+      const search = String(req.query.search ?? '').trim();
+      const limit = Math.min(Math.max(parseInt(req.query.limit ?? '20', 10) || 20, 1), 50);
+      const result = await pool.query(
+        `SELECT u.id, u.email, u.full_name, u.role, u.is_active,
+                EXISTS(SELECT 1 FROM partners p WHERE p.user_id = u.id) AS is_partner,
+                EXISTS(SELECT 1 FROM sponsor_portal_accounts spa WHERE spa.user_id = u.id) AS is_sponsor,
+                EXISTS(SELECT 1 FROM fleet_portal_accounts fpa WHERE fpa.user_id = u.id) AS is_fleet
+         FROM users u
+         WHERE ($1 = '' OR u.email ILIKE '%' || $1 || '%' OR u.full_name ILIKE '%' || $1 || '%')
+         ORDER BY u.created_at DESC
+         LIMIT $2`,
+        [search, limit],
+      );
+      res.json({ users: result.rows });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Unable to search users' });
     }
   }
 

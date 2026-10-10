@@ -18,6 +18,17 @@ import { AuditEventsService } from '../../services/audit-events.service';
 export const PARTNER_STATUSES = ['ACTIVE', 'INACTIVE', 'ARCHIVED'] as const;
 export type PartnerStatus = (typeof PARTNER_STATUSES)[number];
 
+/**
+ * How the partner's portal login is resolved when the partner is created:
+ *  - NEW:      create a brand-new user (errors if the email already exists).
+ *  - EXISTING: link the partner to an already-existing user (user_id) — the
+ *              same identity can own a sponsor and/or fleet dashboard too.
+ *              Credentials are never touched in this mode.
+ *  - AUTO:     legacy behaviour — attach by email when a user exists,
+ *              otherwise create one (used only by older API clients).
+ */
+export type PartnerUserMode = 'NEW' | 'EXISTING' | 'AUTO';
+
 export interface PartnerInput {
   name: string;
   business_type: string;
@@ -25,8 +36,10 @@ export interface PartnerInput {
   contact_name?: string | null;
   contact_phone?: string | null;
   contact_email?: string | null;
-  email: string; // partner login email
-  password: string; // partner login password (will be hashed)
+  email?: string | null; // partner login email (NEW / AUTO modes)
+  password?: string | null; // partner login password (NEW / AUTO modes)
+  user_mode?: PartnerUserMode;
+  user_id?: string | null; // selected existing user (EXISTING mode)
   commission_rate: number; // fraction, e.g. 0.10
   notes?: string | null;
 }
@@ -67,43 +80,77 @@ export class PartnerService {
   }
 
 static async create(input: PartnerInput, adminId: string) {
-    // Attach to an existing account if the email is already a portal login
-    // (a sponsor or fleet user who now also partners) — the same person owns
-    // multiple dashboards under one login.
-    const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [input.email]);
-    const existingUserId = existingUser.rows[0]?.id ?? null;
+    const mode: PartnerUserMode = input.user_mode ?? 'AUTO';
+    const loginEmail = input.email?.trim().toLowerCase() ?? null;
 
-    // Hash the password securely
-    const passwordHash = await bcrypt.hash(input.password, 10);
+    // Resolve which user the partner dashboard belongs to BEFORE opening the
+    // transaction. One email = one user row, so the same person can hold a
+    // partner account and a sponsor/fleet account under a single login.
+    let linkedUserId: string | null = null;
+    let linkedExisting = false;
+    let resolvedLoginEmail = loginEmail;
+
+    if (mode === 'EXISTING') {
+      if (!input.user_id) throw new Error('Select an existing user to link (user_id is required).');
+      const userRes = await pool.query('SELECT id, email FROM users WHERE id = $1', [input.user_id]);
+      if (userRes.rows.length === 0) throw new Error('The selected user no longer exists.');
+      linkedUserId = userRes.rows[0].id;
+      resolvedLoginEmail = userRes.rows[0].email;
+      linkedExisting = true;
+    } else if (mode === 'NEW') {
+      if (!loginEmail) throw new Error('A partner login email is required.');
+      if (!input.password) throw new Error('A partner login password is required.');
+      const dup = await pool.query('SELECT id FROM users WHERE email = $1', [loginEmail]);
+      if (dup.rows.length > 0) {
+        throw new Error('An account with this email already exists. Choose "Use existing user" to link it instead.');
+      }
+    } else {
+      // AUTO (legacy): attach to an existing login by email when present.
+      if (!loginEmail) throw new Error('A partner login email is required.');
+      const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [loginEmail]);
+      linkedUserId = existingUser.rows[0]?.id ?? null;
+      linkedExisting = !!linkedUserId;
+    }
+
+    // Hash only when a password is actually being set. Linking an existing
+    // user must NEVER overwrite credentials shared with their other dashboard.
+    const passwordHash = linkedExisting || !input.password ? null : await bcrypt.hash(input.password, 10);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Create the user account with PARTNER role and hashed password, or
-      // attach to the existing account (role/name untouched).
       let userId: string;
-      if (existingUserId) {
-        await client.query(
-          `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
-          [passwordHash, existingUserId],
-        );
-        userId = existingUserId;
+      let mustChangePassword: boolean;
+      if (linkedUserId) {
+        // Existing identity (explicit link, or legacy AUTO attach). Only the
+        // legacy AUTO path resets the password, preserving older behaviour.
+        if (mode === 'AUTO' && passwordHash) {
+          await client.query(
+            `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
+            [passwordHash, linkedUserId],
+          );
+          mustChangePassword = true;
+        } else {
+          mustChangePassword = false;
+        }
+        userId = linkedUserId;
       } else {
         const userRes = await client.query(
           `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
            VALUES ($1, $2, $3, $4, $5, $6, NOW())
            RETURNING *`,
-          [input.email, input.name.trim(), passwordHash, UserRole.PARTNER, false, true],
+          [resolvedLoginEmail, input.name.trim(), passwordHash, UserRole.PARTNER, false, true],
         );
         userId = userRes.rows[0].id;
+        mustChangePassword = true;
       }
 
       // Create the partner record linked to the user
       const partnerRes = await client.query(
         `INSERT INTO partners
            (name, business_type, address, contact_name, contact_phone, contact_email, commission_rate, notes, status, user_id, must_change_password)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', $9, TRUE)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', $9, $10)
          RETURNING *`,
         [
           input.name.trim(),
@@ -115,6 +162,7 @@ static async create(input: PartnerInput, adminId: string) {
           Math.max(0, Math.min(1, Number(input.commission_rate))),
           input.notes?.trim() ?? null,
           userId,
+          mustChangePassword,
         ],
       );
       const partner = partnerRes.rows[0];
@@ -127,7 +175,13 @@ static async create(input: PartnerInput, adminId: string) {
         action: 'PARTNER_CREATED',
         entityType: 'PARTNER',
         entityId: partner.id,
-        details: { name: input.name, email: input.email, business_type: input.business_type, attachedToExisting: !!existingUserId },
+        details: {
+          name: input.name,
+          email: resolvedLoginEmail,
+          business_type: input.business_type,
+          userMode: linkedUserId ? (mode === 'EXISTING' ? 'EXISTING' : 'AUTO_ATTACH') : 'NEW',
+          attachedToExisting: linkedExisting,
+        },
       });
       return normalizePartner(partner);
     } catch (err) {
@@ -138,7 +192,7 @@ static async create(input: PartnerInput, adminId: string) {
     }
   }
 
-  static async update(id: string, input: Partial<PartnerInput> & { email?: string; password?: string }, adminId: string) {
+  static async update(id: string, input: Partial<PartnerInput> & { email?: string | null; password?: string | null }, adminId: string) {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Partner not found');
 

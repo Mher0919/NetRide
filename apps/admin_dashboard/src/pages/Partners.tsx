@@ -23,6 +23,8 @@ import {
   Stack,
   Snackbar,
   Alert,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
@@ -43,7 +45,9 @@ import {
   exportPartners,
   exportPartnerRides,
   downloadBlob,
+  type PortalUserOption,
 } from '../api/admin';
+import UserPicker from '../components/UserPicker';
 
 const fmtUSD = (cents: number | null | undefined) =>
   ((cents ?? 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -62,6 +66,8 @@ const Partners: React.FC = () => {
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [createUserMode, setCreateUserMode] = React.useState<'NEW' | 'EXISTING'>('NEW');
+  const [createUser, setCreateUser] = React.useState<PortalUserOption | null>(null);
   const [form, setForm] = React.useState({
     name: '',
     business_type: '',
@@ -167,24 +173,44 @@ const Partners: React.FC = () => {
   };
 
   const handleCreate = async () => {
-    if (!form.name.trim() || !form.business_type.trim() || !form.email.trim() || !form.password.trim()) return;
+    if (!form.name.trim() || !form.business_type.trim()) return;
+    if (createUserMode === 'EXISTING' && !createUser) {
+      setSnack({ open: true, message: 'Select the existing user to link', severity: 'error' });
+      return;
+    }
+    if (createUserMode === 'NEW' && (!form.email.trim() || !form.password.trim())) {
+      setSnack({ open: true, message: 'Login email and password are required for a new user', severity: 'error' });
+      return;
+    }
     setSaving(true);
     try {
-      await createPartner({
+      const payload: Record<string, unknown> = {
         name: form.name.trim(),
         business_type: form.business_type.trim(),
         address: form.address.trim() || null,
         contact_name: form.contact_name.trim() || null,
         contact_phone: form.contact_phone.trim() || null,
         contact_email: form.contact_email.trim() || null,
-        email: form.email.trim(),
-        password: form.password.trim(),
+        user_mode: createUserMode,
         commission_rate: (Number(form.commission_rate) || 0) / 100,
         notes: form.notes.trim() || null,
-      });
+      };
+      if (createUserMode === 'EXISTING') {
+        payload.user_id = createUser!.id;
+      } else {
+        payload.email = form.email.trim();
+        payload.password = form.password.trim();
+      }
+      await createPartner(payload);
       setCreateOpen(false);
+      setCreateUser(null);
+      setCreateUserMode('NEW');
       setForm({ name: '', business_type: '', address: '', contact_name: '', contact_phone: '', contact_email: '', email: '', password: '', commission_rate: '10', notes: '' });
-      setSnack({ open: true, message: 'Partner created', severity: 'success' });
+      setSnack({
+        open: true,
+        message: createUserMode === 'EXISTING' ? 'Partner created and linked to the existing user' : 'Partner created',
+        severity: 'success',
+      });
       fetchData();
     } catch (err: any) {
       setSnack({ open: true, message: err?.response?.data?.error || 'Failed to create partner', severity: 'error' });
@@ -324,7 +350,11 @@ const Partners: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              setCreateUserMode('NEW');
+              setCreateUser(null);
+              setCreateOpen(true);
+            }}
             sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none', fontWeight: 700 }}
           >
             New Partner
@@ -446,31 +476,69 @@ const Partners: React.FC = () => {
             </Stack>
             <Stack direction="row" spacing={2}>
               <TextField label="Contact email" fullWidth value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
-              <TextField label="Partner login email" fullWidth value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </Stack>
-            <TextField
-              label="Partner login password"
-              fullWidth
-              type={showCreatePassword ? 'text' : 'password'}
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              slotProps={{
-                input: {
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        aria-label={showCreatePassword ? 'Hide password' : 'Show password'}
-                        onClick={() => setShowCreatePassword((v) => !v)}
-                        edge="end"
-                        size="small"
-                      >
-                        {showCreatePassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                },
-              }}
-            />
+
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Partner login</Typography>
+              <ToggleButtonGroup
+                value={createUserMode}
+                exclusive
+                onChange={(_, v) => v && setCreateUserMode(v)}
+                fullWidth
+                size="small"
+                sx={{ mb: 1.5 }}
+              >
+                <ToggleButton value="NEW" sx={{ textTransform: 'none', fontWeight: createUserMode === 'NEW' ? 700 : 400 }}>
+                  Create new user
+                </ToggleButton>
+                <ToggleButton value="EXISTING" sx={{ textTransform: 'none', fontWeight: createUserMode === 'EXISTING' ? 700 : 400 }}>
+                  Use existing user
+                </ToggleButton>
+              </ToggleButtonGroup>
+
+              {createUserMode === 'EXISTING' ? (
+                <>
+                  <UserPicker value={createUser} onChange={setCreateUser} disabled={saving} label="Partner login — existing user" />
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                    The partner logs in with that user's existing credentials — their password is never changed, so a
+                    sponsor/partner identity stays the same across both dashboards.
+                  </Typography>
+                </>
+              ) : (
+                <>
+                  <TextField
+                    label="Partner login email"
+                    fullWidth
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    sx={{ mb: 1.5 }}
+                  />
+                  <TextField
+                    label="Partner login password"
+                    fullWidth
+                    type={showCreatePassword ? 'text' : 'password'}
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    slotProps={{
+                      input: {
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <IconButton
+                              aria-label={showCreatePassword ? 'Hide password' : 'Show password'}
+                              onClick={() => setShowCreatePassword((v) => !v)}
+                              edge="end"
+                              size="small"
+                            >
+                              {showCreatePassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                      },
+                    }}
+                  />
+                </>
+              )}
+            </Box>
             <TextField
               label="Commission rate (%)"
               type="number"

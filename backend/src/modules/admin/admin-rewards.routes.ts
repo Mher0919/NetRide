@@ -14,6 +14,7 @@ router.use(adminMiddleware);
 // ---- Partners ----------------------------------------------------------
 router.get('/partners', AdminRewardsController.listPartners);
 router.post('/partners', AdminRewardsController.createPartner);
+router.get('/portal-users', AdminRewardsController.searchPortalUsers);
 router.get('/partners/export', AdminRewardsController.exportPartners);
 router.get('/partners/:id', AdminRewardsController.getPartner);
 router.patch('/partners/:id', AdminRewardsController.updatePartner);

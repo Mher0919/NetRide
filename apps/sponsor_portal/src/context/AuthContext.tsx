@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { PortalSession, PortalInfo } from '../api/portal';
+import type { PortalSession, PortalInfo, ActivePortalType } from '../api/portal';
 import { portalLogout } from '../api/portal';
 
 interface AuthContextType {
@@ -13,6 +13,23 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** Synthetic portal entry for the combined 'ALL' view (not a real account). */
+const allPortal = (email: string, portals: PortalInfo[]): PortalInfo => ({
+  type: 'ALL',
+  id: 'ALL',
+  name: 'All dashboards',
+  email,
+  mustChangePassword: portals.some((p) => p.mustChangePassword),
+});
+
+/** Parses the persisted active type, falling back to the first portal. */
+const restoreActivePortal = (portals: PortalInfo[], activeType: string | null): PortalInfo => {
+  if (activeType === 'ALL' && portals.length > 1) {
+    return allPortal(portals[0]?.email ?? '', portals);
+  }
+  return portals.find((p) => p.type === activeType) ?? portals[0];
+};
+
 /** Restores the persisted session lazily (runs before first render). */
 const readSession = (): PortalSession | null => {
   try {
@@ -23,7 +40,7 @@ const readSession = (): PortalSession | null => {
       const parsed = JSON.parse(saved);
       const portals = parsed.portals ?? (parsed.type ? [parsed] : []);
       const activeType = localStorage.getItem('portal_type');
-      const portal = portals.find((p: PortalInfo) => p.type === activeType) ?? portals[0];
+      const portal = restoreActivePortal(portals, activeType);
       return { token, refreshToken, portals, portal };
     }
   } catch {
@@ -54,10 +71,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('portal_type', s.portal.type);
   };
 
-  /** Switch the visible dashboard between the account's portal types. */
+  /** Switch the visible dashboard between the account's portal types ('ALL' = combined view). */
   const setActivePortal = (type: string): PortalInfo | null => {
     if (!session) return null;
-    const next = session.portals.find((p) => p.type === type) ?? null;
+    if (type === 'ALL') {
+      if (session.portals.length < 2) return null;
+      const next = allPortal(session.portal.email, session.portals);
+      setSession({ ...session, portal: next });
+      localStorage.setItem('portal_type', 'ALL');
+      localStorage.setItem('portal_user', JSON.stringify({ portals: session.portals, portal: next }));
+      return next;
+    }
+    const next = session.portals.find((p) => p.type === (type as ActivePortalType)) ?? null;
     if (!next) return null;
     setSession({ ...session, portal: next });
     localStorage.setItem('portal_type', next.type);

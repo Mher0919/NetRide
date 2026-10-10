@@ -30,11 +30,17 @@ import {
   portalFleetDrivers,
   portalFleetRides,
 } from '../api/portal';
-import type { PortalDashboard } from '../api/portal';
+import type { PortalDashboard, PortalType } from '../api/portal';
 import { useAuth } from '../context/AuthContext';
 
 const fmtUSD = (cents: number | null | undefined) =>
   ((cents ?? 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+const typeLabel: Record<string, string> = {
+  SPONSOR: 'Sponsor',
+  PARTNER: 'Partner',
+  FLEET: 'Fleet',
+};
 
 // ---------------------------------------------------------------------------
 // Sponsor dashboard (existing flow)
@@ -149,14 +155,14 @@ const SponsorDashboard: React.FC<{ data: PortalDashboard; onChanged: () => void 
 // Partner dashboard (earnings focus)
 // ---------------------------------------------------------------------------
 
-const PartnerDashboard: React.FC<{ data: PortalDashboard }> = ({ data }) => {
+const PartnerDashboard: React.FC<{ data: PortalDashboard; portalType?: PortalType }> = ({ data, portalType }) => {
   const partner = data.partner!;
   const earnings = data.earnings!;
   const [commission, setCommission] = React.useState<any>(null);
 
   React.useEffect(() => {
-    portalCommission().then(setCommission).catch(() => undefined);
-  }, []);
+    portalCommission(portalType).then(setCommission).catch(() => undefined);
+  }, [portalType]);
 
   return (
     <Box>
@@ -233,16 +239,16 @@ const PartnerDashboard: React.FC<{ data: PortalDashboard }> = ({ data }) => {
 // Fleet dashboard (earnings focus)
 // ---------------------------------------------------------------------------
 
-const FleetDashboard: React.FC<{ data: PortalDashboard }> = ({ data }) => {
+const FleetDashboard: React.FC<{ data: PortalDashboard; portalType?: PortalType }> = ({ data, portalType }) => {
   const fleet = data.fleet!;
   const stats = data.stats!;
   const [drivers, setDrivers] = React.useState<any[]>([]);
   const [rides, setRides] = React.useState<any[]>([]);
 
   React.useEffect(() => {
-    portalFleetDrivers().then((d) => setDrivers(d.drivers ?? [])).catch(() => undefined);
-    portalFleetRides(10).then((d) => setRides(d.rides ?? [])).catch(() => undefined);
-  }, []);
+    portalFleetDrivers(portalType).then((d) => setDrivers(d.drivers ?? [])).catch(() => undefined);
+    portalFleetRides(10, portalType).then((d) => setRides(d.rides ?? [])).catch(() => undefined);
+  }, [portalType]);
 
   return (
     <Box>
@@ -328,10 +334,139 @@ const FleetDashboard: React.FC<{ data: PortalDashboard }> = ({ data }) => {
 };
 
 // ---------------------------------------------------------------------------
-// Type-aware dispatcher
+// Combined dashboard — the same login owns BOTH partner and sponsor (and/or
+// fleet) accounts, so every side is shown on one page.
 // ---------------------------------------------------------------------------
 
-const Dashboard: React.FC = () => {
+const CombinedDashboard: React.FC = () => {
+  const { session } = useAuth();
+  const portals = React.useMemo(() => session?.portals ?? [], [session?.portals]);
+  const hasType = (t: PortalType) => portals.some((p) => p.type === t);
+
+  const [dashboards, setDashboards] = React.useState<Partial<Record<PortalType, PortalDashboard>>>({});
+  const [errors, setErrors] = React.useState<Partial<Record<PortalType, string>>>({});
+  const [loading, setLoading] = React.useState(true);
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    const types: PortalType[] = [];
+    if (portals.some((p) => p.type === 'SPONSOR')) types.push('SPONSOR');
+    if (portals.some((p) => p.type === 'PARTNER')) types.push('PARTNER');
+    if (portals.some((p) => p.type === 'FLEET')) types.push('FLEET');
+
+    const next: Partial<Record<PortalType, PortalDashboard>> = {};
+    const nextErrors: Partial<Record<PortalType, string>> = {};
+    await Promise.all(
+      types.map(async (t) => {
+        try {
+          next[t] = await portalDashboard(t);
+        } catch (err) {
+          nextErrors[t] =
+            (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+            'Failed to load this dashboard';
+        }
+      }),
+    );
+    setDashboards(next);
+    setErrors(nextErrors);
+    setLoading(false);
+  }, [portals]);
+
+  React.useEffect(() => {
+    const t = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(t);
+  }, [load]);
+
+  const sponsor = dashboards.SPONSOR;
+  const partner = dashboards.PARTNER;
+  const fleet = dashboards.FLEET;
+
+  if (loading && Object.keys(dashboards).length === 0) {
+    return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>;
+  }
+
+  const totalEarningsCents =
+    (partner?.earnings?.lifetimeEarningsCents ?? 0) + (fleet?.stats?.lifetimeEarningsCents ?? 0);
+
+  return (
+    <Box>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
+          All dashboards
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {portals.map((p) => `${p.name} · ${typeLabel[p.type]}`).join('  |  ')}
+        </Typography>
+      </Box>
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2, mb: 4 }}>
+        {[
+          { label: 'Sponsor budget remaining', value: sponsor ? fmtUSD(sponsor.sponsor?.remainingBudgetCents) : '—', hint: sponsor ? `${sponsor.stats?.pendingValidations ?? 0} validations awaiting your code` : 'no sponsor account' },
+          { label: 'Partner lifetime earnings', value: partner ? fmtUSD(partner.earnings?.lifetimeEarningsCents) : '—', hint: partner ? `${partner.usage?.total_uses ?? 0} promo redemptions` : 'no partner account' },
+          { label: 'Fleet lifetime earnings', value: fleet ? fmtUSD(fleet.stats?.lifetimeEarningsCents) : '—', hint: fleet ? `${fleet.stats?.completedRides ?? 0} completed rides` : 'no fleet account' },
+          { label: 'Combined earnings', value: fmtUSD(totalEarningsCents), hint: 'partner + fleet lifetime' },
+        ].map((m) => (
+          <Paper key={m.label} sx={{ p: 2.5, borderRadius: 3 }}>
+            <Typography variant="caption" color="text.secondary">{m.label}</Typography>
+            <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5 }}>{m.value}</Typography>
+            <Typography variant="caption" color="text.secondary">{m.hint}</Typography>
+          </Paper>
+        ))}
+      </Box>
+
+      {hasType('SPONSOR') && (
+        <Box sx={{ mb: 5 }}>
+          <Typography variant="overline" sx={{ fontWeight: 800, color: 'text.secondary', letterSpacing: 1 }}>
+            Sponsor side
+          </Typography>
+          {errors.SPONSOR ? (
+            <Alert severity="info" sx={{ mt: 1 }}>{errors.SPONSOR}</Alert>
+          ) : sponsor ? (
+            <SponsorDashboard data={sponsor} onChanged={load} />
+          ) : (
+            <CircularProgress size={24} sx={{ my: 3 }} />
+          )}
+        </Box>
+      )}
+
+      {hasType('PARTNER') && (
+        <Box sx={{ mb: 5 }}>
+          <Typography variant="overline" sx={{ fontWeight: 800, color: 'text.secondary', letterSpacing: 1 }}>
+            Partner side
+          </Typography>
+          {errors.PARTNER ? (
+            <Alert severity="info" sx={{ mt: 1 }}>{errors.PARTNER}</Alert>
+          ) : partner ? (
+            <PartnerDashboard data={partner} portalType="PARTNER" />
+          ) : (
+            <CircularProgress size={24} sx={{ my: 3 }} />
+          )}
+        </Box>
+      )}
+
+      {hasType('FLEET') && (
+        <Box sx={{ mb: 5 }}>
+          <Typography variant="overline" sx={{ fontWeight: 800, color: 'text.secondary', letterSpacing: 1 }}>
+            Fleet side
+          </Typography>
+          {errors.FLEET ? (
+            <Alert severity="info" sx={{ mt: 1 }}>{errors.FLEET}</Alert>
+          ) : fleet ? (
+            <FleetDashboard data={fleet} portalType="FLEET" />
+          ) : (
+            <CircularProgress size={24} sx={{ my: 3 }} />
+          )}
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Single-dashboard view (one active portal type)
+// ---------------------------------------------------------------------------
+
+const SingleDashboard: React.FC = () => {
   const { session } = useAuth();
   const [data, setData] = React.useState<PortalDashboard | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -360,6 +495,16 @@ const Dashboard: React.FC = () => {
   if (type === 'PARTNER') return <PartnerDashboard data={data} />;
   if (type === 'FLEET') return <FleetDashboard data={data} />;
   return <SponsorDashboard data={data} onChanged={load} />;
+};
+
+// ---------------------------------------------------------------------------
+// Type-aware dispatcher
+// ---------------------------------------------------------------------------
+
+const Dashboard: React.FC = () => {
+  const { session } = useAuth();
+  if (session?.portal.type === 'ALL') return <CombinedDashboard />;
+  return <SingleDashboard />;
 };
 
 export default Dashboard;

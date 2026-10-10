@@ -17,9 +17,10 @@ api.interceptors.request.use(
     }
     // The active dashboard type (one login can own sponsor + partner +
     // fleet accounts) — the backend validates it against the user's
-    // accounts on every request.
+    // accounts on every request. The combined 'ALL' view sends NO header:
+    // its individual sections set an explicit per-request type instead.
     const portalType = localStorage.getItem('portal_type');
-    if (portalType) {
+    if (portalType && portalType !== 'ALL' && !config.headers['x-portal-type']) {
       config.headers['x-portal-type'] = portalType;
     }
     return config;

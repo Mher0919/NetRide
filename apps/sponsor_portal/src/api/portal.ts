@@ -4,9 +4,11 @@
 import api from './index';
 
 export type PortalType = 'SPONSOR' | 'PARTNER' | 'FLEET';
+/** 'ALL' is the combined view — every dashboard the account owns on one page. */
+export type ActivePortalType = PortalType | 'ALL';
 
 export interface PortalInfo {
-  type: PortalType;
+  type: ActivePortalType;
   id: string;
   name: string;
   email: string;
@@ -137,13 +139,16 @@ export interface PortalDashboard {
   };
 }
 
-export const portalDashboard = async () => {
-  const response = await api.get<PortalDashboard>('/portal/dashboard');
+export const portalDashboard = async (portalType?: PortalType) => {
+  const response = await api.get<PortalDashboard>('/portal/dashboard', portalType ? { headers: { 'x-portal-type': portalType } } : undefined);
   return response.data;
 };
 
-export const portalUsage = async (page = 1, limit = 20) => {
-  const response = await api.get('/portal/usage', { params: { page, limit } });
+export const portalUsage = async (page = 1, limit = 20, portalType?: PortalType) => {
+  const response = await api.get('/portal/usage', {
+    params: { page, limit },
+    ...(portalType ? { headers: { 'x-portal-type': portalType } } : {}),
+  });
   return response.data as {
     rides: Array<{
       id: string;
@@ -160,8 +165,8 @@ export const portalUsage = async (page = 1, limit = 20) => {
   };
 };
 
-export const portalEarnings = async () => {
-  const response = await api.get('/portal/earnings');
+export const portalEarnings = async (portalType?: PortalType) => {
+  const response = await api.get('/portal/earnings', portalType ? { headers: { 'x-portal-type': portalType } } : undefined);
   return response.data as {
     totals: { totalEarningsCents: number; totalTipCents: number; totalRides: number };
     recent: Array<{
@@ -178,8 +183,8 @@ export const portalEarnings = async () => {
   };
 };
 
-export const portalCommission = async () => {
-  const response = await api.get('/portal/commission');
+export const portalCommission = async (portalType?: PortalType) => {
+  const response = await api.get('/portal/commission', portalType ? { headers: { 'x-portal-type': portalType } } : undefined);
   return response.data as {
     commission_rate: number;
     commission_type: string;
@@ -189,8 +194,8 @@ export const portalCommission = async () => {
   };
 };
 
-export const portalFleetDrivers = async () => {
-  const response = await api.get('/portal/fleet/drivers');
+export const portalFleetDrivers = async (portalType?: PortalType) => {
+  const response = await api.get('/portal/fleet/drivers', portalType ? { headers: { 'x-portal-type': portalType } } : undefined);
   return response.data as {
     drivers: Array<{
       id: string;
@@ -205,8 +210,11 @@ export const portalFleetDrivers = async () => {
   };
 };
 
-export const portalFleetRides = async (limit = 20) => {
-  const response = await api.get('/portal/fleet/rides', { params: { limit } });
+export const portalFleetRides = async (limit = 20, portalType?: PortalType) => {
+  const response = await api.get('/portal/fleet/rides', {
+    params: { limit },
+    ...(portalType ? { headers: { 'x-portal-type': portalType } } : {}),
+  });
   return response.data as {
     rides: Array<{
       id: string;

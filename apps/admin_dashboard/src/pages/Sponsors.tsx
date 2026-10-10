@@ -28,6 +28,8 @@ import {
   Grid,
   Divider,
   Tooltip,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
@@ -52,7 +54,9 @@ import {
   createSponsorPortalAccount,
   resetSponsorPortalPassword,
   disableSponsorPortalAccount,
+  type PortalUserOption,
 } from '../api/admin';
+import UserPicker from '../components/UserPicker';
 
 const fmtUSD = (cents: number | null | undefined) =>
   ((cents ?? 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -128,8 +132,13 @@ const Sponsors: React.FC = () => {
   const [adjustOpen, setAdjustOpen] = React.useState(false);
   const [adjustForm, setAdjustForm] = React.useState({ direction: 'CREDIT' as 'CREDIT' | 'DEBIT', amountCents: '', reason: '' });
 
-  const [portalForm, setPortalForm] = React.useState({ email: '' });
+  const [portalForm, setPortalForm] = React.useState({ email: '', mode: 'NEW' as 'NEW' | 'EXISTING' });
+  const [portalUser, setPortalUser] = React.useState<PortalUserOption | null>(null);
   const [newPassword, setNewPassword] = React.useState<string | null>(null);
+
+  const [createPortalMode, setCreatePortalMode] = React.useState<'NONE' | 'NEW' | 'EXISTING'>('NONE');
+  const [createPortalEmail, setCreatePortalEmail] = React.useState('');
+  const [createPortalUser, setCreatePortalUser] = React.useState<PortalUserOption | null>(null);
 
   const [editOpen, setEditOpen] = React.useState(false);
   const [editSaving, setEditSaving] = React.useState(false);
@@ -203,6 +212,9 @@ const Sponsors: React.FC = () => {
   const openCreate = () => {
     setForm(emptyForm);
     setCreateGoogle(null);
+    setCreatePortalMode('NONE');
+    setCreatePortalEmail('');
+    setCreatePortalUser(null);
     setCreateOpen(true);
   };
 
@@ -248,7 +260,7 @@ const Sponsors: React.FC = () => {
     }
     setSaving(true);
     try {
-      await createSponsor({
+      const created = await createSponsor({
         businessName: form.businessName,
         businessType: form.businessType,
         businessDescription: form.businessDescription || undefined,
@@ -271,7 +283,30 @@ const Sponsors: React.FC = () => {
         googlePlaceId: createGoogle?.placeId ?? null,
         googleSelectionToken: createGoogle?.selectionToken || undefined,
       });
-      notify('Sponsor created');
+      const sponsorId = String(created?.sponsor?.id ?? '');
+
+      // Set up the portal login in the same flow when a login was requested —
+      // the admin chooses "new user" vs "existing user" so the identity stays
+      // consistent with any other dashboard the same email already owns.
+      let tempPassword: string | undefined;
+      if (createPortalMode !== 'NONE' && sponsorId) {
+        try {
+          const result = await createSponsorPortalAccount(
+            sponsorId,
+            createPortalMode === 'EXISTING'
+              ? { user_mode: 'EXISTING', user_id: createPortalUser!.id }
+              : { user_mode: 'NEW', email: createPortalEmail.trim() || form.email.trim() },
+          );
+          tempPassword = result?.temporaryPassword;
+        } catch (portalErr: unknown) {
+          notify(`Sponsor created, but the portal login failed: ${errMsg(portalErr, 'unknown error')}`, 'error');
+        }
+      }
+
+      if (!tempPassword || createPortalMode === 'NONE') {
+        notify(createPortalMode === 'EXISTING' ? 'Sponsor created and linked to the existing user' : 'Sponsor created');
+      }
+      if (tempPassword) setNewPassword(tempPassword);
       setCreateOpen(false);
       fetchData();
     } catch (err: unknown) {
@@ -332,15 +367,29 @@ const Sponsors: React.FC = () => {
   };
 
   const handlePortalCreate = async () => {
-    if (!portalForm.email.includes('@')) {
+    if (portalForm.mode === 'NEW' && !portalForm.email.includes('@')) {
       notify('A valid email is required', 'error');
       return;
     }
+    if (portalForm.mode === 'EXISTING' && !portalUser) {
+      notify('Select the existing user to link', 'error');
+      return;
+    }
     try {
-      const res = await createSponsorPortalAccount(selected.id, portalForm.email.trim());
-      setNewPassword(res?.temporaryPassword ?? res?.password ?? null);
-      notify('Portal account created — share the password with the sponsor');
-      setPortalForm({ email: '' });
+      const res = await createSponsorPortalAccount(
+        selected.id,
+        portalForm.mode === 'EXISTING'
+          ? { user_mode: 'EXISTING', user_id: portalUser!.id }
+          : { user_mode: 'NEW', email: portalForm.email.trim() },
+      );
+      if (res?.temporaryPassword) {
+        setNewPassword(res.temporaryPassword);
+        notify('Portal account created — share the password with the sponsor');
+      } else {
+        notify('Portal account linked to the existing user — they log in with their current credentials');
+      }
+      setPortalForm({ email: '', mode: 'NEW' });
+      setPortalUser(null);
       loadDetail(selected.id);
     } catch (err: unknown) {
       notify(errMsg(err, 'Portal account creation failed'), 'error');
@@ -720,6 +769,46 @@ const Sponsors: React.FC = () => {
               fullWidth
               helperText="BIGINT cents — e.g. 100000 = $1,000. Credits the sponsor ledger + remaining budget."
             />
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Portal login (optional)</Typography>
+            <ToggleButtonGroup
+              value={createPortalMode}
+              exclusive
+              onChange={(_, v) => v && setCreatePortalMode(v)}
+              fullWidth
+              size="small"
+            >
+              <ToggleButton value="NONE" sx={{ textTransform: 'none', fontWeight: createPortalMode === 'NONE' ? 700 : 400 }}>
+                No login yet
+              </ToggleButton>
+              <ToggleButton value="NEW" sx={{ textTransform: 'none', fontWeight: createPortalMode === 'NEW' ? 700 : 400 }}>
+                Create new user
+              </ToggleButton>
+              <ToggleButton value="EXISTING" sx={{ textTransform: 'none', fontWeight: createPortalMode === 'EXISTING' ? 700 : 400 }}>
+                Use existing user
+              </ToggleButton>
+            </ToggleButtonGroup>
+            {createPortalMode === 'NEW' && (
+              <>
+                <TextField
+                  label="Login email"
+                  value={createPortalEmail}
+                  onChange={(e) => setCreatePortalEmail(e.target.value)}
+                  fullWidth
+                  placeholder={form.email || 'sponsor@business.com'}
+                  helperText="A temporary password is generated right after creation — share it with the sponsor."
+                />
+              </>
+            )}
+            {createPortalMode === 'EXISTING' && (
+              <>
+                <UserPicker value={createPortalUser} onChange={setCreatePortalUser} disabled={saving} label="Existing login to link" />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                  The sponsor logs in with that user's existing credentials — a shared partner/sponsor identity keeps
+                  the same password across both dashboards.
+                </Typography>
+              </>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -990,17 +1079,39 @@ const Sponsors: React.FC = () => {
                       <Stack spacing={2}>
                         <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>No portal account yet</Typography>
                         <Typography variant="body2" color="text.secondary">
-                          Create a login so the sponsor can validate rider codes and manage their SPECIALS from the NetRide Sponsor portal.
+                          Create a login so the sponsor can validate rider codes and manage their SPECIALS from the
+                          NetRide Sponsor portal. If this person already has a NetRide login (e.g. a partner account),
+                          link it so the same credentials open both dashboards.
                         </Typography>
+                        <ToggleButtonGroup
+                          value={portalForm.mode}
+                          exclusive
+                          onChange={(_, v) => v && setPortalForm({ ...portalForm, mode: v })}
+                          fullWidth
+                          size="small"
+                        >
+                          <ToggleButton value="NEW" sx={{ textTransform: 'none', fontWeight: portalForm.mode === 'NEW' ? 700 : 400 }}>
+                            Create new user
+                          </ToggleButton>
+                          <ToggleButton value="EXISTING" sx={{ textTransform: 'none', fontWeight: portalForm.mode === 'EXISTING' ? 700 : 400 }}>
+                            Use existing user
+                          </ToggleButton>
+                        </ToggleButtonGroup>
                         <Stack direction="row" spacing={1}>
-                          <TextField
-                            size="small"
-                            placeholder="sponsor@business.com"
-                            value={portalForm.email}
-                            onChange={(e) => setPortalForm({ email: e.target.value })}
-                            sx={{ width: 300 }}
-                          />
-                          <Button size="small" variant="contained" onClick={handlePortalCreate}>Create account</Button>
+                          {portalForm.mode === 'EXISTING' ? (
+                            <UserPicker value={portalUser} onChange={setPortalUser} label="Existing login to link" />
+                          ) : (
+                            <TextField
+                              size="small"
+                              placeholder="sponsor@business.com"
+                              value={portalForm.email}
+                              onChange={(e) => setPortalForm({ ...portalForm, email: e.target.value })}
+                              sx={{ flex: 1 }}
+                            />
+                          )}
+                          <Button size="small" variant="contained" onClick={handlePortalCreate}>
+                            {portalForm.mode === 'EXISTING' ? 'Link account' : 'Create account'}
+                          </Button>
                         </Stack>
                       </Stack>
                     )}

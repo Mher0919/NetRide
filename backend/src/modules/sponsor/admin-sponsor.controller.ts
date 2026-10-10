@@ -353,17 +353,26 @@ export class AdminSponsorController {
 
   static async createPortalAccount(req: AdminReq, res: Response) {
     try {
-      const { email } = req.body ?? {};
-      if (!email) return res.status(400).json({ error: 'Email is required' });
+      const { email, user_mode, user_id } = req.body ?? {};
+      const mode = user_mode === 'EXISTING' ? 'EXISTING' : user_mode === 'NEW' ? 'NEW' : 'AUTO';
+      if (mode === 'EXISTING' && !user_id) return res.status(400).json({ error: 'Select an existing user to link.' });
+      if (mode !== 'EXISTING' && !email) return res.status(400).json({ error: 'Email is required' });
       const crypto = await import('crypto');
       const password = crypto.randomBytes(12).toString('base64url').slice(0, 12);
       const result = await SponsorService.createPortalAccount(
         req.params.id,
-        email,
+        { email, userId: user_id, mode },
         password,
         { id: req.user!.id, role: 'ADMIN' },
       );
-      res.status(201).json({ message: 'Portal account ready', email, temporaryPassword: result.password });
+      res.status(201).json({
+        message: result.linkedExisting
+          ? 'Portal account linked to the existing user'
+          : 'Portal account ready',
+        email: result.email,
+        linkedToExisting: result.linkedExisting,
+        ...(result.linkedExisting ? {} : { temporaryPassword: result.password }),
+      });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

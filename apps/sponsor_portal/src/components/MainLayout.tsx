@@ -37,6 +37,7 @@ const typeLabel: Record<string, string> = {
   SPONSOR: 'Sponsor',
   PARTNER: 'Partner',
   FLEET: 'Fleet',
+  ALL: 'All',
 };
 
 const MainLayout: React.FC = () => {
@@ -50,9 +51,10 @@ const MainLayout: React.FC = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   const type = session?.portal.type ?? 'SPONSOR';
+  const hasSponsor = session?.portals.some((p) => p.type === 'SPONSOR');
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
-    ...(type === 'SPONSOR'
+    ...(type === 'SPONSOR' || (type === 'ALL' && hasSponsor)
       ? [
           { text: 'Validations', icon: <ValidationIcon />, path: '/validations' },
           { text: 'Customers', icon: <CustomersIcon />, path: '/customers' },
@@ -128,6 +130,17 @@ const MainLayout: React.FC = () => {
                   <MenuItem disabled sx={{ py: 1 }}>
                     <Typography variant="caption" color="text.secondary">Switch dashboard</Typography>
                   </MenuItem>
+                  {session.portals.length > 1 && (
+                    <MenuItem
+                      selected={type === 'ALL'}
+                      onClick={() => handleSwitch('ALL')}
+                      sx={{ py: 1, borderRadius: 2, mx: 1 }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: type === 'ALL' ? 800 : 600 }}>
+                        All dashboards · combined
+                      </Typography>
+                    </MenuItem>
+                  )}
                   {session.portals.map((p) => (
                     <MenuItem
                       key={p.type}

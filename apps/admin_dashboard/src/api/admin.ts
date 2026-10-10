@@ -252,6 +252,22 @@ export const createPartner = async (data: Record<string, unknown>) => {
   return response.data;
 };
 
+export interface PortalUserOption {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: string;
+  is_active: boolean;
+  is_partner: boolean;
+  is_sponsor: boolean;
+  is_fleet: boolean;
+}
+
+export const searchPortalUsers = async (search: string, limit = 20) => {
+  const response = await api.get('/admin/portal-users', { params: { search, limit } });
+  return response.data as { users: PortalUserOption[] };
+};
+
 export const getPartner = async (id: string) => {
   const response = await api.get(`/admin/partners/${id}`);
   return response.data;
@@ -536,9 +552,12 @@ export const listSponsorRedemptions = async (params: { status?: string; limit?: 
   return response.data as { redemptions: Array<Record<string, unknown>>; total: number };
 };
 
-export const createSponsorPortalAccount = async (id: string, email: string) => {
-  const response = await api.post(`/admin/sponsors/${id}/portal-account`, { email });
-  return response.data;
+export const createSponsorPortalAccount = async (
+  id: string,
+  payload: { email?: string; user_mode?: 'NEW' | 'EXISTING'; user_id?: string },
+) => {
+  const response = await api.post(`/admin/sponsors/${id}/portal-account`, payload);
+  return response.data as { temporaryPassword?: string; linkedToExisting?: boolean; email?: string };
 };
 
 export const resetSponsorPortalPassword = async (id: string) => {
