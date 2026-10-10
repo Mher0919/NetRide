@@ -36,6 +36,7 @@ require('./src/modules/portal/__tests__/portal-2fa.unit.test.ts');
 require('./src/modules/auth/__tests__/otp.unit.test.ts');
 require('./src/modules/auth/__tests__/auth-enumeration.unit.test.ts');
 require('./src/modules/payments/__tests__/payments.unit.test.ts');
+require('./src/modules/payments/__tests__/withdrawal.unit.test.ts');
 
 // ioredis keeps the event loop alive while retrying a dead host; force a
 // clean exit once the test run finishes.

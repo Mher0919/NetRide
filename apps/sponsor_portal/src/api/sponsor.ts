@@ -86,3 +86,47 @@ export const createPortalFundingSession = async (amountCents: number, idempotenc
   });
   return response.data;
 };
+
+// ----- Managed card + manual withdrawals -----------------------------------
+
+export interface SponsorWithdrawalState {
+  eligible: boolean;
+  nextAvailableAt: string;
+}
+
+export const getPortalPaymentMethod = async () => {
+  const response = await api.get<{
+    configured: boolean;
+    mode: string;
+    card: { brand: string | null; last4: string; expMonth: number | null; expYear: number | null } | null;
+  }>('/sponsor/payment-method');
+  return response.data;
+};
+
+export const createPortalCardSetupSession = async () => {
+  const response = await api.post<{ url: string }>('/sponsor/payment-method/card-setup-session');
+  return response.data;
+};
+
+export const getPortalWithdrawals = async () => {
+  const response = await api.get<{
+    state: SponsorWithdrawalState;
+    withdrawals: Array<{
+      id: string;
+      amount_cents: number;
+      status: string;
+      failure_reason: string | null;
+      requested_at: string;
+      completed_at: string | null;
+    }>;
+  }>('/sponsor/withdrawals');
+  return response.data;
+};
+
+export const requestPortalWithdrawal = async (amountCents: number) => {
+  const response = await api.post<{
+    withdrawal: { id: string; amount_cents: number; status: string; failure_reason: string | null };
+    state: SponsorWithdrawalState;
+  }>('/sponsor/withdrawals/request', { amountCents });
+  return response.data;
+};

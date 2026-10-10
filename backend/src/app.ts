@@ -871,17 +871,29 @@ export function startServer(): void {
       .catch((err: any) => console.error(`[VEHICLE SYNC] ⚠️ Background sync failed (non-fatal): ${err.message}`));
   });
 
-  // Weekly auto-payout sweep — checks once per minute, only fires on
-  // Monday 09:00 UTC. Idempotent via Redis lock + partial UNIQUE INDEX.
+  // Weekly auto-payout sweep — RETIRED: withdrawals are manual only (driver
+  // presses Withdraw in the app; created once per week, window opens Monday
+  // 00:00 UTC). The tick is kept as a no-op guard, not a scheduler.
   import('./services/weeklyPayouts.service').then(({ WeeklyPayoutsService }) => {
     setInterval(() => {
       WeeklyPayoutsService.tick()
         .then((r) => {
-          if (r.fired) logger.info({ processed: r.processed }, 'cron_weekly_payouts_fired');
-          else if (r.skipped.length) logger.info({ skipped: r.skipped }, 'cron_weekly_payouts_skipped');
+          if (r.skipped.some((s) => s !== 'manual-withdrawals-only')) {
+            logger.warn({ skipped: r.skipped }, 'cron_weekly_payouts_UNEXPECTED');
+          }
         })
         .catch((err) => logger.error({ err: err.message }, 'cron_weekly_payouts_error'));
-    }, 60 * 1000);
+    }, 60 * 60 * 1000); // hourly no-op guard, never creates payouts
+  });
+
+  // Manual sponsor budget withdrawals: replay refunds for PENDING/FAILED
+  // requests (idempotent via per-charge refund keys).
+  import('./modules/payments/withdrawal.service').then(({ sweepSponsorWithdrawals }) => {
+    setInterval(() => {
+      sweepSponsorWithdrawals()
+        .then((n) => { if (n > 0) logger.info({ retried: n }, 'cron_sponsor_withdrawals_retry'); })
+        .catch((err: any) => logger.error({ err: err.message }, 'cron_sponsor_withdrawals_error'));
+    }, 5 * 60 * 1000);
   });
   }
 }

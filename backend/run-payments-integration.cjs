@@ -40,6 +40,13 @@ const { PaymentsService } = require('./src/modules/payments/payments.service');
 const { SpecialRedemptionService } = require('./src/modules/sponsor/special-redemption.service');
 const { SponsorService } = require('./src/modules/sponsor/sponsor.service');
 const { setStripeGatewayForTests, clearStripeGatewayForTests } = require('./src/modules/payments/stripe.gateway');
+const {
+  requestSponsorWithdrawal,
+  sponsorWithdrawalState,
+  driverWithdrawalState,
+  assertDriverCanWithdraw,
+  executeSponsorWithdrawalRefunds,
+} = require('./src/modules/payments/withdrawal.service');
 
 let passed = 0, failed = 0;
 const ok = (name, cond, extra = '') => {
@@ -51,9 +58,11 @@ const section = (s) => console.log(`\n═══ ${s} ═══`);
 // ---------------------- fake Stripe gateway ---------------------------------
 function fakeGateway({ onCharge } = {}) {
   const charges = [];
+  const refunds = [];
   let failNextCharges = false;
   return {
     charges,
+    refunds,
     setFailCharges(v) { failNextCharges = v; },
     async createOffSessionCharge(params) {
       charges.push({
@@ -68,11 +77,18 @@ function fakeGateway({ onCharge } = {}) {
       }
       return { paymentIntentId: piId, status: 'succeeded', chargeId: `ch_${crypto.randomBytes(6).toString('hex')}`, failureReason: null, requiresAction: false };
     },
+    async createRefund(params) {
+      refunds.push({
+        paymentIntentId: params.paymentIntentId,
+        amountCents: params.amountCents,
+        idempotencyKey: params.idempotencyKey,
+      });
+      return { refundId: `re_${crypto.randomBytes(6).toString('hex')}`, status: 'succeeded' };
+    },
     async createCheckoutSession() { throw new Error('not used in integration tests'); },
     async retrieveCheckoutSession() { throw new Error('not used'); },
     async retrieveSetupIntent() { throw new Error('not used'); },
     async retrievePaymentIntent(id) { return { id, status: 'succeeded', amountCents: 0, amountReceivedCents: 0, chargeId: null, customerId: null, paymentMethodId: null, metadata: {}, lastPaymentError: null }; },
-    async createRefund() { throw new Error('not used'); },
     async ensureCustomer({ userId }) { return { customerId: `cus_test_${userId}` }; },
     async createExpressAccount() { throw new Error('not used'); },
     async createAccountLink() { throw new Error('not used'); },
@@ -512,6 +528,96 @@ async function cleanup() {
     } finally {
       clearStripeGatewayForTests();
     }
+  }
+
+  // ----------------- SCENARIO 5: SPONSOR MANUAL WITHDRAWAL -----------------
+  section('SCENARIO 5 — sponsor (colab) card-backed manual withdrawal, once per week');
+  {
+    const gateway = fakeGateway();
+    setStripeGatewayForTests(gateway);
+    try {
+      riderId = await seedUser(`withdraw-rider-${suffix}@netride.test`, 'RIDER');
+      driverId = await seedUser(`withdraw-driver-${suffix}@netride.test`, 'DRIVER');
+      sponsorId = await seedSponsor(200000); // $2,000.00 funded budget
+
+      // Two real funding charges on file (SUCCEEDED) so refunds have a source.
+      await pool.query(
+        `INSERT INTO stripe_payments (purpose, sponsor_id, amount_cents, currency, status, stripe_payment_intent_id, stripe_checkout_session_id, idempotency_key)
+         VALUES ('SPONSOR_BUDGET_TOPUP', $1, 150000, 'USD', 'SUCCEEDED', 'pi_fund_a', 'cs_a', 'k_a'),
+                ('SPONSOR_BUDGET_TOPUP', $1, 100000, 'USD', 'SUCCEEDED', 'pi_fund_b', 'cs_b', 'k_b')`,
+        [sponsorId],
+      );
+
+      const wState0 = await sponsorWithdrawalState(sponsorId);
+      ok('new sponsor: withdrawal eligible immediately', wState0.eligible === true);
+
+      const res = await requestSponsorWithdrawal({ sponsorId, amountCents: 120000 });
+      ok('withdrawal completes', res.withdrawal.status === 'COMPLETED', `status=${res.withdrawal.status}`);
+      ok('exactly one refund for $1200 from the oldest funding charge',
+        gateway.refunds.length === 1 && gateway.refunds[0].amountCents === 120000 && gateway.refunds[0].paymentIntentId === 'pi_fund_a',
+        JSON.stringify(gateway.refunds));
+      ok('refund idempotency key is withdrawal-scoped',
+        gateway.refunds.every((rf) => String(rf.idempotencyKey).startsWith('sponsor-withdrawal:')), JSON.stringify(gateway.refunds.map((r) => r.idempotencyKey)));
+
+      const sponsorAfter = (await pool.query(`SELECT initial_budget_cents, remaining_budget_cents, reserved_budget_cents, used_budget_cents FROM sponsors WHERE id=$1`, [sponsorId])).rows[0];
+      ok('budget debited by $1200 (remaining)', centsValue(sponsorAfter.remaining_budget_cents) === 80000, `remaining=${centsValue(sponsorAfter.remaining_budget_cents)}`);
+      ok('budget invariant holds: remaining + used = initial', centsValue(sponsorAfter.remaining_budget_cents) + centsValue(sponsorAfter.used_budget_cents) === centsValue(sponsorAfter.initial_budget_cents));
+
+      const ledger = (await pool.query(
+        `SELECT COUNT(*)::int AS n FROM sponsor_ledger_entries WHERE sponsor_id=$1 AND type='WITHDRAWAL' AND reference_type='sponsor_withdrawal'`,
+        [sponsorId],
+      )).rows[0];
+      ok('exactly one WITHDRAWAL ledger entry', ledger.n === 1);
+
+      // Weekly rule: withdrawing mid-week blocks until next Monday.
+      const wState1 = await sponsorWithdrawalState(sponsorId);
+      ok('second withdrawal this week is BLOCKED', wState1.eligible === false);
+      ok('next window is the following Monday', wState1.nextAvailableAt.getUTCDay() === 1, wState1.nextAvailableAt.toISOString());
+      let blocked = null;
+      try {
+        await requestSponsorWithdrawal({ sponsorId, amountCents: 10000 });
+      } catch (e) {
+        blocked = e;
+      }
+      ok('second request throws WITHDRAWAL_UNAVAILABLE', blocked && blocked.code === 'WITHDRAWAL_UNAVAILABLE', blocked?.message ?? '');
+
+      // Retry safety: replaying refund execution adds nothing.
+      const refundsBefore = gateway.refunds.length;
+      await executeSponsorWithdrawalRefunds(res.withdrawal.id, sponsorId, 120000);
+      ok('replayed refund execution is a no-op (idempotent)', gateway.refunds.length === refundsBefore);
+    } finally {
+      clearStripeGatewayForTests();
+    }
+  }
+
+  // ----------------- SCENARIO 6: DRIVER MANUAL WITHDRAWAL GATE ------------
+  section('SCENARIO 6 — driver manual withdrawal gate (once per week, Monday anchor)');
+  {
+    riderId = await seedUser(`dw-rider-${suffix}@netride.test`, 'RIDER');
+    driverId = await seedUser(`dw-driver-${suffix}@netride.test`, 'DRIVER');
+    const empty = await driverWithdrawalState(driverId);
+    ok('new driver: withdrawal eligible immediately', empty.eligible === true);
+
+    // Simulate a withdrawal made THIS week.
+    await pool.query(
+      `INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method)
+       VALUES ($1, 5000, 0, 5000, 'PAID', 'ON_DEMAND')`,
+      [driverId],
+    );
+    const blocked = await driverWithdrawalState(driverId);
+    ok('driver who withdrew this week is BLOCKED', blocked.eligible === false);
+    let threw = null;
+    try { await assertDriverCanWithdraw(driverId); } catch (e) { threw = e; }
+    ok('assertDriverCanWithdraw throws a typed error', !!threw && threw.code === 'WITHDRAWAL_UNAVAILABLE', threw?.message ?? '');
+    ok('next available is a Monday', threw?.nextAvailableAt ? new Date(threw.nextAvailableAt).getUTCDay() === 1 : false, threw?.nextAvailableAt ?? '');
+
+    // Move that payout back to last week → eligible again (Monday reset).
+    await pool.query(
+      `UPDATE payouts SET requested_at = requested_at - INTERVAL '8 days' WHERE driver_id = $1 AND method = 'ON_DEMAND'`,
+      [driverId],
+    );
+    const reset = await driverWithdrawalState(driverId);
+    ok('previous-week withdrawal does not block the new week', reset.eligible === true);
   }
 
   console.log(`\n══════════════════════════════════════`);

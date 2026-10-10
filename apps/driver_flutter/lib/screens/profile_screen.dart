@@ -1541,6 +1541,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final cardLast4 = card?['last4']?.toString();
         final cardBrand = card?['brand']?.toString().toUpperCase() ?? '';
         final payouts = (w['recent_payouts'] as List?) ?? const [];
+        // Weekly manual-withdrawal availability (server-computed; window
+        // always opens Monday 00:00 UTC, one withdrawal per week).
+        final withdrawal = w['withdrawal'] as Map<String, dynamic>?;
+        final withdrawalEligible = withdrawal?['eligible'] == true;
+        final nextAvailableRaw = withdrawal?['nextAvailableAt']?.toString();
+        final nextAvailable = nextAvailableRaw != null
+            ? DateTime.tryParse(nextAvailableRaw)?.toLocal()
+            : null;
+        final withdrawalLabel = withdrawalEligible
+            ? 'Withdrawal available'
+            : nextAvailable != null
+                ? 'Next withdrawal: ${DateFormat('EEE, MMM d').format(nextAvailable)}'
+                : 'One withdrawal per week (Mondays)';
         return _buildSectionCard(
           title: 'Wallet',
           children: [
@@ -1592,8 +1605,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _buildProfileRow(
               icon: Icons.account_balance_wallet_rounded,
               title: 'Request payout',
+              subtitle: withdrawalLabel,
               trailing: TextButton(
-                onPressed: balanceCents > 0 ? _showRequestPayoutDialog : null,
+                onPressed: (balanceCents > 0 && withdrawalEligible)
+                    ? _showRequestPayoutDialog
+                    : null,
                 child: const Text('Withdraw', style: TextStyle(fontWeight: FontWeight.w700)),
               ),
             ),
@@ -1988,13 +2004,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildProfileRow({
     required IconData icon,
     required String title,
+    String? subtitle,
     Widget? trailing,
   }) {
     return Row(
       children: [
         Icon(icon, size: 20, color: const Color(0xFF2F3A32).withOpacity(0.6)),
         const SizedBox(width: 12),
-        Expanded(child: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              if (subtitle != null)
+                Text(subtitle,
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+            ],
+          ),
+        ),
         if (trailing != null) trailing,
       ],
     );

@@ -286,7 +286,55 @@ export class PaymentsService {
     }
   }
 
-  /** Hosted Checkout (mode=payment) funding a sponsor's prepaid budget. */
+  /** Managed card (Stripe Checkout mode=setup) on the sponsor's customer. */
+  static async createSponsorCardSetupSession(args: {
+    sponsorId: string;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<{ url: string }> {
+    const gateway = gatewayOrNull();
+    if (!gateway) throw new Error('Stripe is not configured');
+    const customer = await this.ensureSponsorStripeCustomer(args.sponsorId);
+    const session = await gateway.createCheckoutSession({
+      mode: 'setup',
+      customerId: customer,
+      successUrl: args.successUrl,
+      cancelUrl: args.cancelUrl,
+      productName: 'NetRide sponsor saved payment method',
+      metadata: {
+        kind: 'SPONSOR_CARD_SETUP',
+        sponsor_id: args.sponsorId,
+      },
+    });
+    if (!session.url) throw new Error('Stripe did not return a setup URL');
+    return { url: session.url };
+  }
+
+  /** Resolves (creating once) the Stripe Customer for a sponsor. */
+  static async ensureSponsorStripeCustomer(sponsorId: string): Promise<string> {
+    const sponsor = await pool.query(
+      `SELECT stripe_customer_id, business_name FROM sponsors WHERE id = $1`,
+      [sponsorId],
+    );
+    const row = sponsor.rows[0];
+    if (!row) throw new Error('Sponsor not found');
+    if (row.stripe_customer_id) return row.stripe_customer_id;
+
+    const gateway = gatewayOrNull();
+    if (!gateway) throw new Error('Stripe is not configured');
+    const created = await gateway.ensureCustomer({
+      userId: `sponsor:${sponsorId}`,
+      email: `sponsor+${sponsorId}@netride.org`,
+      name: row.business_name,
+    });
+    await pool.query(
+      `UPDATE sponsors SET stripe_customer_id = $2, updated_at = NOW() WHERE id = $1`,
+      [sponsorId, created.customerId],
+    );
+    return created.customerId;
+  }
+
+  /** Stripe Checkout (mode=payment) funding a sponsor's prepaid budget. */
   static async createSponsorTopUpSession(args: {
     sponsorId: string;
     amountCents: number;
@@ -307,12 +355,9 @@ export class PaymentsService {
 
     const idempotencyKey = args.idempotencyKey ?? `sponsor-topup:${args.sponsorId}:${Date.now()}`;
     // Sponsors are not NetRide user accounts: create/dedupe their Stripe
-    // Customer directly (idempotent on the sponsor id) without a local row.
-    const platformCustomer = await gateway.ensureCustomer({
-      userId: `sponsor:${args.sponsorId}`,
-      email: `sponsor+${args.sponsorId}@netride.org`,
-      name: sponsor.rows[0].business_name,
-    });
+    // Customer (cached on the sponsor row for repeat fundings and the
+    // managed card).
+    const platformCustomer = await this.ensureSponsorStripeCustomer(args.sponsorId);
     if (!platformCustomer) throw new Error('Stripe is not configured');
 
     const insert = await pool.query(
@@ -321,7 +366,7 @@ export class PaymentsService {
        VALUES ('SPONSOR_BUDGET_TOPUP', $1, $2, $3, 'PENDING', $4, $5)
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING id`,
-      [args.sponsorId, amountCents, env.STRIPE_CURRENCY, platformCustomer.customerId, idempotencyKey],
+      [args.sponsorId, amountCents, env.STRIPE_CURRENCY, platformCustomer, idempotencyKey],
     );
     if (insert.rows.length === 0) {
       const existing = await pool.query(
@@ -336,7 +381,7 @@ export class PaymentsService {
     try {
       const session = await gateway.createCheckoutSession({
         mode: 'payment',
-        customerId: platformCustomer.customerId,
+        customerId: platformCustomer,
         successUrl: args.successUrl,
         cancelUrl: args.cancelUrl,
         amountCents,
@@ -565,6 +610,25 @@ export class PaymentsService {
 
     if (session.mode === 'setup') {
       const metadata = session.metadata ?? {};
+      if (metadata.kind === 'SPONSOR_CARD_SETUP') {
+        if (metadata.sponsor_id && session.setupIntentId) {
+          const si = await gateway.retrieveSetupIntent(session.setupIntentId);
+          if (si.status === 'succeeded') {
+            const card = si.paymentMethod;
+            await pool.query(
+              `UPDATE sponsors
+               SET stripe_customer_id = COALESCE($2, stripe_customer_id),
+                   default_payment_method_id = $3,
+                   card_brand = $4, card_last4 = $5,
+                   card_exp_month = $6, card_exp_year = $7,
+                   updated_payment_at = NOW(), updated_at = NOW()
+               WHERE id = $1`,
+              [metadata.sponsor_id, si.customerId, si.paymentMethodId, card?.brand ?? null, card?.last4 ?? null, card?.expMonth ?? null, card?.expYear ?? null],
+            );
+          }
+        }
+        return;
+      }
       if (metadata.kind !== 'CARD_SETUP' || !metadata.user_id) return;
       if (!session.setupIntentId) return;
       const si = await gateway.retrieveSetupIntent(session.setupIntentId);

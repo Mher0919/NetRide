@@ -66,6 +66,26 @@ export class StripeWebhookService {
 
       case 'setup_intent.succeeded': {
         const metadata = object.metadata ?? {};
+        if (metadata.kind === 'SPONSOR_CARD_SETUP' && metadata.sponsor_id) {
+          const gateway = tryGetStripeGateway();
+          if (gateway) {
+            const si = await gateway.retrieveSetupIntent(object.id);
+            if (si.status === 'succeeded') {
+              const card = si.paymentMethod;
+              await pool.query(
+                `UPDATE sponsors
+                 SET stripe_customer_id = COALESCE($2, stripe_customer_id),
+                     default_payment_method_id = $3,
+                     card_brand = $4, card_last4 = $5,
+                     card_exp_month = $6, card_exp_year = $7,
+                     updated_payment_at = NOW(), updated_at = NOW()
+                 WHERE id = $1`,
+                [metadata.sponsor_id, si.customerId, si.paymentMethodId, card?.brand ?? null, card?.last4 ?? null, card?.expMonth ?? null, card?.expYear ?? null],
+              );
+            }
+          }
+          return 'processed';
+        }
         if (metadata.kind === 'CARD_SETUP' && metadata.user_id) {
           const gateway = tryGetStripeGateway();
           if (gateway) {

@@ -218,6 +218,14 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     user: { max: 10, windowMs: HOUR },
     ip: { max: 30, windowMs: HOUR },
   },
+  'POST /api/sponsor/payment-method/card-setup-session': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 30, windowMs: HOUR },
+  },
+  'POST /api/sponsor/withdrawals/request': {
+    user: { max: 5, windowMs: HOUR },
+    ip: { max: 10, windowMs: HOUR },
+  },
   // Admin financial actions
   'POST /api/admin/payments/:id/reconcile': {
     user: { max: 60, windowMs: MINUTE },

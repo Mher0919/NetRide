@@ -66,6 +66,28 @@ budget, the redemption moves to `REWARD_COMPLETED`, and **no money is sent
 back to the rider**. The $5 referral rewards are separate (`ReferralService`,
 `payout_method`/`wallet_transactions` untouched) and still operate.
 
+### Manual withdrawals — drivers and sponsors (once per week, Mondays)
+
+The automatic weekly payout sweep is **retired** (`WeeklyPayoutsService` is
+a no-op guard). Every payout is created manually:
+
+- **Drivers** press Withdraw in the driver app (`POST /driver/wallet/request-payout`);
+  the row stays PENDING and NetRide pays it out manually (admin Payouts page —
+  existing mark-paid flow, or the Connect transfer action when the driver has
+  an enabled Express account).
+- **Sponsors/Colabs** press Withdraw in the sponsor portal (Budget & funding →
+  Withdraw funds). The amount is **refunded to the sponsor's funding card**
+  via Stripe refunds of their top-up charges (idempotent per withdrawal,
+  recorded as `WITHDRAWAL` sponsor-ledger entries). Sponsors also manage a
+  saved card from the portal (used for top-ups and as the refund destination).
+
+**Shared weekly rule** (`modules/payments/withdrawal.service.ts`, unit-tested):
+one withdrawal per calendar week; the window opens **every Monday 00:00 UTC**
+— a withdrawal on any day makes the next opportunity the *following* Monday;
+accounts that never withdrew are immediately eligible. Violations are refused
+with `WITHDRAWAL_UNAVAILABLE` + `nextAvailableAt`, and the state is returned
+in `GET /driver/wallet` (`withdrawal`) and `GET /api/sponsor/withdrawals`.
+
 ---
 
 ## 2. Backend surface
@@ -88,7 +110,9 @@ Endpoints:
 
 - Rider: `GET /api/payments/config|profile|methods|history`, `POST /api/payments/setup-session|wallet/topup-session|consent`, `DELETE /api/payments/methods/:id`, `GET /api/payments/ride/:rideId/status` (owner or assigned driver only).
 - Driver: `GET /api/payments/connect/status?sync=true`, `POST /api/payments/connect/onboarding`.
-- Sponsor portal: `GET /api/sponsor/funding`, `POST /api/sponsor/funding/session`.
+- Sponsor portal: `GET /api/sponsor/funding`, `POST /api/sponsor/funding/session`,
+  `GET /api/sponsor/payment-method`, `POST /api/sponsor/payment-method/card-setup-session`,
+  `GET /api/sponsor/withdrawals`, `POST /api/sponsor/withdrawals/request`.
 - Admin: `GET /api/admin/payments/overview|settlements|events`, `POST /api/admin/payments/:id/reconcile|refund`, `POST /api/admin/payments/rides/:rideId/retry-additional-charge`, `POST /api/admin/payments/payouts/:payoutId/transfer`.
 - Webhook: `POST /api/payments/webhook` (raw body, registered **before** `express.json`).
 
@@ -282,7 +306,9 @@ production.
   per row for future expansion.
 - **Chargeback handling**: `charge.refunded` marks payments refunded; full
   dispute workflows (dispute evidence, loss accounting) are not automated.
-- **Weekly payout sweep** (`WeeklyPayoutsService`) still creates internal
-  PENDING rows; executing the Stripe transfer is available via the admin
-  Payouts page's transfer action (and the old mark-paid flow remains as a
-  fallback for accounts without Connect).
+- **Weekly payout sweep** is retired: payouts are manual only (driver
+  Withdraw button), one per week, window opens Monday 00:00 UTC; driver
+  payouts are paid out manually or via the Connect transfer action. Sponsor
+  withdrawals are Stripe refunds of funding charges — cards older than
+  Stripe's refund window (or disputed top-ups) surface as FAILED withdrawal
+  rows retried by the sweep cron and flagged for manual admin attention.

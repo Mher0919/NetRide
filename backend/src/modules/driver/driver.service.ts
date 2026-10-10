@@ -8,6 +8,7 @@ import {
   getRevenueAllocationForRide,
   computeRevenueAllocation,
 } from '../../services/pricing.service';
+import { driverWithdrawalState, assertDriverCanWithdraw } from '../payments/withdrawal.service';
 
 export class DriverService {
   static async getProfile(userId: string) {
@@ -896,6 +897,9 @@ export class DriverService {
         rides: Number(week.rides ?? 0),
       },
       payout_card: cardSummary,
+      // Weekly manual-withdrawal availability (defaults to eligible when the
+      // state read fails — the request endpoint still enforces it).
+      withdrawal: await driverWithdrawalState(userId).catch(() => ({ eligible: true, nextAvailableAt: new Date() })),
       // pg returns BIGINT columns as strings — normalize to numbers so the
       // mobile client never hits a `String is not subtype of num` cast error.
       recent_payouts: (pRes.rows ?? []).map((r: any) => ({
@@ -918,6 +922,11 @@ export class DriverService {
     if (amountCents < MIN_PAYOUT_CENTS) {
       throw new Error(`MIN_PAYOUT: Minimum on-demand payout is $${MIN_PAYOUT_CENTS / 100}.`);
     }
+
+    // Weekly rule (manual only): one withdrawal per calendar week; the
+    // window opens every Monday 00:00 UTC regardless of when the last
+    // withdrawal happened. The automatic WEEKLY_AUTO sweep is retired.
+    await assertDriverCanWithdraw(userId);
 
     await pool.query(
       `INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`,

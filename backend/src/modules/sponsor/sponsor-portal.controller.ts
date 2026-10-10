@@ -16,6 +16,11 @@ import { SponsorService, discountLabelFor } from './sponsor.service';
 import { SpecialRedemptionService } from './special-redemption.service';
 import { PaymentsService } from '../payments/payments.service';
 import { stripeMode, isStripeConfigured } from '../payments/stripe.client';
+import {
+  sponsorWithdrawalState,
+  listSponsorWithdrawals,
+  requestSponsorWithdrawal,
+} from '../payments/withdrawal.service';
 
 export interface SponsorRequest extends Request {
   user?: { id: string; role: string; email: string };
@@ -269,6 +274,107 @@ export class SponsorPortalController {
         idempotencyKey: typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : undefined,
       });
       res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  // ------------------------------------------------------- managed card
+
+  /** Saved card on the sponsor's Stripe customer (used for payments/refunds). */
+  static async getPaymentMethod(req: SponsorRequest, res: Response) {
+    try {
+      const row = await pool.query(
+        `SELECT stripe_customer_id, card_brand, card_last4, card_exp_month,
+                card_exp_year, updated_payment_at
+         FROM sponsors WHERE id = $1`,
+        [req.sponsor!.id],
+      );
+      const r = row.rows[0];
+      res.json({
+        configured: isStripeConfigured(),
+        mode: stripeMode(),
+        card: r?.card_last4
+          ? {
+              brand: r.card_brand,
+              last4: r.card_last4,
+              expMonth: r.card_exp_month,
+              expYear: r.card_exp_year,
+            }
+          : null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  /** Stripe-hosted Checkout (mode=setup) to save a managed card. */
+  static async createCardSetupSession(req: SponsorRequest, res: Response) {
+    try {
+      const portalBase = (env.SPONSOR_PORTAL_URL || env.PUBLIC_BACKEND_URL || env.APP_URL || '').replace(/\/$/, '');
+      const result = await PaymentsService.createSponsorCardSetupSession({
+        sponsorId: req.sponsor!.id,
+        successUrl: `${portalBase}/funding?state=card-success`,
+        cancelUrl: `${portalBase}/funding?state=cancel`,
+      });
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  // -------------------------------------------------- manual withdrawals
+
+  /** Withdrawal history + weekly availability (window opens every Monday). */
+  static async withdrawals(req: SponsorRequest, res: Response) {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 100);
+      const offset = Math.max(Number(req.query.offset ?? 0), 0);
+      const [state, rows] = await Promise.all([
+        sponsorWithdrawalState(req.sponsor!.id),
+        listSponsorWithdrawals(req.sponsor!.id, limit, offset),
+      ]);
+      res.json({
+        state: {
+          eligible: state.eligible,
+          nextAvailableAt: state.nextAvailableAt.toISOString(),
+        },
+        withdrawals: rows,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  /**
+   * Manual budget withdrawal (once per week; window opens every Monday).
+   * Implemented as Stripe refunds of the sponsor's funding charges — the
+   * budget is only debited once the request is accepted.
+   */
+  static async requestWithdrawal(req: SponsorRequest, res: Response) {
+    try {
+      const amountCents = Math.round(Number(req.body?.amountCents ?? 0));
+      if (!Number.isFinite(amountCents) || amountCents <= 0) {
+        return res.status(400).json({ error: 'Withdrawal amount must be positive' });
+      }
+      const result = await requestSponsorWithdrawal({
+        sponsorId: req.sponsor!.id,
+        amountCents,
+        actorUserId: req.user?.id ?? null,
+      });
+      res.json({
+        withdrawal: {
+          id: result.withdrawal.id,
+          amount_cents: centsValue(result.withdrawal.amount_cents),
+          status: result.withdrawal.status,
+          failure_reason: result.withdrawal.failure_reason,
+          requested_at: result.withdrawal.requested_at,
+        },
+        state: {
+          eligible: result.state.eligible,
+          nextAvailableAt: result.state.nextAvailableAt.toISOString(),
+        },
+      });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

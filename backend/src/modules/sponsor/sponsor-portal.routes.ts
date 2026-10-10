@@ -29,4 +29,12 @@ router.patch('/sponsor/settings', authMiddleware, sponsorMiddleware, SponsorPort
 router.get('/sponsor/funding', authMiddleware, sponsorMiddleware, SponsorPortalController.fundingHistory);
 router.post('/sponsor/funding/session', authMiddleware, sponsorMiddleware, SponsorPortalController.createFundingSession);
 
+// Managed card (saved on the sponsor's Stripe customer).
+router.get('/sponsor/payment-method', authMiddleware, sponsorMiddleware, SponsorPortalController.getPaymentMethod);
+router.post('/sponsor/payment-method/card-setup-session', authMiddleware, sponsorMiddleware, SponsorPortalController.createCardSetupSession);
+
+// MANUAL withdrawals (once per week; window opens every Monday 00:00 UTC).
+router.get('/sponsor/withdrawals', authMiddleware, sponsorMiddleware, SponsorPortalController.withdrawals);
+router.post('/sponsor/withdrawals/request', authMiddleware, sponsorMiddleware, SponsorPortalController.requestWithdrawal);
+
 export default router;
