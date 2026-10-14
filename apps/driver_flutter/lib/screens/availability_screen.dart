@@ -16,6 +16,7 @@ import '../components/driver_status_card.dart';
 import '../services/sound_service.dart';
 import '../services/heatmap_service.dart';
 import '../services/location_reporter.dart';
+import '../services/gps_tracker.dart';
 import '../models/demand_zone.dart';
 import 'trip_screen.dart';
 
@@ -35,9 +36,9 @@ class AvailabilityScreen extends StatefulWidget {
 
 class _AvailabilityScreenState extends State<AvailabilityScreen> {
   final MapController _mapController = MapController();
-  StreamSubscription<Position>? _positionSubscription;
+  StreamSubscription<GpsFix>? _positionSubscription;
   Timer? _heartbeatTimer;
-  Position? _lastPosition;
+  GpsFix? _lastPosition;
   bool _shouldFollowUser = true;
   ViewState _state = ViewState.loading;
   String? _errorMessage;
@@ -52,9 +53,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   /// parked — the backend never drops updates (which previously made
   /// the rider's marker jitter) and never gets flooded.
   late final LocationReporter _locationReporter;
-
-  /// Last known good heading (geolocator reports NaN before a fix).
-  double _lastHeading = 0;
 
   // Weekly earnings (server-computed in GET /driver/wallet -> this_week).
   bool _earningsLoading = true;
@@ -489,8 +487,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     if (pos == null || !mounted) return;
     try {
       final query = await HeatmapService.fetchZones(
-        lat: pos.latitude,
-        lng: pos.longitude,
+        lat: pos.position.latitude,
+        lng: pos.position.longitude,
       );
       if (!mounted) return;
       setState(() {
@@ -572,7 +570,14 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       );
       if (mounted) {
         setState(() {
-          _lastPosition = position;
+          _lastPosition = GpsFix(
+            position: LatLng(position.latitude, position.longitude),
+            headingDeg: position.heading.isNaN ? 0 : position.heading,
+            speedMps: position.speed.isNaN ? 0 : position.speed,
+            accuracyM: position.accuracy.isFinite ? position.accuracy : 0,
+            isMocked: position.isMocked,
+            timestamp: DateTime.now(),
+          );
           _state = ViewState.success;
         });
       }
@@ -588,36 +593,43 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     _locationReporter = LocationReporter(
       minDistanceM: 10,
       minHeadingDeltaDeg: 15,
-      onReport: (lat, lng, {heading = 0}) {
+      onReport: (lat, lng,
+          {heading = 0, accuracy, speed, mock = false}) {
         if (!mounted) return;
-        provider.updateLocation(lat, lng, heading: heading);
+        provider.updateLocation(
+          lat,
+          lng,
+          heading: heading,
+          accuracy: accuracy,
+          speed: speed,
+          mock: mock,
+        );
       },
     );
 
+    // One OS location stream for the whole app: the SAME GpsTracker that
+    // navigation + speed monitor consume. Previously this screen opened a
+    // SECOND Geolocator stream (bestForNavigation, distanceFilter 0),
+    // duplicating GPS subscriptions and battery cost during trips.
     _positionSubscription?.cancel();
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0, 
-      ),
-    ).listen((Position position) {
+    _positionSubscription = GpsTracker.instance.fixes.listen((fix) {
       if (!mounted) return;
-      setState(() => _lastPosition = position);
+      setState(() => _lastPosition = fix);
 
       if (provider.status != models.DriverStatus.offline) {
-        final rawHeading = position.heading;
-        final heading = rawHeading.isNaN ? _lastHeading : rawHeading;
-        if (!rawHeading.isNaN) _lastHeading = heading;
         _locationReporter.report(
-          position.latitude,
-          position.longitude,
-          heading: heading,
+          fix.position.latitude,
+          fix.position.longitude,
+          heading: fix.headingDeg,
+          accuracy: fix.accuracyM,
+          speed: fix.speedMps,
+          mock: fix.isMocked,
         );
       }
-      
+
       if (_shouldFollowUser && _isMapReady) {
         try {
-          _mapController.move(LatLng(position.latitude, position.longitude), 15.0);
+          _mapController.move(fix.position, 15.0);
         } catch (_) {
           // flutter_map internal state not ready yet — safe to ignore
         }
@@ -629,12 +641,15 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     // parked driver ~1 per 4 s.
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
-      final pos = _lastPosition;
-      if (pos == null || provider.status == models.DriverStatus.offline) return;
+      final fix = GpsTracker.instance.lastFix ?? _lastPosition;
+      if (fix == null || provider.status == models.DriverStatus.offline) return;
       _locationReporter.report(
-        pos.latitude,
-        pos.longitude,
-        heading: pos.heading.isNaN ? _lastHeading : pos.heading,
+        fix.position.latitude,
+        fix.position.longitude,
+        heading: fix.headingDeg,
+        accuracy: fix.accuracyM,
+        speed: fix.speedMps,
+        mock: fix.isMocked,
       );
     });
   }
@@ -671,17 +686,26 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         return;
       }
       final ok = await provider.setOnline(
-        lat: _lastPosition?.latitude,
-        lng: _lastPosition?.longitude,
+        lat: _lastPosition?.position.latitude,
+        lng: _lastPosition?.position.longitude,
       );
       if (ok) {
         // Play the confirmation cue only after the backend accepted; the
         // screen never claims to be online before that.
         SoundService.instance.playOnline();
+        // Start the platform background location pipeline (Android
+        // foreground service / iOS location background mode) so a
+        // minimized driver stays dispatchable instead of going stale.
+        await GpsTracker.instance.start();
         // Start cooling the demand heatmap for this area.
         _startDemandTimer();
       } else if (mounted) {
-        _showHeadshotModal(reason: 'headshot');
+        // setOnline now fails fast when the socket is down (instead of
+        // claiming a local-only online state the server never accepted).
+        _showError(
+          provider.lastAvailabilityError ??
+              'You couldn\'t be put online. Check your connection and try again.',
+        );
       }
     } finally {
       if (mounted) setState(() => _isTogglingOnline = false);
@@ -695,12 +719,18 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     provider.setOffline();
     // Heatmap is an online-mode surface — stop polling and clear zones.
     _stopDemandTimer();
+    // No active trip and no availability means there is nothing legitimate
+    // left to track: stop the OS location stream + foreground service so
+    // battery is never consumed for an offline driver.
+    if (provider.status != models.DriverStatus.onTrip) {
+      GpsTracker.instance.stop();
+    }
     // Re-center on the driver and refresh earnings while the map
     // contracts back into its card.
     _shouldFollowUser = true;
     if (_lastPosition != null && _isMapReady) {
       try {
-        _mapController.move(LatLng(_lastPosition!.latitude, _lastPosition!.longitude), 15.0);
+        _mapController.move(_lastPosition!.position, 15.0);
       } catch (_) {}
     }
     _loadWeeklyEarnings();
@@ -783,8 +813,24 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       });
     }
 
-    if (_positionSubscription == null && _state == ViewState.success) {
-      _startTracking(driverProvider);
+    if (_state == ViewState.success) {
+      if (_positionSubscription == null) {
+        _startTracking(driverProvider);
+      }
+      // Keep the OS location pipeline aligned with the driver's real state:
+      // online (or on a trip) ⇒ foreground service running; offline with no
+      // trip ⇒ fully stopped. GpsTracker.start/stop are idempotent, so this
+      // is safe on every rebuild (including returning from a completed trip,
+      // where NavigationService.stopNavigation released the tracker while
+      // the driver is still online).
+      final shouldTrack = driverProvider.status != models.DriverStatus.offline;
+      if (shouldTrack && !GpsTracker.instance.isRunning) {
+        GpsTracker.instance.start();
+      } else if (!shouldTrack &&
+          driverProvider.status != models.DriverStatus.onTrip &&
+          GpsTracker.instance.isRunning) {
+        GpsTracker.instance.stop();
+      }
     }
 
     // Auto-fit camera when a new incoming ride request arrives
@@ -825,7 +871,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     final mapRoutePoints = _routePointsFromGeometry(incomingRequest?.routeGeometry);
 
     LatLng initialCenter = _lastPosition != null 
-        ? LatLng(_lastPosition!.latitude, _lastPosition!.longitude)
+        ? _lastPosition!.position
         : const LatLng(34.0522, -118.2437);
 
     final bool isOnline = driverProvider.status != models.DriverStatus.offline;
@@ -924,7 +970,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                           markers: [
                             if (_lastPosition != null)
                               Marker(
-                                point: LatLng(_lastPosition!.latitude, _lastPosition!.longitude),
+                                point: _lastPosition!.position,
                                 width: 50,
                                 height: 50,
                                 child: _buildUserLocationMarker(isOnline),
@@ -1063,9 +1109,9 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                       shape: const CircleBorder(),
                       onPressed: () {
                         setState(() => _shouldFollowUser = true);
-                        if (_lastPosition != null) {
-                          try {
-                            _mapController.move(LatLng(_lastPosition!.latitude, _lastPosition!.longitude), 15.0);
+    if (_lastPosition != null) {
+      try {
+        _mapController.move(_lastPosition!.position, 15.0);
                           } catch (_) {}
                         }
                       },
@@ -1095,6 +1141,29 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   // ── Offline dashboard widgets ─────────────────────────────────────
 
   Widget _buildOfflineHeader(DriverProvider provider, bool isOnline) {
+    // Honest availability states: "going online" is pending until the
+    // server acknowledges the lease, and a lost connection is surfaced
+    // instead of a silent, false ONLINE badge.
+    final pending = provider.availabilityPending;
+    final connectionLost =
+        !pending && isOnline && !provider.isConnected;
+    final statusLabel = pending
+        ? 'Connecting to NetRide…'
+        : connectionLost
+            ? 'Connection lost — reconnecting…'
+            : isOnline
+                ? 'You\'re online'
+                : 'You\'re offline';
+    final badgeLabel = pending
+        ? 'CONNECTING'
+        : connectionLost
+            ? 'RECONNECTING'
+            : isOnline
+                ? 'ONLINE'
+                : 'OFFLINE';
+    final activeColor = connectionLost
+        ? const Color(0xFFC65A5A)
+        : const Color(0xFF5B7760);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       decoration: BoxDecoration(
@@ -1123,9 +1192,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  isOnline ? 'You\'re online' : 'You\'re offline',
+                  statusLabel,
                   style: TextStyle(
-                    color: isOnline ? const Color(0xFF5B7760) : const Color(0xFF2F3A32).withOpacity(0.45),
+                    color: (isOnline || pending || connectionLost)
+                        ? activeColor
+                        : const Color(0xFF2F3A32).withOpacity(0.45),
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1136,13 +1207,17 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: isOnline ? const Color(0xFF5B7760) : const Color(0xFFF7F4EF),
+              color: (isOnline || pending || connectionLost)
+                  ? activeColor
+                  : const Color(0xFFF7F4EF),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              isOnline ? 'ONLINE' : 'OFFLINE',
+              badgeLabel,
               style: TextStyle(
-                color: isOnline ? Colors.white : const Color(0xFF2F3A32).withOpacity(0.5),
+                color: (isOnline || pending || connectionLost)
+                    ? Colors.white
+                    : const Color(0xFF2F3A32).withOpacity(0.5),
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 1.2,

@@ -8,7 +8,7 @@ import { Trip, TripStatus } from '../../types';
  * driver who is no longer assigned, or for a ride that already flipped,
  * matches zero rows and cannot clobber a fresher assignment (spec §16/§17).
  */
-export declare const RELEASE_DRIVER_PRE_PICKUP_SQL = "UPDATE rides\n      SET status = $3,\n          driver_id = NULL,\n          cancelled_at = NULL,\n          cancelled_by = NULL,\n          cancellation_reason_code = NULL,\n          cancellation_reason_text = NULL\n    WHERE id = $1 AND driver_id = $2 AND status IN ($4, $5)\n    RETURNING id";
+export declare const RELEASE_DRIVER_PRE_PICKUP_SQL = "UPDATE rides\n      SET status = $3,\n          driver_id = NULL,\n          cancelled_at = NULL,\n          cancelled_by = NULL,\n          cancellation_reason_code = NULL,\n          cancellation_reason_text = NULL,\n          updated_at = NOW()\n    WHERE id = $1 AND driver_id = $2 AND status IN ($4, $5)\n    RETURNING id";
 /**
  * Driver-specific interaction history upsert (shared by the REJECTED and
  * ACCEPTED_THEN_CANCELLED paths). Kept beside the ride SQL so the release
@@ -34,6 +34,14 @@ export declare class RideRepository {
     static findByDriverId(driverId: string): Promise<Trip[]>;
     static findCurrentByRiderId(riderId: string): Promise<Trip | null>;
     static findCurrentByDriverId(driverId: string): Promise<Trip | null>;
+    /**
+     * Most recent terminal ride for a driver, looked up on reconnect when no
+     * active trip exists. Lets the driver app surface an outcome that happened
+     * while the process was dead (e.g. "ride cancelled while you were
+     * offline") instead of silently resetting to idle. Bounded window keeps
+     * the notice relevant.
+     */
+    static findLastTerminalByDriverId(driverId: string, withinMinutes?: number): Promise<Trip | null>;
     static delete(id: string, userId: string): Promise<boolean>;
     private static mapToTrip;
 }

@@ -37,15 +37,24 @@ import 'services/navigation_service.dart';
 /// is complete. Until it confirms completion, the app must stay in onboarding.
 String kInitialTargetRoute = '/login';
 
-/// Notification taps carry a backend-assigned route. The driver currently
-/// receives ride-cancelled pushes only (route '/') — those land on the
-/// dashboard, so no navigation is needed. '/trip' is handled for future
-/// ride-scoped pushes.
+/// Notification taps carry a backend-assigned route. Lifecycle pushes route
+/// to the trip screen; offer pushes open the dashboard, where the provider
+/// reconciles the authoritative offer/trip state (the notification payload
+/// itself is never trusted as state).
 void _routeFromNotification(Map<String, String> data) {
   final nav = ApiService.navigatorKey.currentState;
   if (nav == null) return;
   final route = data['route'];
-  if (route == '/trip') nav.pushNamed('/trip');
+  if (route == '/trip') {
+    nav.pushNamed('/trip');
+    return;
+  }
+  if (data['type'] == 'ride_offer') {
+    // The provider's getPendingOffer -> newTripRequest re-renders the live
+    // offer card if it still exists; if it expired, the dashboard simply
+    // stays idle. No optimistic navigation into a dead offer.
+    nav.pushNamedAndRemoveUntil('/', (r) => r.isFirst);
+  }
 }
 
 void main() async {
@@ -152,6 +161,10 @@ void main() async {
           providers: [
             ChangeNotifierProvider(create: (_) {
               final provider = DriverProvider();
+              // A foreground push is suppressed by the notification service
+              // while the in-app offer card is already visible.
+              NotificationService.instance.offerVisible =
+                  () => provider.incomingRequest != null;
               if (token != null) {
                 provider.initSocket(token);
               }

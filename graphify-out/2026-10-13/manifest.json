@@ -35,8 +35,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/components/MainLayout.tsx": {
-    "mtime": 1791612899.7591438,
-    "ast_hash": "8a3ead281a40c9ae711357b3aca8c505",
+    "mtime": 1791788212.0377064,
+    "ast_hash": "91bedba71eef6845ff5834ce36949f44",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/components/RideMap.tsx": {
@@ -50,8 +50,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/components/UserTable.tsx": {
-    "mtime": 1791265858.8948438,
-    "ast_hash": "a1d0f5dde39765eb4cb0c215624cb45a",
+    "mtime": 1791788212.0387962,
+    "ast_hash": "86b595e7405672f003672fba78599b10",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/context/AuthContext.tsx": {
@@ -65,8 +65,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/AuditLogs.tsx": {
-    "mtime": 1791265852.2477686,
-    "ast_hash": "06fa84f8482beab98cd9db16227626a9",
+    "mtime": 1791788212.0393486,
+    "ast_hash": "596f954e1982e2fa8e8616d45bcf1c33",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/ChangePassword.tsx": {
@@ -75,13 +75,13 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Dashboard.tsx": {
-    "mtime": 1791265867.228639,
-    "ast_hash": "03cb8799554b02d140137dacf586e0bc",
+    "mtime": 1791788212.0403802,
+    "ast_hash": "6a82e4d4b590e4c7e9ca2017f5f3f4da",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/FlaggedRatings.tsx": {
-    "mtime": 1784429686.0937722,
-    "ast_hash": "c454ec6bef84068bd9d81a3acfa5ece6",
+    "mtime": 1791788212.0403802,
+    "ast_hash": "38d6a8325092f5cfc90eca516878fb84",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/LiveMonitoring.tsx": {
@@ -90,53 +90,53 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Login.tsx": {
-    "mtime": 1789348293.275664,
-    "ast_hash": "b2278a3f2493d8b2a972901cce9e71fa",
+    "mtime": 1791788212.04151,
+    "ast_hash": "5b03e5e723a78988a30aa6ac74b32c4a",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/NotFound.tsx": {
-    "mtime": 1784396880.5117884,
-    "ast_hash": "50cdff4cae89ebb61bdd079c6be9cc48",
+    "mtime": 1791788212.0420134,
+    "ast_hash": "5aea773b3b41fac85f15caa648be91a3",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/ProfileChangeDetail.tsx": {
-    "mtime": 1791265857.96056,
-    "ast_hash": "344bb69a3472f13790c5c71045f9d070",
+    "mtime": 1791788212.0436842,
+    "ast_hash": "d570c1b8c9678bb9a41b91bc3dfebb1a",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/ProfileChanges.tsx": {
-    "mtime": 1791265853.2547138,
-    "ast_hash": "b48b4370418c812e67eefeb4b530034e",
+    "mtime": 1791788212.044507,
+    "ast_hash": "d101848b84ee8f5a2134251e5f5885a1",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/RideAudit.tsx": {
-    "mtime": 1791265858.435903,
-    "ast_hash": "6c2b9d9a0def1f0ae7af255f459dff0a",
+    "mtime": 1791788212.046529,
+    "ast_hash": "48ccafe9146d718f80fb27143ef1f8a9",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/RideDetail.tsx": {
-    "mtime": 1791265858.1794417,
-    "ast_hash": "cdafd0f4a10a0f713b6955c1a9e4aa51",
+    "mtime": 1791788212.0475285,
+    "ast_hash": "7d2c07494da3b85d934b8f4b7db77171",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Rides.tsx": {
-    "mtime": 1791265859.112192,
-    "ast_hash": "81cd6c6c6d816b5aea0f553a817670e4",
+    "mtime": 1791788212.0475285,
+    "ast_hash": "ffef297410b3c38df6380cc35a113998",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/SpeedingViolations.tsx": {
-    "mtime": 1782587301.7800176,
-    "ast_hash": "ea311e02adcf814c657e86a1fb5c542c",
+    "mtime": 1791788212.048529,
+    "ast_hash": "5c6eab4815838c52687b4d146848a783",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/UserDetail.tsx": {
-    "mtime": 1791265859.1835072,
-    "ast_hash": "d8ea71586498d5902420d8edd1bc5923",
+    "mtime": 1791788212.0495286,
+    "ast_hash": "f484f43b455d55dc251da45b4b17c46b",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/theme/index.ts": {
-    "mtime": 1779152441.7440095,
-    "ast_hash": "52c9bce0bd61096cb1abe38ced046366",
+    "mtime": 1791788212.0505288,
+    "ast_hash": "17396c7b686b3e23089b1265aacde692",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/tsconfig.app.json": {
@@ -235,18 +235,18 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/components/driver_status_card.dart": {
-    "mtime": 1786261869.673759,
-    "ast_hash": "16e8fb7a1af931db646aa8e3b84c6881",
+    "mtime": 1791788762.5733073,
+    "ast_hash": "fe49194271e3e161b44f82f556b48552",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/components/navigation/bottom_sheet_card.dart": {
-    "mtime": 1786261869.6747668,
-    "ast_hash": "786f04a3de29ff43f31622af950f5983",
+    "mtime": 1791788649.9786236,
+    "ast_hash": "ebd93b28173e45e6d5a12f318359231f",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/components/navigation/lane_guidance.dart": {
-    "mtime": 1786261869.6747668,
-    "ast_hash": "9569763401239ca187feb2e34b3f1d73",
+    "mtime": 1791788646.6745045,
+    "ast_hash": "1c21f24bf0a0d33319147a2c5f62a206",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/components/navigation/speed_hud.dart": {
@@ -260,8 +260,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/components/state_container.dart": {
-    "mtime": 1786261869.678272,
-    "ast_hash": "471446c6a8707cee254b65cca7ee09e1",
+    "mtime": 1791788464.12313,
+    "ast_hash": "2b342784e079202318bdcb2ab6e71700",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/components/tip_received_dialog.dart": {
@@ -275,8 +275,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/components/verification_banner.dart": {
-    "mtime": 1786261869.680279,
-    "ast_hash": "485ed0d0698af3636e84f53ffd6ff572",
+    "mtime": 1791788766.0690794,
+    "ast_hash": "318b698c6a7a438b77e756aa22fd755f",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/data/cars_data.dart": {
@@ -300,13 +300,13 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/activity_screen.dart": {
-    "mtime": 1786603949.6912725,
-    "ast_hash": "42e5507dc4a52fa7d082ac6958bd2c3a",
+    "mtime": 1791788663.9833863,
+    "ast_hash": "d0a3f038a3911df8be81e69bbe7d8d74",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/availability_screen.dart": {
-    "mtime": 1791523479.924469,
-    "ast_hash": "bd6b71fb1f7f1399020308065799ee6c",
+    "mtime": 1791788642.994447,
+    "ast_hash": "f2883ba0dbed0e37cc0caab05ae3a5c1",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/call_overlay.dart": {
@@ -315,8 +315,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/chat_sheet.dart": {
-    "mtime": 1786667121.8397918,
-    "ast_hash": "2e1675718febfdb84ce8f4f42037b949",
+    "mtime": 1791788688.3063073,
+    "ast_hash": "500a10b5cce6bbc8fb7ce6503f3fb32c",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/document_resubmission_screen.dart": {
@@ -335,38 +335,38 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/navigation_screen.dart": {
-    "mtime": 1791343749.632637,
-    "ast_hash": "a8b936b32e05daa6c755fb23a10b685e",
+    "mtime": 1791788696.0352151,
+    "ast_hash": "d0b72e3157d4cb7bacbe392395450db9",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/onboarding_screen.dart": {
-    "mtime": 1786263426.1054797,
-    "ast_hash": "e0e8915348bdd154ed45041b28fc9293",
+    "mtime": 1791788667.6143675,
+    "ast_hash": "780e293905ff35732fa6197042bba101",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/profile_screen.dart": {
-    "mtime": 1791612885.2000978,
-    "ast_hash": "9fade20a814bfc941380a10cca0b83e1",
+    "mtime": 1791788746.0386667,
+    "ast_hash": "12973b6f792f9afced5f9d17c655749d",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/replace_vehicle_screen.dart": {
-    "mtime": 1786264633.981707,
-    "ast_hash": "cd9781087f1d24a1b73ba7665e882538",
+    "mtime": 1791788464.1291313,
+    "ast_hash": "463af4a16adac48eab733f1f616f949e",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/reset_password_screen.dart": {
-    "mtime": 1786261869.6907408,
-    "ast_hash": "7d5339114863f2c1e3d23a3af5354511",
+    "mtime": 1791788464.1301303,
+    "ast_hash": "5f08509ff62dd1fa3153a1d2b77e19d8",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/settings_screen.dart": {
-    "mtime": 1786261869.6907408,
-    "ast_hash": "f118c5134efd53c8912d85f9426cfdd7",
+    "mtime": 1791788759.265398,
+    "ast_hash": "6e7e04ff3b9a4f2d908150a29b8ed076",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/signup_screen.dart": {
-    "mtime": 1786261885.5970037,
-    "ast_hash": "55554170c617007434a8dedd98925fbe",
+    "mtime": 1791788464.1311302,
+    "ast_hash": "e6f0ec4549b26896c0aaf7d58d9621df",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/splash_screen.dart": {
@@ -375,23 +375,23 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/success_screen.dart": {
-    "mtime": 1786261869.6924634,
-    "ast_hash": "a36d33239f66481452b59de1069562f9",
+    "mtime": 1791788464.132131,
+    "ast_hash": "06923cd74a3f13e63423672074d05ffd",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/trip_screen.dart": {
-    "mtime": 1791343738.79655,
-    "ast_hash": "8ebb22f86d1ad508114277cc3f8bb873",
+    "mtime": 1791788677.6288269,
+    "ast_hash": "185fcb71ac2c5acbbda3ef8bf11efc73",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/vehicle_inspection_screen.dart": {
-    "mtime": 1786264601.1308012,
-    "ast_hash": "25ddda0251b4be5458c54f6dccdaf449",
+    "mtime": 1791788681.1191428,
+    "ast_hash": "373ab1bf408246d55f2a5b573e2e3b1b",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/verification_screen.dart": {
-    "mtime": 1786265676.4373777,
-    "ast_hash": "5da3620b9fcbc7534e6596181cc2a3fd",
+    "mtime": 1791788464.132131,
+    "ast_hash": "4e461b433b5cc15654b697615a168dab",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/services/api_service.dart": {
@@ -460,8 +460,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/theme/app_theme.dart": {
-    "mtime": 1786261869.6952183,
-    "ast_hash": "c24c7c89af11e0dbc5a09abdcc724771",
+    "mtime": 1791788310.288909,
+    "ast_hash": "54c8e5d8f5bf6e6184da569f62673dd9",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/utils/file_url.dart": {
@@ -480,8 +480,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/widgets/phone_input_field.dart": {
-    "mtime": 1786261869.6962218,
-    "ast_hash": "22fcd9665b606ed3e430668c302249c1",
+    "mtime": 1791788756.1602778,
+    "ast_hash": "3c435e0ee3eae89c98e716c9c3a5a9b4",
     "semantic_hash": ""
   },
   "apps/driver_flutter/linux/flutter/generated_plugin_registrant.cc": {
@@ -595,8 +595,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/android/app/src/main/kotlin/com/netride/rider/rider_flutter/MainActivity.kt": {
-    "mtime": 1777427679.0806913,
-    "ast_hash": "ecf97756564f15817b117a4f6fe75af0",
+    "mtime": 1791856358.5426872,
+    "ast_hash": "64e0069c3c950a492723848a3f088254",
     "semantic_hash": ""
   },
   "apps/rider_flutter/android/build.gradle.kts": {
@@ -650,13 +650,13 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/state_container.dart": {
-    "mtime": 1779337112.3794732,
-    "ast_hash": "88b2a8fd24e5a44ea3faae121dff94c9",
+    "mtime": 1791788464.1080558,
+    "ast_hash": "d563c2efad3592beeed7bce11baa28cf",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/tip_fab.dart": {
-    "mtime": 1782856442.9818828,
-    "ast_hash": "1e9d9fef75ebf757b635d31dba7dd131",
+    "mtime": 1791788615.4302816,
+    "ast_hash": "e787cc04360877ebccf9264bbefe4420",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/trip_completed_dialog.dart": {
@@ -700,8 +700,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/blocked_account_screen.dart": {
-    "mtime": 1786695651.756313,
-    "ast_hash": "82cbdbf9725a267b0793ef4b5c8e3b94",
+    "mtime": 1791788667.992381,
+    "ast_hash": "7060a03b85759d763128e78538fff791",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/call_overlay.dart": {
@@ -710,8 +710,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/chat_sheet.dart": {
-    "mtime": 1786667077.5790102,
-    "ast_hash": "a9c2354cf185491f81e5546111fa11ab",
+    "mtime": 1791788604.5300393,
+    "ast_hash": "6c089c004395a6c605648f2377d73f78",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/login_screen.dart": {
@@ -725,38 +725,38 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/map_screen.dart": {
-    "mtime": 1791612885.204098,
-    "ast_hash": "fc5b09379ff5225148f8e596593f3737",
+    "mtime": 1791788569.2865365,
+    "ast_hash": "5cb0dc9bfc37066e52a94abb59444a76",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/onboarding_screen.dart": {
-    "mtime": 1785392323.778611,
-    "ast_hash": "c7fbf79f31acf85bdf1cc12eabc0f451",
+    "mtime": 1791788582.4313056,
+    "ast_hash": "9effbb85882ce3cdbe661e41ea15be40",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/profile_screen.dart": {
-    "mtime": 1791612885.205098,
-    "ast_hash": "d1ceb9949751615988910a46db9f13cd",
+    "mtime": 1791788680.2467294,
+    "ast_hash": "e7f8c3f74aa50aaaabf95aa8abd6e10a",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/rating_screen.dart": {
-    "mtime": 1790220029.8730106,
-    "ast_hash": "0b508e0ee896016a4614c23868802ff6",
+    "mtime": 1791788555.5340512,
+    "ast_hash": "8be5f3584af040a68959759219f10c67",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/reset_password_screen.dart": {
-    "mtime": 1784505874.8542202,
-    "ast_hash": "7d5339114863f2c1e3d23a3af5354511",
+    "mtime": 1791788464.1135688,
+    "ast_hash": "5f08509ff62dd1fa3153a1d2b77e19d8",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/settings_screen.dart": {
-    "mtime": 1784506303.7538164,
-    "ast_hash": "02e72bf930edb8c3ac38d012c2780b85",
+    "mtime": 1791788464.1135688,
+    "ast_hash": "f9bf952081feadc13b839126b9205ead",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/signup_screen.dart": {
-    "mtime": 1786145721.544741,
-    "ast_hash": "26e43a263ea98443c4fd5f937d4d2344",
+    "mtime": 1791788464.1145687,
+    "ast_hash": "e27df25666f543bca0622e7be4fb32a1",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/splash_screen.dart": {
@@ -765,13 +765,13 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/trip_screen.dart": {
-    "mtime": 1791343786.2692685,
-    "ast_hash": "7469d0cf4cca18f6f255e5d421cf130d",
+    "mtime": 1791788671.716708,
+    "ast_hash": "b5b209c7a1c0e42d3d34b8be360c514c",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/verification_screen.dart": {
-    "mtime": 1786265677.6207945,
-    "ast_hash": "6798088e5c17387e3969567e898673e2",
+    "mtime": 1791788600.270852,
+    "ast_hash": "fbe60333624982fa1c4892253e15be9b",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/services/api_service.dart": {
@@ -835,8 +835,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/theme/app_theme.dart": {
-    "mtime": 1777597525.994586,
-    "ast_hash": "c24c7c89af11e0dbc5a09abdcc724771",
+    "mtime": 1791788310.288909,
+    "ast_hash": "54c8e5d8f5bf6e6184da569f62673dd9",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/utils/file_url.dart": {
@@ -855,8 +855,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/widgets/phone_input_field.dart": {
-    "mtime": 1784506057.2480226,
-    "ast_hash": "22fcd9665b606ed3e430668c302249c1",
+    "mtime": 1791788687.5586617,
+    "ast_hash": "e3e17a3961dcdf73382f76270711d8b3",
     "semantic_hash": ""
   },
   "apps/rider_flutter/linux/flutter/generated_plugin_registrant.cc": {
@@ -1215,8 +1215,8 @@
     "semantic_hash": ""
   },
   "backend/src/config/env.ts": {
-    "mtime": 1791521083.2525659,
-    "ast_hash": "7a372ca918884c7eec96c6af6eae8784",
+    "mtime": 1791856665.8941429,
+    "ast_hash": "02ccb561bd94e214c4e285d3530c2cd0",
     "semantic_hash": ""
   },
   "backend/src/config/redis.ts": {
@@ -1830,8 +1830,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/index.html": {
-    "mtime": 1788752431.7349992,
-    "ast_hash": "80deb6ee917b76139557ff47efc33165",
+    "mtime": 1791788212.0361629,
+    "ast_hash": "e60d29cbf146208b81ff4b7b5124152b",
     "semantic_hash": ""
   },
   "apps/driver_flutter/README.md": {
@@ -2745,23 +2745,23 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Credits.tsx": {
-    "mtime": 1785887803.0815349,
-    "ast_hash": "1c373d1c92fa363491e128bafeb05c29",
+    "mtime": 1791788212.0398624,
+    "ast_hash": "526c2cfed312b2762b8a2be89b303bd3",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Partners.tsx": {
-    "mtime": 1791609446.9103386,
-    "ast_hash": "5516f02de19371103b6a3909cf98fab7",
+    "mtime": 1791788212.0425334,
+    "ast_hash": "162397c8bea3bbc253cebe57c139204d",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Promos.tsx": {
-    "mtime": 1791508032.1094606,
-    "ast_hash": "947c307172b6a7e969260b9c67c2cfca",
+    "mtime": 1791788212.045015,
+    "ast_hash": "4ed439b83e6bdd1c5c2231bbce80248a",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Referrals.tsx": {
-    "mtime": 1785887683.9505134,
-    "ast_hash": "9774d3b238630b4402befa49746065c3",
+    "mtime": 1791788212.0455246,
+    "ast_hash": "54f2dc7f4b69f900e12d34800e56d5ba",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/reward_models.dart": {
@@ -2955,8 +2955,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/wallet_screen.dart": {
-    "mtime": 1791612885.205098,
-    "ast_hash": "3c3f168f40e3291f376670e6b68cc6de",
+    "mtime": 1791788703.1415124,
+    "ast_hash": "79b680077b6acfeb10fdcab99cf76848",
     "semantic_hash": ""
   },
   "backend/migrations/039_rider_wallet.sql": {
@@ -3030,13 +3030,13 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/favorite_drivers_screen.dart": {
-    "mtime": 1786905940.5979,
-    "ast_hash": "842c169d17bca6093c6994467d239754",
+    "mtime": 1791788673.0783956,
+    "ast_hash": "306830bac3be1439fa0f03c2f03c9d98",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/notifications_screen.dart": {
-    "mtime": 1786501865.922542,
-    "ast_hash": "a28317e44c1dd97c18acfa27741b47e8",
+    "mtime": 1791788697.7243333,
+    "ast_hash": "46f920f7985639ee3fe873d754176422",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/services/favorite_driver_service.dart": {
@@ -3110,33 +3110,33 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/FleetPartners.tsx": {
-    "mtime": 1791508075.0628867,
-    "ast_hash": "0fd1757f699fb0b6f60febae80990144",
+    "mtime": 1791788212.0408924,
+    "ast_hash": "237a84aae01cef2ee36059058318f01b",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Pricing.tsx": {
-    "mtime": 1786602829.78601,
-    "ast_hash": "99b07804f982107108bdcb2cda8e8457",
+    "mtime": 1791788212.0431807,
+    "ast_hash": "58f13335f2700d439cb656d84d03abb7",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Reports.tsx": {
-    "mtime": 1786604028.8350406,
-    "ast_hash": "45ca9e4bab8a7f8ef89f8f6b74f40120",
+    "mtime": 1791788212.0455246,
+    "ast_hash": "1bfce9f55a05bed0a857821077e3849f",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Revenue.tsx": {
-    "mtime": 1786833387.7858372,
-    "ast_hash": "b01112ca59a666743daa92e0712d288a",
+    "mtime": 1791788212.046529,
+    "ast_hash": "c342db422dc832d33e84d5d90aa25f49",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/report_sheet.dart": {
-    "mtime": 1786666773.0802846,
-    "ast_hash": "0aaad9fa3ebd627b2b147559229b6afe",
+    "mtime": 1791788464.1291313,
+    "ast_hash": "5abf72821ead266bbb01573066cbe34d",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/report_sheet.dart": {
-    "mtime": 1786603801.8243668,
-    "ast_hash": "aabbbf28431e3d013f2b94df122b915c",
+    "mtime": 1791788643.5800252,
+    "ast_hash": "89c042faaf0f9415bced4a4caf402dae",
     "semantic_hash": ""
   },
   "backend/migrations/041_revenue_split.sql": {
@@ -3220,8 +3220,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Sponsors.tsx": {
-    "mtime": 1791609590.7113218,
-    "ast_hash": "9d431e4c326add95e31437bd1bfce90b",
+    "mtime": 1791788212.048529,
+    "ast_hash": "66b40ec1ab82b744b6462a5e86dd09c7",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/driver_cancelled_dialog.dart": {
@@ -3275,8 +3275,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/components/MainLayout.tsx": {
-    "mtime": 1791609446.9129572,
-    "ast_hash": "a90bf9b6c0690453074e5ba35caae49e",
+    "mtime": 1791788212.0515473,
+    "ast_hash": "bd0b5caf980a4affdefe0e3a5959ab09",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/context/AuthContext.tsx": {
@@ -3290,38 +3290,38 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/ChangePassword.tsx": {
-    "mtime": 1789335900.6702359,
-    "ast_hash": "c0b1b9af837b14d1cf288fca5620e188",
+    "mtime": 1791788212.0515473,
+    "ast_hash": "b875f3a530969fa5d66d33df4cdc2872",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Customers.tsx": {
-    "mtime": 1786863250.762635,
-    "ast_hash": "d8fbc160b4fd495a4d7aa72398aff63f",
+    "mtime": 1791788212.0520928,
+    "ast_hash": "f88d25ecddea73278527abf92241c698",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Dashboard.tsx": {
-    "mtime": 1791609504.5247307,
-    "ast_hash": "1f9e983ba8d68b52e52d1f25aa9ca3b8",
+    "mtime": 1791788212.0530972,
+    "ast_hash": "2fc44932c9131e24fbfd3c2714746dd0",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Login.tsx": {
-    "mtime": 1789348348.803648,
-    "ast_hash": "0552b71bc56b945fe9ad0e7ad1f79f16",
+    "mtime": 1791788212.05435,
+    "ast_hash": "f9aacfd2f7824e01b128dca03ea7cf4d",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Settings.tsx": {
-    "mtime": 1787897656.6331766,
-    "ast_hash": "640d0dd0d7292d8ec3da2c65fc88f306",
+    "mtime": 1791788212.0553489,
+    "ast_hash": "6ee7b10c0ac1ad81a21ce97eae1654d0",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Validations.tsx": {
-    "mtime": 1789337419.3629928,
-    "ast_hash": "fed89cabd9aea87dd9bda843e1304a20",
+    "mtime": 1791788212.0553489,
+    "ast_hash": "07a750f15a1476c583f02709f2d08a85",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/theme/index.ts": {
-    "mtime": 1786861825.3168814,
-    "ast_hash": "0182037f465eb3e6b587e6520a5eed4c",
+    "mtime": 1791788212.056349,
+    "ast_hash": "372dc9f0faf6b51f9ad7da3b97a397aa",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/tsconfig.app.json": {
@@ -3410,8 +3410,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/index.html": {
-    "mtime": 1788752429.8046677,
-    "ast_hash": "9def2f36d3832a43ba7c88a24ebce9a7",
+    "mtime": 1791788212.0505288,
+    "ast_hash": "f41c1b5edfcb74fcdc1288d290ab3967",
     "semantic_hash": ""
   },
   "docs/sponsors-specials-deliverable.md": {
@@ -3515,8 +3515,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/ForgotPassword.tsx": {
-    "mtime": 1789859890.5879464,
-    "ast_hash": "b79e1835852cf3959a80228edcecf9ec",
+    "mtime": 1791788212.053344,
+    "ast_hash": "d02c7e422cf0359c81693436f883df02",
     "semantic_hash": ""
   },
   "backend/src/modules/auth/__tests__/otp.unit.test.ts": {
@@ -3720,8 +3720,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/components/SponsorLocationPicker.tsx": {
-    "mtime": 1790029127.1214292,
-    "ast_hash": "ad14ad74b6b10d30d87b6ea0a9c470e6",
+    "mtime": 1791788212.0382812,
+    "ast_hash": "9dec7c0dcb4e0c626e0cce7db94272ef",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/widgets/referral_code_dialog.dart": {
@@ -3769,654 +3769,14 @@
     "ast_hash": "53e9dbb8956e9dc8a10346be42bde045",
     "semantic_hash": ""
   },
-  "apps/driver_ios/NetRideDriver/App/AppDelegate.swift": {
-    "mtime": 1790487403.041096,
-    "ast_hash": "2e9d974b4977707aa6d21432deb26605",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/App/NetRideDriverApp.swift": {
-    "mtime": 1790534690.5072966,
-    "ast_hash": "d2c5c5eb3a5fda0511560105182b011e",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Assets.xcassets/AccentColor.colorset/Contents.json": {
-    "mtime": 1790486444.195394,
-    "ast_hash": "4d552294a19d749a8faf1a59989c165b",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Assets.xcassets/AppIcon.appiconset/Contents.json": {
-    "mtime": 1790486443.3612764,
-    "ast_hash": "6a1751d4ca9285a873d8c8bceaf98291",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Assets.xcassets/Contents.json": {
-    "mtime": 1790486442.3700118,
-    "ast_hash": "afeb3bfa4cfb0884ca431ffe27a35432",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Cache/CacheService.swift": {
-    "mtime": 1790487198.5676765,
-    "ast_hash": "241faf8d826a9def52f299ff96efd65e",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Cache/UserCacheRepository.swift": {
-    "mtime": 1790487203.367198,
-    "ast_hash": "c617e14744ab69117ae3a44f1ab02b45",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Components/CallOverlayView.swift": {
-    "mtime": 1790487637.382643,
-    "ast_hash": "0e2a41a5ae4b582baeb3d995b9540564",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Components/NetRideMapView.swift": {
-    "mtime": 1790488128.169317,
-    "ast_hash": "eb8bc92201a4041ce5f505632869f0e8",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Config/EnvConfig.swift": {
-    "mtime": 1790491822.2296805,
-    "ast_hash": "a78824c83f8f4ef1a16f0285b05bd260",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Core/APIClient.swift": {
-    "mtime": 1790487123.2837176,
-    "ast_hash": "7f268dffeb7a161b1a3f11ab052a5db7",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Core/AppRouter.swift": {
-    "mtime": 1790487943.1472738,
-    "ast_hash": "a01842f498f922e5574d1b4b4126e8d4",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Core/AuthService.swift": {
-    "mtime": 1790534680.4892204,
-    "ast_hash": "eb7498c55637755adb5cbc765b9c8377",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Core/ErrorHandler.swift": {
-    "mtime": 1790487156.9804733,
-    "ast_hash": "5d0562d9c04b50fb9eb4486bb17c362e",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Core/SessionStore.swift": {
-    "mtime": 1790487117.2639463,
-    "ast_hash": "05d0f614b4d58f5d2e9035471827efb3",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Core/SupabaseManager.swift": {
-    "mtime": 1790494433.0355148,
-    "ast_hash": "20d21819fb1ef6fabca360ef275eccbe",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Models/DemandZone.swift": {
-    "mtime": 1790487188.2376983,
-    "ast_hash": "4cd42f1e602840e8ffdf4e368e531e01",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Models/RouteModels.swift": {
-    "mtime": 1790494444.6198049,
-    "ast_hash": "259db0718c192a8bbd498ebdf419cc05",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Models/TripModels.swift": {
-    "mtime": 1790494470.1127317,
-    "ast_hash": "7e1f901afde05e11657f62673018ddb4",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Providers/DriverProvider.swift": {
-    "mtime": 1790487763.7665188,
-    "ast_hash": "d9398b43a480cd4b690c3ca1db70f9eb",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/CacheServices.swift": {
-    "mtime": 1790487214.619845,
-    "ast_hash": "fd0a11756c3ba2dec743541381fa9564",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/CommunicationService.swift": {
-    "mtime": 1790487256.929961,
-    "ast_hash": "053a52d59559b21924597a55463595d9",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/GpsTracker.swift": {
-    "mtime": 1790487530.6182654,
-    "ast_hash": "e3f192fbb0b8ea0fb47b115915292c0b",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/HeatmapService.swift": {
-    "mtime": 1790487321.3115516,
-    "ast_hash": "c033ffe6ab62854ef4c5af38eb6c9a7d",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/LocationReporter.swift": {
-    "mtime": 1790487269.5638149,
-    "ast_hash": "c2d8d555b268cc810e97144d5c8fa3c2",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/NavigationService.swift": {
-    "mtime": 1790494475.5472448,
-    "ast_hash": "0c9f4b684486bc8e3f5973b2649fbd0d",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/NotificationService.swift": {
-    "mtime": 1790487244.6022556,
-    "ast_hash": "62fa410bf5eeda618dd3ff6893e0c6e1",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/RoutingService.swift": {
-    "mtime": 1790487223.063586,
-    "ast_hash": "0fec24a9955ac1a654ec842b53c97590",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/SocketService.swift": {
-    "mtime": 1790487810.267843,
-    "ast_hash": "b4360a5317754d42612287c48a81f443",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/SoundService.swift": {
-    "mtime": 1790487249.0793228,
-    "ast_hash": "2be509fdac017a1451d035b82d1183e1",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Services/UserService.swift": {
-    "mtime": 1790487231.6216984,
-    "ast_hash": "f016c2c11f39af956a88e48833f079b4",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Theme/AppTheme.swift": {
-    "mtime": 1790487384.9465258,
-    "ast_hash": "bd85d2cf5793f0163460a6a13aacb727",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/AuthViews.swift": {
-    "mtime": 1790534697.0515757,
-    "ast_hash": "b362b24c639a0b058d72d2f344277eb8",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/AvailabilityView.swift": {
-    "mtime": 1790487501.18356,
-    "ast_hash": "011873248fc534d54ac68eb1d8a9da71",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/ChatAndRatingView.swift": {
-    "mtime": 1790487539.481301,
-    "ast_hash": "36b4a56464a90a45ce7e78a348d9577e",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/DocumentResubmissionView.swift": {
-    "mtime": 1790487592.8940506,
-    "ast_hash": "2bcb323bfd744a46d0fdf260f794cd9f",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/DriverActivityView.swift": {
-    "mtime": 1790487552.8842068,
-    "ast_hash": "2f4dbe0a76df8219957d433fc898374a",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/DriverProfileView.swift": {
-    "mtime": 1790487567.5588515,
-    "ast_hash": "12c58c3cad61c640c3702263500263cd",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/DriverWalletView.swift": {
-    "mtime": 1790487580.426857,
-    "ast_hash": "f2011685901cf192075562f8f041ecaf",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/MainTabView.swift": {
-    "mtime": 1790487479.7502496,
-    "ast_hash": "3d18cb7cb038829a36db5e97e5d6f660",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/OnboardingView.swift": {
-    "mtime": 1790487475.877085,
-    "ast_hash": "878384965bf6c6c55463ad7384282853",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/ReplaceVehicleView.swift": {
-    "mtime": 1790487605.2533514,
-    "ast_hash": "e402d3bce4e7e9b85f1078af15239caf",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/TripView.swift": {
-    "mtime": 1790487768.0095828,
-    "ast_hash": "4999a957748d0c81c4103ccfaa53fa33",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Views/VehicleInspectionView.swift": {
-    "mtime": 1790487618.9055722,
-    "ast_hash": "eabec3378f8445d26c7f5e0e39e3e33a",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/App/AppDelegate.swift": {
-    "mtime": 1790486778.6602602,
-    "ast_hash": "72e43f1b93c33ac732a8c4ea2e8f37c1",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/App/NetRideRiderApp.swift": {
-    "mtime": 1790534748.9522533,
-    "ast_hash": "337e8ef39be399ba25a4d760c17e7a98",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Assets.xcassets/AccentColor.colorset/Contents.json": {
-    "mtime": 1790486441.4849293,
-    "ast_hash": "4d552294a19d749a8faf1a59989c165b",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Assets.xcassets/AppIcon.appiconset/Contents.json": {
-    "mtime": 1790486440.698661,
-    "ast_hash": "6a1751d4ca9285a873d8c8bceaf98291",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Assets.xcassets/Contents.json": {
-    "mtime": 1790486438.7557712,
-    "ast_hash": "afeb3bfa4cfb0884ca431ffe27a35432",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Components/CallOverlayView.swift": {
-    "mtime": 1790487098.7894492,
-    "ast_hash": "226d1cffc5a5a3c8fcf9dedc21791970",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Components/NetRideMapView.swift": {
-    "mtime": 1790488123.3265457,
-    "ast_hash": "41bb1a2e7c981cf5f7a2d1b07edd62f2",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Config/EnvConfig.swift": {
-    "mtime": 1790491807.8541389,
-    "ast_hash": "33ba2172cdd4cb1ee4dc51dc9f485a4d",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Core/APIClient.swift": {
-    "mtime": 1790486471.4378605,
-    "ast_hash": "8d01cb8ac29b6f14c27f992171a55196",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Core/AppRouter.swift": {
-    "mtime": 1790487852.8091986,
-    "ast_hash": "bfd15ced8c6234dcf98f4eb39f2cbd56",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Core/AuthService.swift": {
-    "mtime": 1790534732.9845183,
-    "ast_hash": "b8c6bfb1da12944838b2ad7494257759",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Core/ErrorHandler.swift": {
-    "mtime": 1790486549.200876,
-    "ast_hash": "dea53d3e2e1635bb851f43ae48c1ff55",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Core/SessionStore.swift": {
-    "mtime": 1790486822.5113406,
-    "ast_hash": "8d65a50bfbb450fc5f5fc34ee1dcb964",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Core/SupabaseManager.swift": {
-    "mtime": 1790494440.231773,
-    "ast_hash": "18657931aef231ced392b704d7703dec",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Models/NotificationModels.swift": {
-    "mtime": 1790486611.0882945,
-    "ast_hash": "c7aed1c64698ebbefd7c8b3d5ded8758",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Models/RewardModels.swift": {
-    "mtime": 1790486605.9225338,
-    "ast_hash": "3b7a4e20a0bed64c2c4eee765a86e089",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Models/RouteModels.swift": {
-    "mtime": 1790486619.1981068,
-    "ast_hash": "2da401703bf9da26807364f8dae53c1b",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Models/SearchResult.swift": {
-    "mtime": 1790486573.604794,
-    "ast_hash": "dffee4a5197e0a2a9bf8d9bc960dbfa2",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Models/SpecialModels.swift": {
-    "mtime": 1790486591.785696,
-    "ast_hash": "3cb52c64d564f51c827d68a6de55dacb",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Models/TripModels.swift": {
-    "mtime": 1790486565.9160626,
-    "ast_hash": "056b114edceaa450702f69b470d32658",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Providers/RideProvider.swift": {
-    "mtime": 1790488063.428881,
-    "ast_hash": "385bcc2d7285db8f69ef3d463451b60e",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Providers/SpecialsProvider.swift": {
-    "mtime": 1790486745.3722138,
-    "ast_hash": "2ac32badc528857d6f2b451878b6f153",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/CacheServices.swift": {
-    "mtime": 1790486658.6309543,
-    "ast_hash": "62d528936ba83273f092550cb8c52263",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/CommunicationService.swift": {
-    "mtime": 1790486712.2524722,
-    "ast_hash": "f7f31ec6a8680edc8dd442d2f187deb9",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/LocationReporter.swift": {
-    "mtime": 1790486716.3327544,
-    "ast_hash": "8b3c97f643de4163bdeee4d3eb2af95c",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/NotificationService.swift": {
-    "mtime": 1790486703.6134686,
-    "ast_hash": "28c26ab263899966545cde0dbdd282d5",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/RewardsService.swift": {
-    "mtime": 1790486682.5776887,
-    "ast_hash": "bb64c7ffd732d3974dbb67d14e832cb2",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/RoutingService.swift": {
-    "mtime": 1790486668.9145954,
-    "ast_hash": "837d4c481ebb8e282cbfd765b101eade",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/SearchService.swift": {
-    "mtime": 1790486672.9461038,
-    "ast_hash": "222392eca6bee1a4863f0391ca26d9dc",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/SocketService.swift": {
-    "mtime": 1790487806.3916574,
-    "ast_hash": "417288724faeb8f87adaddb3157e6f9a",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/SoundService.swift": {
-    "mtime": 1790486645.083784,
-    "ast_hash": "e0d8499edc3338372f0d749ad392ca3e",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/SpecialsService.swift": {
-    "mtime": 1790486688.6513295,
-    "ast_hash": "bb1dd4118f7e27e27c9ac6eece545bb7",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Services/UserService.swift": {
-    "mtime": 1790486650.779402,
-    "ast_hash": "1e3637c12804919392597afdb0cc41d7",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Theme/AppTheme.swift": {
-    "mtime": 1790486755.6209972,
-    "ast_hash": "5130652829486eb4d08b411c4fceb10f",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Utils/FileUrl.swift": {
-    "mtime": 1790486637.8253396,
-    "ast_hash": "5fcfae9b135c42fd501d48f1899eb7bd",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Utils/PhoneUtils.swift": {
-    "mtime": 1790486633.370899,
-    "ast_hash": "2752d44b28192b8535f247de54ecacb5",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Utils/SpatialHash.swift": {
-    "mtime": 1790486628.8981984,
-    "ast_hash": "7341be040ec812fb60ec628dedc153ae",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/ActivityView.swift": {
-    "mtime": 1790486948.2833374,
-    "ast_hash": "84bc5686ea34d0b6c4f57d7090fe354d",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/AddressSearchView.swift": {
-    "mtime": 1790486896.400568,
-    "ast_hash": "c6edc834555e1459cc3d5ac04106c16b",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/BlockedAccountView.swift": {
-    "mtime": 1790486833.463864,
-    "ast_hash": "15e0ca641cd3768b6624612b28b49c33",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/ChatView.swift": {
-    "mtime": 1790486928.8271296,
-    "ast_hash": "2a86601e6bc7537c3c32de1b20cabbb6",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/CreditsWalletView.swift": {
-    "mtime": 1790487002.3270352,
-    "ast_hash": "13acb1634f4442d391aba5beccbdce7f",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/IDVerificationView.swift": {
-    "mtime": 1790486985.9798334,
-    "ast_hash": "8a58f3e065375efe2aa2478728334a04",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/LoginView.swift": {
-    "mtime": 1790534756.8664217,
-    "ast_hash": "51ca9c572344dd18408e35b79efbf7da",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/MainTabView.swift": {
-    "mtime": 1790486851.345328,
-    "ast_hash": "0d9088d006a41f4680bc83e23902c6e2",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/MapScreenView.swift": {
-    "mtime": 1790487093.7623806,
-    "ast_hash": "2994e5a0fcb6153b6b09c3d26a5af46b",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/NotificationsView.swift": {
-    "mtime": 1790487008.1157098,
-    "ast_hash": "e5c7db34caad5d1a5849109053b80a15",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/OnboardingView.swift": {
-    "mtime": 1790486825.1012454,
-    "ast_hash": "528760925e44c0509d16bd33dd4645ee",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/PostAuthGateView.swift": {
-    "mtime": 1790486829.3720183,
-    "ast_hash": "28ba7c5cf9c8c7fadd0a9095fd08c06d",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/ProfileView.swift": {
-    "mtime": 1790486977.613359,
-    "ast_hash": "751838d29e6aaf169165b053aa6fbf8b",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/QrScannerView.swift": {
-    "mtime": 1790486933.7372618,
-    "ast_hash": "3c55deb794fe08a2058eab6eeb5882ce",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/RatingView.swift": {
-    "mtime": 1790486922.989121,
-    "ast_hash": "b1aaac30ff03c884b12d82b4eb4755eb",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/ReferralOnboardingView.swift": {
-    "mtime": 1790486840.5374255,
-    "ast_hash": "c4991d037db30a060b9c01820268ef70",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/ReferralView.swift": {
-    "mtime": 1790487061.1937637,
-    "ast_hash": "307e1acfdb480a4117ea785ab67394cd",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/ReportSheetView.swift": {
-    "mtime": 1790486940.93087,
-    "ast_hash": "e73a268783f2263740bd4f10dad8155a",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/ResetPasswordView.swift": {
-    "mtime": 1790486845.795797,
-    "ast_hash": "1c47b5af865bd913abf62b815c416ba9",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/SettingsView.swift": {
-    "mtime": 1790486993.0313756,
-    "ast_hash": "a656f49f66a15f5648ea27c4c1521492",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/SignupView.swift": {
-    "mtime": 1790487710.384853,
-    "ast_hash": "a5e3f47f74f19d656c45d14efef516d6",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/SpecialDetailView.swift": {
-    "mtime": 1790487068.0372953,
-    "ast_hash": "8cc0356c69360a4273a6f6451cc390c8",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/SpecialRedemptionView.swift": {
-    "mtime": 1790487080.7352824,
-    "ast_hash": "c909e0172bb3db8a3bfe5f51de2960c2",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/SplashView.swift": {
-    "mtime": 1790487660.426685,
-    "ast_hash": "ff564badc534e72f2e077d34b9c5ccbd",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/TipView.swift": {
-    "mtime": 1790486916.493011,
-    "ast_hash": "9d8d584e35c204655faf8ca774f2fc55",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/TripView.swift": {
-    "mtime": 1790486909.9784417,
-    "ast_hash": "5269a77707c79ab54f4350737b00cd9b",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Views/VerificationView.swift": {
-    "mtime": 1790486807.5898507,
-    "ast_hash": "38b0b272b6f85ae9d8b66f71b333c9e0",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/README.md": {
-    "mtime": 1790534847.7140255,
-    "ast_hash": "a645152fadccd851748d167789b38ca0",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/project.yml": {
-    "mtime": 1790491847.909578,
-    "ast_hash": "25dbff2657be8fa8a20dfcd557a05dac",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/README.md": {
-    "mtime": 1790534855.2988453,
-    "ast_hash": "435697bc6a1a23a37aaed08458c5b973",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/project.yml": {
-    "mtime": 1790491844.263476,
-    "ast_hash": "3487de1f610c015e0ebd4fb8ad036e24",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Sounds/countdown_tick.wav": {
-    "mtime": 1786154004.8012562,
-    "ast_hash": "e8f29fea5794f6d95f67b43941a20e03",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Sounds/incoming_request.wav": {
-    "mtime": 1786154004.7930613,
-    "ast_hash": "f6b8db459c0bbba3dedc6803aaee6139",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Sounds/offline.wav": {
-    "mtime": 1786154004.7672281,
-    "ast_hash": "0c3b6dbc0854271e16577b273c87d312",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Sounds/online.wav": {
-    "mtime": 1786154004.7509563,
-    "ast_hash": "9255fe2cf80ba8c1a3e849c3a708df9f",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Sounds/order_accepted.mp3": {
-    "mtime": 1782855188.3770175,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Sounds/order_cancelled.mp3": {
-    "mtime": 1782855188.3795252,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Sounds/tip_received.mp3": {
-    "mtime": 1782855188.380526,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
-  "apps/driver_ios/NetRideDriver/Sounds/trip_completed.mp3": {
-    "mtime": 1782855188.380526,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Sounds/countdown_tick.wav": {
-    "mtime": 1786154004.8012562,
-    "ast_hash": "e8f29fea5794f6d95f67b43941a20e03",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Sounds/incoming_request.wav": {
-    "mtime": 1786154004.7930613,
-    "ast_hash": "f6b8db459c0bbba3dedc6803aaee6139",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Sounds/offline.wav": {
-    "mtime": 1786154004.7672281,
-    "ast_hash": "0c3b6dbc0854271e16577b273c87d312",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Sounds/online.wav": {
-    "mtime": 1786154004.7509563,
-    "ast_hash": "9255fe2cf80ba8c1a3e849c3a708df9f",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Sounds/order_accepted.mp3": {
-    "mtime": 1782855188.380526,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Sounds/order_cancelled.mp3": {
-    "mtime": 1782855188.3815258,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Sounds/tip_received.mp3": {
-    "mtime": 1782855188.3825252,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
-  "apps/rider_ios/NetRideRider/Sounds/trip_completed.mp3": {
-    "mtime": 1782855188.3815258,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
   "apps/admin_dashboard/src/utils/date.ts": {
     "mtime": 1791265847.381064,
     "ast_hash": "d2b79975a47fa5df6bad735ad2a324c8",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/components/GoogleBusinessSelector.tsx": {
-    "mtime": 1791428383.1235685,
-    "ast_hash": "b033a4c512259652ede2aeafe14caf65",
+    "mtime": 1791788212.0371938,
+    "ast_hash": "c99f301f18a601efdf60afef2b69ced8",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/google_business.dart": {
@@ -4490,8 +3850,8 @@
     "semantic_hash": ""
   },
   "apps/sponsor_portal/src/pages/Funding.tsx": {
-    "mtime": 1791612885.2090971,
-    "ast_hash": "b6561c2948ceababb492692e0698cc45",
+    "mtime": 1791860987.571978,
+    "ast_hash": "ce3f37ce892915f17b6557472ff783ca",
     "semantic_hash": ""
   },
   "backend/migrations/051_stripe_enums.sql": {
@@ -4565,8 +3925,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/payments/payments.service.ts": {
-    "mtime": 1791612885.2139735,
-    "ast_hash": "fda283bd7cd1c84b501ecd16cbc79ce0",
+    "mtime": 1791860826.125147,
+    "ast_hash": "200f915f6f4a7d84f859ada9da9594d3",
     "semantic_hash": ""
   },
   "backend/src/modules/payments/ride-settlement.service.ts": {
@@ -4580,8 +3940,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/payments/stripe.gateway.ts": {
-    "mtime": 1791612885.2144935,
-    "ast_hash": "438f5f688b654478e34e7bfa4d215558",
+    "mtime": 1791856671.0899398,
+    "ast_hash": "c2c1e2ffcd9bae41177b77a2da548a7f",
     "semantic_hash": ""
   },
   "backend/src/modules/payments/webhook.service.ts": {
@@ -4590,8 +3950,8 @@
     "semantic_hash": ""
   },
   "docs/payments-stripe-integration.md": {
-    "mtime": 1791613028.2171316,
-    "ast_hash": "af1f46b856c936a349fe2a76f97c3231",
+    "mtime": 1791861023.840076,
+    "ast_hash": "ffdef7de9e79ef4026f9c34174bb20de",
     "semantic_hash": ""
   },
   "backend/migrations/054_withdrawals.sql": {
@@ -4612,6 +3972,11 @@
   "apps/admin_dashboard/src/components/UserPicker.tsx": {
     "mtime": 1791609439.903987,
     "ast_hash": "d4a642aecb03d2fb215d14ab4db6ac5e",
+    "semantic_hash": ""
+  },
+  "backend/run-colab-e2e.cjs": {
+    "mtime": 1791860662.2107613,
+    "ast_hash": "d0a3672a46b47c2b084e09afc82362a3",
     "semantic_hash": ""
   }
 }

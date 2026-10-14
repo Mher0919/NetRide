@@ -42,20 +42,25 @@ class GpsFix {
   final LatLng position;
   final double headingDeg;
   final double speedMps;
+  final double accuracyM;
+  final bool isMocked;
   final DateTime timestamp;
 
   const GpsFix({
     required this.position,
     required this.headingDeg,
     required this.speedMps,
+    required this.accuracyM,
     required this.timestamp,
+    this.isMocked = false,
   });
 
   @override
   String toString() =>
       'GpsFix(${position.latitude.toStringAsFixed(5)}, '
       '${position.longitude.toStringAsFixed(5)}, '
-      'spd=${speedMps.toStringAsFixed(1)}m/s, hdg=$headingDeg°)';
+      'spd=${speedMps.toStringAsFixed(1)}m/s, hdg=$headingDeg°, '
+      'acc=${accuracyM.toStringAsFixed(0)}m${isMocked ? ', MOCK' : ''})';
 }
 
 class GpsTracker extends ChangeNotifier {
@@ -117,13 +122,15 @@ class GpsTracker extends ChangeNotifier {
     }
 
     // 3. Subscribe to the native stream with a high-precision config.
-    //    distanceFilter=2 prevents the OS from spamming us at 0.5 Hz
-    //    when the device is stationary; the 1s wall-clock throttle
+    //    Android runs the geolocator FOREGROUND SERVICE (persistent
+    //    notification + wake lock) so fixes keep arriving while the driver
+    //    is backgrounded or the screen is locked. iOS uses the `location`
+    //    background mode with automotive-navigation activity; without these
+    //    the OS suspends the app and the driver silently stops being
+    //    dispatchable mid-shift. distanceFilter=2 prevents the OS from
+    //    spamming us at 0.5 Hz when stationary; the 1 s wall-clock throttle
     //    below enforces the actual cadence.
-    const settings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 2,
-    );
+    final settings = _locationSettings();
 
     _sub = Geolocator.getPositionStream(locationSettings: settings).listen(
       _onPosition,
@@ -135,6 +142,43 @@ class GpsTracker extends ChangeNotifier {
     );
 
     _emitStatus(GpsStatus.tracking);
+  }
+
+  /// Platform-aware settings. The Android foreground service is the only
+  /// reliable way to keep reporting while the app is minimized; the iOS
+  /// background mode requires `UIBackgroundModes: location` in Info.plist.
+  LocationSettings _locationSettings() {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 2,
+        intervalDuration: const Duration(seconds: 2),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'NetRide Driver is active',
+          notificationText:
+              'Keeping your availability and trip navigation location live.',
+          notificationChannelName: 'NetRide location service',
+          notificationIcon:
+              AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
+          enableWakeLock: true,
+          setOngoing: true,
+        ),
+      );
+    }
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        activityType: ActivityType.automotiveNavigation,
+        distanceFilter: 2,
+        pauseLocationUpdatesAutomatically: false,
+        showBackgroundLocationIndicator: true,
+        allowBackgroundLocationUpdates: true,
+      );
+    }
+    return const LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 2,
+    );
   }
 
   Future<void> stop() async {
@@ -179,6 +223,8 @@ class GpsTracker extends ChangeNotifier {
       // Geolocator reports speed in m/s on Android + iOS when the
       // device has a course-over-ground fix; null on simulators.
       speedMps: pos.speed.isNaN ? 0 : pos.speed,
+      accuracyM: pos.accuracy.isFinite ? pos.accuracy : 0,
+      isMocked: pos.isMocked,
       timestamp: now,
     );
     _lastFix = fix;

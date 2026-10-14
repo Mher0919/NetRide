@@ -118,6 +118,10 @@ class Trip {
   final DateTime? expiresAt;
   final DateTime? requestedAt;
 
+  /// Server-side monotonic version (backend rides.updated_at). Used to drop
+  /// out-of-order/duplicate socket events for the same trip.
+  final DateTime? updatedAt;
+
   // Sponsorship/SPECIALS (server-computed; the backend still pays the driver
   // from the ORIGINAL fare — these fields only explain the rider's pricing).
   final bool specialAttached;
@@ -153,6 +157,7 @@ class Trip {
     this.offerId,
     this.expiresAt,
     this.requestedAt,
+    this.updatedAt,
     this.specialAttached = false,
     this.sponsorSubsidyCents,
     this.riderPaymentCents,
@@ -191,6 +196,7 @@ class Trip {
       offerId: json['offerId']?.toString(),
       expiresAt: json['expires_at'] != null ? DateTime.tryParse(json['expires_at'].toString()) : null,
       requestedAt: json['requested_at'] != null ? DateTime.tryParse(json['requested_at'].toString()) : null,
+      updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at'].toString()) : null,
       specialAttached: json['special_attached'] == true,
       sponsorSubsidyCents: (json['sponsor_subsidy_cents'] as num?)?.toInt(),
       riderPaymentCents: (json['rider_payment_cents'] as num?)?.toInt(),

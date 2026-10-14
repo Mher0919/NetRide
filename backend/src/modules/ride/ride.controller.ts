@@ -137,7 +137,40 @@ export class RideController {
       res.json(trip);
     } catch (error: any) {
       console.error(`[RIDE] ❌ Accept error: ${error.message}`);
-      res.status(400).json({ error: error.message || 'Failed to accept trip.' });
+      // Confirmed rejection (offer gone / ride taken / cancelled) is a 409;
+      // malformed or unauthorized input stays a 400. Notification-action
+      // clients use this distinction to stop retrying.
+      const msg = String(error.message || '');
+      const conflict =
+        /already taken|no active offer|different driver|expired|already declined|cancelled/i.test(msg);
+      res.status(conflict ? 409 : 400).json({
+        error: msg || 'Failed to accept trip.',
+        code: conflict ? 'OFFER_UNAVAILABLE' : 'ACCEPT_REJECTED',
+      });
+    }
+  }
+
+  /**
+   * REST decline used by notification actions (background isolates cannot
+   * open a socket). Idempotent: a repeated decline of the same offer is a
+   * no-op success, and the per-driver exclusion guarantees the ride is
+   * never re-offered to this driver.
+   */
+  static async declineTrip(req: any, res: Response) {
+    try {
+      const driverId = req.user?.id;
+      if (!driverId) return res.status(401).json({ error: 'Unauthorized' });
+      const parsed = z
+        .object({
+          tripId: z.string().uuid(),
+          offerId: z.string().uuid().optional(),
+        })
+        .parse(req.body);
+      const result = await RideService.declineTrip(parsed.tripId, driverId, parsed.offerId);
+      res.json(result);
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Decline error: ${error.message}`);
+      res.status(400).json({ error: error.message || 'Failed to decline trip.' });
     }
   }
 

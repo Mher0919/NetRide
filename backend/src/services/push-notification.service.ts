@@ -14,6 +14,7 @@ import { env } from '../config/env';
 import { pool } from '../config/database';
 import { redis } from '../config/redis';
 import { logger } from '../observability/logger';
+import { pushDeliveryTotal } from '../observability/metrics';
 import * as fs from 'fs';
 
 // ============================================
@@ -105,16 +106,24 @@ export async function storeFcmToken(
     [userId, role, token, meta?.platform ?? null, meta?.appVersion ?? null]
   );
 
-  if (role === 'rider') {
-    await pool.query(
-      'UPDATE users SET fcm_token = $1, updated_at = NOW() WHERE id = $2',
-      [token, userId]
-    );
-  } else {
-    await pool.query(
-      'UPDATE drivers SET fcm_token = $1 WHERE user_id = $2',
-      [token, userId]
-    );
+  // Legacy single-column mirror. Best-effort: the multi-device registry is
+  // the source of truth, and on databases where the optional column is
+  // absent a mirror failure must not reject a token registration that
+  // already succeeded (it previously returned 500 after a partial write).
+  try {
+    if (role === 'rider') {
+      await pool.query(
+        'UPDATE users SET fcm_token = $1, updated_at = NOW() WHERE id = $2',
+        [token, userId]
+      );
+    } else {
+      await pool.query(
+        'UPDATE drivers SET fcm_token = $1 WHERE user_id = $2',
+        [token, userId]
+      );
+    }
+  } catch (err: any) {
+    logger.warn({ err, userId, role }, '[FCM] Legacy token mirror failed (device registry still updated)');
   }
   logger.debug({ userId, role }, '[FCM] Token stored');
 }
@@ -219,6 +228,7 @@ export async function sendPush(
   const token = await getFcmToken(userId, role);
   if (!token) {
     logger.debug({ userId, role, title: payload.title }, '[FCM] No token on record — skipping push');
+    pushDeliveryTotal.inc({ outcome: 'no_tokens' });
     return false;
   }
 
@@ -230,7 +240,10 @@ export async function sendPush(
       body: payload.body,
       data: payload.data,
     }, '[FCM] (stub) Push notification not sent — FCM not configured');
-    return true;
+    // Stub mode is NOT delivery: reporting success here previously made
+    // telemetry claim pushes were sent when nothing left the process.
+    pushDeliveryTotal.inc({ outcome: 'stub' });
+    return false;
   }
 
   try {
@@ -265,14 +278,20 @@ export async function sendPush(
     const messaging = getMessaging(firebaseApp);
     const messageId = await messaging.send(message);
     logger.info({ userId, role, messageId, title: payload.title }, '[FCM] Push sent');
+    pushDeliveryTotal.inc({ outcome: 'delivered' });
     return true;
   } catch (err: any) {
     if (err?.code === 'messaging/invalid-registration-token' ||
-        err?.code === 'messaging/registration-token-not-registerred') {
-      logger.warn({ userId, role, errCode: err.code }, '[FCM] Token invalid — clearing');
-      await clearFcmToken(userId, role);
+        err?.code === 'messaging/registration-token-not-registered') {
+      // Clear ONLY the offending token. The previous blanket
+      // `clearFcmToken(userId, role)` wiped every device the user owned
+      // because one stale install failed, silently disabling all pushes.
+      logger.warn({ userId, role, errCode: err.code }, '[FCM] Token invalid — pruning device');
+      pushDeliveryTotal.inc({ outcome: 'invalid_token' });
+      await clearFcmToken(userId, role, token);
     } else {
       logger.error({ err, userId, role }, '[FCM] Failed to send push');
+      pushDeliveryTotal.inc({ outcome: 'failed' });
     }
     return false;
   }
@@ -291,6 +310,7 @@ export async function sendPushAll(
   const tokens = await getFcmTokens(userId, role);
   if (tokens.length === 0) {
     logger.debug({ userId, role, title: payload.title }, '[FCM] No tokens on record — skipping push');
+    pushDeliveryTotal.inc({ outcome: 'no_tokens' });
     return 0;
   }
 
@@ -302,7 +322,8 @@ export async function sendPushAll(
       body: payload.body,
       data: payload.data,
     }, '[FCM] (stub) Push notification not sent — FCM not configured');
-    return tokens.length;
+    pushDeliveryTotal.inc({ outcome: 'stub' });
+    return 0;
   }
 
   let delivered = 0;
@@ -339,14 +360,17 @@ export async function sendPushAll(
       const messaging = getMessaging(firebaseApp);
       const messageId = await messaging.send(message);
       delivered += 1;
+      pushDeliveryTotal.inc({ outcome: 'delivered' });
       logger.info({ userId, role, messageId, title: payload.title }, '[FCM] Push sent (device fan-out)');
     } catch (err: any) {
       if (err?.code === 'messaging/invalid-registration-token' ||
-          err?.code === 'messaging/registration-token-not-registerred') {
+          err?.code === 'messaging/registration-token-not-registered') {
         logger.warn({ userId, role, errCode: err.code }, '[FCM] Device token invalid — pruning');
+        pushDeliveryTotal.inc({ outcome: 'invalid_token' });
         await pool.query(`DELETE FROM device_tokens WHERE user_id = $1 AND role = $2 AND token = $3`, [userId, role, token]).catch(() => undefined);
       } else {
         logger.error({ err, userId, role }, '[FCM] Device push failed');
+        pushDeliveryTotal.inc({ outcome: 'failed' });
       }
     }
   }
@@ -428,24 +452,42 @@ export async function pushRideAccepted(
   });
 }
 
+export interface RideOfferPush {
+  offerId: string;
+  tripId: string;
+  expiresAt: string;
+  earningsCents?: number;
+  pickupAddress?: string;
+  riderName?: string;
+}
+
 /**
  * Send a "new ride offer" push notification (driver side).
+ *
+ * This is the ONLY delivery path for a driver whose app is backgrounded or
+ * killed — the socket offer is invisible to them and the offer expires in
+ * seconds. The payload carries the server-authoritative offer id and
+ * expiry so notification actions can call the authenticated REST
+ * accept/decline endpoints; the notification body itself is never treated
+ * as state. Fan-out covers every registered device.
  */
-export async function pushRideOffer(
-  driverId: string,
-  tripId: string,
-  fare: string
-): Promise<boolean> {
-  return sendPush(driverId, 'driver', {
+export async function pushRideOffer(driverId: string, offer: RideOfferPush): Promise<number> {
+  const body = offer.earningsCents != null
+    ? `New ride available — estimated earnings $${(offer.earningsCents / 100).toFixed(2)}`
+    : 'A new ride is available';
+  return sendPushAll(driverId, 'driver', {
     title: 'New ride request',
-    body: `A new ride is available for $${fare}`,
+    body,
     data: {
       type: 'ride_offer',
-      tripId,
-      fare,
+      tripId: offer.tripId,
+      offerId: offer.offerId,
+      expiresAt: offer.expiresAt,
+      ...(offer.earningsCents != null ? { earningsCents: String(offer.earningsCents) } : {}),
+      ...(offer.pickupAddress ? { pickupAddress: offer.pickupAddress } : {}),
     },
     priority: 'high',
-    channelId: 'ride',
+    channelId: 'ride_offer',
     sound: 'ride_offer.wav',
   });
 }
@@ -607,21 +649,61 @@ export async function pushRideCompleted(
 
 const PRESENCE_KEY = (userId: string, role: string) => `presence:${role}:${userId}`;
 
+// Presence = "this user has a live socket right now", used only to choose
+// between socket delivery and FCM for chat/calls. The TTL is refreshed by
+// the socket gateway while the connection is alive; without the refresh a
+// connected user was considered offline after 60s and every message was
+// pushed as well as socket-delivered (duplicate alerts).
+const PRESENCE_TTL_S = 120;
+
 /**
- * Mark a user as online (called when socket connects).
+ * Mark a user as online (called when socket connects). The value is the
+ * owning socket id so a stale socket's disconnect cannot wipe a newer
+ * connection's presence.
  */
 export async function markOnline(userId: string, role: 'rider' | 'driver', socketId: string): Promise<void> {
   const key = PRESENCE_KEY(userId, role);
-  // Store socket ID with a 60s TTL (refreshed by heartbeat)
-  await redis.set(key, socketId, 'EX', 60);
+  await redis.set(key, socketId, 'EX', PRESENCE_TTL_S);
 }
 
 /**
- * Mark a user as offline (called when socket disconnects).
+ * Refresh presence for a still-connected socket. Compare-and-expire: only
+ * renews when this socket still owns the key, so a second device (or a
+ * reconnect) is never resurrected by the old connection's timer.
  */
-export async function markOffline(userId: string, role: 'rider' | 'driver'): Promise<void> {
+export async function touchPresence(userId: string, role: 'rider' | 'driver', socketId: string): Promise<void> {
   const key = PRESENCE_KEY(userId, role);
-  await redis.del(key);
+  const script = `
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+      return redis.call('EXPIRE', KEYS[1], ARGV[2])
+    end
+    return 0
+  `;
+  await redis.eval(script, 1, key, socketId, String(PRESENCE_TTL_S));
+}
+
+/**
+ * Mark a user as offline. With a socket id, only deletes when that socket
+ * still owns the presence key (multi-device / reconnect safe); without
+ * one, deletes unconditionally.
+ */
+export async function markOffline(
+  userId: string,
+  role: 'rider' | 'driver',
+  socketId?: string,
+): Promise<void> {
+  const key = PRESENCE_KEY(userId, role);
+  if (!socketId) {
+    await redis.del(key);
+    return;
+  }
+  const script = `
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+      return redis.call('DEL', KEYS[1])
+    end
+    return 0
+  `;
+  await redis.eval(script, 1, key, socketId);
 }
 
 /**

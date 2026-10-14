@@ -79,14 +79,6 @@ const ProfileChangeRequestSchema = zod_1.z.object({
     changes: ProfileChangeChangesSchema,
     reason: zod_1.z.string().min(1).max(500).optional(),
 });
-const PayoutCardSchema = zod_1.z.object({
-    card_number: zod_1.z.string().min(13).max(19),
-    exp_month: zod_1.z.number().int().min(1).max(12),
-    exp_year: zod_1.z.number().int().min(2024).max(2099),
-    cvc: zod_1.z.string().regex(/^\d{3,4}$/),
-    cardholder_name: zod_1.z.string().min(2).max(80),
-    zip: zod_1.z.string().min(3).max(12),
-});
 const PayoutRequestSchema = zod_1.z.object({
     amount_cents: zod_1.z.number().int().positive().max(10000000),
 });
@@ -302,25 +294,6 @@ class DriverController {
             res.status(500).json({ error: 'Failed to retrieve current profile change.' });
         }
     }
-    static async addPayoutCard(req, res) {
-        try {
-            const userId = req.user?.id;
-            if (!userId)
-                return res.status(401).json({ error: 'Unauthorized' });
-            const validated = PayoutCardSchema.parse(req.body);
-            const result = await driver_service_1.DriverService.addPayoutCard(userId, validated);
-            res.json(result);
-        }
-        catch (error) {
-            if (error?.name === 'ZodError') {
-                return res.status(400).json({ error: 'Invalid card details.', details: error.errors });
-            }
-            const msg = error?.message ?? 'Failed to submit payout card.';
-            const code = msg.includes('INVALID_CARD') ? 400 : 400;
-            console.error(`[DRIVER] ❌ Add payout card error: ${msg}`);
-            res.status(code).json({ error: msg });
-        }
-    }
     static async getWallet(req, res) {
         try {
             const userId = req.user?.id;
@@ -348,10 +321,11 @@ class DriverController {
                 return res.status(400).json({ error: 'Invalid payout request.' });
             }
             const msg = error?.message ?? 'Failed to request payout.';
-            const code = msg.includes('NO_PAYOUT_CARD') ? 403
+            const code = msg.includes('CONNECT_SETUP_REQUIRED') ? 403
                 : msg.includes('INSUFFICIENT_BALANCE') ? 400
                     : msg.includes('MIN_PAYOUT') ? 400
-                        : 400;
+                        : msg.includes('WITHDRAWAL_UNAVAILABLE') ? 400
+                            : 400;
             console.error(`[DRIVER] ❌ Request payout error: ${msg}`);
             res.status(code).json({ error: msg });
         }

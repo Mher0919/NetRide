@@ -41,6 +41,7 @@ const RideDetail: React.FC = () => {
   const [actualAvailable, setActualAvailable] = useState(false);
   const [ledger, setLedger] = useState<any>(null);
   const [opsPending, setOpsPending] = useState(false);
+  const [connected, setConnected] = useState(false);
 
   const handleAdminCancel = async () => {
     if (opsPending) return;
@@ -123,12 +124,21 @@ const RideDetail: React.FC = () => {
     });
 
     socket.on('connect', () => {
+      setConnected(true);
       socket.emit('subscribeToMonitoring');
+      // Reconnect resync of the authoritative ride detail.
+      fetchRide();
     });
+
+    socket.on('disconnect', () => setConnected(false));
 
     socket.on('tripUpdate', (updatedTrip: any) => {
       if (updatedTrip.id === id) {
-        setRide(updatedTrip);
+        // MERGE (not replace): socket payloads are repository-shaped and
+        // omit REST-only join fields (nested rider/driver, *_address).
+        setRide((prev: any) =>
+          prev && prev.id === updatedTrip.id ? { ...prev, ...updatedTrip } : updatedTrip
+        );
         if (updatedTrip.trajectory) {
           setTrajectory(typeof updatedTrip.trajectory === 'string' ? JSON.parse(updatedTrip.trajectory) : updatedTrip.trajectory);
         }
@@ -189,6 +199,14 @@ const RideDetail: React.FC = () => {
             px: 1
           }}
         />
+        {isActive && (
+          <Chip
+            label={connected ? 'LIVE' : 'RECONNECTING'}
+            size="small"
+            color={connected ? 'success' : 'warning'}
+            sx={{ fontWeight: 700, fontSize: '0.65rem', borderRadius: '6px' }}
+          />
+        )}
         <Box sx={{ flexGrow: 1 }} />
         {isActive && (
           <>

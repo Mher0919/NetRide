@@ -8,9 +8,76 @@
 
 import { EventEmitter } from 'events';
 import { latLngToCell, gridDisk } from 'h3-js';
-import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX, DRIVER_H3_CELL_PREFIX, DRIVER_H3_INDEX_PREFIX } from '../../config/redis';
+import {
+  redis,
+  DRIVER_LOCATIONS_KEY,
+  DRIVER_HEARTBEAT_PREFIX,
+  DRIVER_LOCATION_RECORD_PREFIX,
+  DRIVER_ONLINE_PREFIX,
+  DRIVER_H3_CELL_PREFIX,
+  DRIVER_H3_INDEX_PREFIX,
+} from '../../config/redis';
+import { env } from '../../config/env';
 import { Location } from '../../types';
 import * as geohash from 'ngeohash';
+
+/**
+ * A raw location observation as reported by a device. Only lat/lng are
+ * mandatory; everything else may be absent on older clients.
+ */
+export interface LocationFix extends Location {
+  /** Horizontal accuracy in meters as reported by the OS (null = unknown). */
+  accuracy?: number | null;
+  /** Device heading in degrees (null = unknown). */
+  heading?: number | null;
+  /** Device-reported speed in m/s (null = unknown). */
+  speed?: number | null;
+  /** True when the OS marks the fix as coming from a mock/spoofed provider. */
+  mock?: boolean;
+  /** Device-supplied ISO timestamp (never trusted for freshness decisions). */
+  deviceAt?: string | null;
+  /** Observation source label for diagnostics. */
+  source?: string | null;
+}
+
+/**
+ * The stored, timestamped observation. `serverAt` is the server's own
+ * receive time; freshness and every safety-relevant gate must use it, never
+ * a device clock.
+ */
+export interface DriverLocationRecord extends Location {
+  serverAt: number;
+  accuracy: number | null;
+  heading: number | null;
+  speed: number | null;
+  mock: boolean;
+  deviceAt: string | null;
+  source: string;
+}
+
+export interface LocationFreshness {
+  fresh: boolean;
+  ageSeconds: number | null;
+}
+
+/**
+ * Pure freshness evaluation (unit-tested): a location is fresh when the
+ * server observed it no longer than `maxAgeS` ago. A missing/absent
+ * timestamp is never fresh. Clock skew is one-sided: future timestamps
+ * (negative age) are treated as age 0 rather than rejected.
+ */
+export function evaluateLocationFreshness(
+  serverAt: number | null | undefined,
+  nowMs: number,
+  maxAgeS: number,
+): LocationFreshness {
+  if (serverAt == null || !isFinite(serverAt) || serverAt <= 0) {
+    return { fresh: false, ageSeconds: null };
+  }
+  const ageMs = Math.max(0, nowMs - serverAt);
+  const ageSeconds = ageMs / 1000;
+  return { fresh: ageSeconds <= maxAgeS, ageSeconds };
+}
 
 /**
  * In-process emitter for buffered trajectory points.
@@ -98,16 +165,45 @@ export class LocationsService {
    * Updates a driver's real-time location in Redis
    * Also sets a heartbeat to track online status and returns the geohash for room management.
    */
-  static async updateDriverLocation(driverId: string, loc: Location): Promise<string> {
+  static async updateDriverLocation(driverId: string, loc: LocationFix): Promise<string> {
     const pipeline = redis.pipeline();
     
     // 1. Update Geospatial position
     pipeline.geoadd(DRIVER_LOCATIONS_KEY, loc.lng, loc.lat, driverId);
     
-    // 2. Set heartbeat with TTL (90 seconds). This is long enough to
-    // survive brief socket disconnects (free-tier spin-down, network
-    // blip) without making truly offline drivers invisible to matching.
-    pipeline.set(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`, '1', 'EX', 90);
+    // 2. Set heartbeat with TTL. This is long enough to survive brief
+    // socket disconnects (free-tier spin-down, network blip) without making
+    // truly offline drivers invisible to matching. The TTL is a single
+    // configurable constant shared with the eligibility freshness math.
+    pipeline.set(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`, '1', 'EX', env.DRIVER_HEARTBEAT_TTL_S);
+
+    // 2b. Persist the timestamped observation metadata (server receipt time,
+    // accuracy, source, mock flag). Freshness gates read this record — the
+    // GEO set alone has no age and previously let stale/spoofed fixes drive
+    // pickup/complete gates and dispatch.
+    const record: DriverLocationRecord = {
+      lat: loc.lat,
+      lng: loc.lng,
+      serverAt: Date.now(),
+      accuracy: typeof loc.accuracy === 'number' && isFinite(loc.accuracy) ? loc.accuracy : null,
+      heading: typeof loc.heading === 'number' && isFinite(loc.heading) ? loc.heading : null,
+      speed: typeof loc.speed === 'number' && isFinite(loc.speed) ? loc.speed : null,
+      mock: loc.mock === true,
+      deviceAt: typeof loc.deviceAt === 'string' ? loc.deviceAt : null,
+      source: typeof loc.source === 'string' && loc.source.length > 0 ? loc.source : 'socket',
+    };
+    pipeline.set(
+      `${DRIVER_LOCATION_RECORD_PREFIX}${driverId}`,
+      JSON.stringify(record),
+      'EX',
+      env.DRIVER_LOCATION_RECORD_TTL_S,
+    );
+
+    // 2c. Renew the availability lease on every accepted position. A driver
+    // whose app keeps reporting stays dispatchable; one whose app stopped
+    // stops being offered new rides after the lease TTL without losing any
+    // already-accepted trip.
+    pipeline.set(`${DRIVER_ONLINE_PREFIX}${driverId}`, '1', 'EX', env.DRIVER_ONLINE_TTL_S);
 
     // 3. Maintain the H3 hexagonal cell index. Each online driver lives in
     // the set of their current cell; matching only queries the small ring of
@@ -330,7 +426,8 @@ export class LocationsService {
   }
 
   /**
-   * Removes a driver from online tracking (GEO set, heartbeat, H3 cell index)
+   * Removes a driver from online tracking (GEO set, heartbeat, location
+   * record, availability lease, H3 cell index).
    */
   static async removeDriverLocation(driverId: string): Promise<void> {
     const cellKey = `${DRIVER_H3_CELL_PREFIX}${driverId}`;
@@ -338,6 +435,8 @@ export class LocationsService {
     const pipeline = redis.pipeline();
     pipeline.zrem(DRIVER_LOCATIONS_KEY, driverId);
     pipeline.del(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`);
+    pipeline.del(`${DRIVER_LOCATION_RECORD_PREFIX}${driverId}`);
+    pipeline.del(`${DRIVER_ONLINE_PREFIX}${driverId}`);
     if (cell) {
       pipeline.srem(`${DRIVER_H3_INDEX_PREFIX}${cell}`, driverId);
     }
@@ -345,14 +444,96 @@ export class LocationsService {
     await pipeline.exec();
   }
 
-  static async getDriverLocation(driverId: string): Promise<Location | null> {
+  // ---- Availability lease -------------------------------------------------
+  //
+  // `goOnline` establishes a server-side lease independent of any position
+  // fix, so availability is an explicit server state rather than a side
+  // effect of location writes. It is renewed by every accepted location
+  // update and expires on its own if the app stops reporting.
+
+  static async markDriverOnline(driverId: string): Promise<number> {
+    const ttl = env.DRIVER_ONLINE_TTL_S;
+    await redis.set(`${DRIVER_ONLINE_PREFIX}${driverId}`, '1', 'EX', ttl);
+    return Date.now() + ttl * 1000;
+  }
+
+  static async clearDriverOnline(driverId: string): Promise<void> {
+    await redis.del(`${DRIVER_ONLINE_PREFIX}${driverId}`);
+  }
+
+  static async isDriverOnline(driverId: string): Promise<boolean> {
+    const lease = await redis.get(`${DRIVER_ONLINE_PREFIX}${driverId}`);
+    return lease !== null;
+  }
+
+  /**
+   * Renews the raw heartbeat without changing the position. Used by
+   * `goOnline` when the client has no fresh fix yet but a stored record
+   * exists (e.g. reconnect) so the driver is not silently dropped from
+   * dispatch while waiting for the first GPS sample.
+   */
+  static async touchHeartbeat(driverId: string): Promise<void> {
+    await redis.set(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`, '1', 'EX', env.DRIVER_HEARTBEAT_TTL_S);
+  }
+
+  /** Raw stored observation record (no freshness judgement). */
+  static async getDriverLocationRecord(driverId: string): Promise<DriverLocationRecord | null> {
+    const raw = await redis.get(`${DRIVER_LOCATION_RECORD_PREFIX}${driverId}`);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as DriverLocationRecord;
+      if (!isFinite(parsed.lat) || !isFinite(parsed.lng)) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Returns the driver's last-known position with its freshness metadata.
+   * `stale`/`mock` are explicit so callers can refuse to treat an obsolete
+   * or spoofed coordinate as live (safety gates, ETAs, notifications).
+   * Falls back to the GEO set when the record is missing (legacy entries)
+   * with `serverAt: null` → always stale.
+   */
+  static async getDriverLocation(
+    driverId: string,
+  ): Promise<(DriverLocationRecord & { stale: boolean; ageSeconds: number | null }) | null> {
+    const record = await LocationsService.getDriverLocationRecord(driverId);
+    if (record) {
+      const { fresh, ageSeconds } = evaluateLocationFreshness(
+        record.serverAt,
+        Date.now(),
+        env.DRIVER_LOCATION_MAX_AGE_S,
+      );
+      return { ...record, stale: !fresh, ageSeconds };
+    }
     const pos = await redis.geopos(DRIVER_LOCATIONS_KEY, driverId);
     if (pos && pos[0]) {
       return {
         lng: parseFloat(pos[0][0]),
         lat: parseFloat(pos[0][1]),
+        serverAt: 0,
+        accuracy: null,
+        heading: null,
+        speed: null,
+        mock: false,
+        deviceAt: null,
+        source: 'geo-legacy',
+        stale: true,
+        ageSeconds: null,
       };
     }
     return null;
+  }
+
+  /** Freshness assessment for the stored record (dispatch eligibility). */
+  static async isLocationFresh(driverId: string): Promise<boolean> {
+    const record = await LocationsService.getDriverLocationRecord(driverId);
+    return evaluateLocationFreshness(
+      record?.serverAt,
+      Date.now(),
+      env.DRIVER_LOCATION_FRESHNESS_S,
+    ).fresh;
   }
 }

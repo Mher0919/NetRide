@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RideService = void 0;
+exports.RideService = exports.buildTerminalCancelGuardSql = void 0;
 // backend/src/modules/ride/ride.service.ts
 console.log('[SVC_INIT] ride.service.ts loaded at', new Date().toISOString());
 const ride_repository_1 = require("./ride.repository");
@@ -46,6 +46,9 @@ const io_handle_1 = require("../../gateway/io-handle");
 const database_1 = require("../../config/database");
 const redis_1 = require("../../config/redis");
 const pricing_service_1 = require("../../services/pricing.service");
+const ride_settlement_service_1 = require("../payments/ride-settlement.service");
+const fare_breakdown_service_1 = require("../payments/fare-breakdown.service");
+const payments_service_1 = require("../payments/payments.service");
 const navigation_service_1 = require("../../services/navigation.service");
 const route_store_service_1 = require("../../services/route-store.service");
 const speeding_detector_1 = require("../../services/speeding_detector");
@@ -60,6 +63,9 @@ const financial_ledger_service_1 = require("../../services/financial-ledger.serv
 const special_redemption_service_1 = require("../sponsor/special-redemption.service");
 const notification_service_1 = require("../../services/notification.service");
 const report_reasons_1 = require("../reporting/report.reasons");
+const ride_state_rules_1 = require("./ride-state.rules");
+var ride_state_rules_2 = require("./ride-state.rules");
+Object.defineProperty(exports, "buildTerminalCancelGuardSql", { enumerable: true, get: function () { return ride_state_rules_2.buildTerminalCancelGuardSql; } });
 /** Display name of a platform user (used in notification copy). */
 async function fetchDisplayName(userId) {
     try {
@@ -133,11 +139,15 @@ class RideService {
             const ratingRes = await client.query(`INSERT INTO ratings (ride_id, rater_id, target_id, target_role, rating, review_text, flagged_for_review)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`, [data.ride_id, data.rater_id, target_id, target_role, data.rating, data.review_text, flagged]);
-            // 4. Update Target Rating (Moving Average of last 100)
+            // 4. Update Target Rating (moving average of the most recent 100
+            // ratings, including the one just inserted above). Previously a
+            // target with fewer than 100 ratings was forced to 5.0, which threw
+            // away a real first rating — a 1-star driver (or rider) looked
+            // perfect until their 100th rating.
             const lastRatings = await client.query(`SELECT rating FROM ratings WHERE target_id = $1 ORDER BY created_at DESC LIMIT 100`, [target_id]);
             const totalRatingsCount = parseInt((await client.query('SELECT COUNT(*) FROM ratings WHERE target_id = $1', [target_id])).rows[0].count);
             let newRating = 5.0;
-            if (totalRatingsCount >= 100) {
+            if (lastRatings.rows.length > 0) {
                 const sum = lastRatings.rows.reduce((acc, curr) => acc + curr.rating, 0);
                 newRating = parseFloat((sum / lastRatings.rows.length).toFixed(1));
             }
@@ -162,6 +172,10 @@ class RideService {
         return (0, tracing_1.traceAsync)('RideService.requestRide', async () => {
             const traceId = (0, tracing_1.getCurrentTraceId)();
             console.log(`[RIDE] New request from rider ${riderId}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
+            // Booking gate: a saved payment card is required before any ride can
+            // be requested (server-authoritative — the client only redirects).
+            // Seeded test accounts keep the legacy wallet rail for the sandbox.
+            await payments_service_1.PaymentsService.assertRiderPaymentMethod(riderId);
             // Idempotency: if key provided, check for existing ride
             if (idempotencyKey) {
                 const existing = await database_1.pool.query(`SELECT * FROM rides WHERE idempotency_key = $1 AND rider_id = $2`, [idempotencyKey, riderId]);
@@ -237,6 +251,7 @@ class RideService {
                         rideId: tripId,
                         fareCents: Math.round(breakdown.totalFare * 100),
                         specialRedemptionId: rewards.specialRedemptionId,
+                        specialTermsAccepted: rewards.specialTermsAccepted === true,
                     });
                 }
                 await client.query('COMMIT');
@@ -412,7 +427,7 @@ class RideService {
         // superseded so the driver is released for the next request.
         const acceptRes = await database_1.pool.query(`UPDATE rides
           SET status = $2, driver_id = $3, accepted_at = $4,
-              compliance_snapshot = $5, fare_amount = $6
+              compliance_snapshot = $5, fare_amount = $6, updated_at = NOW()
         WHERE id = $1 AND status = $7
         RETURNING id`, [tripId, 'ACCEPTED', driverId, new Date(), JSON.stringify(complianceSnapshot), finalFare, types_1.TripStatus.REQUESTED]);
         if ((acceptRes.rowCount ?? 0) === 0) {
@@ -432,6 +447,11 @@ class RideService {
         // when this write is missing.
         (0, pricing_service_1.persistRevenueAllocation)(tripId, driverId, Math.round(finalFare * 100))
             .catch((err) => console.error(`[RIDE] ⚠️ Revenue allocation persist failed: ${err.message}`));
+        // Immutable fare breakdown (original fare, rider/sponsor components,
+        // driver earnings from the ORIGINAL fare). Snapshotted once the driver is
+        // known; later campaign/commission edits can never rewrite it.
+        ride_settlement_service_1.RideSettlementService.snapshotOnAccept(tripId, driverId)
+            .catch((err) => console.error(`[RIDE] ⚠️ Fare breakdown snapshot failed: ${err.message}`));
         // Cache active trip for trajectory buffering
         await redis_1.redis.set(`driver:${driverId}:active_trip`, tripId, 'EX', 14400); // 4h safety TTL
         // Step 4: Parallel fan-out — record winner and cancel other offers
@@ -479,6 +499,70 @@ class RideService {
             .then((driverName) => (0, notification_service_1.notifyRideAccepted)(trip.rider_id, tripId, driverName, Math.round(finalFare * 100)))
             .catch(() => undefined);
         return updatedTrip;
+    }
+    /**
+     * Atomic ACCEPTED → DRIVER_ARRIVING transition, triggered when a fresh,
+     * non-mock driver fix enters the pickup radius. Idempotent: a repeated
+     * call after the flip returns `changed: false` without touching the row,
+     * so concurrent location updates can never double-broadcast or regress a
+     * ride that already started.
+     */
+    static async markDriverArriving(tripId, driverId) {
+        const res = await database_1.pool.query(`UPDATE rides
+          SET status = $3, updated_at = NOW()
+        WHERE id = $1 AND driver_id = $2 AND status = $4
+        RETURNING id`, [tripId, driverId, types_1.TripStatus.DRIVER_ARRIVING, types_1.TripStatus.ACCEPTED]);
+        const trip = await ride_repository_1.RideRepository.findById(tripId);
+        if (!trip)
+            throw new Error('Trip not found');
+        return { changed: (res.rowCount ?? 0) > 0, trip };
+    }
+    /**
+     * Decline a ride offer. Idempotent and safe to retry from either the
+     * socket or the REST notification-action path: the offer transition only
+     * fires from SENT, the driver-specific exclusion upsert is keyed by
+     * (ride, driver), and matching is only re-enqueued while the ride is
+     * still REQUESTED.
+     */
+    static async declineTrip(tripId, driverId, offerId) {
+        const { DriverOfferService } = await Promise.resolve().then(() => __importStar(require('../../services/driver-offer.service')));
+        let declined = false;
+        if (offerId) {
+            const offer = await DriverOfferService.getOffer(offerId);
+            // Only the driver the offer actually belongs to may decline it.
+            if (offer && offer.driverId === driverId && offer.rideId === tripId) {
+                declined = await DriverOfferService.declineOffer(offerId);
+                await DriverOfferService.releaseDriver(driverId);
+            }
+        }
+        else {
+            await DriverOfferService.releaseDriver(driverId);
+        }
+        const { RideRejectionService } = await Promise.resolve().then(() => __importStar(require('../../services/ride-rejection.service')));
+        await RideRejectionService.recordRejection(tripId, driverId).catch((err) => {
+            console.error(`[RIDE] Failed to persist rejection for ${tripId}/${driverId}: ${err.message}`);
+        });
+        const trip = await ride_repository_1.RideRepository.findById(tripId);
+        if (trip && trip.status === types_1.TripStatus.REQUESTED) {
+            const pickupLat = trip.pickup?.lat ?? 0;
+            const pickupLng = trip.pickup?.lng ?? 0;
+            if (env_1.env.LEGACY_SYNC_MATCHING) {
+                const { matchingService } = await Promise.resolve().then(() => __importStar(require('../../services/matching.service')));
+                matchingService
+                    .findAndDispatch((0, io_handle_1.getIo)(), tripId, pickupLat, pickupLng, trip.rider_id)
+                    .catch((err) => console.error(`[RIDE] In-process re-match failed for ${tripId}: ${err.message}`));
+            }
+            else {
+                queue_1.matchQueue.add('matchRide', {
+                    tripId,
+                    pickupLat,
+                    pickupLng,
+                    riderId: trip.rider_id,
+                    retryCount: 0,
+                }).catch((err) => console.error(`[RIDE] Failed to enqueue re-match after decline: ${err.message}`));
+            }
+        }
+        return { declined };
     }
     static async updateTripStatus(tripId, status, userId, opts = {}) {
         const trip = await ride_repository_1.RideRepository.findById(tripId);
@@ -636,9 +720,12 @@ class RideService {
             // Idempotent (ride_completion:{rideId} idempotency key + partial unique
             // index on ride_id). Settled only when the full amount due is covered;
             // a shortfall is recorded as PENDING_CAPTURE with the outstanding
-            // cents so failed/short payments stay explicit.
+            // cents so failed/short payments stay explicit. The immutable fare
+            // breakdown (original fare / rider share / sponsor subsidy / driver
+            // earnings) is written alongside as separate, traceable components.
             try {
                 const tipCents = Math.round(parseFloat(updatedTrip.tip_amount ?? '0') * 100);
+                const breakdown = await (0, fare_breakdown_service_1.getFareBreakdown)(tripId);
                 await financial_ledger_service_1.FinancialLedgerService.recordRideCompletion({
                     rideId: tripId,
                     riderId: updatedTrip.rider_id,
@@ -655,7 +742,17 @@ class RideService {
                     paymentProvider: 'wallet',
                     paymentReference: tripId,
                     completedAt: updatedTrip.completed_at ? new Date(updatedTrip.completed_at) : new Date(),
+                    originalFareCents: breakdown ? Number(breakdown.original_fare_cents) : dueCents,
+                    riderShareCents: breakdown ? Number(breakdown.rider_share_cents) : dueCents,
+                    sponsorSubsidyCents: breakdown ? Number(breakdown.sponsor_subsidy_cents) : 0,
+                    sponsorCollectedCents: 0,
+                    additionalRiderChargeCents: 0,
+                    sponsorContributionStatus: breakdown && Number(breakdown.sponsor_subsidy_cents) > 0 ? 'RESERVED' : 'NONE',
+                    additionalChargeStatus: 'NONE',
                 });
+                // Stripe shortfall collection (saved card, off-session) + sponsor
+                // reservation state. Non-blocking and fully idempotent.
+                await ride_settlement_service_1.RideSettlementService.onRideCompleted(tripId);
             }
             catch (err) {
                 console.warn(`[RIDE] ⚠️ Financial ledger write failed (non-blocking) for trip ${tripId}: ${err.message}`);
@@ -944,7 +1041,7 @@ class RideService {
         const reasonText = (opts.reasonText ?? 'Ride was resolved by the system (stale ride).')
             .trim()
             .slice(0, 300);
-        return RideService._terminalCancel(trip, null, null, reasonText);
+        return RideService._terminalCancel(trip, null, null, reasonText, opts.guard);
     }
     /**
      * Shared terminal-cancellation core used by party cancels (cancelTrip),
@@ -952,33 +1049,50 @@ class RideService {
      * guard + rewards/sponsor teardown + safety/navigation teardown +
      * authoritative broadcast to both parties and admin monitoring.
      */
-    static async _terminalCancel(trip, cancelledBy, reasonCode, reasonText) {
+    static async _terminalCancel(trip, cancelledBy, reasonCode, reasonText, guard) {
         const tripId = trip.id;
         // Atomic transition: the WHERE guard means a concurrent ACCEPT that
         // commits between our read and this update wins the race — we never
-        // overwrite a fresher state (accept-vs-cancel race safety).
-        const cancelRes = await database_1.pool.query(`UPDATE rides
-          SET status = $2, cancelled_at = $3, cancelled_by = $4,
-              cancellation_reason_code = $5, cancellation_reason_text = $6
-        WHERE id = $1 AND status IN ($7, $8, $9, $10)
-        RETURNING id`, [
+        // overwrite a fresher state (accept-vs-cancel race safety). When a
+        // watchdog guard is supplied, the same UPDATE re-verifies the age and
+        // state predicate so a ride that started between query and write is
+        // left alone.
+        const statuses = guard?.statuses && guard.statuses.length > 0
+            ? guard.statuses
+            : [
+                types_1.TripStatus.REQUESTED,
+                types_1.TripStatus.ACCEPTED,
+                types_1.TripStatus.IN_PROGRESS,
+                types_1.TripStatus.DRIVER_ARRIVING,
+            ];
+        const built = (0, ride_state_rules_1.buildTerminalCancelGuardSql)(statuses, guard, 7);
+        const values = [
             tripId,
             types_1.TripStatus.CANCELLED,
             new Date(),
             cancelledBy,
             reasonCode,
             reasonText,
-            types_1.TripStatus.REQUESTED,
-            types_1.TripStatus.ACCEPTED,
-            types_1.TripStatus.IN_PROGRESS,
-            types_1.TripStatus.DRIVER_ARRIVING,
-        ]);
+            ...statuses,
+            ...built.extraValues,
+        ];
+        const where = `id = $1 AND status IN (${built.statusPlaceholders})${built.extraWhere}`;
+        const cancelRes = await database_1.pool.query(`UPDATE rides
+          SET status = $2, cancelled_at = $3, cancelled_by = $4,
+              cancellation_reason_code = $5, cancellation_reason_text = $6,
+              updated_at = NOW()
+        WHERE ${where}
+        RETURNING id`, values);
         if ((cancelRes.rowCount ?? 0) === 0) {
             // Another actor flipped the ride between our read and the write
             // (driver accepted, or the ride was already cancelled/completed).
             const latest = await ride_repository_1.RideRepository.findById(tripId);
             if (latest?.status === types_1.TripStatus.CANCELLED)
                 return latest; // idempotent
+            // A watchdog guard miss is a benign race: the ride progressed, so the
+            // sweep must not throw (it isn't the sweep's ride any more).
+            if (guard)
+                return latest ?? trip;
             throw new Error('Cannot cancel a ride that is already completed');
         }
         const updatedTrip = await ride_repository_1.RideRepository.findById(tripId);
@@ -1036,7 +1150,10 @@ class RideService {
         return updatedTrip;
     }
     static async getHistory(userId, role) {
-        if (role === 'driver') {
+        // JWT roles are uppercase ('DRIVER'/'RIDER'); a lower-case equality
+        // check here silently routed drivers through the RIDER query, so their
+        // history (and any client rollup built on it) came back empty.
+        if ((role ?? '').toUpperCase() === 'DRIVER') {
             return ride_repository_1.RideRepository.findByDriverId(userId);
         }
         return ride_repository_1.RideRepository.findByRiderId(userId);

@@ -2,6 +2,7 @@
 import { Server, Socket } from 'socket.io';
 import { LocationsService } from '../modules/location/locations.service';
 import { RideService } from '../modules/ride/ride.service';
+import { RideRepository } from '../modules/ride/ride.repository';
 import { RideMessagesRepository } from '../modules/ride/ride_messages.repository';
 import { NavigationService } from '../services/navigation.service';
 import { RerouteService } from '../services/reroute.service';
@@ -27,7 +28,7 @@ import {
   RequestRideSchema,
   RiderDestinationChangedSchema,
 } from '../utils/socket-validation';
-import { isOnline, markOnline, markOffline, pushChatMessage, pushIncomingCall } from '../services/push-notification.service';
+import { isOnline, markOnline, markOffline, touchPresence, pushChatMessage, pushIncomingCall } from '../services/push-notification.service';
 import { notifyDriverArrived } from '../services/notification.service';
 import { recordRiderActivity } from '../services/demand.service';
 import { z } from 'zod';
@@ -41,7 +42,7 @@ import { z } from 'zod';
 // is handled here.
 
 import { redis } from '../config/redis';
-import { rateLimitedTotal } from '../observability/metrics';
+import { rateLimitedTotal, lifecycleEventsTotal } from '../observability/metrics';
 
 // Rider auto-cancel timers: userId → setTimeout handle
 // Cancelled when the rider reconnects within the grace period.
@@ -299,10 +300,17 @@ export function setupSocketGateway(io: Server) {
     // Track online presence for push notification delivery.
     // When a user disconnects, their presence key expires (60s TTL)
     // and the system falls back to FCM push notifications.
+    let presenceTimer: ReturnType<typeof setInterval> | null = null;
     if (roomRole === 'driver' || roomRole === 'rider') {
       markOnline(id, roomRole as 'rider' | 'driver', socket.id).catch((err: any) =>
         console.error(`[SOCKET] ⚠️ Presence tracking failed: ${err.message}`)
       );
+      // Keep presence alive while the connection is alive. Without this the
+      // 60s TTL expired mid-connection and every chat message was ALSO
+      // pushed, producing duplicate alerts for foregrounded users.
+      presenceTimer = setInterval(() => {
+        touchPresence(id, roomRole as 'rider' | 'driver', socket.id).catch(() => undefined);
+      }, 30_000);
     }
 
     /**
@@ -341,8 +349,37 @@ export function setupSocketGateway(io: Server) {
         console.log(`[SOCKET] 🟢 Driver ${id} is now ONLINE`);
 
         (socket as any).isOnline = true;
-        if (validated.data.lat && validated.data.lng) {
-          const gh = await LocationsService.updateDriverLocation(id, { lat: validated.data.lat, lng: validated.data.lng });
+        // Server-authoritative availability: establish/renew the lease even
+        // when the client has no fix yet, and acknowledge it with an expiry
+        // so the app knows the server accepted the transition (never a
+        // local-only `online = true`).
+        const leaseExpiresAt = await LocationsService.markDriverOnline(id);
+        const hasCoords =
+          typeof validated.data.lat === 'number' && typeof validated.data.lng === 'number';
+        if (!hasCoords) {
+          // No fix supplied (e.g. reconnect before the first GPS sample):
+          // reuse the last stored observation if it exists so the driver is
+          // not invisible to dispatch while waiting for the next sample.
+          const stored = await LocationsService.getDriverLocationRecord(id);
+          if (stored) {
+            await LocationsService.touchHeartbeat(id);
+          }
+        }
+
+        socket.emit('driverAvailability', {
+          online: true,
+          available: hasCoords,
+          hasLocation: hasCoords,
+          expiresAt: leaseExpiresAt,
+          reason: hasCoords ? 'online' : 'awaiting_location',
+        });
+
+        if (hasCoords) {
+          const gh = await LocationsService.updateDriverLocation(id, {
+            lat: validated.data.lat!,
+            lng: validated.data.lng!,
+            source: 'goOnline',
+          });
           updateDriverGeohashRoom(socket, gh);
 
           // When a driver comes online, check for any pending REQUESTED
@@ -390,12 +427,87 @@ export function setupSocketGateway(io: Server) {
         }
       });
 
-      socket.on('goOffline', async () => {
-        console.log(`[SOCKET] 🔴 Driver ${id} is now OFFLINE`);
+      // Reconciliation query: the client asks what the SERVER believes
+      // about its availability instead of restoring a local `online=true`.
+      socket.on('getDriverAvailability', async () => {
+        try {
+          const [online, activeTripId, record] = await Promise.all([
+            LocationsService.isDriverOnline(id),
+            redis.get(`driver:${id}:active_trip`),
+            LocationsService.getDriverLocationRecord(id),
+          ]);
+          (socket as any).isOnline = online;
+          socket.emit('driverAvailability', {
+            online,
+            available: online && !activeTripId && !!record,
+            activeTrip: activeTripId !== null,
+            hasLocation: !!record,
+            expiresAt: null,
+            reason: 'reconcile',
+          });
+        } catch (err: any) {
+          console.error(`[SOCKET] getDriverAvailability failed: ${err.message}`);
+        }
+      });
+
+      /**
+       * Re-emit a still-live offer after a reconnect / app resume. The
+       * payload is the exact card persisted at offer creation; an expired
+       * or already-responded offer is never replayed (and is cleaned up
+       * here), so returning through the app icon cannot resurrect a dead
+       * offer and double-tapping cannot create a second actionable card.
+       */
+      socket.on('getPendingOffer', async () => {
+        try {
+          const { DriverOfferService, OfferStatus } = await import('../services/driver-offer.service');
+          const offer = await DriverOfferService.getOfferForDriver(id);
+          if (!offer || offer.status !== OfferStatus.SENT) return;
+          if (new Date(offer.expiresAt).getTime() <= Date.now()) {
+            await DriverOfferService.transitionOffer(
+              offer.offerId, OfferStatus.SENT, OfferStatus.EXPIRED,
+            ).catch(() => undefined);
+            await DriverOfferService.releaseDriver(id).catch(() => undefined);
+            return;
+          }
+          if (!offer.payload) return;
+          socket.emit('newTripRequest', {
+            ...offer.payload,
+            offerId: offer.offerId,
+            expires_at: offer.expiresAt,
+          });
+        } catch (err: any) {
+          console.error(`[SOCKET] getPendingOffer failed: ${err.message}`);
+        }
+      });
+
+      socket.on('goOffline', async () => {        console.log(`[SOCKET] 🔴 Driver ${id} is now OFFLINE`);
         (socket as any).isOnline = false;
         leaveGeohashRoom(socket);
 
+        // Never delete the position/heartbeat of a driver who is mid-trip:
+        // the pickup/complete proximity gates (and the rider's map) still
+        // need the last fix while they finish the accepted journey. The
+        // availability lease is always cleared → no new offers.
+        const activeTripId = await redis.get(`driver:${id}:active_trip`).catch(() => null);
+        await LocationsService.clearDriverOnline(id);
+        if (activeTripId) {
+          console.log(`[SOCKET] 🚕 Driver ${id} went offline mid-trip ${activeTripId} — keeping last known location for the active trip`);
+          socket.emit('driverAvailability', {
+            online: false,
+            available: false,
+            activeTrip: true,
+            reason: 'offline_mid_trip',
+          });
+          return;
+        }
+
         await LocationsService.removeDriverLocation(id);
+        socket.emit('driverAvailability', {
+          online: false,
+          available: false,
+          activeTrip: false,
+          reason: 'offline',
+        });
       });
 
       socket.on('getCurrentTrip', async () => {
@@ -409,7 +521,17 @@ export function setupSocketGateway(io: Server) {
           if (currentTrip) {
             socket.emit('tripUpdate', currentTrip);
           } else {
-            socket.emit('currentTripNone');
+            // Carry the most recent terminal ride (last 10 minutes) so a
+            // driver who was killed while assigned can learn the outcome
+            // ("cancelled while you were offline") instead of silently
+            // resetting to idle. The client dedupes by trip id.
+            let lastTerminalTrip: any = null;
+            try {
+              lastTerminalTrip = await RideRepository.findLastTerminalByDriverId(id);
+            } catch (err: any) {
+              console.warn(`[SOCKET] last terminal trip lookup failed: ${err.message}`);
+            }
+            socket.emit('currentTripNone', { lastTerminalTrip });
           }
         } catch (err: any) {
           console.error(`[SOCKET] getCurrentTrip failed: ${err.message}`);
@@ -424,14 +546,26 @@ export function setupSocketGateway(io: Server) {
         if (!allowed) return;
         
         try {
-          if ((socket as any).isOnline) {
+          // Accept positions when the socket flag says online OR the
+          // server-side availability lease is still live. This is what lets
+          // a reconnecting driver keep reporting (and stay dispatchable)
+          // even if the client's `goOnline` re-announce is lost — the
+          // lease, not the socket object, is the source of truth.
+          const leaseOnline = (socket as any).isOnline
+            ? true
+            : await LocationsService.isDriverOnline(id).catch(() => false);
+          if (leaseOnline) {
             console.log(`[SOCKET] 📍 Location from driver ${id}: lat=${validated.data.lat}, lng=${validated.data.lng}`);
-            const gh = await LocationsService.updateDriverLocation(id, validated.data);
+            const gh = await LocationsService.updateDriverLocation(id, {
+              ...validated.data,
+              source: 'updateLocation',
+            });
             updateDriverGeohashRoom(socket, gh);
 
             const payload = {
               driverId: id,
               ...validated.data,
+              mock: validated.data.mock === true,
               timestamp: new Date()
             };
 
@@ -485,15 +619,31 @@ export function setupSocketGateway(io: Server) {
           }
 
           // Driver ARRIVED at pickup: once the driver enters the pickup
-          // radius, the rider gets a real phone notification. Guarded
-          // by a Redis NX key + DB event_id dedup → exactly one per trip.
-          if (currentTrip.status === TripStatus.ACCEPTED && currentTrip.rider_id) {
+          // radius, the ride transitions ACCEPTED → DRIVER_ARRIVING (the
+          // previously dormant state is now the authoritative "driver is
+          // here" signal every client renders) and the rider gets a real
+          // phone notification. Guarded by an atomic status flip + Redis NX
+          // key + DB event_id dedup → exactly one per trip. Mock/flagged
+          // fixes are never allowed to drive this transition.
+          if (
+            currentTrip.status === TripStatus.ACCEPTED &&
+            currentTrip.rider_id &&
+            validated.data.mock !== true
+          ) {
             try {
               const distToPickup = haversineMeters(
                 { lat: validated.data.lat, lng: validated.data.lng },
                 currentTrip.pickup,
               );
               if (distToPickup <= env.DRIVER_PICKUP_PROXIMITY_M) {
+                const arriving = await RideService.markDriverArriving(currentTrip.id, id);
+                if (arriving.changed) {
+                  lifecycleEventsTotal.inc({ event: 'driver_arrived' });
+                  setCachedCurrentRide(id, UserRole.DRIVER, arriving.trip);
+                  io.to(`rider:${currentTrip.rider_id}`).emit('tripUpdate', arriving.trip);
+                  io.to(`driver:${id}`).emit('tripUpdate', arriving.trip);
+                  io.to('monitoring:all_rides').emit('tripUpdate', arriving.trip);
+                }
                 notifyDriverArrived(
                   currentTrip.rider_id,
                   currentTrip.id,
@@ -501,7 +651,7 @@ export function setupSocketGateway(io: Server) {
                 ).catch(() => undefined);
               }
             } catch {
-              // Arrival notification is best-effort.
+              // Arrival transition is best-effort — never block location updates.
             }
           }
         }
@@ -536,7 +686,9 @@ export function setupSocketGateway(io: Server) {
           setCachedCurrentRide(id, UserRole.DRIVER, acceptedTrip);
         } catch (err: any) {
           console.error(`[SOCKET] Accept trip failed: ${err.message}`);
-          socket.emit('acceptTripFailed', err.message);
+          // Include the trip identity so the client can roll back ONLY the
+          // offer it attempted (a stale failure must not clear a newer offer).
+          socket.emit('acceptTripFailed', { tripId, offerId, message: err.message });
         }
       });
 
@@ -556,42 +708,11 @@ export function setupSocketGateway(io: Server) {
 
         console.log(`[SOCKET] Driver ${id} declined trip: ${tripId}${offerId ? ` (offer=${offerId})` : ''}`);
         try {
-          if (offerId) {
-            const { DriverOfferService } = await import('../services/driver-offer.service');
-            await DriverOfferService.declineOffer(offerId);
-            await DriverOfferService.releaseDriver(id);
-          }
-          // Persist the driver-specific rejection (ride_driver_rejections).
-          // This is what keeps the declined request from ever coming back to
-          // THIS driver — across engine retries, re-enqueues, listener
-          // refreshes, app restarts, and offline/online cycles. It is a
-          // per-driver exclusion, NOT a ride-wide cancellation: the same
-          // ride stays offerable to every other eligible driver. The pair
-          // primary key makes the write idempotent (double tap / retry safe).
-          const { RideRejectionService } = await import('../services/ride-rejection.service');
-          await RideRejectionService.recordRejection(tripId, id).catch((err: any) => {
-            console.error(`[SOCKET] Failed to persist rejection for ${tripId}/${id}: ${err.message}`);
-          });
-          // Re-enqueue matching so the system progresses to the next candidate
-          const { RideRepository } = await import('../modules/ride/ride.repository');
-          const trip = await RideRepository.findById(tripId);
-          if (trip && trip.status === 'REQUESTED') {
-            if (env.LEGACY_SYNC_MATCHING) {
-              const { matchingService } = await import('../services/matching.service');
-              matchingService.findAndDispatch(
-                io, tripId, (trip as any).pickup?.lat ?? 0, (trip as any).pickup?.lng ?? 0, trip.rider_id,
-              ).catch((err: any) => console.error(`[SOCKET] In-process re-match failed for ${tripId}: ${err.message}`));
-            } else {
-              const { matchQueue } = await import('../queue/queue');
-              await matchQueue.add('matchRide', {
-                tripId,
-                pickupLat: (trip as any).pickup?.lat ?? 0,
-                pickupLng: (trip as any).pickup?.lng ?? 0,
-                riderId: trip.rider_id,
-                retryCount: 0,
-              });
-            }
-          }
+          // Shared, idempotent implementation also used by the REST
+          // notification-action path (`POST /ride/decline`): offer
+          // transition (ownership-checked), per-driver exclusion upsert,
+          // and re-enqueue only while the ride is still REQUESTED.
+          await RideService.declineTrip(tripId, id, offerId);
         } catch (err: any) {
           console.error(`[SOCKET] Decline trip failed: ${err.message}`);
         }
@@ -641,6 +762,16 @@ export function setupSocketGateway(io: Server) {
           console.log(`[SOCKET] pickUpRider: driverLoc=`, driverLoc);
           if (!driverLoc) {
             socket.emit('error', 'Driver location unknown. Make sure GPS is enabled.');
+            return;
+          }
+          // Never gate a safety-relevant action on an obsolete coordinate:
+          // a stale fix proves nothing about where the driver is now.
+          if (driverLoc.stale) {
+            socket.emit('error', 'Your location is out of date. Wait for GPS to update, then try again.');
+            return;
+          }
+          if (driverLoc.mock === true) {
+            socket.emit('error', 'Location verification failed. Please disable mock location to start the trip.');
             return;
           }
           const dist = haversineMeters(driverLoc, trip.pickup);
@@ -720,6 +851,14 @@ export function setupSocketGateway(io: Server) {
           const driverLoc = await LocationsService.getDriverLocation(id);
           if (!driverLoc) {
             socket.emit('error', 'Driver location unknown. Make sure GPS is enabled.');
+            return;
+          }
+          if (driverLoc.stale) {
+            socket.emit('error', 'Your location is out of date. Wait for GPS to update, then try again.');
+            return;
+          }
+          if (driverLoc.mock === true) {
+            socket.emit('error', 'Location verification failed. Please disable mock location to complete the trip.');
             return;
           }
           const dist = haversineMeters(driverLoc, trip.destination);
@@ -872,7 +1011,8 @@ export function setupSocketGateway(io: Server) {
         // driver's location makes them invisible when the service wakes.
         // Location is only removed on explicit goOffline or heartbeat expiry.
         clearCachedCurrentRide(id, UserRole.DRIVER);
-        markOffline(id, 'driver').catch((err: any) =>
+        if (presenceTimer) clearInterval(presenceTimer);
+        markOffline(id, 'driver', socket.id).catch((err: any) =>
           console.error(`[SOCKET] ⚠️ Presence tracking failed on disconnect: ${err.message}`)
         );
       });
@@ -1129,8 +1269,10 @@ export function setupSocketGateway(io: Server) {
         console.log(`[SOCKET] ❌ Rider ${id} disconnected`);
         clearCachedCurrentRide(id, UserRole.RIDER);
         
-        // Mark rider as offline for push notification delivery
-        markOffline(id, 'rider').catch((err: any) =>
+        // Mark rider as offline for push notification delivery (only when
+        // this socket still owns the presence key).
+        if (presenceTimer) clearInterval(presenceTimer);
+        markOffline(id, 'rider', socket.id).catch((err: any) =>
           console.error(`[SOCKET] ⚠️ Presence tracking failed on disconnect: ${err.message}`)
         );
 

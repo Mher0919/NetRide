@@ -23,6 +23,11 @@ class BottomSheetCard extends StatelessWidget {
   final bool showProgress; // true while navigating, false when at-pickup
   final double progressFraction; // 0..1
 
+  /// True while the CTA mutation is awaiting server confirmation. The
+  /// button turns into a spinner and cannot be tapped again, so a double
+  /// tap can never emit the same pickup/complete twice.
+  final bool actionPending;
+
   /// Optional chat/call actions rendered above the CTA. Pass null to
   /// hide them (e.g. before a trip is active).
   final VoidCallback? onChat;
@@ -40,6 +45,7 @@ class BottomSheetCard extends StatelessWidget {
     this.onAction,
     this.showProgress = true,
     this.progressFraction = 0.0,
+    this.actionPending = false,
     this.onChat,
     this.onCall,
     this.callActive = false,
@@ -141,7 +147,7 @@ class BottomSheetCard extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: actionEnabled ? onAction : null,
+              onPressed: (actionEnabled && !actionPending) ? onAction : null,
               style: ElevatedButton.styleFrom(
                 backgroundColor: actionEnabled
                     ? AppTheme.primaryBrandGreen
@@ -157,7 +163,16 @@ class BottomSheetCard extends StatelessWidget {
                   letterSpacing: 1.2,
                 ),
               ),
-              child: Text(actionLabel),
+              child: actionPending
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(actionLabel),
             ),
           ),
         ],

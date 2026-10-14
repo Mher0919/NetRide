@@ -435,9 +435,11 @@ class _TripScreenState extends State<TripScreen> {
                             children: [
                               Text(
                                 rideProvider.status ==
-                                        models.TripStatus.ACCEPTED
-                                    ? 'DRIVER IS ARRIVING'
-                                    : 'TRIP IN PROGRESS',
+                                        models.TripStatus.DRIVER_ARRIVING
+                                    ? 'DRIVER HAS ARRIVED'
+                                    : rideProvider.isPrePickup
+                                        ? 'DRIVER IS ARRIVING'
+                                        : 'TRIP IN PROGRESS',
                                 style: const TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w800,
@@ -488,7 +490,7 @@ class _TripScreenState extends State<TripScreen> {
           ),
 
           // Tip FAB (during trip only, above the bottom controls)
-          if (rideProvider.status == models.TripStatus.ACCEPTED ||
+          if (rideProvider.isPrePickup ||
               rideProvider.status == models.TripStatus.IN_PROGRESS)
             Positioned(
               bottom: 230,
@@ -538,9 +540,11 @@ class _TripScreenState extends State<TripScreen> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          rideProvider.status == models.TripStatus.ACCEPTED
-                              ? 'Arriving in ${(etaSec / 60).ceil()} min'
-                              : 'ETA ${(etaSec / 60).ceil()} min',
+                          rideProvider.status == models.TripStatus.DRIVER_ARRIVING
+                              ? 'Waiting at pickup'
+                              : rideProvider.isPrePickup
+                                  ? 'Arriving in ${(etaSec / 60).ceil()} min'
+                                  : 'ETA ${(etaSec / 60).ceil()} min',
                           style: const TextStyle(
                             color: Color(0xFF2F3A32),
                             fontSize: 13,
@@ -558,7 +562,7 @@ class _TripScreenState extends State<TripScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              rideProvider.status == models.TripStatus.ACCEPTED
+                              rideProvider.isPrePickup
                                   ? 'PICKUP'
                                   : 'DESTINATION',
                               style: TextStyle(
@@ -570,7 +574,7 @@ class _TripScreenState extends State<TripScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              rideProvider.status == models.TripStatus.ACCEPTED
+                              rideProvider.isPrePickup
                                   ? rideProvider.currentTrip!.pickup.address!
                                   : rideProvider
                                         .currentTrip!
@@ -595,8 +599,9 @@ class _TripScreenState extends State<TripScreen> {
                       ),
                       // Ride actions live in a "⋯" menu on the far right
                       // instead of a full-width inline Cancel button.
-                      if (rideProvider.status == models.TripStatus.ACCEPTED ||
-                          rideProvider.status == models.TripStatus.IN_PROGRESS) ...[
+                      if (rideProvider.isPrePickup ||
+                          rideProvider.status ==
+                              models.TripStatus.IN_PROGRESS) ...[
                         const SizedBox(width: 12),
                         _RideActionMenu(
                           onCancel: () =>

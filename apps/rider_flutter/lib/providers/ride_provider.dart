@@ -27,6 +27,36 @@ class RideProvider with ChangeNotifier {
   final Map<String, Location> _nearbyDrivers = {};
   bool _cancelling = false;
 
+  /// Idempotency key for the CURRENT logical ride request. Reused across
+  /// every retry (double tap, ack timeout, unknown outcome) so the server
+  /// can never create a second ride from the same intent; cleared once the
+  /// request is confirmed or the ride settles.
+  String? _requestKey;
+
+  /// The exact payload of the pending ride request, kept for safe retries
+  /// and for reconciling an unknown outcome (ack timeout) against the REST
+  /// endpoint with the same idempotency key.
+  Map<String, dynamic>? _lastRequestPayload;
+
+  /// Bounded ack timeout: the request stays "pending" until the first
+  /// authoritative tripUpdate arrives. On expiry the rider sees an honest
+  /// unknown-outcome state (retry reuses the same key).
+  Timer? _requestAckTimer;
+  bool _awaitingServerAck = false;
+
+  /// Trip ids that already reached a terminal state. Late/duplicate events
+  /// for them are ignored (bounded below in [_settleTripId]).
+  final Set<String> _settledTripIds = {};
+
+  /// Server version of the tracked trip (`updated_at`) for out-of-order
+  /// event suppression.
+  DateTime? _currentTripUpdatedAt;
+
+  /// True while the request mutation is awaiting the authoritative server
+  /// acknowledgement (first tripUpdate). The UI must not claim success while
+  /// this is true.
+  bool get awaitingServerAck => _awaitingServerAck;
+
   /// Last rider position sent to the gateway. Used to attribute activity
   /// signals (REQUEST_FLOW / APP_ACTIVE) with a real location.
   Location? _lastKnownLocation;
@@ -126,6 +156,21 @@ class RideProvider with ChangeNotifier {
   bool get isSearchingForDriver =>
       _status == TripStatus.REQUESTED && _tripId != null;
 
+  /// True while a driver is assigned but the trip has not started:
+  /// ACCEPTED (en route to pickup) or DRIVER_ARRIVING (at pickup).
+  bool get isPrePickup =>
+      _status == TripStatus.ACCEPTED ||
+      _status == TripStatus.DRIVER_ARRIVING;
+
+  /// Hot-swap the auth token (fresh login) and rebuild the socket against it.
+  void updateToken(String token) => initSocket(token);
+
+  /// The idempotency key of the pending request intent (null when no
+  /// request is in flight or unsettled). Exposed for tests asserting that
+  /// retries reuse one key.
+  @visibleForTesting
+  String? get pendingRequestKey => _requestKey;
+
   /// Consumed by whichever screen is in front (map sheet or trip screen)
   /// so the apology popup appears exactly once per driver cancellation.
   Map<String, dynamic>? consumeDriverCancelledNotice() {
@@ -187,11 +232,13 @@ class RideProvider with ChangeNotifier {
     _socket!.on('currentTripNone', (data) {
       // Authoritative answer to getCurrentTrip: no active trip. Only act
       // when we believe we have one — the server may have cancelled it
-      // while we were disconnected.
+      // while we were disconnected. Settle the id first so a late stale
+      // ACCEPTED event can never resurrect it.
       if (_status != TripStatus.IDLE && _tripId != null) {
         debugPrint(
           '[RIDE] Server reports no current trip — clearing stale local state',
         );
+        _settleTripId(_tripId!);
         reset();
       }
     });
@@ -213,101 +260,11 @@ class RideProvider with ChangeNotifier {
     });
 
     _socket!.on('tripUpdate', (data) {
-      final oldStatus = _status;
-      final trip = Trip.fromJson(data);
-      // After an intentional reset (e.g. the rider cancelled), late
-      // tripUpdates for the old trip must NOT resurrect stale state —
-      // the server's CANCELLED broadcast arrives after our REST cancel.
-      // Reject ALL stale updates when IDLE, not just REQUESTED/CANCELLED.
-      // A stale ACCEPTED arriving after reset would resurrect driver state.
-      if (_status == TripStatus.IDLE) {
-        debugPrint(
-          '[RIDE] Ignoring stale ${trip.status} tripUpdate while IDLE (trip ${trip.id})',
-        );
-        return;
-      }
-      // Reject updates for a different ride ID after we have an active trip.
-      if (_tripId != null && trip.id != _tripId) {
-        debugPrint(
-          '[RIDE] Ignoring tripUpdate for different trip ${trip.id} (current: $_tripId)',
-        );
-        return;
-      }
-      _currentTrip = trip;
-      _status = trip.status;
-      _tripId = trip.id;
-
-      // Back to searching (driver released / rider's request still being
-      // matched): the departing driver's identity and route context are
-      // gone — the riding side rebuilds them on the next ACCEPTED.
-      if (trip.status == TripStatus.REQUESTED && _driver != null) {
-        _driver = null;
-        _navigationRoute = null;
-        _navigationEtaSeconds = null;
-        _driverEtaSeconds = null;
-        _driverRemainingMeters = null;
-      }
-
-      // Chat dies with the ride (spec §16): no new messages, no stale
-      // bubbles surviving the transition.
-      if (trip.status == TripStatus.CANCELLED) {
-        _messages = [];
-      }
-
-      // Persist the active trip for cold-start restore; drop the marker
-      // the instant the ride reaches a terminal state so a later reboot
-      // stays clean.
-      if (trip.status == TripStatus.CANCELLED ||
-          trip.status == TripStatus.COMPLETED) {
-        _persistActiveTrip(null);
-      } else {
-        _persistActiveTrip(trip.id);
-      }
-
-      if (oldStatus == TripStatus.REQUESTED &&
-          trip.status == TripStatus.ACCEPTED) {
-        SoundService.instance.play(SoundEffect.orderAccepted);
-      }
-      if (oldStatus != TripStatus.CANCELLED &&
-          trip.status == TripStatus.CANCELLED) {
-        SoundService.instance.play(SoundEffect.orderCancelled);
-      }
-      if (oldStatus != TripStatus.COMPLETED &&
-          trip.status == TripStatus.COMPLETED) {
-        SoundService.instance.play(SoundEffect.tripCompleted);
-      }
-
-      if (trip.status == TripStatus.ACCEPTED ||
-          trip.status == TripStatus.IN_PROGRESS) {
-        Location? initialLoc;
-        if (data['driver_location'] != null) {
-          initialLoc = Location.fromJson(data['driver_location']);
-        }
-
-        // Real driver identity from the authoritative payload. The map
-        // carries driver_info.{name,vehicle,plate} from the users +
-        // driver_vehicles tables — never fabricated client-side. Fields
-        // absent from the payload stay null and the UI hides them.
-        final driverInfo = trip.driverInfo;
-        if (_driver == null) {
-          _driver = DriverInfo(
-            id: trip.driverId ?? '',
-            name: driverInfo?.name ?? '',
-            vehicle: driverInfo?.vehicle,
-            plate: driverInfo?.plate,
-            location: initialLoc,
-          );
-        } else {
-          _driver = DriverInfo(
-            id: _driver!.id.isNotEmpty ? _driver!.id : (trip.driverId ?? ''),
-            name: _driver!.name,
-            vehicle: _driver!.vehicle,
-            plate: _driver!.plate,
-            location: initialLoc ?? _driver!.location,
-          );
-        }
-      }
-      notifyListeners();
+      if (data is! Map) return;
+      applyTripUpdate(
+        Trip.fromJson(Map<String, dynamic>.from(data)),
+        Map<String, dynamic>.from(data),
+      );
     });
 
     // Driver cancelled after accepting but BEFORE pickup: the backend
@@ -421,6 +378,11 @@ class RideProvider with ChangeNotifier {
           ? data['message'] as String
           : 'Your ride request could not be sent. Please try again.';
       _requestFailure = msg;
+      // The server answered (rejection): stop waiting for the ack, but keep
+      // the idempotency key so a retry of the same intent is safe.
+      _requestAckTimer?.cancel();
+      _requestAckTimer = null;
+      _awaitingServerAck = false;
       notifyListeners();
     });
 
@@ -430,6 +392,11 @@ class RideProvider with ChangeNotifier {
       debugPrint('[RIDE] paymentMethodRequired: $data');
       _paymentMethodRequired = true;
       _requestFailure = null;
+      _requestAckTimer?.cancel();
+      _requestAckTimer = null;
+      _awaitingServerAck = false;
+      _requestKey = null;
+      _lastRequestPayload = null;
       _status = TripStatus.IDLE;
       notifyListeners();
     });
@@ -440,6 +407,143 @@ class RideProvider with ChangeNotifier {
     _socket!.on('cancelTripFailed', (data) {
       debugPrint('[RIDE] Server rejected cancellation: $data');
     });
+  }
+
+  /// Applies an authoritative trip payload exactly once, in order. Shared by
+  /// the socket broadcast path and the REST request fallback so both funnel
+  /// through the same guards:
+  ///   1. settled trip ids are ignored (late terminal duplicates),
+  ///   2. IDLE resets reject every stale resurrection,
+  ///   3. a different ride id never replaces the tracked ride,
+  ///   4. an older server version (`updated_at`) never overwrites a newer one.
+  @visibleForTesting
+  void applyTripUpdate(Trip trip, [Map<String, dynamic>? raw]) {
+    final oldStatus = _status;
+    final data = raw ?? const <String, dynamic>{};
+
+    if (_settledTripIds.contains(trip.id)) {
+      debugPrint('[RIDE] Ignoring tripUpdate for settled trip ${trip.id}');
+      return;
+    }
+    if (_status == TripStatus.IDLE) {
+      debugPrint(
+        '[RIDE] Ignoring stale ${trip.status} tripUpdate while IDLE (trip ${trip.id})',
+      );
+      return;
+    }
+    if (_tripId != null && trip.id != _tripId) {
+      debugPrint(
+        '[RIDE] Ignoring tripUpdate for different trip ${trip.id} (current: $_tripId)',
+      );
+      return;
+    }
+    final incomingVersion = trip.updatedAt;
+    if (incomingVersion != null &&
+        _currentTripUpdatedAt != null &&
+        trip.id == _tripId &&
+        incomingVersion.isBefore(_currentTripUpdatedAt!)) {
+      debugPrint(
+        '[RIDE] Ignoring out-of-order tripUpdate (v=$incomingVersion < $_currentTripUpdatedAt)',
+      );
+      return;
+    }
+
+    // The server answered: the request ack is settled (success path).
+    _requestAckTimer?.cancel();
+    _requestAckTimer = null;
+    _awaitingServerAck = false;
+    _requestKey = null;
+    _lastRequestPayload = null;
+
+    _currentTrip = trip;
+    _currentTripUpdatedAt = incomingVersion;
+    _status = trip.status;
+    _tripId = trip.id;
+
+    // Back to searching (driver released / rider's request still being
+    // matched): the departing driver's identity and route context are
+    // gone — the riding side rebuilds them on the next ACCEPTED.
+    if (trip.status == TripStatus.REQUESTED && _driver != null) {
+      _driver = null;
+      _navigationRoute = null;
+      _navigationEtaSeconds = null;
+      _driverEtaSeconds = null;
+      _driverRemainingMeters = null;
+    }
+
+    // Chat dies with the ride (spec §16): no new messages, no stale
+    // bubbles surviving the transition.
+    if (trip.status == TripStatus.CANCELLED) {
+      _messages = [];
+    }
+
+    // Persist the active trip for cold-start restore; drop the marker and
+    // release the trip id the instant the ride reaches a terminal state so
+    // a later reboot — or the next request — starts clean.
+    if (trip.status == TripStatus.CANCELLED ||
+        trip.status == TripStatus.COMPLETED) {
+      _persistActiveTrip(null);
+      _settleTripId(trip.id);
+      _tripId = null;
+      _currentTripUpdatedAt = null;
+    } else {
+      _persistActiveTrip(trip.id);
+    }
+
+    if (oldStatus == TripStatus.REQUESTED &&
+        trip.status == TripStatus.ACCEPTED) {
+      SoundService.instance.play(SoundEffect.orderAccepted);
+    }
+    if (oldStatus != TripStatus.CANCELLED &&
+        trip.status == TripStatus.CANCELLED) {
+      SoundService.instance.play(SoundEffect.orderCancelled);
+    }
+    if (oldStatus != TripStatus.COMPLETED &&
+        trip.status == TripStatus.COMPLETED) {
+      SoundService.instance.play(SoundEffect.tripCompleted);
+    }
+
+    if (trip.status == TripStatus.ACCEPTED ||
+        trip.status == TripStatus.DRIVER_ARRIVING ||
+        trip.status == TripStatus.IN_PROGRESS) {
+      Location? initialLoc;
+      if (data['driver_location'] != null) {
+        initialLoc = Location.fromJson(data['driver_location']);
+      }
+
+      // Real driver identity from the authoritative payload. The map
+      // carries driver_info.{name,vehicle,plate} from the users +
+      // driver_vehicles tables — never fabricated client-side. Fields
+      // absent from the payload stay null and the UI hides them.
+      final driverInfo = trip.driverInfo;
+      if (_driver == null) {
+        _driver = DriverInfo(
+          id: trip.driverId ?? '',
+          name: driverInfo?.name ?? '',
+          vehicle: driverInfo?.vehicle,
+          plate: driverInfo?.plate,
+          location: initialLoc,
+        );
+      } else {
+        _driver = DriverInfo(
+          id: _driver!.id.isNotEmpty ? _driver!.id : (trip.driverId ?? ''),
+          name: _driver!.name,
+          vehicle: _driver!.vehicle,
+          plate: _driver!.plate,
+          location: initialLoc ?? _driver!.location,
+        );
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Records a terminal trip id so late/duplicate events can never resurrect
+  /// it. Bounded: oldest entries are dropped beyond 50.
+  void _settleTripId(String tripId) {
+    _settledTripIds.add(tripId);
+    while (_settledTripIds.length > 50) {
+      _settledTripIds.remove(_settledTripIds.first);
+    }
   }
 
   void sendMessage(String tripId, String message) {
@@ -476,19 +580,24 @@ class RideProvider with ChangeNotifier {
     debugPrint(
       '[RIDE] requestRide called | socket=${_socket != null} connected=${_socket?.connected} pickup=${pickup.lat},${pickup.lng} dest=${destination.lat},${destination.lng}',
     );
-    if (_socket == null) {
-      debugPrint('[RIDE] ❌ Socket is NULL — request will be silently dropped!');
-    } else if (!_socket!.connected) {
-      debugPrint(
-        '[RIDE] ⚠️ Socket exists but NOT connected — attempting emit anyway',
-      );
-    }
 
-    // Generate idempotency key if not provided (for retries)
-    final key = idempotencyKey ?? const Uuid().v4();
+    // A request that is already being matched must never be duplicated by a
+    // double tap or a re-entrant caller. The retry path (no trip id yet)
+    // falls through and reuses the same idempotency key.
+    if (isSearchingForDriver) {
+      debugPrint('[RIDE] requestRide ignored — already matching $_tripId');
+      return;
+    }
+    _prepareForNewRequest();
+
+    // One stable key per logical ride intent: identical retries resolve to
+    // the SAME server-side ride (unique rides.idempotency_key) instead of
+    // creating another one.
+    _requestKey ??= idempotencyKey ?? const Uuid().v4();
+    final key = idempotencyKey ?? _requestKey!;
     final cleanedPromo = promoCode?.trim();
 
-    _socket?.emit('requestRide', {
+    final payload = <String, dynamic>{
       'pickup': pickup.toJson(),
       'destination': destination.toJson(),
       'isScheduled': isScheduled,
@@ -506,13 +615,123 @@ class RideProvider with ChangeNotifier {
       // (server-enforced; the ride request fails without it).
       if (specialRedemptionId != null && specialRedemptionId.isNotEmpty)
         'specialTermsAccepted': specialTermsAccepted,
-    });
+    };
 
+    _requestFailure = null;
+    _awaitingServerAck = true;
+    _lastRequestPayload = payload;
     if (!isScheduled) {
       _status = TripStatus.REQUESTED;
     }
-    _requestFailure = null;
     notifyListeners();
+
+    if (_socket != null && _socket!.connected) {
+      _socket!.emit('requestRide', payload);
+      _armRequestAckTimer(key);
+    } else {
+      // No live socket (e.g. the socket was never initialized after a
+      // password login). Fall back to the REST endpoint with the identical
+      // payload + idempotency key instead of silently dropping the request.
+      debugPrint('[RIDE] Socket unavailable — requesting via REST fallback');
+      _requestRideViaRest(payload, key);
+    }
+  }
+
+  /// Re-issues the pending request after an unknown outcome or a surfaced
+  /// failure. Always uses the SAME idempotency key: if the first attempt
+  /// actually reached the server, this resolves to the same ride (never a
+  /// duplicate), otherwise it creates the intended one.
+  Future<void> retryPendingRequest() async {
+    final key = _requestKey;
+    final payload = _lastRequestPayload;
+    if (key == null || payload == null) return;
+    if (isSearchingForDriver) return;
+    _requestFailure = null;
+    _awaitingServerAck = true;
+    notifyListeners();
+    if (_socket != null && _socket!.connected) {
+      _socket!.emit('requestRide', payload);
+      _armRequestAckTimer(key);
+    } else {
+      await _requestRideViaRest(payload, key);
+    }
+  }
+
+  /// Clears state that belongs to a PREVIOUS logical request. A retry of an
+  /// unconfirmed request (REQUESTED with no server trip id yet) keeps its
+  /// key and pending state.
+  void _prepareForNewRequest() {
+    if (_status == TripStatus.REQUESTED && _tripId == null) return;
+    _currentTrip = null;
+    _currentTripUpdatedAt = null;
+    _tripId = null;
+    _driver = null;
+    _navigationRoute = null;
+    _navigationEtaSeconds = null;
+    _driverEtaSeconds = null;
+    _driverRemainingMeters = null;
+    _driverCancelledNotice = null;
+    _requestKey = null;
+    _lastRequestPayload = null;
+    _requestAckTimer?.cancel();
+    _requestAckTimer = null;
+    _awaitingServerAck = false;
+  }
+
+  Future<void> _requestRideViaRest(
+    Map<String, dynamic> payload,
+    String key,
+  ) async {
+    try {
+      final response = await ApiService.dio.post('/ride/request', data: payload);
+      final data = response.data;
+      if (data is Map && _requestKey == key) {
+        applyTripUpdate(Trip.fromJson(Map<String, dynamic>.from(data)));
+      }
+    } on DioException catch (e) {
+      if (_requestKey != key) return;
+      _requestAckTimer?.cancel();
+      _awaitingServerAck = false;
+      final serverMsg = e.response?.data is Map
+          ? (e.response!.data as Map)['error']?.toString()
+          : null;
+      if (e.response?.statusCode == 402) {
+        // Payment method required — the map screen owns the navigation to
+        // the wallet; this is a definitive rejection, not a retry.
+        _paymentMethodRequired = true;
+        _status = TripStatus.IDLE;
+        _requestKey = null;
+        _lastRequestPayload = null;
+      } else {
+        _requestFailure = serverMsg ??
+            'We couldn\'t send your ride request. Check your connection and try again.';
+      }
+      notifyListeners();
+    } catch (e) {
+      if (_requestKey != key) return;
+      _requestAckTimer?.cancel();
+      _awaitingServerAck = false;
+      _requestFailure =
+          'We couldn\'t send your ride request. Check your connection and try again.';
+      notifyListeners();
+    }
+  }
+
+  /// Bounded wait for the authoritative first tripUpdate. On expiry the
+  /// outcome is UNKNOWN, so the client RECONCILES via REST with the same
+  /// idempotency key instead of assuming failure (a mutation that actually
+  /// succeeded resolves to the same ride). Only a failed reconciliation
+  /// surfaces the retry state to the rider.
+  void _armRequestAckTimer(String key) {
+    _requestAckTimer?.cancel();
+    _requestAckTimer = Timer(const Duration(seconds: 12), () async {
+      if (_requestKey != key) return;
+      if (_tripId != null) return; // confirmed by a tripUpdate
+      final payload = _lastRequestPayload;
+      if (payload == null) return;
+      debugPrint('[RIDE] request ack timeout — reconciling via REST (same key)');
+      await _requestRideViaRest(payload, key);
+    });
   }
 
   void setEstimatedFare(double fare) {
@@ -609,8 +828,11 @@ class RideProvider with ChangeNotifier {
   }
 
   void reset() {
+    if (_currentTrip != null) _settleTripId(_currentTrip!.id);
+    if (_tripId != null) _settleTripId(_tripId!);
     _status = TripStatus.IDLE;
     _tripId = null;
+    _currentTrip = null;
     _driver = null;
     _estimatedFare = null;
     _navigationRoute = null;
@@ -619,6 +841,12 @@ class RideProvider with ChangeNotifier {
     _driverRemainingMeters = null;
     _driverCancelledNotice = null;
     _cancelling = false;
+    _requestKey = null;
+    _lastRequestPayload = null;
+    _requestAckTimer?.cancel();
+    _requestAckTimer = null;
+    _awaitingServerAck = false;
+    _currentTripUpdatedAt = null;
     _nearbyDrivers.clear();
     _persistActiveTrip(null);
     notifyListeners();
@@ -808,6 +1036,12 @@ class RideProvider with ChangeNotifier {
       if (token != null) {
         initSocket(token);
       }
+    } else if (_status != TripStatus.IDLE) {
+      // Live socket: still re-ask for the authoritative trip. A match or
+      // terminal transition may have happened while the process was
+      // suspended and the socket silently missed the event.
+      debugPrint('[RIDE] Foreground resync for status=$_status');
+      _socket!.emit('getCurrentTrip');
     }
     // Signal "rider actively using the app" with their last known position
     // (privacy-safe: backendside cooldowns cap the rate).

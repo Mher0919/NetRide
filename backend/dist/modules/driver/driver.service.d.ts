@@ -53,19 +53,30 @@ export declare class DriverService {
         card_last4: any;
         card_brand: any;
     }>;
-    static addPayoutCard(userId: string, payload: any): Promise<{
-        card_id: any;
-        status: string;
-        brand: import("../../utils/card").CardBrandName;
-        last4: string;
-        exp_month: any;
-        exp_year: any;
-    }>;
     static getWallet(userId: string): Promise<{
         balance_cents: number;
         lifetime_earnings_cents: number;
-        payout_card: any;
-        recent_payouts: any[];
+        this_week: {
+            earnings_cents: number;
+            tips_cents: number;
+            rides: number;
+        };
+        withdrawal: import("../payments/withdrawal.service").WithdrawalState | {
+            eligible: boolean;
+            nextAvailableAt: Date;
+        };
+        recent_payouts: {
+            id: any;
+            amount_cents: number;
+            fee_cents: number;
+            net_cents: number;
+            status: any;
+            method: any;
+            requested_at: any;
+            processed_at: any;
+            reference: any;
+            notes: any;
+        }[];
     }>;
     static requestOnDemandPayout(userId: string, amountCents: number): Promise<{
         payout_id: string;
@@ -74,6 +85,12 @@ export declare class DriverService {
         net_cents: number;
         status: string;
         method: string;
+        transfer: {
+            transferred: boolean;
+            transferId: string | null;
+            reason: string | null;
+            requiresPayoutSetup: boolean;
+        };
     }>;
     static listMyPayouts(userId: string, limit: number, offset: number): Promise<{
         payouts: any[];

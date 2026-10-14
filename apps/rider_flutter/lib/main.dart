@@ -239,13 +239,34 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    AuthService.isAuthenticatedNotifier.addListener(_onAuthChanged);
     _initDeepLinks();
   }
 
   @override
   void dispose() {
+    AuthService.isAuthenticatedNotifier.removeListener(_onAuthChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// A fresh sign-in (OAuth, password, signup, OTP) flips the shared auth
+  /// notifier. The app-level socket was created before login with no token,
+  /// so it must be rebuilt here — otherwise every rider mutation emitted
+  /// through a null/dead socket was silently dropped.
+  Future<void> _onAuthChanged() async {
+    if (AuthService.isAuthenticatedNotifier.value != true) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token');
+      if (token == null || token.isEmpty) return;
+      final provider = context.read<RideProvider>();
+      provider.updateToken(token);
+      await NotificationService.instance.registerDevice();
+      await _initStripe();
+    } catch (e) {
+      debugPrint('[AUTH] Post-login socket init failed: $e');
+    }
   }
 
   @override

@@ -258,12 +258,19 @@ static async applyToRide(
     userId: string,
     amountCents: number,
     reason: string,
+    idempotencyKey?: string,
   ): Promise<CreditResult> {
     const delta = roundCents(amountCents);
     if (delta === 0) throw new Error('Grant amount must be non-zero');
     const type: CreditTxType = delta > 0 ? 'ADMIN_GRANT' : 'ADJUSTMENT';
     return this.post(userId, delta, type, {
-      idempotencyKey: `admin:${adminId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      // A caller-supplied key (the dashboard sends one per operator click)
+      // makes duplicate submissions exactly-once. Only ad-hoc API callers
+      // without a key fall back to a unique key.
+      idempotencyKey:
+        idempotencyKey && idempotencyKey.length > 0
+          ? `admin:${adminId}:${idempotencyKey}`
+          : `admin:${adminId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
       description: reason || (type === 'ADMIN_GRANT' ? 'Admin credit grant' : 'Admin adjustment'),
       referenceType: 'admin',
     });

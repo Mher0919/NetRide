@@ -20,7 +20,8 @@ exports.RELEASE_DRIVER_PRE_PICKUP_SQL = `UPDATE rides
           cancelled_at = NULL,
           cancelled_by = NULL,
           cancellation_reason_code = NULL,
-          cancellation_reason_text = NULL
+          cancellation_reason_text = NULL,
+          updated_at = NOW()
     WHERE id = $1 AND driver_id = $2 AND status IN ($4, $5)
     RETURNING id`;
 /**
@@ -76,7 +77,9 @@ class RideRepository {
         return res.rows[0] ? this.mapToTrip(res.rows[0]) : null;
     }
     static async updateStatus(id, status, extra = {}) {
-        const fields = ['status = $1'];
+        // `updated_at = NOW()` is unconditional: every status write is a new
+        // version, and clients rely on it to drop out-of-order events.
+        const fields = ['status = $1', 'updated_at = NOW()'];
         const values = [status, id];
         if (extra.driver_id) {
             fields.push(`driver_id = $${values.length + 1}`);
@@ -222,6 +225,27 @@ class RideRepository {
         console.log(`[REPO] findCurrentByDriverId rowCount=${res.rowCount} keys=${Object.keys(res.rows[0] || {}).slice(0, 5).join(',')} id=${res.rows[0]?.id} status=${res.rows[0]?.status}`);
         return res.rows[0] ? this.mapToTrip(res.rows[0]) : null;
     }
+    /**
+     * Most recent terminal ride for a driver, looked up on reconnect when no
+     * active trip exists. Lets the driver app surface an outcome that happened
+     * while the process was dead (e.g. "ride cancelled while you were
+     * offline") instead of silently resetting to idle. Bounded window keeps
+     * the notice relevant.
+     */
+    static async findLastTerminalByDriverId(driverId, withinMinutes = 10) {
+        const res = await database_1.pool.query(`SELECT r.*,
+              u.full_name as rider_name, u.email as rider_email,
+              d.full_name as driver_name, d.email as driver_email
+       FROM rides r
+       LEFT JOIN users u ON r.rider_id = u.id
+       LEFT JOIN users d ON r.driver_id = d.id
+       WHERE r.driver_id = $1
+         AND r.status IN ('COMPLETED', 'CANCELLED')
+         AND COALESCE(r.completed_at, r.cancelled_at, r.updated_at) > NOW() - ($2 || ' minutes')::interval
+       ORDER BY COALESCE(r.completed_at, r.cancelled_at, r.updated_at) DESC
+       LIMIT 1`, [driverId, String(withinMinutes)]);
+        return res.rows[0] ? this.mapToTrip(res.rows[0]) : null;
+    }
     static async delete(id, userId) {
         const res = await database_1.pool.query('DELETE FROM rides WHERE id = $1 AND (rider_id = $2 OR driver_id = $2)', [id, userId]);
         return (res.rowCount ?? 0) > 0;
@@ -247,6 +271,7 @@ class RideRepository {
                 address: row.destination_address
             },
             requested_at: row.created_at,
+            updated_at: row.updated_at,
             accepted_at: row.accepted_at,
             started_at: row.started_at,
             completed_at: row.completed_at,

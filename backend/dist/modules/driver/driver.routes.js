@@ -22,7 +22,6 @@ router.get('/vehicle-models/models', driver_controller_1.DriverController.getVeh
 router.post('/profile-changes', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.submitProfileChange);
 router.get('/profile-changes/current', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getCurrentProfileChange);
 // Wallet + payouts
-router.post('/payout-cards', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.addPayoutCard);
 router.get('/wallet', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getWallet);
 router.post('/wallet/request-payout', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.requestOnDemandPayout);
 router.get('/payouts', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.listMyPayouts);

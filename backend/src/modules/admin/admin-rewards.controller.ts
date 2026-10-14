@@ -65,6 +65,9 @@ const GrantCreditsSchema = z.object({
   user_id: z.string().uuid(),
   amount_cents: z.number().int().min(1).max(100_000_000),
   reason: z.string().trim().min(3).max(500),
+  // Optional client idempotency key: a retried/duplicated grant request
+  // resolves to the SAME credit transaction instead of granting twice.
+  idempotency_key: z.string().trim().min(8).max(128).optional(),
 });
 
 const COMMISSION_STATUSES = ['PENDING', 'PAID', 'VOID', ''] as const;
@@ -507,7 +510,13 @@ export class AdminRewardsController {
       const input = GrantCreditsSchema.parse(req.body);
       const user = await pool.query(`SELECT id FROM users WHERE id = $1`, [input.user_id]);
       if (user.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-      const result = await CreditsService.adminGrant(req.user.id, input.user_id, input.amount_cents, input.reason);
+      const result = await CreditsService.adminGrant(
+        req.user.id,
+        input.user_id,
+        input.amount_cents,
+        input.reason,
+        input.idempotency_key,
+      );
       await AuditEventsService.record({
         actorId: req.user.id,
         actorRole: 'ADMIN',

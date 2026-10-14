@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DRIVER_H3_INDEX_PREFIX = exports.DRIVER_H3_CELL_PREFIX = exports.DRIVER_HEARTBEAT_PREFIX = exports.DRIVER_LOCATIONS_KEY = exports.redis = void 0;
+exports.DRIVER_H3_INDEX_PREFIX = exports.DRIVER_H3_CELL_PREFIX = exports.DRIVER_ONLINE_PREFIX = exports.DRIVER_LOCATION_RECORD_PREFIX = exports.DRIVER_HEARTBEAT_PREFIX = exports.DRIVER_LOCATIONS_KEY = exports.redis = void 0;
 // backend/src/config/redis.ts
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
@@ -36,6 +36,16 @@ exports.redis.on('connect', () => {
 });
 exports.DRIVER_LOCATIONS_KEY = 'driver_locations';
 exports.DRIVER_HEARTBEAT_PREFIX = 'driver:heartbeat:';
+// Timestamped last-known location record (JSON): lat/lng/accuracy/source/
+// serverAt. Used to decide whether a position is fresh enough to gate
+// trip actions or dispatch on. Expires so it can never be served as live
+// indefinitely.
+exports.DRIVER_LOCATION_RECORD_PREFIX = 'driver:loc:';
+// Server-side availability lease set by `goOnline` and renewed by accepted
+// location updates. Distinct from the location heartbeat: a driver can be
+// lease-online but location-stale (explicit `stale_location` eligibility
+// state) without being treated as absent.
+exports.DRIVER_ONLINE_PREFIX = 'driver:online:';
 // H3 hexagonal cell index for scalable rider↔driver matching. Each online
 // driver is a member of the set for their current H3 cell; `findNearbyDrivers`
 // queries only the small ring of cells around the pickup (gridDisk) instead of

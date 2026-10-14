@@ -36,8 +36,26 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<any>(null);
+  // Socket liveness: the table must say "reconnecting" instead of silently
+  // serving frozen data when the realtime channel drops.
+  const [connected, setConnected] = useState(false);
 
   const fmtUSD = (cents: any) => '$' + (Number(cents ?? 0) / 100).toFixed(2);
+
+  // Socket `tripUpdate` payloads are repository-shaped (rider_name /
+  // pickup.address), while the REST list is join-shaped (rider.full_name /
+  // pickup_address). Render from BOTH so a live merge never blanks a cell.
+  const riderName = (ride: any) =>
+    ride.rider?.full_name ?? ride.rider_name ?? ride.rider_info?.name ?? '—';
+  const driverName = (ride: any) =>
+    ride.driver?.full_name ?? ride.driver_name ?? ride.driver_info?.name ?? null;
+  const pickupAddress = (ride: any) =>
+    ride.pickup_address ?? ride.pickup?.address ?? '—';
+  const destinationAddress = (ride: any) =>
+    ride.destination_address ?? ride.destination?.address ?? '—';
+  const createdTimestamp = (ride: any) => ride.created_at ?? ride.requested_at;
+  const finalCents = (ride: any) =>
+    ride.final_payment_cents ?? ride.fare_amount_cents ?? null;
 
   const fetchRides = async () => {
     setLoading(true);
@@ -80,8 +98,14 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
     });
 
     socket.on('connect', () => {
+      setConnected(true);
       socket.emit('subscribeToMonitoring');
+      // Reconnect resync: a broadcast (or many) may have been missed while
+      // reconnecting. Re-fetch the authoritative page immediately.
+      fetchRides();
     });
+
+    socket.on('disconnect', () => setConnected(false));
 
     socket.on('tripUpdate', (updatedTrip: any) => {
       if (status === 'ACTIVE') {
@@ -92,7 +116,9 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
             const index = prev.findIndex(r => r.id === updatedTrip.id);
             if (index !== -1) {
               const newRides = [...prev];
-              newRides[index] = updatedTrip;
+              // MERGE (not replace): the socket payload carries only the
+              // repository-shaped subset; REST-only join fields must survive.
+              newRides[index] = { ...newRides[index], ...updatedTrip };
               return newRides;
             } else {
               if (page === 0) return [updatedTrip, ...prev].slice(0, rowsPerPage);
@@ -103,7 +129,7 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
       } 
       else if (status === 'COMPLETED' && updatedTrip.status === 'COMPLETED') {
         if (page === 0) {
-          setRides(prev => [updatedTrip, ...prev].slice(0, rowsPerPage));
+          setRides(prev => [{ ...updatedTrip }, ...prev].slice(0, rowsPerPage));
         }
       }
     });
@@ -157,9 +183,17 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 1.5 }}>
-        <Typography variant="h4">
-          {title}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Typography variant="h4">
+            {title}
+          </Typography>
+          <Chip
+            label={connected ? 'LIVE' : 'RECONNECTING'}
+            size="small"
+            color={connected ? 'success' : 'warning'}
+            sx={{ fontWeight: 700, fontSize: '0.65rem', borderRadius: '6px' }}
+          />
+        </Box>
         <Button 
           startIcon={loading ? undefined : <RefreshIcon />} 
           variant="contained" 
@@ -227,12 +261,12 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
                   <TableCell>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{ride.rider?.full_name}</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{riderName(ride)}</Typography>
                         <Chip label="RIDER" size="small" sx={{ ml: 1, height: 16, fontSize: '0.6rem', fontWeight: 700 }} />
                       </Box>
-                      {ride.driver ? (
+                      {driverName(ride) ? (
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.secondary' }}>{ride.driver?.full_name}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.secondary' }}>{driverName(ride)}</Typography>
                           <Chip label="DRIVER" size="small" variant="outlined" sx={{ ml: 1, height: 16, fontSize: '0.6rem', fontWeight: 700 }} />
                         </Box>
                       ) : (
@@ -242,20 +276,20 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', flexDirection: 'column', maxWidth: 250 }}>
-                      <Typography variant="body2" noWrap title={ride.pickup_address} sx={{ fontWeight: 500 }}>
+                      <Typography variant="body2" noWrap title={pickupAddress(ride)} sx={{ fontWeight: 500 }}>
                         <Box component="span" sx={{ color: 'success.main', mr: 1 }}>●</Box>
-                        {ride.pickup_address}
+                        {pickupAddress(ride)}
                       </Typography>
-                      <Typography variant="body2" noWrap title={ride.destination_address} sx={{ fontWeight: 500 }}>
+                      <Typography variant="body2" noWrap title={destinationAddress(ride)} sx={{ fontWeight: 500 }}>
                         <Box component="span" sx={{ color: 'error.main', mr: 1 }}>■</Box>
-                        {ride.destination_address}
+                        {destinationAddress(ride)}
                       </Typography>
                     </Box>
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" sx={{ fontWeight: 700 }}>
                       {status === 'COMPLETED'
-                        ? fmtUSD(ride.final_payment_cents)
+                        ? fmtUSD(finalCents(ride))
                         : <Box component="span" sx={{ color: 'text.disabled', fontWeight: 500 }}>—</Box>}
                     </Typography>
                     {status === 'COMPLETED' && (
@@ -269,10 +303,10 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                      {ride.created_at ? format(new Date(ride.created_at), 'MMM d') : '-'}
+                      {createdTimestamp(ride) ? format(new Date(createdTimestamp(ride)), 'MMM d') : '-'}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {ride.created_at ? format(new Date(ride.created_at), 'HH:mm') : '-'}
+                      {createdTimestamp(ride) ? format(new Date(createdTimestamp(ride)), 'HH:mm') : '-'}
                     </Typography>
                   </TableCell>
                   <TableCell align="right">

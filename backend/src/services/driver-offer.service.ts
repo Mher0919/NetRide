@@ -20,6 +20,13 @@ export interface DriverOffer {
   sentAt: string;
   respondedAt?: string;
   expiresAt: string;
+  /**
+   * The exact least-privilege `newTripRequest` payload computed at offer
+   * creation. Persisted so the offer can be re-emitted verbatim when the
+   * driver's socket reconnects (or when the app returns through the icon)
+   * without recomputing prices or drifting from what was originally shown.
+   */
+  payload?: Record<string, unknown>;
 }
 
 const OFFER_RIDE_PREFIX = 'ride:offer:';
@@ -76,6 +83,38 @@ export class DriverOfferService {
     const raw = await redis.get(`${OFFER_DATA_PREFIX}${offerId}`);
     if (!raw) return null;
     return JSON.parse(raw) as DriverOffer;
+  }
+
+  /**
+   * The driver's current offer, if any. Reads the driver→ride lock first
+   * and then the ride→offer pointer, so a released driver (decline /
+   * timeout / offline) correctly reports no offer.
+   */
+  static async getOfferForDriver(driverId: string): Promise<DriverOffer | null> {
+    const rideId = await redis.get(`${OFFER_DRIVER_PREFIX}${driverId}`);
+    if (!rideId) return null;
+    return DriverOfferService.getOfferForRide(rideId);
+  }
+
+  /**
+   * Attach the rendered offer payload for later re-emission. Best-effort:
+   * a missing payload only means a reconnect cannot replay the card, never
+   * that the offer itself is invalid.
+   */
+  static async attachPayload(
+    offerId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const offer = await DriverOfferService.getOffer(offerId);
+    if (!offer) return;
+    offer.payload = payload;
+    const ttl = await redis.ttl(`${OFFER_DATA_PREFIX}${offerId}`);
+    await redis.set(
+      `${OFFER_DATA_PREFIX}${offerId}`,
+      JSON.stringify(offer),
+      'EX',
+      ttl > 0 ? ttl : env.DRIVER_LOCK_TTL_S,
+    );
   }
 
   /**

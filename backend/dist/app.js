@@ -84,6 +84,7 @@ const wallet_routes_1 = __importDefault(require("./modules/wallet/wallet.routes"
 const routing_api_1 = __importDefault(require("./routing/api/routing-api"));
 const push_routes_1 = __importDefault(require("./modules/push/push.routes"));
 const places_routes_1 = __importDefault(require("./modules/places/places.routes"));
+const google_places_routes_1 = __importDefault(require("./modules/google-places/google-places.routes"));
 const notifications_routes_1 = __importDefault(require("./modules/notifications/notifications.routes"));
 const heatmap_routes_1 = __importDefault(require("./modules/heatmap/heatmap.routes"));
 const specials_routes_1 = __importDefault(require("./modules/sponsor/specials.routes"));
@@ -91,7 +92,11 @@ const sponsor_portal_routes_1 = __importDefault(require("./modules/sponsor/spons
 const admin_sponsor_routes_1 = __importDefault(require("./modules/sponsor/admin-sponsor.routes"));
 const partner_portal_routes_1 = __importDefault(require("./modules/partner/partner-portal.routes"));
 const portal_routes_1 = __importDefault(require("./modules/portal/portal.routes"));
+const payments_routes_1 = __importDefault(require("./modules/payments/payments.routes"));
+const admin_payments_routes_1 = __importDefault(require("./modules/payments/admin-payments.routes"));
+const payments_controller_1 = require("./modules/payments/payments.controller");
 const special_redemption_service_1 = require("./modules/sponsor/special-redemption.service");
+const ride_settlement_service_1 = require("./modules/payments/ride-settlement.service");
 const geospatial_service_1 = require("./modules/geospatial/geospatial.service");
 const upload_service_1 = require("./services/upload.service");
 const speeding_detector_1 = require("./services/speeding_detector");
@@ -179,6 +184,12 @@ app.use((0, cors_1.default)({
 // instead of the proxy IP. This fixes rate-limit key collisions
 // where all users share one rate-limit bucket behind Render.
 app.set('trust proxy', 1);
+// Stripe webhook FIRST: signature verification needs the raw request bytes,
+// so this route must be registered before the global JSON body parser. The
+// handler verifies the signature with Stripe's official library using
+// STRIPE_WEBHOOK_SECRET. No auth middleware — Stripe authenticates by
+// signature.
+app.post('/api/payments/webhook', express_1.default.raw({ type: 'application/json', limit: '2mb' }), payments_controller_1.PaymentsController.webhook);
 app.use(express_1.default.json({ limit: '8mb' }));
 app.use(express_1.default.urlencoded({ limit: '8mb', extended: true }));
 // Request-id + child logger context. Mount BEFORE rate-limit so even
@@ -290,6 +301,7 @@ app.use('/api/wallet', wallet_routes_1.default);
 app.use('/api/files', files_routes_1.default);
 app.use('/api/push', push_routes_1.default);
 app.use('/api/places', places_routes_1.default);
+app.use('/api', google_places_routes_1.default);
 app.use('/api/notifications', notifications_routes_1.default);
 app.use('/api/heatmap', heatmap_routes_1.default);
 app.use('/api', specials_routes_1.default);
@@ -297,6 +309,8 @@ app.use('/api', sponsor_portal_routes_1.default);
 app.use('/api/partner', partner_portal_routes_1.default);
 app.use('/api', portal_routes_1.default);
 app.use('/api/admin', admin_sponsor_routes_1.default);
+app.use('/api/payments', payments_routes_1.default);
+app.use('/api/admin/payments', admin_payments_routes_1.default);
 app.post('/api/upload', upload_service_1.UploadService.upload);
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -767,12 +781,23 @@ function startServer() {
                 .catch((err) => console.error(`[BOOT] ⚠️ Stale ride reconciliation failed: ${err.message}`));
         });
         // Special redemption hygiene (Every 5 minutes): expire stale validation
-        // codes and release the reserved budget (spec §28/§69).
+        // codes, release the reserved budget (spec §28/§69), collect the remaining
+        // fare from riders whose special was never validated, and reconcile any
+        // REWARD_COMPLETED redemption whose settlement components were not
+        // recorded (crash between redemption tx and component write).
         setInterval(() => {
             special_redemption_service_1.SpecialRedemptionService.expireStaleRedemptions()
                 .then((n) => { if (n > 0)
                 logger_1.logger.info({ expired: n }, 'cron_special_redemptions_expired'); })
                 .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_special_redemptions_error'));
+            ride_settlement_service_1.RideSettlementService.sweepExpiredAdditionalCharges()
+                .then((n) => { if (n > 0)
+                logger_1.logger.info({ retried: n }, 'cron_special_expiry_retry'); })
+                .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_special_expiry_retry_error'));
+            special_redemption_service_1.SpecialRedemptionService.reconcileSettledRedemptions()
+                .then((n) => { if (n > 0)
+                logger_1.logger.info({ reconciled: n }, 'cron_special_settlement_reconcile'); })
+                .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_special_settlement_reconcile_error'));
         }, 5 * 60 * 1000);
         // Scheduled Rides Job (Every 1 minute)
         Promise.resolve().then(() => __importStar(require('./services/scheduler.service'))).then(({ SchedulerService }) => {
@@ -796,19 +821,37 @@ function startServer() {
             VehicleDataService.syncCommonVehicles()
                 .catch((err) => console.error(`[VEHICLE SYNC] ⚠️ Background sync failed (non-fatal): ${err.message}`));
         });
-        // Weekly auto-payout sweep — checks once per minute, only fires on
-        // Monday 09:00 UTC. Idempotent via Redis lock + partial UNIQUE INDEX.
+        // Weekly auto-payout sweep — RETIRED: withdrawals are manual only (driver
+        // presses Withdraw in the app; created once per week, window opens Monday
+        // 00:00 UTC). The tick is kept as a no-op guard, not a scheduler.
         Promise.resolve().then(() => __importStar(require('./services/weeklyPayouts.service'))).then(({ WeeklyPayoutsService }) => {
             setInterval(() => {
                 WeeklyPayoutsService.tick()
                     .then((r) => {
-                    if (r.fired)
-                        logger_1.logger.info({ processed: r.processed }, 'cron_weekly_payouts_fired');
-                    else if (r.skipped.length)
-                        logger_1.logger.info({ skipped: r.skipped }, 'cron_weekly_payouts_skipped');
+                    if (r.skipped.some((s) => s !== 'manual-withdrawals-only')) {
+                        logger_1.logger.warn({ skipped: r.skipped }, 'cron_weekly_payouts_UNEXPECTED');
+                    }
                 })
                     .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_weekly_payouts_error'));
-            }, 60 * 1000);
+            }, 60 * 60 * 1000); // hourly no-op guard, never creates payouts
+        });
+        // Manual sponsor budget withdrawals: replay refunds for PENDING/FAILED
+        // requests (idempotent via per-charge refund keys).
+        Promise.resolve().then(() => __importStar(require('./modules/payments/withdrawal.service'))).then(({ sweepSponsorWithdrawals, sweepDriverPayouts }) => {
+            setInterval(() => {
+                sweepSponsorWithdrawals()
+                    .then((n) => { if (n > 0)
+                    logger_1.logger.info({ retried: n }, 'cron_sponsor_withdrawals_retry'); })
+                    .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_sponsor_withdrawals_error'));
+                // AUTOMATIC driver payouts: requests are transferred immediately; this
+                // sweep retries payouts whose transfer is still pending because the
+                // connected account was not yet eligible or the Stripe API was
+                // temporarily unavailable. No Admin approval is involved.
+                sweepDriverPayouts()
+                    .then((n) => { if (n > 0)
+                    logger_1.logger.info({ transferred: n }, 'cron_driver_payouts_auto'); })
+                    .catch((err) => logger_1.logger.error({ err: err.message }, 'cron_driver_payouts_error'));
+            }, 5 * 60 * 1000);
         });
     }
 }

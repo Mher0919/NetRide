@@ -336,6 +336,9 @@ model Ride {
   cancellation_reason_text String?
 
   created_at DateTime? @default(now()) @db.Timestamptz(6)
+  /// Bumped on every status-affecting write. Included in every payload so
+  /// clients can discard out-of-order/duplicate events (see migration 055).
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
 
   rider          User?              @relation("RiderRides", fields: [rider_id], references: [id])
   driver         User?              @relation("DriverRides", fields: [driver_id], references: [id])

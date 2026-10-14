@@ -3,6 +3,13 @@ export declare class RideController {
     static requestRide(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static estimateRide(req: any, res: Response): Promise<void>;
     static acceptTrip(req: any, res: Response): Promise<void>;
+    /**
+     * REST decline used by notification actions (background isolates cannot
+     * open a socket). Idempotent: a repeated decline of the same offer is a
+     * no-op success, and the per-driver exclusion guarantees the ride is
+     * never re-offered to this driver.
+     */
+    static declineTrip(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static rateRide(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static getHistory(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static deleteHistory(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;

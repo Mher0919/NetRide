@@ -903,6 +903,9 @@ class _MapScreenState extends State<MapScreen>
   }
 
   Future<void> _confirmRide() async {
+    // Double-tap / re-entrancy guard: the CTA is disabled while the request
+    // is in flight, and this guard makes a programmatic second call a no-op.
+    if (_requesting) return;
     if (_pickup == null || _destination == null) return;
     // SPECIALS: attach the rider's CREATED redemption (if any) so the
     // backend applies the sponsor discount inside the pricing transaction.
@@ -1139,16 +1142,17 @@ class _MapScreenState extends State<MapScreen>
     );
 
     // When a driver accepts, leave the map and go to the active trip
-    // screen. Covers BOTH the initial request (`_requesting`) and a resumed
-    // search after a driver cancellation (`_resumedSearchTripId` engaged):
-    // the ride staying on this map is only ever a SEARCHING state. The
-    // sheet being open is the single requirement — a ride accepted for
-    // this rider while this sheet is up always lands on the trip screen.
-    final acceptedByMapFlow =
-        _panelOpen &&
-        rideProvider.tripId != null &&
-        rideProvider.status == models.TripStatus.ACCEPTED;
-    if (acceptedByMapFlow && !_hasNavigatedToTrip) {
+    // screen. This fires for ANY active trip state once the map is the
+    // visible route — including a cold-start restore that lands directly
+    // on a server-confirmed ACCEPTED/DRIVER_ARRIVING/IN_PROGRESS ride
+    // (previously such a restore could strand the rider on Explore because
+    // the panel had never opened). The ride staying on this map is only
+    // ever a SEARCHING state.
+    final activeTripForNavigation = rideProvider.tripId != null &&
+        (rideProvider.status == models.TripStatus.ACCEPTED ||
+            rideProvider.status == models.TripStatus.DRIVER_ARRIVING ||
+            rideProvider.status == models.TripStatus.IN_PROGRESS);
+    if (activeTripForNavigation && !_hasNavigatedToTrip) {
       _hasNavigatedToTrip = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.pushReplacementNamed(context, '/trip');
@@ -2066,36 +2070,76 @@ class _MapScreenState extends State<MapScreen>
                           ),
                         ),
                         const SizedBox(height: 20),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Provider.of<RideProvider>(
-                              context,
-                              listen: false,
-                            ).clearRequestFailure();
-                            _closePanel(cancelIfRequesting: false);
-                          },
-                          icon: const Icon(
-                            Icons.close,
-                            size: 18,
-                            color: Color(0xFF5B7760),
-                          ),
-                          label: const Text(
-                            'Close',
-                            style: TextStyle(
-                              color: Color(0xFF5B7760),
-                              fontWeight: FontWeight.w700,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                // Safe retry: the provider re-issues the SAME
+                                // idempotency key, so an outcome that was
+                                // actually successful resolves to the same
+                                // ride instead of creating a duplicate.
+                                Provider.of<RideProvider>(
+                                  context,
+                                  listen: false,
+                                ).retryPendingRequest();
+                              },
+                              icon: const Icon(
+                                Icons.refresh,
+                                size: 18,
+                                color: Color(0xFF5B7760),
+                              ),
+                              label: const Text(
+                                'Try Again',
+                                style: TextStyle(
+                                  color: Color(0xFF5B7760),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFF5B7760)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 12,
+                                ),
+                              ),
                             ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xFF5B7760)),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                            const SizedBox(width: 10),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                Provider.of<RideProvider>(
+                                  context,
+                                  listen: false,
+                                ).clearRequestFailure();
+                                _closePanel(cancelIfRequesting: false);
+                              },
+                              icon: const Icon(
+                                Icons.close,
+                                size: 18,
+                                color: Color(0xFFC65A5A),
+                              ),
+                              label: const Text(
+                                'Close',
+                                style: TextStyle(
+                                  color: Color(0xFFC65A5A),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFFE5B9B9)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 12,
+                                ),
+                              ),
                             ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 22,
-                              vertical: 12,
-                            ),
-                          ),
+                          ],
                         ),
                       ],
                     )

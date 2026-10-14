@@ -18,6 +18,9 @@ require('ts-node').register({
 require('./src/modules/routing/__tests__/routing.unit.test.ts');
 require('./src/modules/rewards/__tests__/rewards.unit.test.ts');
 require('./src/modules/ride/__tests__/ride-cancellation.unit.test.ts');
+require('./src/modules/ride/__tests__/ride-state-guards.unit.test.ts');
+require('./src/modules/location/__tests__/location-freshness.unit.test.ts');
+require('./src/queue/__tests__/cleanup-stale-rides.unit.test.ts');
 require('./src/modules/referral/__tests__/referral-onboarding.unit.test.ts');
 require('./src/modules/credits/__tests__/credits-cap.unit.test.ts');
 require('./src/modules/wallet/__tests__/wallet-cap.unit.test.ts');

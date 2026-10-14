@@ -14,7 +14,6 @@ export declare class DriverController {
     static getVehicleModelsByMake(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static submitProfileChange(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static getCurrentProfileChange(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
-    static addPayoutCard(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static getWallet(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static requestOnDemandPayout(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static listMyPayouts(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;

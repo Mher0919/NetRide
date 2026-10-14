@@ -38,7 +38,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>NetRide uses your location to show nearby ride requests, calculate earnings, and navigate to riders.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>NetRide uses your location to show nearby ride requests, calculate earnings, and navigate to riders.</string>
+	<string>NetRide keeps using your location in the background while you are online or on a trip, so riders can see you approaching and your trip navigation keeps working when the app is minimized or the screen is locked. You can go offline at any time to stop it.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>NetRide keeps using your location in the background while you are online or on a trip, so riders can see you approaching and your trip navigation keeps working when the app is minimized or the screen is locked. You can go offline at any time to stop it.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>NetRide uses the microphone to record vehicle photos and trip videos.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -67,6 +69,9 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+		<!-- Continuous driver location while online/on-trip (Core Location
+		     background updates + the iOS blue location indicator). -->
+		<string>location</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>

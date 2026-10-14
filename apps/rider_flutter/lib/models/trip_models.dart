@@ -139,6 +139,10 @@ class Trip {
   final RiderInfo? riderInfo;
   final DriverInfo? driverInfo;
 
+  /// Server-side monotonic version (backend rides.updated_at). Used to drop
+  /// out-of-order/duplicate socket events for the same trip.
+  final DateTime? updatedAt;
+
   /// Cancellation audit trail (042): who ended the ride and why.
   final String? cancelledBy;
   final String? cancellationReasonCode;
@@ -156,6 +160,7 @@ class Trip {
     this.savingLikelihood,
     this.riderInfo,
     this.driverInfo,
+    this.updatedAt,
     this.cancelledBy,
     this.cancellationReasonCode,
     this.cancellationReasonText,
@@ -179,6 +184,9 @@ class Trip {
       savingLikelihood: (json['saving_likelihood'] as num?)?.toInt(),
       riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
       driverInfo: json['driver_info'] != null ? DriverInfo.fromJson(json['driver_info']) : null,
+      updatedAt: json['updated_at'] != null
+          ? DateTime.tryParse(json['updated_at'].toString())
+          : null,
       cancelledBy: json['cancelled_by']?.toString(),
       cancellationReasonCode: json['cancellation_reason_code']?.toString(),
       cancellationReasonText: json['cancellation_reason_text']?.toString(),

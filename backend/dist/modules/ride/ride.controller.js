@@ -36,6 +36,8 @@ const RequestRideSchema = zod_1.z.object({
     // Mirrors the socket requestRide payload so both request paths carry the
     // special ride end-to-end (discount snapshot + sponsor budget reserve).
     specialRedemptionId: zod_1.z.string().uuid().optional(),
+    // Explicit consent to the conditional no-show additional charge.
+    specialTermsAccepted: zod_1.z.boolean().optional(),
 });
 const EstimateRideSchema = zod_1.z.object({
     pickup: zod_1.z.object({
@@ -68,12 +70,15 @@ class RideController {
             if (user?.verification_status === 'PENDING') {
                 return res.status(403).json({ error: 'Your account is undergoing age verification. Requests are restricted until completed.' });
             }
-            const trip = await ride_service_1.RideService.requestRide(riderId, validatedData.pickup, validatedData.destination, validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined, validatedData.isScheduled, validatedData.idempotencyKey, { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents, specialRedemptionId: validatedData.specialRedemptionId }, validatedData.favoritePriority);
+            const trip = await ride_service_1.RideService.requestRide(riderId, validatedData.pickup, validatedData.destination, validatedData.scheduledAt ? new Date(validatedData.scheduledAt) : undefined, validatedData.isScheduled, validatedData.idempotencyKey, { promoCode: validatedData.promoCode, applyCredits: validatedData.applyCredits, creditUseCents: validatedData.creditUseCents, specialRedemptionId: validatedData.specialRedemptionId, specialTermsAccepted: validatedData.specialTermsAccepted }, validatedData.favoritePriority);
             res.status(201).json(trip);
         }
         catch (error) {
             console.error(`[RIDE] ❌ Request error: ${error.message}`);
-            res.status(400).json({ error: error.message || 'Unable to process your ride request.' });
+            const body = { error: error.message || 'Unable to process your ride request.' };
+            if (error?.code)
+                body.code = error.code;
+            res.status(error?.code === 'PAYMENT_METHOD_REQUIRED' ? 402 : 400).json(body);
         }
     }
     static async estimateRide(req, res) {
@@ -111,7 +116,40 @@ class RideController {
         }
         catch (error) {
             console.error(`[RIDE] ❌ Accept error: ${error.message}`);
-            res.status(400).json({ error: error.message || 'Failed to accept trip.' });
+            // Confirmed rejection (offer gone / ride taken / cancelled) is a 409;
+            // malformed or unauthorized input stays a 400. Notification-action
+            // clients use this distinction to stop retrying.
+            const msg = String(error.message || '');
+            const conflict = /already taken|no active offer|different driver|expired|already declined|cancelled/i.test(msg);
+            res.status(conflict ? 409 : 400).json({
+                error: msg || 'Failed to accept trip.',
+                code: conflict ? 'OFFER_UNAVAILABLE' : 'ACCEPT_REJECTED',
+            });
+        }
+    }
+    /**
+     * REST decline used by notification actions (background isolates cannot
+     * open a socket). Idempotent: a repeated decline of the same offer is a
+     * no-op success, and the per-driver exclusion guarantees the ride is
+     * never re-offered to this driver.
+     */
+    static async declineTrip(req, res) {
+        try {
+            const driverId = req.user?.id;
+            if (!driverId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const parsed = zod_1.z
+                .object({
+                tripId: zod_1.z.string().uuid(),
+                offerId: zod_1.z.string().uuid().optional(),
+            })
+                .parse(req.body);
+            const result = await ride_service_1.RideService.declineTrip(parsed.tripId, driverId, parsed.offerId);
+            res.json(result);
+        }
+        catch (error) {
+            console.error(`[RIDE] ❌ Decline error: ${error.message}`);
+            res.status(400).json({ error: error.message || 'Failed to decline trip.' });
         }
     }
     static async rateRide(req, res) {

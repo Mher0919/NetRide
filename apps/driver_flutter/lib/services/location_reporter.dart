@@ -20,8 +20,17 @@ class LocationReporter {
     this.maxStaleInterval = const Duration(seconds: 4),
   });
 
-  /// Invoked when a report should actually be sent.
-  final void Function(double lat, double lng, {double heading}) onReport;
+  /// Invoked when a report should actually be sent. Carries the fix's
+  /// accuracy and mock flag so the server can store a quality-annotated,
+  /// timestamped observation instead of a bare coordinate.
+  final void Function(
+    double lat,
+    double lng, {
+    double heading,
+    double? accuracy,
+    double? speed,
+    bool mock,
+  }) onReport;
 
   /// Minimum time between two reports.
   final Duration minInterval;
@@ -40,7 +49,14 @@ class LocationReporter {
   double? _lastLng;
   double? _lastHeading;
 
-  void report(double lat, double lng, {double heading = 0}) {
+  void report(
+    double lat,
+    double lng, {
+    double heading = 0,
+    double? accuracy,
+    double? speed,
+    bool mock = false,
+  }) {
     final now = DateTime.now();
     final lastAt = _lastSentAt;
     final stale = lastAt == null || now.difference(lastAt) >= maxStaleInterval;
@@ -64,7 +80,8 @@ class LocationReporter {
     _lastLat = lat;
     _lastLng = lng;
     _lastHeading = heading;
-    onReport(lat, lng, heading: heading);
+    onReport(lat, lng,
+        heading: heading, accuracy: accuracy, speed: speed, mock: mock);
   }
 
   static double _haversineMeters(double lat1, double lng1, double lat2, double lng2) {

@@ -256,6 +256,7 @@ class _TripScreenState extends State<TripScreen> {
     // accept that must be rolled back to the dashboard.
     if (trip != null &&
         (trip.status == models.TripStatus.ACCEPTED ||
+            trip.status == models.TripStatus.DRIVER_ARRIVING ||
             trip.status == models.TripStatus.IN_PROGRESS)) {
       _tripEverConfirmed = true;
     }
@@ -380,6 +381,8 @@ class _TripScreenState extends State<TripScreen> {
               _isActionInRange(trip, driverProvider, isPickup: true),
           canCompleteTrip:
               _isActionInRange(trip, driverProvider, isPickup: false),
+          arrivedAtPickup: trip.status == models.TripStatus.DRIVER_ARRIVING,
+          actionPending: driverProvider.tripActionPending,
           pickupAddress: trip.pickup.address ?? 'Pickup',
           destinationAddress: trip.destination.address ?? 'Destination',
           onPickupRider: () => driverProvider.pickUpRider(trip.id),
@@ -389,8 +392,10 @@ class _TripScreenState extends State<TripScreen> {
         ),
         // Ride actions menu (⋯ bottom-right) — holds Cancel Ride. Keeps the
         // top of the navigation screen free of overlapping controls; only
-        // available before pickup (ACCEPTED status), like the old pills.
-        if (trip.status == models.TripStatus.ACCEPTED)
+        // available before pickup (ACCEPTED / DRIVER_ARRIVING), like the old
+        // pills.
+        if (trip.status == models.TripStatus.ACCEPTED ||
+            trip.status == models.TripStatus.DRIVER_ARRIVING)
           Positioned(
             right: 16,
             bottom: 322,
@@ -400,7 +405,8 @@ class _TripScreenState extends State<TripScreen> {
             ),
           ),
         if (!_isActionInRange(trip, driverProvider,
-            isPickup: trip.status == models.TripStatus.ACCEPTED))
+            isPickup: trip.status == models.TripStatus.ACCEPTED ||
+                trip.status == models.TripStatus.DRIVER_ARRIVING))
           Positioned(
             bottom: 280,
             left: 20,
@@ -755,7 +761,8 @@ class _TripScreenState extends State<TripScreen> {
   String _outOfRangeHint(models.Trip trip, DriverProvider provider) {
     final loc = provider.lastLocation;
     if (loc == null) return 'Waiting for GPS signal...';
-    final isPickup = trip.status == models.TripStatus.ACCEPTED;
+    final isPickup = trip.status == models.TripStatus.ACCEPTED ||
+        trip.status == models.TripStatus.DRIVER_ARRIVING;
     final m = _metersFromDriverTo(
       isPickup
           ? LatLng(trip.pickup.lat, trip.pickup.lng)

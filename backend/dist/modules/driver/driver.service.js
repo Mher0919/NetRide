@@ -6,6 +6,8 @@ const email_service_1 = require("../../services/email.service");
 const env_1 = require("../../config/env");
 const card_1 = require("../../utils/card");
 const pricing_service_1 = require("../../services/pricing.service");
+const withdrawal_service_1 = require("../payments/withdrawal.service");
+const connect_service_1 = require("../payments/connect.service");
 class DriverService {
     static async getProfile(userId) {
         const res = await database_1.pool.query(`SELECT u.*, d.*
@@ -646,50 +648,60 @@ class DriverService {
     // ============================================================
     // Wallet + payout cards + payouts (020)
     // ============================================================
-    static async addPayoutCard(userId, payload) {
-        const digits = String(payload.card_number).replace(/\D/g, '');
-        if (!(0, card_1.isValidLuhn)(digits))
-            throw new Error('INVALID_CARD: Card number failed validation.');
-        const brand = (0, card_1.detectCardBrand)(digits);
-        const l4 = digits.slice(-4);
-        const ins = await database_1.pool.query(`INSERT INTO payout_cards (driver_id, brand, last4, exp_month, exp_year, cardholder_name, zip, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING') RETURNING id, created_at`, [userId, brand, l4, payload.exp_month, payload.exp_year, payload.cardholder_name.trim(), payload.zip.trim()]);
-        // Make sure the wallet row exists so an admin approval can attach a card.
-        await database_1.pool.query(`INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`, [userId]);
-        // Notify admin
-        try {
-            const driverInfo = await database_1.pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [userId]);
-            await email_service_1.EmailService.sendPayoutCardNotice({ email: env_1.env.ADMIN_NOTIFY_EMAIL || '' }, { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' }, { id: ins.rows[0].id, brand, last4: l4 });
-        }
-        catch (e) {
-            console.warn('[DRIVER] ⚠️ Payout-card admin notice failed:', e.message);
-        }
-        return {
-            card_id: ins.rows[0].id,
-            status: 'PENDING',
-            brand,
-            last4: l4,
-            exp_month: payload.exp_month,
-            exp_year: payload.exp_year,
-        };
-    }
     static async getWallet(userId) {
         // Ensure the wallet row exists.
         await database_1.pool.query(`INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`, [userId]);
         const wRes = await database_1.pool.query(`SELECT * FROM driver_wallets WHERE driver_id = $1`, [userId]);
         const wallet = wRes.rows[0];
-        let cardSummary = null;
-        if (wallet?.payout_card_id) {
-            const cRes = await database_1.pool.query(`SELECT id, brand, last4, exp_month, exp_year, cardholder_name, status FROM payout_cards WHERE id = $1`, [wallet.payout_card_id]);
-            cardSummary = cRes.rows[0] ?? null;
-        }
         const pRes = await database_1.pool.query(`SELECT id, amount_cents, fee_cents, net_cents, status, method, requested_at, processed_at, reference, notes
        FROM payouts WHERE driver_id = $1 ORDER BY requested_at DESC LIMIT 5`, [userId]);
+        // Trailing-7-day rollup from the SETTLED financial ledger (the same
+        // source that funded the wallet credits) so the driver app's "THIS
+        // WEEK" card can never drift from the balance. `driver_share_cents`
+        // is the fare take-home; `tip_cents` is the tip captured at
+        // completion. Tips added AFTER completion land as TIP_CREDIT wallet
+        // credits instead, so they are summed separately (never double-counted).
+        const weekRes = await database_1.pool.query(`SELECT
+         COALESCE(SUM(driver_share_cents), 0) AS earnings_cents,
+         COALESCE(SUM(tip_cents), 0)          AS tip_cents,
+         COUNT(*)                             AS rides
+       FROM financial_transactions
+       WHERE driver_id = $1 AND status = 'SETTLED' AND type = 'RIDE_COMPLETION'
+         AND completed_at >= NOW() - INTERVAL '7 days'`, [userId]);
+        const afterTipRes = await database_1.pool.query(`SELECT COALESCE(SUM(amount_cents), 0) AS cents
+       FROM payouts
+       WHERE driver_id = $1 AND method = 'TIP_CREDIT'
+         AND (processed_at >= NOW() - INTERVAL '7 days'
+              OR (processed_at IS NULL AND requested_at >= NOW() - INTERVAL '7 days'))`, [userId]);
+        const week = weekRes.rows[0] ?? {};
         return {
             balance_cents: Number(wallet?.balance_cents ?? 0),
             lifetime_earnings_cents: Number(wallet?.lifetime_earnings_cents ?? 0),
-            payout_card: cardSummary,
-            recent_payouts: pRes.rows,
+            // Server-computed "This Week" (last 7 days) — the driver app renders
+            // these directly; it never sums ride fares client-side.
+            this_week: {
+                earnings_cents: Number(week.earnings_cents ?? 0),
+                tips_cents: Number(week.tip_cents ?? 0) +
+                    Number(afterTipRes.rows[0]?.cents ?? 0),
+                rides: Number(week.rides ?? 0),
+            },
+            // Weekly manual-withdrawal availability (defaults to eligible when the
+            // state read fails — the request endpoint still enforces it).
+            withdrawal: await (0, withdrawal_service_1.driverWithdrawalState)(userId).catch(() => ({ eligible: true, nextAvailableAt: new Date() })),
+            // pg returns BIGINT columns as strings — normalize to numbers so the
+            // mobile client never hits a `String is not subtype of num` cast error.
+            recent_payouts: (pRes.rows ?? []).map((r) => ({
+                id: r.id,
+                amount_cents: Number(r.amount_cents ?? 0),
+                fee_cents: Number(r.fee_cents ?? 0),
+                net_cents: Number(r.net_cents ?? 0),
+                status: r.status,
+                method: r.method,
+                requested_at: r.requested_at,
+                processed_at: r.processed_at,
+                reference: r.reference,
+                notes: r.notes,
+            })),
         };
     }
     static async requestOnDemandPayout(userId, amountCents) {
@@ -697,13 +709,36 @@ class DriverService {
         if (amountCents < MIN_PAYOUT_CENTS) {
             throw new Error(`MIN_PAYOUT: Minimum on-demand payout is $${MIN_PAYOUT_CENTS / 100}.`);
         }
+        // Weekly rule (existing): one withdrawal per calendar week; the window
+        // opens every Monday 00:00 UTC regardless of when the last withdrawal
+        // happened.
+        await (0, withdrawal_service_1.assertDriverCanWithdraw)(userId);
         await database_1.pool.query(`INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`, [userId]);
         const wRes = await database_1.pool.query(`SELECT * FROM driver_wallets WHERE driver_id = $1`, [userId]);
         const wallet = wRes.rows[0];
-        if (!wallet?.payout_card_id)
-            throw new Error('NO_PAYOUT_CARD: Add a payout card before requesting a payout.');
         if (Number(wallet.balance_cents) < amountCents) {
             throw new Error('INSUFFICIENT_BALANCE: Requested amount exceeds your wallet balance.');
+        }
+        // Payouts go to the driver's Stripe Connect account — NetRide never
+        // collects bank/card payout details. Make sure the connected account
+        // exists (created once, reused on every later request), then check
+        // Stripe's LIVE state for payout eligibility BEFORE the wallet is
+        // debited. A driver whose verification is incomplete or restricted is
+        // told to finish payout setup; their balance is untouched.
+        const { accountId } = await connect_service_1.ConnectService.ensureAccount(userId);
+        try {
+            const status = await connect_service_1.ConnectService.syncAccountStatus(userId);
+            if (!status.payoutsEnabled) {
+                throw new Error('CONNECT_SETUP_REQUIRED: Finish your Stripe payout setup before requesting a payout.');
+            }
+        }
+        catch (err) {
+            if (err?.message?.includes('CONNECT_SETUP_REQUIRED'))
+                throw err;
+            // Stripe API temporarily unavailable: the eligibility decision is
+            // deferred — the payout row (if created) is processed automatically
+            // by the retry sweep once Stripe is reachable again.
+            console.warn(`[DRIVER] ⚠️ Connect status sync failed for ${userId}: ${err?.message}`);
         }
         const fee = Math.round(amountCents * 0.05);
         const net = amountCents - fee;
@@ -716,8 +751,8 @@ class DriverService {
          WHERE driver_id = $2 AND balance_cents >= $1 RETURNING balance_cents`, [amountCents, userId]);
             if (!upd.rowCount)
                 throw new Error('INSUFFICIENT_BALANCE: Insufficient wallet balance.');
-            const ins = await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method)
-         VALUES ($1, $2, $3, $4, 'PENDING', 'ON_DEMAND') RETURNING id, requested_at`, [userId, amountCents, fee, net]);
+            const ins = await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, notes)
+         VALUES ($1, $2, $3, $4, 'PENDING', 'ON_DEMAND', 'Stripe Connect account ' || $5) RETURNING id, requested_at`, [userId, amountCents, fee, net, accountId]);
             payoutId = ins.rows[0].id;
             await client.query('COMMIT');
         }
@@ -728,21 +763,29 @@ class DriverService {
         finally {
             client.release();
         }
-        // Admin notification
-        try {
-            const driverInfo = await database_1.pool.query(`SELECT email, full_name FROM users WHERE id = $1`, [userId]);
-            await email_service_1.EmailService.sendPayoutRequestedNotice({ email: env_1.env.ADMIN_NOTIFY_EMAIL || '' }, { id: userId, email: driverInfo.rows[0]?.email ?? '', full_name: driverInfo.rows[0]?.full_name ?? 'Driver' }, { id: payoutId, amount_cents: amountCents, fee_cents: fee, net_cents: net, method: 'ON_DEMAND' });
-        }
-        catch (e) {
-            console.warn('[DRIVER] ⚠️ Payout-request admin notice failed:', e.message);
-        }
+        // AUTOMATIC transfer: no Admin approval step. The transfer only runs if
+        // Stripe's live account state says payouts are enabled; otherwise the
+        // row stays PENDING and an automatic sweep retries it once the account
+        // is eligible.
+        const transfer = await (0, withdrawal_service_1.executeDriverPayout)({
+            payoutId,
+            driverId: userId,
+            amountCents: net,
+            description: 'NetRide on-demand payout',
+        });
         return {
             payout_id: payoutId,
             amount_cents: amountCents,
             fee_cents: fee,
             net_cents: net,
-            status: 'PENDING',
+            status: transfer.transferred ? 'PAID' : 'PENDING',
             method: 'ON_DEMAND',
+            transfer: {
+                transferred: transfer.transferred,
+                transferId: transfer.transferId ?? null,
+                reason: transfer.reason ?? null,
+                requiresPayoutSetup: !transfer.transferred && (transfer.reason === 'payouts_not_enabled' || transfer.reason === 'no_connect_account'),
+            },
         };
     }
     static async listMyPayouts(userId, limit, offset) {

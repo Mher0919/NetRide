@@ -38,6 +38,12 @@ import {
   notifyWalletCharged,
 } from '../../services/notification.service';
 import { cancellationReasonLabel } from '../reporting/report.reasons';
+import {
+  TerminalCancelGuard,
+  buildTerminalCancelGuardSql,
+} from './ride-state.rules';
+
+export { TerminalCancelGuard, buildTerminalCancelGuardSql } from './ride-state.rules';
 
 /** Display name of a platform user (used in notification copy). */
 async function fetchDisplayName(userId: string): Promise<string> {
@@ -478,7 +484,7 @@ export class RideService {
     const acceptRes = await pool.query(
       `UPDATE rides
           SET status = $2, driver_id = $3, accepted_at = $4,
-              compliance_snapshot = $5, fare_amount = $6
+              compliance_snapshot = $5, fare_amount = $6, updated_at = NOW()
         WHERE id = $1 AND status = $7
         RETURNING id`,
       [tripId, 'ACCEPTED', driverId, new Date(), JSON.stringify(complianceSnapshot), finalFare, TripStatus.REQUESTED],
@@ -573,6 +579,82 @@ export class RideService {
       .catch(() => undefined);
 
     return updatedTrip;
+  }
+
+  /**
+   * Atomic ACCEPTED → DRIVER_ARRIVING transition, triggered when a fresh,
+   * non-mock driver fix enters the pickup radius. Idempotent: a repeated
+   * call after the flip returns `changed: false` without touching the row,
+   * so concurrent location updates can never double-broadcast or regress a
+   * ride that already started.
+   */
+  static async markDriverArriving(
+    tripId: string,
+    driverId: string,
+  ): Promise<{ changed: boolean; trip: Trip }> {
+    const res = await pool.query(
+      `UPDATE rides
+          SET status = $3, updated_at = NOW()
+        WHERE id = $1 AND driver_id = $2 AND status = $4
+        RETURNING id`,
+      [tripId, driverId, TripStatus.DRIVER_ARRIVING, TripStatus.ACCEPTED],
+    );
+    const trip = await RideRepository.findById(tripId);
+    if (!trip) throw new Error('Trip not found');
+    return { changed: (res.rowCount ?? 0) > 0, trip };
+  }
+
+  /**
+   * Decline a ride offer. Idempotent and safe to retry from either the
+   * socket or the REST notification-action path: the offer transition only
+   * fires from SENT, the driver-specific exclusion upsert is keyed by
+   * (ride, driver), and matching is only re-enqueued while the ride is
+   * still REQUESTED.
+   */
+  static async declineTrip(
+    tripId: string,
+    driverId: string,
+    offerId?: string,
+  ): Promise<{ declined: boolean }> {
+    const { DriverOfferService } = await import('../../services/driver-offer.service');
+
+    let declined = false;
+    if (offerId) {
+      const offer = await DriverOfferService.getOffer(offerId);
+      // Only the driver the offer actually belongs to may decline it.
+      if (offer && offer.driverId === driverId && offer.rideId === tripId) {
+        declined = await DriverOfferService.declineOffer(offerId);
+        await DriverOfferService.releaseDriver(driverId);
+      }
+    } else {
+      await DriverOfferService.releaseDriver(driverId);
+    }
+
+    const { RideRejectionService } = await import('../../services/ride-rejection.service');
+    await RideRejectionService.recordRejection(tripId, driverId).catch((err: any) => {
+      console.error(`[RIDE] Failed to persist rejection for ${tripId}/${driverId}: ${err.message}`);
+    });
+
+    const trip = await RideRepository.findById(tripId);
+    if (trip && trip.status === TripStatus.REQUESTED) {
+      const pickupLat = (trip as any).pickup?.lat ?? 0;
+      const pickupLng = (trip as any).pickup?.lng ?? 0;
+      if (env.LEGACY_SYNC_MATCHING) {
+        const { matchingService } = await import('../../services/matching.service');
+        matchingService
+          .findAndDispatch(getIo(), tripId, pickupLat, pickupLng, trip.rider_id)
+          .catch((err: any) => console.error(`[RIDE] In-process re-match failed for ${tripId}: ${err.message}`));
+      } else {
+        matchQueue.add('matchRide', {
+          tripId,
+          pickupLat,
+          pickupLng,
+          riderId: trip.rider_id,
+          retryCount: 0,
+        }).catch((err) => console.error(`[RIDE] Failed to enqueue re-match after decline: ${err.message}`));
+      }
+    }
+    return { declined };
   }
 
   static async updateTripStatus(
@@ -1127,7 +1209,7 @@ export class RideService {
    */
   static async cancelTripSystem(
     tripId: string,
-    opts: { reasonText?: string } = {},
+    opts: { reasonText?: string; guard?: TerminalCancelGuard } = {},
   ): Promise<Trip | null> {
     const trip = await RideRepository.findById(tripId);
     if (!trip) return null;
@@ -1168,7 +1250,7 @@ export class RideService {
       .trim()
       .slice(0, 300);
 
-    return RideService._terminalCancel(trip, null, null, reasonText);
+    return RideService._terminalCancel(trip, null, null, reasonText, opts.guard);
   }
 
   /**
@@ -1182,30 +1264,46 @@ export class RideService {
     cancelledBy: string | null,
     reasonCode: string | null,
     reasonText: string | null,
+    guard?: TerminalCancelGuard,
   ): Promise<Trip> {
     const tripId = trip.id;
 
     // Atomic transition: the WHERE guard means a concurrent ACCEPT that
     // commits between our read and this update wins the race — we never
-    // overwrite a fresher state (accept-vs-cancel race safety).
+    // overwrite a fresher state (accept-vs-cancel race safety). When a
+    // watchdog guard is supplied, the same UPDATE re-verifies the age and
+    // state predicate so a ride that started between query and write is
+    // left alone.
+    const statuses = guard?.statuses && guard.statuses.length > 0
+      ? guard.statuses
+      : [
+          TripStatus.REQUESTED,
+          TripStatus.ACCEPTED,
+          TripStatus.IN_PROGRESS,
+          TripStatus.DRIVER_ARRIVING,
+        ];
+
+    const built = buildTerminalCancelGuardSql(statuses, guard, 7);
+    const values: any[] = [
+      tripId,
+      TripStatus.CANCELLED,
+      new Date(),
+      cancelledBy,
+      reasonCode,
+      reasonText,
+      ...statuses,
+      ...built.extraValues,
+    ];
+    const where = `id = $1 AND status IN (${built.statusPlaceholders})${built.extraWhere}`;
+
     const cancelRes = await pool.query(
       `UPDATE rides
           SET status = $2, cancelled_at = $3, cancelled_by = $4,
-              cancellation_reason_code = $5, cancellation_reason_text = $6
-        WHERE id = $1 AND status IN ($7, $8, $9, $10)
+              cancellation_reason_code = $5, cancellation_reason_text = $6,
+              updated_at = NOW()
+        WHERE ${where}
         RETURNING id`,
-      [
-        tripId,
-        TripStatus.CANCELLED,
-        new Date(),
-        cancelledBy,
-        reasonCode,
-        reasonText,
-        TripStatus.REQUESTED,
-        TripStatus.ACCEPTED,
-        TripStatus.IN_PROGRESS,
-        TripStatus.DRIVER_ARRIVING,
-      ],
+      values,
     );
 
     if ((cancelRes.rowCount ?? 0) === 0) {
@@ -1213,6 +1311,9 @@ export class RideService {
       // (driver accepted, or the ride was already cancelled/completed).
       const latest = await RideRepository.findById(tripId);
       if (latest?.status === TripStatus.CANCELLED) return latest; // idempotent
+      // A watchdog guard miss is a benign race: the ride progressed, so the
+      // sweep must not throw (it isn't the sweep's ride any more).
+      if (guard) return latest ?? trip;
       throw new Error('Cannot cancel a ride that is already completed');
     }
 

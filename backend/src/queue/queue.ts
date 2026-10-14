@@ -2,10 +2,38 @@ import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 
-const connection = {
-  host: new URL(env.REDIS_URL).hostname || '127.0.0.1',
-  port: parseInt(new URL(env.REDIS_URL).port || '6379'),
-};
+// Preserve the auth/TLS of the configured Redis URL. The previous
+// host+port-only connection silently dropped username/password and
+// `rediss://` TLS, breaking every queue/worker on a managed Redis.
+function buildBullConnection(): {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  tls?: Record<string, never>;
+} {
+  try {
+    const url = new URL(env.REDIS_URL);
+    const conn: {
+      host: string;
+      port: number;
+      username?: string;
+      password?: string;
+      tls?: Record<string, never>;
+    } = {
+      host: url.hostname || '127.0.0.1',
+      port: parseInt(url.port || '6379', 10),
+    };
+    if (url.username) conn.username = decodeURIComponent(url.username);
+    if (url.password) conn.password = decodeURIComponent(url.password);
+    if (url.protocol === 'rediss:') conn.tls = {};
+    return conn;
+  } catch {
+    return { host: '127.0.0.1', port: 6379 };
+  }
+}
+
+const connection = buildBullConnection();
 
 export const matchQueue = new Queue('match-ride', {
   connection,

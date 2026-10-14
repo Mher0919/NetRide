@@ -983,18 +983,31 @@ export class AdminController {
 
     try {
       const { RideService } = await import('../ride/ride.service');
+      const rideSnapshot = await prisma.ride.findUnique({
+        where: { id },
+        select: { status: true, driver_id: true, rider_id: true },
+      });
       const trip = await RideService.cancelTrip(id, adminId, {
         reasonCode: 'ADMIN_CANCELLED',
         reasonText: reasonText ?? 'Cancelled by NetRide operations (admin).',
         bypassOwnership: true,
       });
 
-      await prisma.auditLog.create({
-        data: {
-          admin_id: adminId,
-          target_id: id,
-          action: 'RIDE_CANCELLED',
-          details: `Ride ${id} cancelled by admin. ${reasonText ? 'Reason: ' + reasonText : ''}`,
+      // Audit to `audit_events` (generic entity). The previous
+      // `audit_logs.target_id` write put a RIDE uuid into a column that is
+      // NOT NULL REFERENCES users(id): the insert always failed, so the
+      // mutation returned an error AND no audit row was ever written.
+      await AuditEventsService.record({
+        actorId: adminId,
+        actorRole: 'ADMIN',
+        action: 'RIDE_CANCELLED',
+        entityType: 'RIDE',
+        entityId: id,
+        details: {
+          cancelledBy: adminId,
+          reasonText: reasonText ?? 'Cancelled by NetRide operations (admin).',
+          cancelledAt: new Date().toISOString(),
+          previousStatus: rideSnapshot?.status ?? null,
         },
       });
 
@@ -1028,20 +1041,35 @@ export class AdminController {
       if (ride.status === 'CANCELLED') {
         return res.status(400).json({ error: 'Cancelled rides cannot be completed.' });
       }
+      // A driverless ride has no assigned journey and no settlement to run:
+      // completing it would write COMPLETED with no wallet credit, no ledger
+      // row and no receipt. Operators must cancel it instead.
+      if (!ride.driver_id) {
+        return res.status(409).json({
+          error: 'This ride has no assigned driver and cannot be completed. Cancel it instead.',
+          code: 'RIDE_HAS_NO_DRIVER',
+        });
+      }
 
+      const previousStatus = ride.status;
       const trip = await RideService.updateTripStatus(
         id,
         'COMPLETED',
-        ride.driver_id ?? ride.rider_id ?? adminId,
+        ride.driver_id,
         { bypassDriverGuard: true },
       );
 
-      await prisma.auditLog.create({
-        data: {
-          admin_id: adminId,
-          target_id: id,
-          action: 'RIDE_COMPLETED',
-          details: `Ride ${id} force-completed by admin (bypasses driver completion guard).`,
+      await AuditEventsService.record({
+        actorId: adminId,
+        actorRole: 'ADMIN',
+        action: 'RIDE_COMPLETED',
+        entityType: 'RIDE',
+        entityId: id,
+        details: {
+          completedBy: adminId,
+          previousStatus,
+          driverId: ride.driver_id,
+          completedAt: new Date().toISOString(),
         },
       });
 

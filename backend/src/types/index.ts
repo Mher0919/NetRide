@@ -84,6 +84,8 @@ export interface Trip {
   saving_likelihood?: number;
   trajectory?: any;
   requested_at: Date;
+  /** Monotonic version bumped on every status-affecting write (migration 055). */
+  updated_at?: Date;
   accepted_at?: Date;
   started_at?: Date;
   completed_at?: Date;

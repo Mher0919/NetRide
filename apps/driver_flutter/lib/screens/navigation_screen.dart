@@ -32,6 +32,13 @@ class NavigationScreen extends StatefulWidget {
   final VoidCallback? onChat;
   final VoidCallback? onCall;
 
+  /// Server-confirmed DRIVER_ARRIVING: the driver is at the pickup point.
+  /// The sheet states it explicitly instead of continuing to say "en route".
+  final bool arrivedAtPickup;
+
+  /// A pickup/complete mutation is awaiting server confirmation.
+  final bool actionPending;
+
   const NavigationScreen({
     super.key,
     required this.canPickupRider,
@@ -42,6 +49,8 @@ class NavigationScreen extends StatefulWidget {
     required this.pickupAddress,
     this.onChat,
     this.onCall,
+    this.arrivedAtPickup = false,
+    this.actionPending = false,
   });
 
   @override
@@ -352,21 +361,27 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
   Widget _buildBottomSheet(NavigationService nav, RouteProgress? progress) {
     final isPickupLeg = nav.leg == NavigationLeg.pickup;
-    final heading =
-        isPickupLeg ? 'EN ROUTE TO PICKUP' : 'EN ROUTE TO DESTINATION';
+    final atPickup = isPickupLeg && widget.arrivedAtPickup;
+    final heading = atPickup
+        ? 'AT PICKUP — WAITING FOR RIDER'
+        : isPickupLeg
+            ? 'EN ROUTE TO PICKUP'
+            : 'EN ROUTE TO DESTINATION';
     final address =
         isPickupLeg ? widget.pickupAddress : widget.destinationAddress;
     final etaSec = progress?.etaSeconds ?? 0;
     final remaining = progress?.totalRemainingMeters ?? 0;
-    final actionLabel = isPickupLeg ? 'PICK UP RIDER' : 'COMPLETE TRIP';
+    final actionLabel = isPickupLeg ? 'START TRIP' : 'COMPLETE TRIP';
     final actionEnabled =
         isPickupLeg ? widget.canPickupRider : widget.canCompleteTrip;
     final onAction =
         isPickupLeg ? widget.onPickupRider : widget.onCompleteTrip;
 
-    final etaLabel =
-        etaSec > 0 ? 'ETA ${(etaSec / 60).ceil()} min' : 'ETA \u2014';
-    final remainingLabel = nav.formatDistance(remaining);
+    final etaLabel = atPickup
+        ? 'ARRIVED'
+        : (etaSec > 0 ? 'ETA ${(etaSec / 60).ceil()} min' : 'ETA \u2014');
+    final remainingLabel =
+        atPickup ? 'At pickup' : nav.formatDistance(remaining);
 
     final comm = context.watch<CommunicationService>();
 
@@ -381,8 +396,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
           remainingLabel: remainingLabel,
           actionLabel: actionLabel,
           actionEnabled: actionEnabled,
+          actionPending: widget.actionPending,
           onAction: onAction,
-          showProgress: true,
+          showProgress: !atPickup,
           progressFraction: progress?.progressFraction ?? 0,
           onChat: widget.onChat,
           onCall: widget.onCall,

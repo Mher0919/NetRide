@@ -218,7 +218,11 @@ export class DispatchEngine {
       }
     })();
 
-    io.to(`driver:${driverId}`).emit('newTripRequest', {
+    // The full least-privilege offer card the driver app renders. Built
+    // ONCE and persisted on the offer so a reconnect can replay it exactly
+    // (no recomputed price drift) and the push payload matches the socket
+    // payload field-for-field.
+    const offerPayload: Record<string, unknown> = {
       id: trip.id,
       rider_id: trip.rider_id,
       status: trip.status,
@@ -238,7 +242,34 @@ export class DispatchEngine {
       expires_at: offer.expiresAt,
       offerId: offer.offerId,
       ...(specialInfo ?? {}),
-    });
+    };
+    await DriverOfferService.attachPayload(offer.offerId, offerPayload).catch(
+      (err: any) => console.error(`[DISPATCH] offer payload persist failed: ${err.message}`),
+    );
+
+    // A backgrounded/killed app never sees the socket offer and the offer
+    // expires in seconds. A push is therefore sent on EVERY offer — not
+    // only when presence happened to expire — because presence (socket
+    // alive) is not evidence the app can render: iOS suspends sockets in
+    // seconds while the presence TTL lingers, and Android may be dozing.
+    // The push carries the authoritative offer id + expiry; notification
+    // actions call the REST accept/decline endpoints, and the offer itself
+    // stays the single source of truth. Foreground duplicate alerts are
+    // suppressed client-side.
+    try {
+      const { pushRideOffer } = await import('./push-notification.service');
+      await pushRideOffer(driverId, {
+        offerId: offer.offerId,
+        tripId: rideId,
+        expiresAt: offer.expiresAt,
+        earningsCents: driverShare.driverShareCents,
+        pickupAddress: (trip as any).pickup?.address,
+      });
+    } catch (err: any) {
+      console.error(`[DISPATCH] ride-offer push failed (non-fatal): ${err.message}`);
+    }
+
+    io.to(`driver:${driverId}`).emit('newTripRequest', offerPayload);
 
     return DispatchEngine._waitForOfferResponse(rideId, driverId, offer.offerId);
   }

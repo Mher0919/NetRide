@@ -16,6 +16,12 @@ const envSchema = zod_1.z.object({
     JWT_SECRET: zod_1.z.string(),
     GOOGLE_MAPS_API_KEY: zod_1.z.string().optional(),
     GOOGLE_ROUTES_API_KEY: zod_1.z.string().optional(),
+    // ---- Google Places API (New) ---------------------------------------------
+    // Preferred key for Google business information (SPECIALS). Falls back to
+    // GOOGLE_MAPS_API_KEY, then GOOGLE_ROUTES_API_KEY. Server-side only — the
+    // key must never be exposed to clients. Enable "Places API (New)" plus
+    // billing on the project that owns this key.
+    GOOGLE_PLACES_API_KEY: zod_1.z.string().optional(),
     // ---- Routing engine: A* (PRIMARY) ----------------------------------------
     // Self-hosted A* routing engine. Loads preprocessed graph from disk.
     // Fast, free, and runs entirely in-memory. No external API calls.
@@ -48,6 +54,18 @@ const envSchema = zod_1.z.object({
     DRIVER_LOCK_TTL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(60),
     // Max seconds since last driver heartbeat for location to be considered fresh.
     DRIVER_LOCATION_FRESHNESS_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(60),
+    // TTL of the raw location heartbeat key (seconds). Must be >= freshness.
+    DRIVER_HEARTBEAT_TTL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(90),
+    // TTL of the driver availability lease (seconds). Renewed by goOnline and
+    // every accepted location update; its expiry is what stops new dispatch
+    // offers to a driver whose app stopped reporting.
+    DRIVER_ONLINE_TTL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(120),
+    // TTL of the last-known location record (timestamped metadata), seconds.
+    DRIVER_LOCATION_RECORD_TTL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(300),
+    // Max age (seconds) of a location observation accepted for dispatching and
+    // for trip proximity gates (pickup/complete). Older fixes must not be
+    // treated as live.
+    DRIVER_LOCATION_MAX_AGE_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(60),
     // Threshold (seconds) for considering a driver "near completion" of their
     // current ride and thus eligible for a new dispatch offer.
     NEAR_COMPLETION_THRESHOLD_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(300),
@@ -56,7 +74,11 @@ const envSchema = zod_1.z.object({
     // ---- Legacy dispatch config ----------------------------------------------
     DRIVER_MATCH_RADIUS_KM: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     DRIVER_ACCEPT_TIMEOUT_MS: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15000),
-    DRIVER_PICKUP_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(15),
+    // Radius (meters) inside which a driver may pick up the rider. Matches
+    // the destination radius (100m): GPS accuracy + parking variance made a
+    // 15m gate reject drivers standing right at the rider. The driver app
+    // enables PICK UP RIDER at the same 100m.
+    DRIVER_PICKUP_PROXIMITY_M: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(100),
     // Radius (meters) inside which a driver may complete the ride. 100m is
     // the practical drop-off zone: GPS accuracy + parking variance. The
     // driver app enables COMPLETE TRIP at the same 100m.
@@ -165,6 +187,35 @@ const envSchema = zod_1.z.object({
     SPONSOR_LEDGER_ENFORCED: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(1),
     CORS_ORIGINS: zod_1.z.string().optional(),
     SPONSOR_PORTAL_URL: zod_1.z.string().optional(),
+    // ---- Stripe (Connect: separate charges and transfers) --------------------
+    // All optional: when STRIPE_SECRET_KEY is unset every Stripe-backed path
+    // degrades to an explicit "payments not configured" state — the legacy
+    // wallet flow keeps working and no fake payment is ever recorded.
+    // Use TEST keys (sk_test_… / pk_test_…) everywhere except a deliberate
+    // production activation.
+    STRIPE_SECRET_KEY: zod_1.z.string().optional(),
+    STRIPE_PUBLISHABLE_KEY: zod_1.z.string().optional(),
+    STRIPE_WEBHOOK_SECRET: zod_1.z.string().optional(),
+    // Optional Connect OAuth client id (only needed for the OAuth flow; the
+    // Express onboarding used here does not require it).
+    STRIPE_CONNECT_CLIENT_ID: zod_1.z.string().optional(),
+    // Hard interlock: live keys (sk_live_…) are refused unless this is 'true'
+    // AND NODE_ENV=production. Prevents a test/dev process ever touching live.
+    STRIPE_ALLOW_LIVE: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    // Default currency for all Stripe amounts (lowercase ISO-4217).
+    STRIPE_CURRENCY: zod_1.z.string().default('usd'),
+    // Public base URL of this backend, used to build Stripe return URLs
+    // (e.g. https://netride.onrender.com). Falls back to APP_URL.
+    PUBLIC_BACKEND_URL: zod_1.z.string().optional(),
+    // Deep link the mobile apps listen for after a Stripe Checkout return.
+    MOBILE_PAYMENT_RETURN_URL: zod_1.z.string().default('netride://payments/return'),
+    // API version used when creating customer ephemeral keys (PaymentSheet).
+    // MUST match the API version the mobile SDKs are pinned to — the native
+    // stripe_ios / stripe_android SDKs make API calls under the ephemeral
+    // key's api_version, and a mismatch fails at card-entry time. The default
+    // is the version family in use by the flutter_stripe release pinned here
+    // (same family the backend SDK is pinned to).
+    STRIPE_EPHEMERAL_KEY_API_VERSION: zod_1.z.string().default('2026-09-30.endive'),
 });
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {

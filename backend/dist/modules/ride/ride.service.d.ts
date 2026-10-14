@@ -1,4 +1,6 @@
 import { Trip, Location } from '../../types';
+import { TerminalCancelGuard } from './ride-state.rules';
+export { TerminalCancelGuard, buildTerminalCancelGuardSql } from './ride-state.rules';
 export declare class RideService {
     static rateRide(data: {
         ride_id: string;
@@ -15,8 +17,30 @@ export declare class RideService {
         applyCredits?: boolean;
         creditUseCents?: number;
         specialRedemptionId?: string;
+        specialTermsAccepted?: boolean;
     }, favoritePriority?: boolean): Promise<Trip>;
     static acceptTrip(tripId: string, driverId: string): Promise<Trip>;
+    /**
+     * Atomic ACCEPTED → DRIVER_ARRIVING transition, triggered when a fresh,
+     * non-mock driver fix enters the pickup radius. Idempotent: a repeated
+     * call after the flip returns `changed: false` without touching the row,
+     * so concurrent location updates can never double-broadcast or regress a
+     * ride that already started.
+     */
+    static markDriverArriving(tripId: string, driverId: string): Promise<{
+        changed: boolean;
+        trip: Trip;
+    }>;
+    /**
+     * Decline a ride offer. Idempotent and safe to retry from either the
+     * socket or the REST notification-action path: the offer transition only
+     * fires from SENT, the driver-specific exclusion upsert is keyed by
+     * (ride, driver), and matching is only re-enqueued while the ride is
+     * still REQUESTED.
+     */
+    static declineTrip(tripId: string, driverId: string, offerId?: string): Promise<{
+        declined: boolean;
+    }>;
     static updateTripStatus(tripId: string, status: any, userId: string, opts?: {
         bypassDriverGuard?: boolean;
     }): Promise<Trip>;
@@ -34,6 +58,7 @@ export declare class RideService {
      */
     static cancelTripSystem(tripId: string, opts?: {
         reasonText?: string;
+        guard?: TerminalCancelGuard;
     }): Promise<Trip | null>;
     /**
      * Shared terminal-cancellation core used by party cancels (cancelTrip),

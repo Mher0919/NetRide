@@ -176,6 +176,68 @@ class AdminController {
             res.status(500).json({ error: 'Failed to update fleet partner.' });
         }
     }
+    /**
+     * Permanently deletes a fleet partner: assigned drivers are unassigned and
+     * revenue snapshots are detached (FKs have no ON DELETE rule), and the
+     * fleet portal account cascades away. Snapshot financial data itself is
+     * preserved — only the fleet attribution is removed.
+     */
+    static async deleteFleet(req, res) {
+        const { id } = req.params;
+        const client = await database_1.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const fleetRes = await client.query(`SELECT id, name FROM fleet_partners WHERE id = $1 FOR UPDATE`, [id]);
+            if (!fleetRes.rowCount) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Fleet partner not found.' });
+            }
+            const fleet = fleetRes.rows[0];
+            const counts = await client.query(`SELECT
+           (SELECT COUNT(*)::int FROM drivers WHERE fleet_id = $1) AS driver_count,
+           (SELECT COUNT(*)::int FROM ride_price_snapshots WHERE driver_fleet_id = $1) AS ride_count`, [id]);
+            const portal = await client.query(`SELECT user_id FROM fleet_portal_accounts WHERE fleet_id = $1`, [id]);
+            const portalUserId = portal.rows[0]?.user_id ?? null;
+            await client.query(`UPDATE drivers SET fleet_id = NULL WHERE fleet_id = $1`, [id]);
+            await client.query(`UPDATE ride_price_snapshots SET driver_fleet_id = NULL WHERE driver_fleet_id = $1`, [id]);
+            await client.query(`DELETE FROM fleet_partners WHERE id = $1`, [id]);
+            if (portalUserId) {
+                const shared = await client.query(`SELECT 1 FROM partners WHERE user_id = $1
+           UNION ALL
+           SELECT 1 FROM sponsor_portal_accounts WHERE user_id = $1
+           LIMIT 1`, [portalUserId]);
+                if (shared.rows.length === 0) {
+                    await client.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [portalUserId]);
+                }
+            }
+            await client.query('COMMIT');
+            (0, pricing_service_1.invalidateRevenueCache)();
+            await audit_events_service_1.AuditEventsService.record({
+                actorId: req.user.id,
+                actorRole: 'ADMIN',
+                action: 'FLEET_DELETED',
+                entityType: 'FLEET',
+                entityId: id,
+                details: {
+                    name: fleet.name,
+                    drivers_unassigned: counts.rows[0].driver_count,
+                    rides_detached: counts.rows[0].ride_count,
+                },
+            });
+            res.json({ deleted: true });
+        }
+        catch (error) {
+            try {
+                await client.query('ROLLBACK');
+            }
+            catch { /* noop */ }
+            console.error(`[ADMIN] ❌ Fleet delete error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to delete fleet partner.' });
+        }
+        finally {
+            client.release();
+        }
+    }
     /** Assign (fleet_id) or unassign (null) a driver to/from a fleet. */
     static async assignDriverFleet(req, res) {
         const { id } = req.params;
@@ -852,17 +914,30 @@ class AdminController {
         const reasonText = req.body?.reasonText?.trim() || null;
         try {
             const { RideService } = await Promise.resolve().then(() => __importStar(require('../ride/ride.service')));
+            const rideSnapshot = await prisma_service_1.prisma.ride.findUnique({
+                where: { id },
+                select: { status: true, driver_id: true, rider_id: true },
+            });
             const trip = await RideService.cancelTrip(id, adminId, {
                 reasonCode: 'ADMIN_CANCELLED',
                 reasonText: reasonText ?? 'Cancelled by NetRide operations (admin).',
                 bypassOwnership: true,
             });
-            await prisma_service_1.prisma.auditLog.create({
-                data: {
-                    admin_id: adminId,
-                    target_id: id,
-                    action: 'RIDE_CANCELLED',
-                    details: `Ride ${id} cancelled by admin. ${reasonText ? 'Reason: ' + reasonText : ''}`,
+            // Audit to `audit_events` (generic entity). The previous
+            // `audit_logs.target_id` write put a RIDE uuid into a column that is
+            // NOT NULL REFERENCES users(id): the insert always failed, so the
+            // mutation returned an error AND no audit row was ever written.
+            await audit_events_service_1.AuditEventsService.record({
+                actorId: adminId,
+                actorRole: 'ADMIN',
+                action: 'RIDE_CANCELLED',
+                entityType: 'RIDE',
+                entityId: id,
+                details: {
+                    cancelledBy: adminId,
+                    reasonText: reasonText ?? 'Cancelled by NetRide operations (admin).',
+                    cancelledAt: new Date().toISOString(),
+                    previousStatus: rideSnapshot?.status ?? null,
                 },
             });
             res.json({ success: true, trip: AdminController.toJSON(trip) });
@@ -895,13 +970,28 @@ class AdminController {
             if (ride.status === 'CANCELLED') {
                 return res.status(400).json({ error: 'Cancelled rides cannot be completed.' });
             }
-            const trip = await RideService.updateTripStatus(id, 'COMPLETED', ride.driver_id ?? ride.rider_id ?? adminId, { bypassDriverGuard: true });
-            await prisma_service_1.prisma.auditLog.create({
-                data: {
-                    admin_id: adminId,
-                    target_id: id,
-                    action: 'RIDE_COMPLETED',
-                    details: `Ride ${id} force-completed by admin (bypasses driver completion guard).`,
+            // A driverless ride has no assigned journey and no settlement to run:
+            // completing it would write COMPLETED with no wallet credit, no ledger
+            // row and no receipt. Operators must cancel it instead.
+            if (!ride.driver_id) {
+                return res.status(409).json({
+                    error: 'This ride has no assigned driver and cannot be completed. Cancel it instead.',
+                    code: 'RIDE_HAS_NO_DRIVER',
+                });
+            }
+            const previousStatus = ride.status;
+            const trip = await RideService.updateTripStatus(id, 'COMPLETED', ride.driver_id, { bypassDriverGuard: true });
+            await audit_events_service_1.AuditEventsService.record({
+                actorId: adminId,
+                actorRole: 'ADMIN',
+                action: 'RIDE_COMPLETED',
+                entityType: 'RIDE',
+                entityId: id,
+                details: {
+                    completedBy: adminId,
+                    previousStatus,
+                    driverId: ride.driver_id,
+                    completedAt: new Date().toISOString(),
                 },
             });
             res.json({ success: true, trip: AdminController.toJSON(trip) });

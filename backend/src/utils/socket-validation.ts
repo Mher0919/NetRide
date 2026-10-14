@@ -35,10 +35,17 @@ export const GoOnlineSchema = z.object({
 
 // heading (compass degrees) is carried through the broadcast so the
 // rider's map can rotate the driver marker live. Zod objects strip
-// unknown keys, so it must be part of the schema — otherwise it would
-// never reach the `driverLocationUpdate` payload.
+// unknown keys, so every field that must reach the server has to be in
+// the schema. Accuracy/speed/mock/deviceAt feed the location record and
+// safety gates; without them the trajectory speed was always null and
+// spoofed fixes were indistinguishable from real ones.
 export const UpdateLocationSchema = LocationSchema.extend({
   heading: z.number().min(0).max(360).optional(),
+  accuracy: z.number().min(0).max(10000).optional(),
+  speed: z.number().min(0).max(150).optional(),
+  mock: z.boolean().optional(),
+  deviceAt: z.string().datetime().optional(),
+  source: z.string().max(32).optional(),
 });
 
 export const AcceptTripSchema = z.string().uuid();

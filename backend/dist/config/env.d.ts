@@ -13,6 +13,10 @@ export declare const env: {
     DRIVER_OFFER_TIMEOUT_MS: number;
     DRIVER_LOCK_TTL_S: number;
     DRIVER_LOCATION_FRESHNESS_S: number;
+    DRIVER_HEARTBEAT_TTL_S: number;
+    DRIVER_ONLINE_TTL_S: number;
+    DRIVER_LOCATION_RECORD_TTL_S: number;
+    DRIVER_LOCATION_MAX_AGE_S: number;
     NEAR_COMPLETION_THRESHOLD_S: number;
     MAX_CANDIDATES_PER_RADIUS: number;
     DRIVER_MATCH_RADIUS_KM: number;
@@ -52,8 +56,13 @@ export declare const env: {
     SPONSOR_CREDIT_BONUS: number;
     SPONSOR_DRIVER_SHARE: number;
     SPONSOR_LEDGER_ENFORCED: number;
+    STRIPE_ALLOW_LIVE: boolean;
+    STRIPE_CURRENCY: string;
+    MOBILE_PAYMENT_RETURN_URL: string;
+    STRIPE_EPHEMERAL_KEY_API_VERSION: string;
     GOOGLE_MAPS_API_KEY?: string | undefined;
     GOOGLE_ROUTES_API_KEY?: string | undefined;
+    GOOGLE_PLACES_API_KEY?: string | undefined;
     ROUTING_GRAPH_PATH?: string | undefined;
     OSRM_BASE_URL?: string | undefined;
     OSRM_TIMEOUT_MS?: number | undefined;
@@ -80,4 +89,9 @@ export declare const env: {
     FCM_SERVICE_ACCOUNT_B64?: string | undefined;
     CORS_ORIGINS?: string | undefined;
     SPONSOR_PORTAL_URL?: string | undefined;
+    STRIPE_SECRET_KEY?: string | undefined;
+    STRIPE_PUBLISHABLE_KEY?: string | undefined;
+    STRIPE_WEBHOOK_SECRET?: string | undefined;
+    STRIPE_CONNECT_CLIENT_ID?: string | undefined;
+    PUBLIC_BACKEND_URL?: string | undefined;
 };

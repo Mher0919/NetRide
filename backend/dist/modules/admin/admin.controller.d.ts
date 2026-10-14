@@ -6,6 +6,13 @@ export declare class AdminController {
     static listFleets(req: AuthRequest, res: Response): Promise<void>;
     static createFleet(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static updateFleet(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * Permanently deletes a fleet partner: assigned drivers are unassigned and
+     * revenue snapshots are detached (FKs have no ON DELETE rule), and the
+     * fleet portal account cascades away. Snapshot financial data itself is
+     * preserved — only the fleet attribution is removed.
+     */
+    static deleteFleet(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     /** Assign (fleet_id) or unassign (null) a driver to/from a fleet. */
     static assignDriverFleet(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static listPricingProfiles(req: AuthRequest, res: Response): Promise<void>;

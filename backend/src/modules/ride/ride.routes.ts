@@ -12,6 +12,7 @@ router.use('/', featureRoutes);
 router.post('/request', authMiddleware, riderMiddleware, RideController.requestRide);
 router.post('/estimate', authMiddleware, riderMiddleware, RideController.estimateRide);
 router.post('/accept', authMiddleware, driverMiddleware, RideController.acceptTrip);
+router.post('/decline', authMiddleware, driverMiddleware, RideController.declineTrip);
 router.post('/rate', authMiddleware, RideController.rateRide);
 router.post('/cancel', authMiddleware, riderMiddleware, RideController.cancelCurrentRide);
 

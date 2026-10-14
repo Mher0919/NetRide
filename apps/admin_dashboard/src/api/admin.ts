@@ -341,7 +341,18 @@ export const listCreditAccounts = async (params: { search?: string; limit?: numb
 };
 
 export const grantCredits = async (userId: string, amountCents: number, reason: string) => {
-  const response = await api.post('/admin/credits/grant', { user_id: userId, amount_cents: amountCents, reason });
+  // Idempotency key for THIS submission: an axios/transport retry of the
+  // same call resolves to the SAME credit transaction server-side instead
+  // of granting the amount twice. (The dialog also guards double clicks.)
+  const idempotencyKey =
+    (globalThis.crypto?.randomUUID?.() ??
+      `${Date.now()}-${Math.random().toString(36).slice(2)}`).toString();
+  const response = await api.post('/admin/credits/grant', {
+    user_id: userId,
+    amount_cents: amountCents,
+    reason,
+    idempotency_key: idempotencyKey,
+  });
   return response.data;
 };
 

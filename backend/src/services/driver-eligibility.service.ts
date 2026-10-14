@@ -3,7 +3,7 @@ import { env } from '../config/env';
 import { prisma } from '../services/prisma.service';
 import { RideRepository } from '../modules/ride/ride.repository';
 import { TripStatus } from '../types';
-import { LocationsService } from '../modules/location/locations.service';
+import { LocationsService, evaluateLocationFreshness } from '../modules/location/locations.service';
 import { RideRejectionService } from './ride-rejection.service';
 
 export interface DriverEligibility {
@@ -18,6 +18,7 @@ export interface DriverEligibility {
 }
 
 const DRIVER_HEARTBEAT_PREFIX = 'driver:heartbeat:';
+const DRIVER_ONLINE_PREFIX = 'driver:online:';
 const DRIVER_OFFER_PREFIX = 'driver:offer:';
 
 export class DriverEligibilityService {
@@ -37,8 +38,9 @@ export class DriverEligibilityService {
    * was rejected and log meaningful diagnostics.
    */
   static async checkEligibility(driverId: string, rideId?: string): Promise<DriverEligibility> {
-    const [heartbeat, activeTripKey, activeOffer, driverDb] = await Promise.all([
+    const [heartbeat, onlineLease, activeTripKey, activeOffer, driverDb] = await Promise.all([
       redis.get(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`),
+      redis.get(`${DRIVER_ONLINE_PREFIX}${driverId}`),
       redis.get(`driver:${driverId}:active_trip`),
       redis.get(`${DRIVER_OFFER_PREFIX}${driverId}`),
       prisma.driver.findUnique({
@@ -58,7 +60,10 @@ export class DriverEligibilityService {
       }).catch(() => null),
     ]);
 
-    const isOnline = heartbeat !== null;
+    // Availability is the explicit `goOnline` lease OR a live heartbeat
+    // (legacy writers). The lease lets a driver be "online but
+    // location-stale" explicitly instead of silently vanishing.
+    const isOnline = heartbeat !== null || onlineLease !== null;
     const isActive = driverDb?.user?.is_active === true;
 
     // Self-heal stale active-trip keys. The key is written at ACCEPT time
@@ -136,17 +141,20 @@ export class DriverEligibilityService {
   }
 
   /**
-   * Check if a driver's location is fresh enough to dispatch.
-   * Uses heartbeat TTL as a proxy for location freshness.
-   * A driver who sent a heartbeat within the freshness window is
-   * considered to have a fresh location.
+   * Check if a driver's location is fresh enough to dispatch. Delegates to
+   * the timestamped location record (server receipt time) instead of
+   * inferring age from the heartbeat TTL — a heartbeat proves liveness but
+   * never proved the position itself was current.
    */
   static async isLocationFresh(driverId: string): Promise<boolean> {
-    const heartbeat = await redis.get(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`);
-    if (!heartbeat) return false;
-    const ttl = await redis.ttl(`${DRIVER_HEARTBEAT_PREFIX}${driverId}`);
-    const maxAge = env.DRIVER_LOCATION_FRESHNESS_S;
-    return ttl > 0 && (90 - ttl) <= maxAge;
+    const record = await LocationsService.getDriverLocationRecord(driverId);
+    if (!record) return false;
+    const { fresh } = evaluateLocationFreshness(
+      record.serverAt,
+      Date.now(),
+      env.DRIVER_LOCATION_FRESHNESS_S,
+    );
+    return fresh;
   }
 
   /**

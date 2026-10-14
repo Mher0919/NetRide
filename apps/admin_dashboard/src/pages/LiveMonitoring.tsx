@@ -48,6 +48,7 @@ const FitDriversOnce: React.FC<{ drivers: any[] }> = ({ drivers }) => {
 const LiveMonitoring: React.FC = () => {
   const [drivers, setDrivers] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [connected, setConnected] = useState(false);
 
   const fetchDrivers = async () => {
     setRefreshing(true);
@@ -69,8 +70,14 @@ const LiveMonitoring: React.FC = () => {
     });
 
     socket.on('connect', () => {
+      setConnected(true);
       socket.emit('subscribeToMonitoring');
+      // Reconnect resync: drivers may have gone online/offline while the
+      // realtime channel was down.
+      fetchDrivers();
     });
+
+    socket.on('disconnect', () => setConnected(false));
 
     socket.on('driverLocationUpdate', (data: any) => {
       setDrivers((prev) => {
@@ -98,7 +105,13 @@ const LiveMonitoring: React.FC = () => {
       fetchDrivers();
     });
 
+    // Bounded reconciliation poll: a driver whose availability lease expired
+    // (app killed, GPS lost) emits no socket event; without this their dot
+    // would stay on the map indefinitely.
+    const reconcileTimer = setInterval(fetchDrivers, 30_000);
+
     return () => {
+      clearInterval(reconcileTimer);
       socket.disconnect();
     };
   }, []);
@@ -132,6 +145,12 @@ const LiveMonitoring: React.FC = () => {
               label={`${drivers.length} online`}
               size="small"
               sx={{ fontWeight: 800, bgcolor: DOT_COLOR, color: 'white', height: 22 }}
+            />
+            <Chip
+              label={connected ? 'LIVE' : 'RECONNECTING'}
+              size="small"
+              color={connected ? 'success' : 'warning'}
+              sx={{ fontWeight: 800, height: 22 }}
             />
             <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
               Real-time driver positions

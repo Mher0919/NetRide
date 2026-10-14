@@ -2,6 +2,17 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Continuous driver tracking while the app is minimized or the phone
+         is locked. Android 10+ requires this in addition to the foreground
+         location permission; the location foreground service (declared by
+         the geolocator plugin) shows the mandatory persistent notification.
+         Google Play requires a declaration for this permission — it is
+         justified for an on-demand driver app. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Android 14+ location foreground service requirements. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Android 13+ runtime notification permission. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application

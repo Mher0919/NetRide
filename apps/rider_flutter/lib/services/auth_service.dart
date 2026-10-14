@@ -124,6 +124,9 @@ class AuthService {
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['id']);
         await prefs.setString('user_role', data['user']['role']);
+        // A fresh session must initialize the app-wide socket (otherwise a
+        // password login left the rider with no socket at all).
+        isAuthenticatedNotifier.value = true;
         await _registerDeviceForCurrentUser();
         return data;
       }
@@ -157,6 +160,7 @@ class AuthService {
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['id']);
         await prefs.setString('user_role', data['user']['role']);
+        isAuthenticatedNotifier.value = true;
         await _registerDeviceForCurrentUser();
         return data;
       }
@@ -188,6 +192,7 @@ class AuthService {
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['id']);
         await prefs.setString('user_role', data['user']['role']);
+        isAuthenticatedNotifier.value = true;
         await _registerDeviceForCurrentUser();
         return data;
       }

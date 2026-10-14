@@ -7,6 +7,7 @@ import '../models/trip_models.dart' as models;
 import '../services/api_service.dart';
 import '../services/user_service.dart';
 import '../services/sound_service.dart';
+import '../services/notification_service.dart';
 import '../components/tip_received_dialog.dart';
 import '../cache/cache_service.dart';
 import '../cache/cache_keys.dart';
@@ -65,6 +66,33 @@ class DriverProvider with ChangeNotifier {
   /// (which would re-push the trip screen and yank the driver out of
   /// chat/cancel flows).
   final Set<String> _settledTripIds = {};
+
+  /// Server-confirmed availability (lease) state. `_status` is the local
+  /// intent; `_serverOnline` is what the backend actually holds. The two
+  /// must be reconciled on every connect instead of trusting a local flag.
+  bool _serverOnline = false;
+  bool _availabilityPending = false;
+  DateTime? _availabilityExpiresAt;
+  String? _lastAvailabilityError;
+
+  /// In-flight guard for pickup/complete so a double tap cannot emit the
+  /// same mutation twice. Cleared by the authoritative tripUpdate or when
+  /// the server rejects with an error.
+  bool _tripActionPending = false;
+
+  /// Version of the currently tracked trip (server updated_at) for
+  /// out-of-order event suppression.
+  DateTime? _currentTripUpdatedAt;
+
+  /// Last terminal trip id already surfaced to the driver (missed-outcome
+  /// notice). Persisted so a restart does not repeat the same dialog.
+  static const _lastTerminalNoticeKey = 'last_terminal_notice_id';
+  String? _lastTerminalNoticeId;
+
+  /// Offer notification currently posted (by offerId or tripId). Cancelled
+  /// the moment the offer is accepted, declined, replaced, or settled so an
+  /// actionable notification can never outlive its server-side offer.
+  String? _activeOfferNotificationId;
 
   /// Last user-facing error the server pushed on the socket (`error`
   /// event). The trip screen surfaces this when a trip action (e.g.
@@ -134,6 +162,19 @@ class DriverProvider with ChangeNotifier {
   bool get cancelConfirmFailed => _cancelConfirmFailed;
   String? get lastCancelError => _lastCancelError;
   bool get isConnected => _isConnected;
+
+  /// True when the backend holds a live availability lease for this driver.
+  bool get serverOnline => _serverOnline;
+
+  /// True between emitting `goOnline` and the server's `driverAvailability`
+  /// acknowledgement. The UI should show "Going online…" rather than a
+  /// definitive online state while this is true.
+  bool get availabilityPending => _availabilityPending;
+  DateTime? get availabilityExpiresAt => _availabilityExpiresAt;
+  String? get lastAvailabilityError => _lastAvailabilityError;
+
+  /// True while a pickup/complete mutation is awaiting confirmation.
+  bool get tripActionPending => _tripActionPending;
   models.Location? get lastLocation => _lastLocation;
   double get heading => _heading;
   models.Location? get riderLocation => _riderLocation;
@@ -256,6 +297,13 @@ class DriverProvider with ChangeNotifier {
       if (token != null) {
         initSocket(token);
       }
+    } else {
+      // Live socket: still reconcile authoritative state. Matching, offers,
+      // or a terminal transition may all have happened while suspended, and
+      // the socket may have silently missed events (OS suspend, doze).
+      _socket?.emit('getCurrentTrip');
+      _socket?.emit('getDriverAvailability');
+      _socket?.emit('getPendingOffer');
     }
 
     try {
@@ -464,18 +512,68 @@ class DriverProvider with ChangeNotifier {
       // (the ACCEPTED tripUpdate is not replayed automatically, so
       // without this the driver would never recover the trip screen).
       _socket?.emit('getCurrentTrip');
+      // Reconcile availability with the server instead of trusting local
+      // state: the server answers with the lease it actually holds.
+      _socket?.emit('getDriverAvailability');
+      // If a live offer still exists server-side (we were backgrounded when
+      // it was sent), the server re-emits it so returning through the app
+      // icon is not a dead end.
+      _socket?.emit('getPendingOffer');
       notifyListeners();
     });
 
-    _socket!.on('currentTripNone', (data) {
-      // Authoritative answer to getCurrentTrip: no active trip. Only act
-      // when we believe we have one — otherwise ignore (fresh connect).
-      if (_currentTrip != null || _status == models.DriverStatus.onTrip) {
+    _socket!.on('driverAvailability', (data) {
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final online = map['online'] == true;
+      _availabilityPending = false;
+      _serverOnline = online;
+      final exp = map['expiresAt'];
+      _availabilityExpiresAt = exp is num
+          ? DateTime.fromMillisecondsSinceEpoch(exp.toInt())
+          : null;
+      if (online) {
+        _lastAvailabilityError = null;
+        // Server truth: it holds an availability lease. Adopt online unless
+        // we are actively on a trip.
+        if (_status == models.DriverStatus.offline) {
+          _status = models.DriverStatus.online;
+        }
+      } else if (_status != models.DriverStatus.onTrip) {
+        // Server truth: no lease (expired / rejected / went offline).
+        _status = models.DriverStatus.offline;
+      }
+      notifyListeners();
+    });
+
+    _socket!.on('currentTripNone', (data) async {
+      // Authoritative answer to getCurrentTrip: no active trip.
+      final hadTrip = _currentTrip != null || _status == models.DriverStatus.onTrip;
+      if (hadTrip) {
         debugPrint('[RIDE] Server reports no current trip — clearing stale local state');
         _currentTrip = null;
         _incomingRequest = null;
-        _status = models.DriverStatus.online;
+        _currentTripUpdatedAt = null;
+        if (_status == models.DriverStatus.onTrip) {
+          _status = _serverOnline
+              ? models.DriverStatus.online
+              : models.DriverStatus.offline;
+        }
+        _clearOfferNotification();
         notifyListeners();
+      }
+      // Terminal-outcome notice: the server includes the driver's most
+      // recent completed/cancelled ride (last 10 min). If we were dead when
+      // it happened, surface it once instead of silently resetting to idle.
+      try {
+        final map = data is Map ? Map<String, dynamic>.from(data) : null;
+        final last = map?['lastTerminalTrip'];
+        if (last is Map && _currentTrip == null) {
+          await _maybeSurfaceMissedTerminal(
+            models.Trip.fromJson(Map<String, dynamic>.from(last)),
+          );
+        }
+      } catch (e) {
+        debugPrint('[RIDE] lastTerminalTrip handling failed: $e');
       }
     });
 
@@ -496,71 +594,22 @@ class DriverProvider with ChangeNotifier {
     });
 
     _socket!.on('newTripRequest', (data) {
-      _incomingRequest = models.Trip.fromJson(data);
-      // A brand-new offer means the previous ride context is over — any
-      // still-tracked settled ids are stale (bounded memory too).
-      _settledTripIds.clear();
+      final trip = models.Trip.fromJson(data);
+      _incomingRequest = trip;
+      // Do NOT clear `_settledTripIds`: a delayed terminal event for the
+      // previous ride can arrive after the next offer and would otherwise
+      // resurrect it. The set is bounded in _ackTerminalNotice.
       _lastCompletedTrip = null;
+      _maybeNotifyIncomingOffer(trip, data);
       notifyListeners();
     });
 
     _socket!.on('tripUpdate', (data) {
-      final trip = models.Trip.fromJson(data);
-
-      // Stale guard (spec §40/§61): never resurrect a ride that already
-      // reached a terminal state, and never switch to a different ride
-      // than the one currently active. Without this, a delayed ACCEPTED
-      // resets _currentTrip → the availability screen re-pushes /trip →
-      // the driver is thrown back to the route screen mid-chat / mid-cancel.
-      if (_settledTripIds.contains(trip.id)) {
-        debugPrint('[RIDE] Ignoring stale tripUpdate for settled trip ${trip.id}');
-        return;
-      }
-      if ((trip.status == models.TripStatus.ACCEPTED ||
-              trip.status == models.TripStatus.IN_PROGRESS) &&
-          _currentTrip != null &&
-          _currentTrip!.id != trip.id) {
-        debugPrint('[RIDE] Ignoring tripUpdate for different trip ${trip.id} (current ${_currentTrip!.id})');
-        return;
-      }
-
-      if (trip.status == models.TripStatus.ACCEPTED || trip.status == models.TripStatus.IN_PROGRESS) {
-        _currentTrip = trip;
-        _incomingRequest = null;
-        _status = models.DriverStatus.onTrip;
-        notifyListeners();
-      } else if (trip.status == models.TripStatus.COMPLETED) {
-        // If the current incoming offer is the one being completed (e.g.
-        // it expired, the rider cancelled, or another driver accepted),
-        // clear it so the request card closes and sounds stop.
-        if (_incomingRequest?.id == trip.id) {
-          _incomingRequest = null;
-        }
-        // Capture the authoritative completion payload (carries
-        // driver_earnings_cents) BEFORE clearing the active trip — the
-        // completion dialog reads it right after this update arrives.
-        _lastCompletedTrip = trip;
-        _settledTripIds.add(trip.id);
-        _currentTrip = null;
-        _status = models.DriverStatus.online;
-        notifyListeners();
-      } else if (trip.status == models.TripStatus.CANCELLED) {
-        // First-class cancelled state (never a raw "ride == null" exit):
-        // keep the terminal trip so the UI can render who cancelled + why,
-        // then the UI acknowledges it (ackCancelled) before returning home.
-        if (_incomingRequest?.id == trip.id) {
-          _incomingRequest = null;
-        }
-        _settledTripIds.add(trip.id);
-        _currentTrip = null;
-        _messages = [];
-        _riderLocation = null;
-        _lastCancelledTrip = trip;
-        _cancelConfirmFailed = false;
-        _onCancelConfirmed();
-        _status = models.DriverStatus.online;
-        notifyListeners();
-      }
+      if (data is! Map) return;
+      applyTripUpdate(
+        models.Trip.fromJson(Map<String, dynamic>.from(data)),
+        Map<String, dynamic>.from(data),
+      );
     });
 
     _socket!.on('cancelTripFailed', (data) {
@@ -727,6 +776,9 @@ class DriverProvider with ChangeNotifier {
               : null;
       if (msg != null && msg.isNotEmpty) {
         _socketError = msg;
+        // A rejected pickup/complete must release the in-flight guard so the
+        // driver can correct the situation and retry.
+        _tripActionPending = false;
         notifyListeners();
       }
     });
@@ -737,12 +789,192 @@ class DriverProvider with ChangeNotifier {
     // reacts to currentTrip == null by returning to the dashboard.
     _socket!.on('acceptTripFailed', (data) {
       debugPrint('[RIDE] Server rejected accept: $data');
-      if (_currentTrip != null && _currentTrip!.status == models.TripStatus.REQUESTED) {
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final failedTripId = map['tripId']?.toString();
+      final message = map['message']?.toString();
+      if (message != null && message.isNotEmpty) _socketError = message;
+      // Only roll back the offer we actually tried to accept — a stale
+      // failure for an older offer must not clear a newer optimistic trip.
+      if (_currentTrip != null &&
+          _currentTrip!.status == models.TripStatus.REQUESTED &&
+          (failedTripId == null || failedTripId == _currentTrip!.id)) {
         _currentTrip = null;
-        _status = models.DriverStatus.online;
-        notifyListeners();
+        _status = _serverOnline
+            ? models.DriverStatus.online
+            : models.DriverStatus.offline;
       }
+      notifyListeners();
     });
+
+    // Restore the last terminal-notice id so a missed-ride dialog is shown
+    // at most once per ride across process restarts.
+    SharedPreferences.getInstance().then((prefs) {
+      _lastTerminalNoticeId = prefs.getString(_lastTerminalNoticeKey);
+    }).catchError((_) {});
+  }
+
+  // ── Missed terminal outcomes (killed while assigned) ─────────────
+
+  /// Surface a completed/cancelled ride that happened while this app was
+  /// not running. Idempotent per trip id (persisted), so reconnect storms
+  /// and restarts never repeat the same dialog.
+  Future<void> _maybeSurfaceMissedTerminal(models.Trip trip) async {
+    if (_lastTerminalNoticeId == trip.id) return;
+    if (_settledTripIds.contains(trip.id)) return;
+    _lastTerminalNoticeId = trip.id;
+    _settledTripIds.add(trip.id);
+    if (trip.status == models.TripStatus.CANCELLED) {
+      _lastCancelledTrip = trip;
+    } else if (trip.status == models.TripStatus.COMPLETED) {
+      _lastCompletedTrip = trip;
+    } else {
+      return;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_lastTerminalNoticeKey, trip.id);
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  void _ackTerminalNotice(String tripId) {
+    _lastTerminalNoticeId = tripId;
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_lastTerminalNoticeKey, tripId))
+        .catchError((_) => false);
+    // Bounded memory: insertion-ordered set, drop the oldest beyond 50.
+    while (_settledTripIds.length > 50) {
+      _settledTripIds.remove(_settledTripIds.first);
+    }
+  }
+
+  // ── Offer notifications (actionable, background-safe) ────────────
+
+  /// Mirrors a socket-delivered offer into a local notification when the
+  /// app is not visible. The notification carries only the server offer
+  /// identity — accept/decline actions call the authenticated REST API,
+  /// which re-validates ownership, status, and expiry.
+  void _maybeNotifyIncomingOffer(models.Trip trip, dynamic raw) {
+    final newId = trip.offerId ?? trip.id;
+    if (_activeOfferNotificationId != null &&
+        _activeOfferNotificationId != newId) {
+      NotificationService.instance
+          .cancelOfferNotification(_activeOfferNotificationId!);
+    }
+    _activeOfferNotificationId = newId;
+
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      // The in-app offer card is visible; the socket path wins.
+      return;
+    }
+    final map =
+        raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final earnings = map['driver_earnings_cents'] ?? trip.driverEarningsCents;
+    NotificationService.instance.showRideOfferNotification({
+      'tripId': trip.id,
+      if (trip.offerId != null) 'offerId': trip.offerId,
+      if (trip.expiresAt != null)
+        'expiresAt': trip.expiresAt!.toUtc().toIso8601String(),
+      if (earnings != null) 'earningsCents': earnings,
+      if (trip.pickup.address != null) 'pickupAddress': trip.pickup.address,
+    });
+  }
+
+  /// Removes a still-visible offer notification (accepted, declined,
+  /// replaced, or settled server-side). A no-op when nothing is posted.
+  void _clearOfferNotification() {
+    final id = _activeOfferNotificationId;
+    if (id == null) return;
+    _activeOfferNotificationId = null;
+    NotificationService.instance.cancelOfferNotification(id);
+  }
+
+  /// Applies one authoritative trip payload under every ordering guard.
+  /// Exposed for the socket listener AND for tests, so the stale/duplicate
+  /// rules are asserted on the real code path:
+  ///   1. settled ids never resurrect,
+  ///   2. an event for a different trip never replaces the active one,
+  ///   3. an older `updated_at` never overwrites a newer state.
+  @visibleForTesting
+  void applyTripUpdate(models.Trip trip, [Map<String, dynamic>? raw]) {
+    // Stale guard (spec §40/§61): never resurrect a ride that already
+    // reached a terminal state, and never switch to a different ride
+    // than the one currently active. Without this, a delayed ACCEPTED
+    // resets _currentTrip → the availability screen re-pushes /trip →
+    // the driver is thrown back to the route screen mid-chat / mid-cancel.
+    if (_settledTripIds.contains(trip.id)) {
+      debugPrint('[RIDE] Ignoring stale tripUpdate for settled trip ${trip.id}');
+      return;
+    }
+
+    final isActiveStatus = trip.status == models.TripStatus.ACCEPTED ||
+        trip.status == models.TripStatus.DRIVER_ARRIVING ||
+        trip.status == models.TripStatus.IN_PROGRESS;
+
+    if (_currentTrip != null && _currentTrip!.id != trip.id) {
+      debugPrint('[RIDE] Ignoring ${trip.status} tripUpdate for different trip ${trip.id} (current ${_currentTrip!.id})');
+      return;
+    }
+
+    final incomingVersion = trip.updatedAt;
+    if (incomingVersion != null &&
+        _currentTrip != null &&
+        _currentTrip!.id == trip.id &&
+        _currentTripUpdatedAt != null &&
+        incomingVersion.isBefore(_currentTripUpdatedAt!)) {
+      debugPrint('[RIDE] Ignoring out-of-order tripUpdate (v=$incomingVersion < $_currentTripUpdatedAt)');
+      return;
+    }
+
+    if (isActiveStatus) {
+      _currentTrip = trip;
+      _currentTripUpdatedAt = incomingVersion;
+      _incomingRequest = null;
+      _tripActionPending = false;
+      _status = models.DriverStatus.onTrip;
+      _clearOfferNotification();
+      notifyListeners();
+    } else if (trip.status == models.TripStatus.COMPLETED) {
+      if (_incomingRequest?.id == trip.id) {
+        _incomingRequest = null;
+      }
+      // Capture the authoritative completion payload (carries
+      // driver_earnings_cents) BEFORE clearing the active trip — the
+      // completion dialog reads it right after this update arrives.
+      _lastCompletedTrip = trip;
+      _settledTripIds.add(trip.id);
+      _ackTerminalNotice(trip.id);
+      _currentTrip = null;
+      _currentTripUpdatedAt = null;
+      _tripActionPending = false;
+      _status = _serverOnline
+          ? models.DriverStatus.online
+          : models.DriverStatus.offline;
+      _clearOfferNotification();
+      notifyListeners();
+    } else if (trip.status == models.TripStatus.CANCELLED) {
+      // First-class cancelled state (never a raw "ride == null" exit):
+      // keep the terminal trip so the UI can render who cancelled + why,
+      // then the UI acknowledges it (ackCancelled) before returning home.
+      if (_incomingRequest?.id == trip.id) {
+        _incomingRequest = null;
+      }
+      _settledTripIds.add(trip.id);
+      _ackTerminalNotice(trip.id);
+      _currentTrip = null;
+      _currentTripUpdatedAt = null;
+      _tripActionPending = false;
+      _messages = [];
+      _riderLocation = null;
+      _lastCancelledTrip = trip;
+      _cancelConfirmFailed = false;
+      _onCancelConfirmed();
+      _status = _serverOnline
+          ? models.DriverStatus.online
+          : models.DriverStatus.offline;
+      _clearOfferNotification();
+      notifyListeners();
+    }
   }
 
   void _tryHydrateFromToken(String token) {
@@ -759,7 +991,10 @@ class DriverProvider with ChangeNotifier {
           payload += '=';
           break;
       }
-      final decoded = String.fromCharCodes(base64Decode(payload));
+      // JWT payloads use base64url; `base64Decode` throws on '-'/'_' and
+      // non-ASCII payloads used to abort hydration entirely.
+      final normalized = base64Url.normalize(payload);
+      final decoded = utf8.decode(base64Url.decode(normalized));
       final json = jsonDecode(decoded) as Map<String, dynamic>;
       final driverId = json['id']?.toString();
       if (driverId != null && driverId.isNotEmpty) {
@@ -831,22 +1066,45 @@ class DriverProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Request the online transition. Returns false when the socket is not
+  /// connected (the caller must NOT claim the driver is online). On success
+  /// the local state moves to a pending transition; the authoritative
+  /// `driverAvailability` ack from the server settles it.
   Future<bool> setOnline({double? lat, double? lng}) async {
+    if (!_isConnected || _socket == null) {
+      _lastAvailabilityError =
+          'You are offline. Wait for the connection to return, then try again.';
+      notifyListeners();
+      return false;
+    }
+    _lastAvailabilityError = null;
     _status = models.DriverStatus.online;
-    if (lat != null && lng != null) {
-      _socket?.emit('goOnline', {'lat': lat, 'lng': lng});
+    _availabilityPending = true;
+    final useLat = lat ?? _lastLocation?.lat;
+    final useLng = lng ?? _lastLocation?.lng;
+    if (useLat != null && useLng != null) {
+      _socket?.emit('goOnline', {'lat': useLat, 'lng': useLng});
     } else {
+      // No fix yet: the server still creates the availability lease, but
+      // the driver is not dispatchable until the first location arrives.
       _socket?.emit('goOnline');
     }
     notifyListeners();
     return true;
   }
 
+  /// Go offline. A driver mid-trip is NOT released locally: the server
+  /// keeps the accepted trip's position until it finishes, and this client
+  /// keeps rendering the trip.
   void setOffline() {
-    _status = models.DriverStatus.offline;
+    _availabilityPending = false;
+    _serverOnline = false;
+    if (_status != models.DriverStatus.onTrip) {
+      _status = models.DriverStatus.offline;
+      _incomingRequest = null;
+      _clearOfferNotification();
+    }
     _socket?.emit('goOffline');
-    _currentTrip = null;
-    _incomingRequest = null;
     notifyListeners();
   }
 
@@ -858,13 +1116,23 @@ class DriverProvider with ChangeNotifier {
     // state must not push the driver onto a phantom trip.
     if (!_isConnected) {
       debugPrint('[RIDE] ⚠️ acceptTrip skipped — socket not connected');
+      _socketError = 'Connection lost. Reconnecting — try accepting again.';
+      notifyListeners();
       return;
     }
+    // Double-tap / retransmit guard: one accept mutation per offer.
+    if (_tripActionPending) return;
+    if (_currentTrip?.id == tripId &&
+        _currentTrip!.status != models.TripStatus.REQUESTED) {
+      return; // already accepted
+    }
+    _tripActionPending = true;
     if (_incomingRequest != null && _incomingRequest!.id == tripId) {
       _currentTrip = _incomingRequest;
       _incomingRequest = null;
       _lastCompletedTrip = null;
       _status = models.DriverStatus.onTrip;
+      _clearOfferNotification();
       notifyListeners();
     }
     final offerId = _currentTrip?.offerId;
@@ -940,6 +1208,8 @@ class DriverProvider with ChangeNotifier {
   /// The UI has shown the cancelled state; clear it so the driver returns
   /// to the normal online/home screen.
   void ackCancelled() {
+    if (_lastCancelledTrip != null) _ackTerminalNotice(_lastCancelledTrip!.id);
+    if (_lastCompletedTrip != null) _ackTerminalNotice(_lastCompletedTrip!.id);
     _lastCancelledTrip = null;
     _lastCompletedTrip = null;
     _cancelConfirmFailed = false;
@@ -947,7 +1217,9 @@ class DriverProvider with ChangeNotifier {
     _cancelling = false;
     _cancelConfirmTimer?.cancel();
     _cancelConfirmTimer = null;
-    _settledTripIds.clear();
+    // NOTE: `_settledTripIds` deliberately survives the ack — delayed
+    // duplicate terminal events after returning home must not resurrect
+    // the ride. Memory is bounded in _ackTerminalNotice.
     notifyListeners();
   }
 
@@ -958,16 +1230,48 @@ class DriverProvider with ChangeNotifier {
         offerId != null ? {'tripId': tripId, 'offerId': offerId} : tripId);
     if (_incomingRequest?.id == tripId) {
       _incomingRequest = null;
+      _clearOfferNotification();
       notifyListeners();
     }
   }
 
+  /// Start the trip. Guarded: the UI disables the CTA while pending, and
+  /// this guard stops a programmatic/double tap from emitting twice. The
+  /// authoritative IN_PROGRESS tripUpdate (or a socket error) clears it.
   void pickUpRider(String tripId) {
+    if (_tripActionPending) return;
+    if (!_isConnected) {
+      _socketError = 'Connection lost. Reconnecting — try again.';
+      notifyListeners();
+      return;
+    }
+    _tripActionPending = true;
+    _socketError = null;
     _socket?.emit('pickUpRider', tripId);
+    // Safety release: if no confirmation/error arrives the button must not
+    // stay disabled forever.
+    Timer(const Duration(seconds: 10), () {
+      if (_tripActionPending && _currentTrip?.status != models.TripStatus.IN_PROGRESS) {
+        _tripActionPending = false;
+        notifyListeners();
+      }
+    });
+    notifyListeners();
   }
 
   void completeTrip(String tripId) {
+    if (_tripActionPending) return;
+    _tripActionPending = true;
     _socket?.emit('completeTrip', tripId);
+    notifyListeners();
+  }
+
+  /// Releases the in-flight pickup/complete guard when the UI abandons the
+  /// attempt (e.g. screen popped).
+  void clearTripActionPending() {
+    if (!_tripActionPending) return;
+    _tripActionPending = false;
+    notifyListeners();
   }
 
   /// Emits `completeTrip` and resolves only when the server confirms:
@@ -984,15 +1288,27 @@ class DriverProvider with ChangeNotifier {
     String tripId, {
     Duration timeout = const Duration(seconds: 8),
   }) async {
+    // Re-entrancy guard: only one completion attempt may be in flight; a
+    // second call returns false so the UI does not run two confirmation
+    // loops/dialogs from a double tap.
+    if (_tripActionPending) return false;
+    _tripActionPending = true;
     _socketError = null;
     notifyListeners();
     _socket?.emit('completeTrip', tripId);
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       await Future.delayed(const Duration(milliseconds: 150));
-      if (_currentTrip == null) return true;
-      if (_socketError != null) return false;
+      if (_currentTrip == null) {
+        _tripActionPending = false;
+        return true;
+      }
+      if (_socketError != null) {
+        _tripActionPending = false;
+        return false;
+      }
     }
+    _tripActionPending = false;
     return _currentTrip == null;
   }
 
@@ -1004,10 +1320,28 @@ class DriverProvider with ChangeNotifier {
     );
   }
 
-  void updateLocation(double lat, double lng, {double heading = 0}) {
+  void updateLocation(
+    double lat,
+    double lng, {
+    double heading = 0,
+    double? accuracy,
+    double? speed,
+    bool mock = false,
+  }) {
     _lastLocation = models.Location(lat: lat, lng: lng);
     _heading = heading;
-    _socket?.emit('updateLocation', {'lat': lat, 'lng': lng, 'heading': heading});
+    // Accuracy/speed/mock ride along so the server can store a timestamped,
+    // quality-annotated observation instead of a bare coordinate. The
+    // server persists server-receipt time and refuses mock fixes at gates.
+    _socket?.emit('updateLocation', {
+      'lat': lat,
+      'lng': lng,
+      'heading': heading,
+      if (accuracy != null && accuracy.isFinite) 'accuracy': accuracy,
+      if (speed != null && speed.isFinite) 'speed': speed,
+      if (mock) 'mock': true,
+      'source': 'gps',
+    });
     notifyListeners();
   }
 

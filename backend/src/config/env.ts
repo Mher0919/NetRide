@@ -50,6 +50,18 @@ const envSchema = z.object({
   DRIVER_LOCK_TTL_S: z.union([z.string(), z.number()]).transform(Number).default(60),
   // Max seconds since last driver heartbeat for location to be considered fresh.
   DRIVER_LOCATION_FRESHNESS_S: z.union([z.string(), z.number()]).transform(Number).default(60),
+  // TTL of the raw location heartbeat key (seconds). Must be >= freshness.
+  DRIVER_HEARTBEAT_TTL_S: z.union([z.string(), z.number()]).transform(Number).default(90),
+  // TTL of the driver availability lease (seconds). Renewed by goOnline and
+  // every accepted location update; its expiry is what stops new dispatch
+  // offers to a driver whose app stopped reporting.
+  DRIVER_ONLINE_TTL_S: z.union([z.string(), z.number()]).transform(Number).default(120),
+  // TTL of the last-known location record (timestamped metadata), seconds.
+  DRIVER_LOCATION_RECORD_TTL_S: z.union([z.string(), z.number()]).transform(Number).default(300),
+  // Max age (seconds) of a location observation accepted for dispatching and
+  // for trip proximity gates (pickup/complete). Older fixes must not be
+  // treated as live.
+  DRIVER_LOCATION_MAX_AGE_S: z.union([z.string(), z.number()]).transform(Number).default(60),
   // Threshold (seconds) for considering a driver "near completion" of their
   // current ride and thus eligible for a new dispatch offer.
   NEAR_COMPLETION_THRESHOLD_S: z.union([z.string(), z.number()]).transform(Number).default(300),

@@ -180,3 +180,24 @@ export const rateLimitedTotal = new client.Counter({
   labelNames: ['bucket'] as const, // user | ip | socket
   registers: [register],
 });
+
+// --- Push delivery ---------------------------------------------------------
+
+export const pushDeliveryTotal = new client.Counter({
+  name: 'netride_push_delivery_total',
+  help: 'FCM push delivery outcomes, labeled by outcome.',
+  // delivered | failed | invalid_token | stub | no_tokens
+  labelNames: ['outcome'] as const,
+  registers: [register],
+});
+
+// --- Lifecycle / watchdog --------------------------------------------------
+
+export const lifecycleEventsTotal = new client.Counter({
+  name: 'netride_lifecycle_events_total',
+  help: 'Server lifecycle transitions and watchdog outcomes, labeled by event.',
+  // stale_ride_cancelled | ghost_driver_removed | driver_arrived |
+  // trip_restored | duplicate_event_suppressed
+  labelNames: ['event'] as const,
+  registers: [register],
+});
