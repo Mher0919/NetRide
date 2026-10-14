@@ -6,7 +6,7 @@
       flutter-version: "3.41.7"
       xcode: "latest"
       node-version: "20"
-      cocoapods: "1.15.2"
+      cocoapods: "1.17.0"
     environment_vars:
       - name: MATCH_PASSWORD
         value: ""
@@ -59,7 +59,7 @@
       flutter-version: "3.41.7"
       xcode: "latest"
       node-version: "20"
-      cocoapods: "1.15.2"
+      cocoapods: "1.17.0"
     triggering:
       branch_patterns:
         - pattern: main
@@ -85,7 +85,7 @@
       flutter-version: "3.41.7"
       xcode: "latest"
       node-version: "20"
-      cocoapods: "1.15.2"
+      cocoapods: "1.17.0"
     triggering:
       branch_patterns:
         - pattern: main
