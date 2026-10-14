@@ -13,6 +13,7 @@ import {
   Stack,
   Snackbar,
   Alert,
+  Button,
   LinearProgress,
   Card,
 } from '@mui/material';
@@ -25,6 +26,7 @@ const fmtUSD = (cents: number | null | undefined) =>
 const Revenue: React.FC = () => {
   const [overview, setOverview] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState('');
   const [snack, setSnack] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
     message: '',
@@ -34,10 +36,12 @@ const Revenue: React.FC = () => {
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     try {
+      setLoadError('');
       const data = await getRevenueOverview();
       setOverview(data);
     } catch (err: any) {
       console.error('Failed to fetch revenue overview', err);
+      setLoadError('Failed to load revenue overview');
       setSnack({ open: true, message: err?.response?.data?.error || 'Failed to load revenue overview', severity: 'error' });
     } finally {
       setLoading(false);
@@ -65,7 +69,7 @@ const Revenue: React.FC = () => {
   );
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box>
       <Box>
         <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
           Revenue Overview
@@ -74,6 +78,16 @@ const Revenue: React.FC = () => {
           Every completed ride records a cent-exact split: final fare = driver share + fleet shares + NetRide share.
         </Typography>
       </Box>
+
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={() => fetchData()}>Retry</Button>}
+        >
+          {loadError}
+        </Alert>
+      )}
 
       {loading && !overview && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
@@ -85,7 +99,7 @@ const Revenue: React.FC = () => {
         <>
           {/* Global split */}
           <Paper sx={{ mt: 3, p: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
                 Global revenue split
               </Typography>
@@ -93,9 +107,9 @@ const Revenue: React.FC = () => {
                 Configured via the revenue_configs table (single row, must sum to 100)
               </Typography>
             </Stack>
-            <Stack direction="row" spacing={3} sx={{ mt: 2 }} alignItems="center" flexWrap="wrap">
+            <Stack direction="row" spacing={3} sx={{ mt: 2, alignItems: 'center', flexWrap: 'wrap' }}>
               <Box sx={{ flex: 1, minWidth: 220 }}>
-                <Stack direction="row" justifyContent="space-between">
+                <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                   <Typography variant="body2" sx={{ fontWeight: 700, color: '#5B7760' }}>
                     Drivers {Number(config?.driverSharePercent ?? 0).toFixed(0)}%
                   </Typography>
@@ -116,7 +130,7 @@ const Revenue: React.FC = () => {
           </Paper>
 
           {/* Global totals */}
-          <Stack direction="row" spacing={2} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
+          <Stack direction="row" spacing={2} sx={{ mt: 2, flexWrap: 'wrap' }} useFlexGap>
             {statCard('Total fare', fmtUSD(global?.total_fare_cents), '#2F3A32')}
             {statCard('Driver earnings (60%)', fmtUSD(global?.total_driver_share_cents), '#5B7760')}
             {statCard('Platform pool', fmtUSD(global?.total_platform_share_cents), '#C79A4A')}
@@ -125,7 +139,7 @@ const Revenue: React.FC = () => {
           </Stack>
 
           {/* Per-fleet breakdown */}
-          <Paper sx={{ mt: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
+          <Paper sx={{ mt: 3, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
             <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Fleet partner earnings</Typography>
             </Box>

@@ -3,6 +3,8 @@
 // Modal bottom sheet that shows the live chat thread between the driver
 // and the rider. Symmetric to the rider app's ChatSheet — only the
 // role identity differs (driver vs rider).
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -76,7 +78,11 @@ class _ChatSheetState extends State<ChatSheet> {
               bottom: MediaQuery.of(context).viewInsets.bottom,
             ),
             child: Container(
-              height: MediaQuery.of(context).size.height * 0.72,
+              height: math.max(
+                MediaQuery.of(context).size.height * 0.72 -
+                    MediaQuery.of(context).viewInsets.bottom,
+                MediaQuery.of(context).size.height * 0.45,
+              ),
               decoration: const BoxDecoration(
                 color: AppTheme.primaryBackground,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),

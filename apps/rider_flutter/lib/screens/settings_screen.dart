@@ -37,11 +37,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Security Check', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Security Check', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Please enter your current password to receive a verification email.', style: GoogleFonts.poppins(fontSize: 13)),
+              Text('Please enter your current password to receive a verification email.', style: GoogleFonts.inter(fontSize: 13)),
               const SizedBox(height: 16),
               TextField(
                 controller: currentPasswordController,
@@ -281,7 +281,7 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('$actionName Account?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('$actionName Account?', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Text('Are you absolutely sure you want to $actionName your account?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -338,7 +338,7 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
             const SizedBox(height: 24),
             Text(
               'Important Information',
-              style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold),
+              style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             Expanded(
@@ -347,7 +347,7 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
                   widget.isDeletion
                       ? 'When you delete your account, all your data, including profile information, trip history, and preferences, will be permanently removed from the app. This action cannot be undone.'
                       : 'When you deactivate your account, your profile will be hidden and you won\'t be able to use the app until you sign back in. Your data will be preserved, and signing back in will immediately reactivate your account.',
-                  style: GoogleFonts.poppins(fontSize: 16, color: Colors.black87, height: 1.5),
+                  style: GoogleFonts.inter(fontSize: 16, color: Colors.black87, height: 1.5),
                 ),
               ),
             ),
@@ -362,7 +362,7 @@ class _AccountActionScreenState extends State<AccountActionScreen> {
                 Expanded(
                   child: Text(
                     'I understand the consequences of ${actionName.toLowerCase()}ing my account.',
-                    style: GoogleFonts.poppins(fontSize: 14),
+                    style: GoogleFonts.inter(fontSize: 14),
                   ),
                 ),
               ],

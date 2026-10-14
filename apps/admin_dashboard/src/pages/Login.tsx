@@ -189,10 +189,18 @@ const Login: React.FC = () => {
                   onChange={(e) => setOtp(e.target.value)}
                   required
                   autoFocus
-                  {...({
-                    inputProps: { maxLength: 6, style: { textAlign: 'center', letterSpacing: '0.5em', fontSize: '1.5rem', fontWeight: 800 } },
-                    InputProps: { disableUnderline: true, sx: { borderRadius: 3, bgcolor: '#f5f5f5' } }
-                  } as any)}
+                  slotProps={{
+                    htmlInput: {
+                      maxLength: 6,
+                      style: {
+                        textAlign: 'center',
+                        letterSpacing: '0.35em',
+                        fontSize: '1.35rem',
+                        fontWeight: 800,
+                      },
+                    },
+                    input: { disableUnderline: true, sx: { borderRadius: '12px', bgcolor: '#f5f5f5' } },
+                  }}
                 />
                 <FormControlLabel
                   control={

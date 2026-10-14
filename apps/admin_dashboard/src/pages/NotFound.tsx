@@ -11,15 +11,15 @@ const NotFound = () => {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        height: '100vh',
+        height: '100dvh',
         textAlign: 'center',
         px: 2,
       }}
     >
-      <Typography variant="h1" fontWeight={700} color="text.secondary" sx={{ fontSize: { xs: 72, md: 120 } }}>
+      <Typography variant="h1" sx={{ fontWeight: 700, color: 'text.secondary', fontSize: { xs: 72, md: 120 } }}>
         404
       </Typography>
-      <Typography variant="h5" fontWeight={600} sx={{ mt: 1 }}>
+      <Typography variant="h5" sx={{ mt: 1, fontWeight: 600 }}>
         Page Not Found
       </Typography>
       <Typography variant="body1" color="text.secondary" sx={{ mt: 1, maxWidth: 400 }}>

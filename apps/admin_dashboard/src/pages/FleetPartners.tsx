@@ -57,6 +57,7 @@ const emptyForm = {
 const FleetPartners: React.FC = () => {
   const [fleets, setFleets] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState('');
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editTarget, setEditTarget] = React.useState<any>(null);
@@ -86,10 +87,12 @@ const FleetPartners: React.FC = () => {
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     try {
+      setLoadError('');
       const data = await listFleets();
       setFleets(data?.fleets ?? []);
     } catch (err) {
       console.error('Failed to fetch fleets', err);
+      setLoadError('Failed to load fleet partners');
       setFleets([]);
     } finally {
       setLoading(false);
@@ -273,8 +276,8 @@ const FleetPartners: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: { xs: 0, sm: 3 } }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+    <Box>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
             Fleet Partners
@@ -293,9 +296,19 @@ const FleetPartners: React.FC = () => {
         </Button>
       </Stack>
 
-      <Paper sx={{ mt: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={() => fetchData()}>Retry</Button>}
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      <Paper sx={{ mt: 3, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
         <TableContainer>
-          <Table>
+          <Table sx={{ minWidth: 860 }}>
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, color: 'text.secondary', bgcolor: '#FAFAFA' } }}>
                 <TableCell>Fleet</TableCell>
@@ -314,7 +327,7 @@ const FleetPartners: React.FC = () => {
                   </TableCell>
                 </TableRow>
               )}
-              {!loading && fleets.length === 0 && (
+              {!loading && !loadError && fleets.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 5, color: 'text.secondary' }}>
                     No fleet partners yet — create one to start paying fleet shares.
@@ -353,7 +366,7 @@ const FleetPartners: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell align="right">
-                      <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                         <IconButton size="small" title="Portal account" onClick={() => openPortal(f)}>
                           <VpnKeyIcon fontSize="small" sx={{ color: '#5B7760' }} />
                         </IconButton>
@@ -382,7 +395,7 @@ const FleetPartners: React.FC = () => {
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>{editTarget ? `Edit ${editTarget.name}` : 'New Fleet Partner'}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} mt={1}>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               label="Fleet name"
               value={form.name}
@@ -393,7 +406,7 @@ const FleetPartners: React.FC = () => {
               type="number"
               value={form.platform_share_percent}
               onChange={(e) => setForm({ ...form, platform_share_percent: e.target.value })}
-              InputProps={{ endAdornment: <InputAdornment position="end">% of NetRide's 40%</InputAdornment> }}
+              slotProps={{ input: { endAdornment: <InputAdornment position="end">% of NetRide's 40%</InputAdornment> } }}
               helperText="Example: 20% → fleet gets 20% of the 40% platform pool (8% of the fare); NetRide keeps the rest."
             />
             <Stack direction="row" spacing={2}>
@@ -445,7 +458,7 @@ const FleetPartners: React.FC = () => {
             onChange={(e) => setDriverSearch(e.target.value)}
             fullWidth
             sx={{ mb: 2 }}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+            slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
           />
           {driverLoading && (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -462,7 +475,7 @@ const FleetPartners: React.FC = () => {
               const driverFleet = d.driver_profile?.fleet_id ?? null;
               return (
                 <Paper key={d.id} sx={{ p: 1.5, mb: 1, borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)' }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
                     <Box>
                       <Typography variant="body2" sx={{ fontWeight: 700 }}>{d.full_name}</Typography>
                       <Typography variant="caption" color="text.secondary">{d.email}</Typography>
@@ -500,7 +513,7 @@ const FleetPartners: React.FC = () => {
       <Dialog open={!!portalTarget} onClose={() => setPortalTarget(null)} fullWidth maxWidth="xs">
         <DialogTitle>Fleet Portal Account · {portalTarget?.name}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} mt={1}>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
               The fleet logs into the NetRide Partner Portal to track its earnings. A temporary
               password is generated below — the fleet must change it on first login.

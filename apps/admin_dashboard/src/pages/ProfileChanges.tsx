@@ -87,7 +87,7 @@ const ProfileChanges: React.FC = () => {
 
   return (
     <Box>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
+      <Stack direction="row" spacing={2} sx={{ mb: 3, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', rowGap: 1.5 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
             Driver Profile Changes
@@ -98,10 +98,13 @@ const ProfileChanges: React.FC = () => {
         </Box>
       </Stack>
 
-      <Paper sx={{ p: 0, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
+      <Paper sx={{ p: 0, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
         <Tabs
           value={status}
           onChange={(_, v) => setStatus(v)}
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
           sx={{
             borderBottom: '1px solid rgba(0,0,0,0.06)',
             px: 2,

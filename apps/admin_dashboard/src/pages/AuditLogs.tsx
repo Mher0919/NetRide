@@ -4,7 +4,9 @@ import {
   Typography, 
   Paper, 
   Chip, 
-  Avatar
+  Avatar,
+  Alert,
+  Button
 } from '@mui/material';
 import { 
   DataGrid, 
@@ -17,6 +19,7 @@ import { format } from '../utils/date';
 const AuditLogs: React.FC = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,
@@ -25,6 +28,7 @@ const AuditLogs: React.FC = () => {
 
   const fetchLogs = async () => {
     setLoading(true);
+    setError(null);
     try {
       const response = await api.get('/admin/logs', {
         params: {
@@ -36,6 +40,7 @@ const AuditLogs: React.FC = () => {
       setTotal(response.data.total);
     } catch (error) {
       console.error('Failed to fetch logs', error);
+      setError('We could not load the audit log. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -50,7 +55,7 @@ const AuditLogs: React.FC = () => {
       field: 'created_at', 
       headerName: 'Timestamp', 
       width: 220,
-      valueFormatter: (params: any) => params.value ? format(new Date(params.value), 'MMM dd, yyyy HH:mm:ss') : '-'
+      valueFormatter: (value: any) => (value ? format(new Date(value), 'MMM dd, yyyy HH:mm:ss') : '-')
     },
     { 
       field: 'admin', 
@@ -80,7 +85,7 @@ const AuditLogs: React.FC = () => {
         
         return (
           <Chip 
-            label={action.replace('_', ' ')} 
+            label={action.replaceAll('_', ' ')} 
             color={color as any} 
             size="small" 
             sx={{ fontWeight: 800, fontSize: '0.65rem', height: 22 }} 
@@ -115,14 +120,28 @@ const AuditLogs: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{ mb: 5 }}>
-        <Typography variant="h4" sx={{ fontWeight: 800, mb: 1 }}>Security Audit</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4">Security Audit</Typography>
+        <Typography variant="body2" color="text.secondary">
           Immutable log of all administrative actions and system modifications
         </Typography>
       </Box>
 
-      <Paper sx={{ height: 800, width: '100%', border: 'none', overflow: 'hidden' }}>
+      {error && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => fetchLogs()}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
+
+      <Paper sx={{ height: 'calc(100vh - 240px)', minHeight: 420, width: '100%', border: 'none', overflow: 'hidden' }}>
         <DataGrid
           rows={logs}
           columns={columns}

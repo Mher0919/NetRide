@@ -64,6 +64,7 @@ const Promos: React.FC = () => {
   const [promos, setPromos] = React.useState<any[]>([]);
   const [partners, setPartners] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
 
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -92,12 +93,13 @@ const Promos: React.FC = () => {
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await listPromos({ search });
       setPromos(data?.promos ?? []);
     } catch (err) {
       console.error('Failed to fetch promos', err);
-      setPromos([]);
+      setLoadError('We could not load promo codes. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -235,10 +237,10 @@ const Promos: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
+    <Box>
+      <Stack direction="row" spacing={2} useFlexGap sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h5">
             Promo Codes
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -260,13 +262,27 @@ const Promos: React.FC = () => {
         placeholder="Search promo code…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        sx={{ mt: 3, width: 300 }}
-        InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+        sx={{ mt: 3, width: { xs: '100%', sm: 300 } }}
+        slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
       />
 
-      <Paper sx={{ mt: 2, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mt: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => fetchData()}>
+              Retry
+            </Button>
+          }
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      <Paper sx={{ mt: 2, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
         <TableContainer>
-          <Table>
+          <Table size="small" sx={{ minWidth: 860 }}>
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, color: 'text.secondary', bgcolor: '#FAFAFA' } }}>
                 <TableCell>Code</TableCell>
@@ -324,7 +340,7 @@ const Promos: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell align="right" onClick={(e) => e.stopPropagation()}>
-                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                        <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                           <IconButton size="small" title={p.active ? 'Deactivate' : 'Activate'} onClick={() => handleToggleActive(p)}>
                             <PowerIcon fontSize="small" sx={{ color: p.active ? '#5B7760' : '#999999' }} />
                           </IconButton>
@@ -351,13 +367,13 @@ const Promos: React.FC = () => {
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>{editTarget ? `Edit ${editTarget.code}` : 'New Promo'}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} mt={1}>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               label="Code"
               value={form.code}
               disabled={!!editTarget}
               onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
-              InputProps={{ startAdornment: <InputAdornment position="start">NetRide_</InputAdornment> }}
+              slotProps={{ input: { startAdornment: <InputAdornment position="start">NetRide_</InputAdornment> } }}
             />
             <TextField
               select
@@ -420,7 +436,7 @@ const Promos: React.FC = () => {
               type="datetime-local"
               value={form.expires_at}
               onChange={(e) => setForm({ ...form, expires_at: e.target.value })}
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
             <FormControlLabel
               control={
@@ -458,10 +474,10 @@ const Promos: React.FC = () => {
       </Dialog>
 
       {/* Detail drawer */}
-      <Drawer anchor="right" open={!!selected && !createOpen} onClose={() => setSelected(null)} PaperProps={{ sx: { width: { xs: '100%', sm: 480 } } }}>
+      <Drawer anchor="right" open={!!selected && !createOpen} onClose={() => setSelected(null)} slotProps={{ paper: { sx: { width: { xs: '100%', sm: 'min(560px, 100vw)' }, maxWidth: '100%' } } }}>
         {selected && (
-          <Box sx={{ p: 3 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Box>
+            <Stack direction="row" spacing={2} useFlexGap sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.code}</Typography>
               <IconButton onClick={() => setSelected(null)}><CloseIcon /></IconButton>
             </Stack>
@@ -479,7 +495,7 @@ const Promos: React.FC = () => {
                 {usage.length === 0 && <Typography variant="body2" color="text.secondary">No rides have used this code.</Typography>}
                 {usage.map((u) => (
                   <Paper key={u.id} sx={{ p: 1.5, mb: 1, borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)' }}>
-                    <Stack direction="row" justifyContent="space-between">
+                    <Stack direction="row" spacing={2} useFlexGap sx={{ justifyContent: 'space-between', flexWrap: 'wrap', rowGap: 1 }}>
                       <Box>
                         <Typography variant="body2" sx={{ fontWeight: 700 }}>{u.rider_name ?? u.rider_id?.slice(0, 8)}</Typography>
                         <Typography variant="caption" color="text.secondary">

@@ -191,6 +191,7 @@ class _WalletScreenState extends State<WalletScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final accountMissing = _state == ViewState.success && _account == null;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -201,8 +202,10 @@ class _WalletScreenState extends State<WalletScreen> {
         ),
       ),
       body: StateContainer(
-        state: _state,
-        errorMessage: _errorMessage,
+        state: accountMissing ? ViewState.failure : _state,
+        errorMessage: accountMissing
+            ? 'We couldn\'t load your payment information. Please try again.'
+            : _errorMessage,
         onRetry: _fetch,
         successWidget: _account == null ? const SizedBox.shrink() : _buildContent(),
       ),

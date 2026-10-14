@@ -46,6 +46,7 @@ const fmtMoney = (v: number | null | undefined) =>
 const Pricing: React.FC = () => {
   const [profiles, setProfiles] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState('');
 
   const [editTarget, setEditTarget] = React.useState<any>(null);
   const [saving, setSaving] = React.useState(false);
@@ -60,10 +61,12 @@ const Pricing: React.FC = () => {
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     try {
+      setLoadError('');
       const data = await listPricingProfiles();
       setProfiles(data?.profiles ?? []);
     } catch (err) {
       console.error('Failed to fetch pricing profiles', err);
+      setLoadError('Failed to load pricing profiles');
       setProfiles([]);
     } finally {
       setLoading(false);
@@ -103,8 +106,8 @@ const Pricing: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+    <Box>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
             Pricing Profiles
@@ -115,9 +118,19 @@ const Pricing: React.FC = () => {
         </Box>
       </Stack>
 
-      <Paper sx={{ mt: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={() => fetchData()}>Retry</Button>}
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      <Paper sx={{ mt: 3, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
         <TableContainer>
-          <Table>
+          <Table sx={{ minWidth: 860 }}>
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, color: 'text.secondary', bgcolor: '#FAFAFA' } }}>
                 <TableCell>Profile</TableCell>
@@ -138,7 +151,7 @@ const Pricing: React.FC = () => {
                   </TableCell>
                 </TableRow>
               )}
-              {!loading && profiles.length === 0 && (
+              {!loading && !loadError && profiles.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={8} align="center" sx={{ py: 5, color: 'text.secondary' }}>
                     No active pricing profiles.
@@ -188,7 +201,7 @@ const Pricing: React.FC = () => {
       <Dialog open={!!editTarget} onClose={() => setEditTarget(null)} fullWidth maxWidth="sm">
         <DialogTitle>Edit {editTarget?.label}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} mt={1}>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               label="Display label"
               value={form.label ?? ''}
@@ -200,7 +213,7 @@ const Pricing: React.FC = () => {
                 key={key}
                 label={label}
                 type="number"
-                inputProps={{ step: step ?? 'any' }}
+                slotProps={{ htmlInput: { step: step ?? 'any' } }}
                 value={form[key] ?? '0'}
                 onChange={(e) => setForm({ ...form, [key]: e.target.value })}
               />
@@ -211,7 +224,7 @@ const Pricing: React.FC = () => {
                 key={key}
                 label={label}
                 type="number"
-                inputProps={{ step: step ?? 'any' }}
+                slotProps={{ htmlInput: { step: step ?? 'any' } }}
                 value={form[key] ?? '1'}
                 onChange={(e) => setForm({ ...form, [key]: e.target.value })}
               />

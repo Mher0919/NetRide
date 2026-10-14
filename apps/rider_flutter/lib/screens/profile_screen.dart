@@ -184,13 +184,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text('ID Verification (Step 1/2)', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('ID Verification (Step 1/2)', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.badge_outlined, size: 80, color: Colors.blue),
             const SizedBox(height: 16),
-            Text('Please select a clear picture of the FRONT of your ID card.', textAlign: TextAlign.center, style: GoogleFonts.poppins()),
+            Text('Please select a clear picture of the FRONT of your ID card.', textAlign: TextAlign.center, style: GoogleFonts.inter()),
           ],
         ),
         actions: [
@@ -214,7 +214,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text('ID Verification (Step 2/2)', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('ID Verification (Step 2/2)', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -239,7 +239,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
             ),
             const SizedBox(height: 16),
-            Text('Now, please select a clear picture of the BACK of your ID card.', textAlign: TextAlign.center, style: GoogleFonts.poppins()),
+            Text('Now, please select a clear picture of the BACK of your ID card.', textAlign: TextAlign.center, style: GoogleFonts.inter()),
           ],
         ),
         actions: [
@@ -261,13 +261,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Submit for Verification?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Submit for Verification?', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.cloud_upload_outlined, size: 80, color: Colors.green),
             const SizedBox(height: 16),
-            Text('Are you sure you want to submit these photos for age verification?', textAlign: TextAlign.center, style: GoogleFonts.poppins()),
+            Text('Are you sure you want to submit these photos for age verification?', textAlign: TextAlign.center, style: GoogleFonts.inter()),
           ],
         ),
         actions: [
@@ -310,11 +310,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Change Email', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Change Email', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('A verification link will be sent to your new email address.', style: GoogleFonts.poppins(fontSize: 14)),
+            Text('A verification link will be sent to your new email address.', style: GoogleFonts.inter(fontSize: 14)),
             const SizedBox(height: 16),
             TextField(
               controller: emailController,
@@ -397,7 +397,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Logout', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Logout', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: const Text('Are you sure you want to log out?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -963,7 +963,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (onAction != null)
           GestureDetector(
             onTap: onAction,
-            child: const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF5B7760)),
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Icon(Icons.edit_outlined, size: 16, color: Color(0xFF5B7760)),
+            ),
           ),
       ],
     );
@@ -993,20 +997,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
       behavior: HitTestBehavior.opaque,
       child: Opacity(
         opacity: enabled ? 1.0 : 0.4,
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.4)),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF2F3A32)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.4)),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF2F3A32)),
+                ),
               ),
-            ),
-            ?trailing,
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.2)),
-          ],
+              ?trailing,
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.2)),
+            ],
+          ),
         ),
       ),
     );

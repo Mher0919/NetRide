@@ -295,7 +295,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
           Positioned(
             right: 16,
-            bottom: 250,
+            bottom: 300,
             child: ValueListenableBuilder<bool>(
               valueListenable: NavigationVoiceService.instance.mutedListenable,
               builder: (context, muted, _) {
@@ -372,19 +372,22 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
     return SafeArea(
       top: false,
-      child: BottomSheetCard(
-        heading: heading,
-        destinationAddress: address,
-        etaLabel: etaLabel,
-        remainingLabel: remainingLabel,
-        actionLabel: actionLabel,
-        actionEnabled: actionEnabled,
-        onAction: onAction,
-        showProgress: true,
-        progressFraction: progress?.progressFraction ?? 0,
-        onChat: widget.onChat,
-        onCall: widget.onCall,
-        callActive: comm.callPhase != CallPhase.idle,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 300),
+        child: BottomSheetCard(
+          heading: heading,
+          destinationAddress: address,
+          etaLabel: etaLabel,
+          remainingLabel: remainingLabel,
+          actionLabel: actionLabel,
+          actionEnabled: actionEnabled,
+          onAction: onAction,
+          showProgress: true,
+          progressFraction: progress?.progressFraction ?? 0,
+          onChat: widget.onChat,
+          onCall: widget.onCall,
+          callActive: comm.callPhase != CallPhase.idle,
+        ),
       ),
     );
   }

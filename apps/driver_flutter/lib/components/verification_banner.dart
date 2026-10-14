@@ -91,8 +91,7 @@ class VerificationBanner extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white, size: 18),
                 onPressed: onDismiss,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(8),
               ),
           ],
         ),

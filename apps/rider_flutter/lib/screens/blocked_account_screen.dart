@@ -71,14 +71,18 @@ class _BlockedAccountScreenState extends State<BlockedAccountScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFEEEBE6),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 96,
-                height: 96,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 96,
+                      height: 96,
                 decoration: BoxDecoration(
                   color: const Color(0xFF5B7760).withOpacity(0.12),
                   shape: BoxShape.circle,
@@ -188,6 +192,9 @@ class _BlockedAccountScreenState extends State<BlockedAccountScreen> {
               const SizedBox(height: 18),
               const _CheckingHint(),
             ],
+                ),
+              ),
+            ),
           ),
         ),
       ),

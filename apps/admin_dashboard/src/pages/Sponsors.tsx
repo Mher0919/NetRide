@@ -116,6 +116,7 @@ const Sponsors: React.FC = () => {
   const [sponsors, setSponsors] = React.useState<Record<string, unknown>[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
 
@@ -164,8 +165,10 @@ const Sponsors: React.FC = () => {
       const data = await listSponsors({ search, status: statusFilter, limit: 200 });
       setSponsors(data?.sponsors ?? []);
       setTotal(data?.total ?? 0);
+      setLoadError(null);
     } catch (err) {
       console.error('Failed to fetch sponsors', err);
+      setLoadError('We could not load sponsors. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -557,10 +560,12 @@ const Sponsors: React.FC = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             sx={{ width: { xs: '100%', sm: 280 } }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
-              ),
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
+                ),
+              },
             }}
           />
           <TextField
@@ -581,8 +586,18 @@ const Sponsors: React.FC = () => {
         </Stack>
       </Paper>
 
-      <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
-        <Table>
+      {loadError && (
+        <Alert
+          severity="error"
+          action={<Button color="inherit" size="small" onClick={() => fetchData()}>Retry</Button>}
+          sx={{ mb: 2 }}
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      <TableContainer component={Paper} sx={{ borderRadius: '16px' }}>
+        <Table size="small" sx={{ minWidth: 900 }}>
           <TableHead>
             <TableRow sx={{ '& th': { fontWeight: 700, color: 'text.secondary', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 } }}>
               <TableCell>Business</TableCell>
@@ -605,7 +620,9 @@ const Sponsors: React.FC = () => {
             ) : sponsors.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} align="center" sx={{ py: 6, color: 'text.secondary' }}>
-                  No sponsors yet. Click “New Sponsor” to fund your first SPECIALS.
+                  {loadError
+                    ? 'We could not load sponsors. Check your connection and try again.'
+                    : 'No sponsors yet. Click “New Sponsor” to fund your first SPECIALS.'}
                 </TableCell>
               </TableRow>
             ) : (
@@ -645,7 +662,7 @@ const Sponsors: React.FC = () => {
                       <Chip size="small" label={s.status} sx={{ bgcolor: sc.bg, color: sc.fg, fontWeight: 700, fontSize: 11 }} />
                     </TableCell>
                     <TableCell align="right" onClick={(e) => e.stopPropagation()}>
-                      <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                         {s.status === 'ACTIVE' ? (
                           <Tooltip title="Suspend sponsor (SPECIALS hidden, redemptions blocked)">
                             <Button size="small" color="error" onClick={() => handleStatusChange(s, 'SUSPENDED')}>Suspend</Button>
@@ -690,11 +707,11 @@ const Sponsors: React.FC = () => {
             </TextField>
             <TextField label="Description" value={form.businessDescription} onChange={(e) => setForm({ ...form, businessDescription: e.target.value })} fullWidth multiline minRows={2} />
             <Grid container spacing={2}>
-              <Grid item xs={6}><TextField label="Manager name" value={form.managerName} onChange={(e) => setForm({ ...form, managerName: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={6}><TextField label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={6}><TextField label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={6}><TextField label="City" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={12}><TextField label="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="Manager name" value={form.managerName} onChange={(e) => setForm({ ...form, managerName: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="City" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12 }}><TextField label="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} fullWidth /></Grid>
             </Grid>
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
@@ -731,24 +748,24 @@ const Sponsors: React.FC = () => {
             </TextField>
             {form.discountType === 'PERCENTAGE' ? (
               <Grid container spacing={2}>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 12, sm: 6 }}>
                   <TextField
                     label="Discount % (of fare)"
                     type="number"
                     value={form.discountPercent}
                     onChange={(e) => setForm({ ...form, discountPercent: e.target.value })}
                     fullWidth
-                    InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                    slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> } }}
                   />
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 12, sm: 6 }}>
                   <TextField
                     label="Max % of fare"
                     type="number"
                     value={form.maxDiscountPercent}
                     onChange={(e) => setForm({ ...form, maxDiscountPercent: e.target.value })}
                     fullWidth
-                    InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                    slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> } }}
                   />
                 </Grid>
               </Grid>
@@ -779,13 +796,13 @@ const Sponsors: React.FC = () => {
               size="small"
             >
               <ToggleButton value="NONE" sx={{ textTransform: 'none', fontWeight: createPortalMode === 'NONE' ? 700 : 400 }}>
-                No login yet
+                No login
               </ToggleButton>
               <ToggleButton value="NEW" sx={{ textTransform: 'none', fontWeight: createPortalMode === 'NEW' ? 700 : 400 }}>
-                Create new user
+                Create new
               </ToggleButton>
               <ToggleButton value="EXISTING" sx={{ textTransform: 'none', fontWeight: createPortalMode === 'EXISTING' ? 700 : 400 }}>
-                Use existing user
+                Link existing
               </ToggleButton>
             </ToggleButtonGroup>
             {createPortalMode === 'NEW' && (
@@ -820,12 +837,12 @@ const Sponsors: React.FC = () => {
       </Dialog>
 
       {/* Detail drawer */}
-      <Drawer anchor="right" open={!!selected} onClose={() => setSelected(null)} sx={{ '& .MuiDrawer-paper': { width: { xs: '100%', sm: 720 } } }}>
+      <Drawer anchor="right" open={!!selected} onClose={() => setSelected(null)} sx={{ '& .MuiDrawer-paper': { width: { xs: '100%', sm: 'min(720px, 100vw)' }, maxWidth: '100%' } }}>
         {selected && (
           <Box sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <Box sx={{ width: 44, height: 44, borderRadius: 2, bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+                <Box sx={{ width: 44, height: 44, borderRadius: '12px', bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
                   <StorefrontIcon />
                 </Box>
                 <Box>
@@ -842,7 +859,7 @@ const Sponsors: React.FC = () => {
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
             ) : (
               <>
-                <Tabs value={detailTab} onChange={(_, v) => setDetailTab(v)} sx={{ mb: 2 }}>
+                <Tabs value={detailTab} onChange={(_, v) => setDetailTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ mb: 2 }}>
                   <Tab label="Overview" />
                   <Tab label="Ledger" />
                   <Tab label="Settlements" />
@@ -853,25 +870,25 @@ const Sponsors: React.FC = () => {
                 {detailTab === 0 && (
                   <Stack spacing={2}>
                     <Grid container spacing={2}>
-                      <Grid item xs={6} sm={3}>
+                      <Grid size={{ xs: 6, sm: 3 }}>
                         <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
                           <Typography variant="caption" color="text.secondary">Remaining</Typography>
                           <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(sponsor.remaining_budget_cents)}</Typography>
                         </Paper>
                       </Grid>
-                      <Grid item xs={6} sm={3}>
+                      <Grid size={{ xs: 6, sm: 3 }}>
                         <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
                           <Typography variant="caption" color="text.secondary">Reserved</Typography>
                           <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(sponsor.reserved_budget_cents)}</Typography>
                         </Paper>
                       </Grid>
-                      <Grid item xs={6} sm={3}>
+                      <Grid size={{ xs: 6, sm: 3 }}>
                         <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
                           <Typography variant="caption" color="text.secondary">Used</Typography>
                           <Typography variant="h6" sx={{ fontWeight: 800 }}>{fmtUSD(sponsor.used_budget_cents)}</Typography>
                         </Paper>
                       </Grid>
-                      <Grid item xs={6} sm={3}>
+                      <Grid size={{ xs: 6, sm: 3 }}>
                         <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
                           <Typography variant="caption" color="text.secondary">Status</Typography>
                           <Chip size="small" label={sponsor.status} sx={{ mt: 1, bgcolor: (statusColors[sponsor.status] ?? { bg: '#EEE' }).bg, color: (statusColors[sponsor.status] ?? { fg: '#666' }).fg, fontWeight: 700 }} />
@@ -901,7 +918,7 @@ const Sponsors: React.FC = () => {
                       <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Contact</Typography>
                       <Typography variant="body2">{sponsor.manager_name ?? '—'} · {sponsor.phone ?? '—'} · {sponsor.email ?? '—'}</Typography>
                       <Typography variant="body2" color="text.secondary">{sponsor.address ?? ''}{sponsor.city ? `, ${sponsor.city}` : ''}{sponsor.state ? `, ${sponsor.state}` : ''}</Typography>
-                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1.5 }}>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 1.5 }}>
                         <LocationOnIcon fontSize="small" sx={{ color: 'primary.main' }} />
                         {sponsor.latitude != null && sponsor.longitude != null ? (
                           <Typography variant="body2" sx={{ fontWeight: 700 }}>
@@ -924,7 +941,7 @@ const Sponsors: React.FC = () => {
                       <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Google Business</Typography>
                       {sponsor.google_place_id ? (
                         <Stack spacing={0.5}>
-                          <Stack direction="row" alignItems="center" spacing={1}>
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                             <StorefrontIcon fontSize="small" sx={{ color: '#2E7D32' }} />
                             <Typography variant="body2" sx={{ fontWeight: 700 }}>
                               {sponsor.google_business_name ?? sponsor.business_name}
@@ -1046,7 +1063,7 @@ const Sponsors: React.FC = () => {
                       { label: 'NetRide allocation (40%)', value: fmtUSD(analytics.totalNetrideAllocationCents) },
                       { label: 'Rider rewards paid', value: fmtUSD(analytics.totalRewardAmountCents) },
                     ].map((m) => (
-                      <Grid item xs={6} sm={3} key={m.label}>
+                      <Grid size={{ xs: 6, sm: 3 }} key={m.label}>
                         <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
                           <Typography variant="caption" color="text.secondary">{m.label}</Typography>
                           <Typography variant="h6" sx={{ fontWeight: 800 }}>{m.value}</Typography>
@@ -1202,14 +1219,14 @@ const Sponsors: React.FC = () => {
             </TextField>
             <TextField label="Description" value={editForm.businessDescription} onChange={(e) => setEditForm({ ...editForm, businessDescription: e.target.value })} fullWidth multiline minRows={2} />
             <Grid container spacing={2}>
-              <Grid item xs={6}><TextField label="Manager name" value={editForm.managerName} onChange={(e) => setEditForm({ ...editForm, managerName: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={6}><TextField label="Phone" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={6}><TextField label="Email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={6}><TextField label="City" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={6}><TextField label="State" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={6}><TextField label="Postal code" value={editForm.postalCode} onChange={(e) => setEditForm({ ...editForm, postalCode: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={12}><TextField label="Address" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} fullWidth /></Grid>
-              <Grid item xs={12}><TextField label="Country" value={editForm.country} onChange={(e) => setEditForm({ ...editForm, country: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="Manager name" value={editForm.managerName} onChange={(e) => setEditForm({ ...editForm, managerName: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="Phone" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="Email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="City" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="State" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12, sm: 6 }}><TextField label="Postal code" value={editForm.postalCode} onChange={(e) => setEditForm({ ...editForm, postalCode: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12 }}><TextField label="Address" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} fullWidth /></Grid>
+              <Grid size={{ xs: 12 }}><TextField label="Country" value={editForm.country} onChange={(e) => setEditForm({ ...editForm, country: e.target.value })} fullWidth /></Grid>
             </Grid>
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
@@ -1249,24 +1266,24 @@ const Sponsors: React.FC = () => {
             </TextField>
             {editForm.discountType === 'PERCENTAGE' ? (
               <Grid container spacing={2}>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 12, sm: 6 }}>
                   <TextField
                     label="Discount % (of fare)"
                     type="number"
                     value={editForm.discountPercent}
                     onChange={(e) => setEditForm({ ...editForm, discountPercent: e.target.value })}
                     fullWidth
-                    InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                    slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> } }}
                   />
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 12, sm: 6 }}>
                   <TextField
                     label="Max % of fare"
                     type="number"
                     value={editForm.maxDiscountPercent}
                     onChange={(e) => setEditForm({ ...editForm, maxDiscountPercent: e.target.value })}
                     fullWidth
-                    InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                    slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> } }}
                   />
                 </Grid>
               </Grid>

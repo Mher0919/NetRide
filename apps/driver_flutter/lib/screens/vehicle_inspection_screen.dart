@@ -1012,8 +1012,8 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: SizedBox(
-        width: (MediaQuery.of(context).size.width - 60) / 3, // 3 per row
-        height: (MediaQuery.of(context).size.width - 60) / 3,
+        width: (MediaQuery.of(context).size.width - 100) / 3, // 3 per row
+        height: (MediaQuery.of(context).size.width - 100) / 3,
         child: Stack(
           children: [
             // Image

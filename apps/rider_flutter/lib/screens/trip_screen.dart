@@ -491,7 +491,7 @@ class _TripScreenState extends State<TripScreen> {
           if (rideProvider.status == models.TripStatus.ACCEPTED ||
               rideProvider.status == models.TripStatus.IN_PROGRESS)
             Positioned(
-              bottom: 210,
+              bottom: 230,
               right: 16,
               child: TipFab(rideId: rideProvider.currentTrip!.id),
             ),

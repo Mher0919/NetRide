@@ -4,6 +4,8 @@
 // and the driver. Loads history on open, listens to the
 // CommunicationService for incoming + delivered events, and lets the
 // rider type + send messages with the send button.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -78,7 +80,11 @@ class _ChatSheetState extends State<ChatSheet> {
               bottom: MediaQuery.of(context).viewInsets.bottom,
             ),
             child: Container(
-              height: MediaQuery.of(context).size.height * 0.72,
+              height: math.max(
+                MediaQuery.of(context).size.height * 0.72 -
+                    MediaQuery.of(context).viewInsets.bottom,
+                MediaQuery.of(context).size.height * 0.45,
+              ),
               decoration: const BoxDecoration(
                 color: AppTheme.primaryBackground,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),

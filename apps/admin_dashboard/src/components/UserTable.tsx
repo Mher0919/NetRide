@@ -8,7 +8,9 @@ import {
   TextField,
   InputAdornment,
   FormControlLabel,
-  Switch
+  Switch,
+  Alert,
+  Button
 } from '@mui/material';
 import { 
   DataGrid, 
@@ -32,6 +34,7 @@ interface UserTableProps {
 const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,
@@ -43,6 +46,7 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
 
   const fetchUsers = async () => {
     setLoading(true);
+    setError(null);
     try {
       const response = await api.get('/admin/users', {
         params: {
@@ -57,6 +61,7 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
       setTotal(response.data.total);
     } catch (error) {
       console.error('Failed to fetch users', error);
+      setError('We could not load this list. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -125,7 +130,7 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
       field: 'created_at',
       headerName: 'Registered',
       width: 150,
-      valueFormatter: (params: any) => params.value ? format(new Date(params.value), 'MMM dd, yyyy') : '-'
+      valueFormatter: (value: any) => (value ? format(new Date(value), 'MMM dd, yyyy') : '-')
     },
     {
       field: 'actions',
@@ -142,9 +147,9 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
 
   return (
     <Box sx={{ maxWidth: 1600, mx: 'auto' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5, flexWrap: 'wrap', gap: 2 }}>
-        <Typography variant="h4" sx={{ fontWeight: 800 }}>{title}</Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+        <Typography variant="h4">{title}</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
           <FormControlLabel
             control={
               <Switch
@@ -160,22 +165,36 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
             placeholder="Search identity or email..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            {...({
-              InputProps: {
+            slotProps={{
+              input: {
                 startAdornment: (
                   <InputAdornment position="start">
                     <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
                   </InputAdornment>
                 ),
-                sx: { borderRadius: '12px', bgcolor: 'white', px: 1 }
-              }
-            } as any)}
-            sx={{ width: 350 }}
+                sx: { borderRadius: '12px', bgcolor: 'white', px: 1 },
+              },
+            }}
+            sx={{ width: { xs: '100%', sm: 350 } }}
           />
         </Box>
       </Box>
 
-      <Paper sx={{ height: 750, width: '100%', border: 'none', overflow: 'hidden' }}>
+      {error && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => fetchUsers()}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
+
+      <Paper sx={{ height: 'calc(100vh - 240px)', minHeight: 420, width: '100%', border: 'none', overflow: 'hidden' }}>
         <DataGrid
           rows={users}
           columns={columns}
@@ -186,17 +205,20 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
           onPaginationModelChange={setPaginationModel}
           pageSizeOptions={[10, 25, 50]}
           disableRowSelectionOnClick
-          sx={{ 
+          sx={{
             border: 'none',
             '& .MuiDataGrid-columnHeaders': {
               bgcolor: '#fafafa',
               borderBottom: '1px solid rgba(0,0,0,0.05)',
-              fontWeight: 800
+              fontWeight: 800,
             },
             '& .MuiDataGrid-cell': {
               borderBottom: '1px solid rgba(0,0,0,0.03)',
-              py: 2
-            }
+              py: 2,
+            },
+            '& .MuiDataGrid-cell:focus, & .MuiDataGrid-cell:focus-within': {
+              outline: 'none',
+            },
           }}
         />
       </Paper>

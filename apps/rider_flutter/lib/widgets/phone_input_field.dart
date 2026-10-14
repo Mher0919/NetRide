@@ -78,13 +78,14 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
   @override
   Widget build(BuildContext context) {
     final valid = widget.isValid;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Country selector ────────────────────────────────────────
-        Container(
-          height: 56, // match the text field height for alignment
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Country selector ────────────────────────────────────────
+          Container(
+            constraints: const BoxConstraints(minHeight: 56),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             color: Colors.grey.shade50,
             borderRadius: BorderRadius.circular(12),
@@ -105,7 +106,7 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
                           const SizedBox(width: 8),
                           Text(
                             c.dialCode,
-                            style: GoogleFonts.poppins(
+                            style: GoogleFonts.inter(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
                               color: Colors.black,
@@ -126,7 +127,7 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
                           children: [
                             Text(c.flag, style: const TextStyle(fontSize: 20)),
                             const SizedBox(width: 8),
-                            Text(c.dialCode, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
+                            Text(c.dialCode, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600)),
                           ],
                         ),
                       ))
@@ -144,7 +145,7 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
             textInputAction: TextInputAction.done,
             autofillHints: const [AutofillHints.telephoneNumberNational],
             maxLength: 14, // (555) 123-4567 -> 14 chars
-            style: GoogleFonts.poppins(fontSize: 16),
+            style: GoogleFonts.inter(fontSize: 16),
             decoration: (widget.decoration ??
                     InputDecoration(
                       hintText: '(555) 123-4567',
@@ -180,7 +181,8 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
             },
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 }

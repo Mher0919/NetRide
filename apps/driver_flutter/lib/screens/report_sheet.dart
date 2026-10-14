@@ -86,7 +86,7 @@ class _CancellationReasonSheetState extends State<CancellationReasonSheet> {
         children: [
           Text(
             'Why are you cancelling?',
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.inter(
               fontSize: 18,
               fontWeight: FontWeight.w700,
               color: Colors.black,
@@ -95,7 +95,7 @@ class _CancellationReasonSheetState extends State<CancellationReasonSheet> {
           const SizedBox(height: 6),
           Text(
             'Cancelling an accepted ride affects your acceptance record, so let us know why.',
-            style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[600]),
+            style: GoogleFonts.inter(fontSize: 13, color: Colors.grey[600]),
           ),
           const SizedBox(height: 16),
           Flexible(
@@ -135,7 +135,7 @@ class _CancellationReasonSheetState extends State<CancellationReasonSheet> {
                             Expanded(
                               child: Text(
                                 option.label,
-                                style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
+                                style: GoogleFonts.inter(fontSize: 14, color: Colors.black87),
                               ),
                             ),
                           ],
@@ -172,7 +172,7 @@ class _CancellationReasonSheetState extends State<CancellationReasonSheet> {
               onPressed: _submitting ? null : _confirm,
               child: Text(
                 'Cancel Ride',
-                style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700),
+                style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -311,7 +311,7 @@ class _ReportSheetState extends State<ReportSheet> {
         children: [
           Text(
             'Report an issue',
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.inter(
               fontSize: 18,
               fontWeight: FontWeight.w700,
               color: Colors.black,
@@ -322,7 +322,7 @@ class _ReportSheetState extends State<ReportSheet> {
             _reportedName != null
                 ? 'Tell us what happened on this ride with $_reportedName.'
                 : 'Tell us what happened on this ride.',
-            style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[600]),
+            style: GoogleFonts.inter(fontSize: 13, color: Colors.grey[600]),
           ),
           const SizedBox(height: 16),
           if (_loading)
@@ -403,7 +403,7 @@ class _ReportSheetState extends State<ReportSheet> {
                               Expanded(
                                 child: Text(
                                   option.label,
-                                  style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
+                                  style: GoogleFonts.inter(fontSize: 14, color: Colors.black87),
                                 ),
                               ),
                             ],
@@ -451,7 +451,7 @@ class _ReportSheetState extends State<ReportSheet> {
                 onPressed: _submitting ? null : _submit,
                 child: Text(
                   _submitting ? 'Submitting…' : 'Submit Report',
-                  style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700),
+                  style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700),
                 ),
               ),
             ),

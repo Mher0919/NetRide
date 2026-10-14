@@ -69,7 +69,7 @@ class StateContainer extends StatelessWidget {
             const SizedBox(height: 24),
             Text(
               'Connection Issue',
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.inter(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
                 color: Colors.black,
@@ -79,7 +79,7 @@ class StateContainer extends StatelessWidget {
             Text(
               errorMessage ?? 'We could not synchronize your data. Please check your connection and try again.',
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.inter(
                 fontSize: 14,
                 color: Colors.grey[700],
               ),

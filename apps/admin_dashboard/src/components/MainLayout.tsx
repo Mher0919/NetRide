@@ -137,18 +137,23 @@ const MainLayout: React.FC = () => {
     navigate(path);
   };
 
+  React.useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [location.pathname]);
+
+  // Highlight the parent section on detail routes (e.g. /rides/:id under Rides).
+  const isSelected = (path: string) =>
+    location.pathname === path ||
+    (path !== '/' &&
+      (location.pathname === path || location.pathname.startsWith(path + '/')));
+
   return (
     <Box sx={{ display: 'flex' }}>
-      <AppBar 
-        position="fixed" 
-        sx={{ 
-          zIndex: (theme: any) => theme.zIndex.drawer + 1, 
-          boxShadow: 'none',
-          backgroundColor: 'rgba(255, 255, 255, 0.9)',
-          borderBottom: '1px solid rgba(0, 0, 0, 0.06)'
-        }}
+      <AppBar
+        position="fixed"
+        sx={{ zIndex: (t: { zIndex: { drawer: number } }) => t.zIndex.drawer + 1 }}
       >
-        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 1.5, sm: 4 } }}>
+        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 4 } }}>
           <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
             {isMobile && (
               <IconButton
@@ -160,16 +165,16 @@ const MainLayout: React.FC = () => {
                 <MenuIcon />
               </IconButton>
             )}
-            <Box sx={{ 
-              width: 36, 
-              height: 36, 
-              bgcolor: 'primary.main', 
-              borderRadius: '10px', 
-              display: 'flex', 
-              alignItems: 'center', 
+            <Box sx={{
+              width: 36,
+              height: 36,
+              bgcolor: 'primary.main',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
               justifyContent: 'center',
               mr: 1.5,
-              flexShrink: 0
+              flexShrink: 0,
             }}>
               <DashboardIcon sx={{ color: 'white', fontSize: 20 }} />
             </Box>
@@ -177,11 +182,11 @@ const MainLayout: React.FC = () => {
               NetRide <Typography component="span" sx={{ fontWeight: 400, color: 'text.secondary', ml: 0.5 }}>Admin</Typography>
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mr: 1, display: { xs: 'none', sm: 'block' } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexShrink: 0 }}>
+            <Typography variant="body2" noWrap sx={{ fontWeight: 600, mr: 1, maxWidth: 200, display: { xs: 'none', sm: 'block' } }}>
               {user?.full_name}
             </Typography>
-            <IconButton onClick={handleProfileMenuOpen} sx={{ p: 0.5, border: '2px solid transparent', '&:hover': { border: '2px solid #eee' } }}>
+            <IconButton onClick={handleProfileMenuOpen} sx={{ p: 0.5 }} aria-label="Account menu">
               <Avatar sx={{ width: 34, height: 34, bgcolor: 'primary.main', fontSize: 14, fontWeight: 700 }}>
                 {user?.full_name?.charAt(0) || 'A'}
               </Avatar>
@@ -190,33 +195,39 @@ const MainLayout: React.FC = () => {
               anchorEl={anchorEl}
               open={Boolean(anchorEl)}
               onClose={handleProfileMenuClose}
-              {...({
-                PaperProps: {
-                  sx: { 
-                    mt: 1.5, 
-                    minWidth: 200, 
-                    borderRadius: 3, 
-                    boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
-                    border: '1px solid rgba(0,0,0,0.05)'
-                  }
-                }
-              } as any)}
-              transformOrigin={{ horizontal: 'right', vertical: 'top' }}
               anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+              transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+              slotProps={{
+                paper: {
+                  sx: {
+                    mt: 1.5,
+                    minWidth: 220,
+                    maxWidth: 320,
+                    borderRadius: '16px',
+                    boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+                    border: '1px solid rgba(0,0,0,0.05)',
+                  },
+                },
+              }}
             >
-              <MenuItem disabled sx={{ py: 1.5 }}>
-                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                  <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>{user?.full_name}</Typography>
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>{user?.email}</Typography>
+              <MenuItem disabled sx={{ py: 1.5, opacity: '1 !important' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <Typography variant="subtitle2" noWrap sx={{ color: 'text.primary', fontWeight: 700 }}>{user?.full_name}</Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', wordBreak: 'break-all', whiteSpace: 'normal' }}
+                  >
+                    {user?.email}
+                  </Typography>
                 </Box>
               </MenuItem>
               <Divider />
               <MenuItem onClick={handleChangePassword} sx={{ py: 1.2, borderRadius: 2, mx: 1 }}>
-                <ListItemIcon><LockIcon style={{ fontSize: 20 }} /></ListItemIcon>
+                <ListItemIcon><LockIcon sx={{ fontSize: 20 }} /></ListItemIcon>
                 <ListItemText primary="Change Password" />
               </MenuItem>
-              <MenuItem onClick={handleLogout} sx={{ py: 1.2, borderRadius: 2, mx: 1, color: 'error.main' }}>
-                <ListItemIcon><LogoutIcon style={{ fontSize: 20, color: 'inherit' }} /></ListItemIcon>
+              <MenuItem onClick={handleLogout} sx={{ py: 1.2, borderRadius: 2, mx: 1, my: 0.5, color: 'error.main' }}>
+                <ListItemIcon><LogoutIcon sx={{ fontSize: 20, color: 'inherit' }} /></ListItemIcon>
                 <ListItemText primary="Logout" />
               </MenuItem>
             </Menu>
@@ -234,19 +245,27 @@ const MainLayout: React.FC = () => {
           [`& .MuiDrawer-paper`]: { width: drawerWidth, boxSizing: 'border-box', pt: 2 },
         }}
       >
-        <Toolbar />
+        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }} />
+        {isMobile && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 1 }}>
+            <IconButton aria-label="Close navigation" onClick={() => setMobileOpen(false)}>
+              <MenuIcon />
+            </IconButton>
+          </Box>
+        )}
         <Box sx={{ overflow: 'auto', px: 2 }}>
           <List>
             {menuItems.map((item) => (
               <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
                 <ListItemButton
-                  selected={location.pathname === item.path}
+                  selected={isSelected(item.path)}
                   onClick={() => go(item.path)}
                   sx={{
                     py: 1.2,
                     px: 2,
                     borderRadius: '12px',
-                    transition: 'all 0.2s',
+                    minHeight: 44,
+                    transition: 'background-color 0.15s ease',
                     '&.Mui-selected': {
                       backgroundColor: 'primary.main',
                       color: 'white',
@@ -255,21 +274,19 @@ const MainLayout: React.FC = () => {
                     },
                     '&:hover': {
                       backgroundColor: 'rgba(0,0,0,0.04)',
-                    }
+                    },
                   }}
                 >
                   <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
                     {React.cloneElement(item.icon as React.ReactElement, {
-                      style: { fontSize: 20 }
+                      sx: { fontSize: 20 },
                     } as any)}
                   </ListItemIcon>
-                  <ListItemText
-                    primary={item.text}
-                  />
+                  <ListItemText primary={item.text} />
                   {(item as any).badge > 0 && (
                     <Box
                       sx={{
-                        ml: 'auto',
+                        ml: 1,
                         minWidth: 22,
                         height: 22,
                         px: 0.75,
@@ -278,12 +295,13 @@ const MainLayout: React.FC = () => {
                         alignItems: 'center',
                         justifyContent: 'center',
                         backgroundColor:
-                          location.pathname === item.path ? '#C65A5A' : '#FCE9E9',
+                          isSelected(item.path) ? '#C65A5A' : '#FCE9E9',
                         color:
-                          location.pathname === item.path ? 'white' : '#C65A5A',
+                          isSelected(item.path) ? 'white' : '#C65A5A',
                         fontSize: 11,
                         fontWeight: 800,
                         letterSpacing: 0.3,
+                        flexShrink: 0,
                       }}
                     >
                       {(item as any).badge}
@@ -295,9 +313,9 @@ const MainLayout: React.FC = () => {
           </List>
         </Box>
       </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, sm: 6 }, backgroundColor: 'background.default', minHeight: '100vh', width: { xs: '100%', md: 'auto' } }}>
-        <Toolbar />
-        <Box sx={{ maxWidth: '100%', mx: 'auto' }}>
+      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, sm: 3, lg: 4 }, backgroundColor: 'background.default', minHeight: '100dvh', width: { xs: '100%', md: 'auto' }, minWidth: 0 }}>
+        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }} />
+        <Box sx={{ maxWidth: 1400, width: '100%', mx: 'auto' }}>
           <Outlet />
         </Box>
       </Box>

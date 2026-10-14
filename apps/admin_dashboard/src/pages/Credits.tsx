@@ -46,6 +46,7 @@ const Credits: React.FC = () => {
   const [transactions, setTransactions] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [search, setSearch] = React.useState('');
+  const [loadError, setLoadError] = React.useState('');
 
   const [grantOpen, setGrantOpen] = React.useState(false);
   const [grantTarget, setGrantTarget] = React.useState<any>(null);
@@ -62,6 +63,7 @@ const Credits: React.FC = () => {
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     try {
+      setLoadError('');
       if (tab === 0) {
         const data = await listCreditAccounts({ search });
         setAccounts(data?.accounts ?? []);
@@ -71,6 +73,7 @@ const Credits: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to fetch credits', err);
+      setLoadError('Failed to load credit data');
       setSnack({ open: true, message: 'Failed to load credit data', severity: 'error' });
     } finally {
       setLoading(false);
@@ -115,8 +118,8 @@ const Credits: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+    <Box>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
             Ride Credits
@@ -130,7 +133,17 @@ const Credits: React.FC = () => {
         </Button>
       </Stack>
 
-      <Paper sx={{ mt: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={() => fetchData()}>Retry</Button>}
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      <Paper sx={{ mt: 3, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
         <Box sx={{ px: 2, pt: 1 }}>
           <Tabs value={tab} onChange={(_e, v) => setTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 700 } }}>
             <Tab label="Accounts" />
@@ -138,19 +151,19 @@ const Credits: React.FC = () => {
           </Tabs>
         </Box>
 
-        <Stack direction="row" gap={1} px={2} py={2} flexWrap="wrap">
+        <Stack direction="row" sx={{ gap: 1, px: 2, py: 2, flexWrap: 'wrap' }}>
           <TextField
             size="small"
             placeholder={tab === 0 ? 'Search name, email, phone…' : 'Filter by user ID…'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            sx={{ width: 300 }}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
+            slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
           />
         </Stack>
 
         <TableContainer>
-          <Table>
+          <Table sx={{ minWidth: 860 }}>
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, color: 'text.secondary', bgcolor: '#FAFAFA' } }}>
                 {tab === 0 ? (
@@ -179,14 +192,14 @@ const Credits: React.FC = () => {
                   </TableCell>
                 </TableRow>
               )}
-              {!loading && tab === 0 && accounts.length === 0 && (
+              {!loading && !loadError && tab === 0 && accounts.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={4} align="center" sx={{ py: 5, color: 'text.secondary' }}>
                     No riders found
                   </TableCell>
                 </TableRow>
               )}
-              {!loading && tab === 1 && transactions.length === 0 && (
+              {!loading && !loadError && tab === 1 && transactions.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 5, color: 'text.secondary' }}>
                     No transactions found
@@ -247,7 +260,7 @@ const Credits: React.FC = () => {
       <Dialog open={grantOpen} onClose={() => setGrantOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>Grant ride credits</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} mt={1}>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
               {grantTarget?.full_name ?? 'Rider'} — current balance {fmtUSD(grantTarget?.balance_cents)}
             </Typography>
@@ -257,7 +270,7 @@ const Credits: React.FC = () => {
               type="number"
               value={grantAmount}
               onChange={(e) => setGrantAmount(e.target.value)}
-              InputProps={{ inputProps: { min: 0.01, step: 0.01 } }}
+              slotProps={{ htmlInput: { min: 0.01, step: 0.01 } }}
             />
             <TextField
               label="Reason"

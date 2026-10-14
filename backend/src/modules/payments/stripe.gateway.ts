@@ -282,9 +282,12 @@ const realGateway: StripeGateway = {
     const stripe = getStripe();
     const key: any = await stripe.ephemeralKeys.create(
       { customer: customerId },
-      // Must be pinned to the same API version the SDK was built with,
-      // otherwise object shapes drift between the backend and the app.
-      { apiVersion: '2026-09-30.endive' as Stripe.LatestApiVersion },
+      // Must be pinned to the SAME API version the mobile SDKs (stripe_ios /
+      // stripe_android) are built with — the SDKs run their API calls under
+      // the ephemeral key's api_version, and a mismatch fails when the
+      // PaymentSheet opens. Override via STRIPE_EPHEMERAL_KEY_API_VERSION
+      // when the app's flutter_stripe release is upgraded to a newer family.
+      { apiVersion: env.STRIPE_EPHEMERAL_KEY_API_VERSION as Stripe.LatestApiVersion },
     );
     return { keySecret: key.secret };
   },

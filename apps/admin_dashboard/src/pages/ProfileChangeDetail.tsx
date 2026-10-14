@@ -162,7 +162,7 @@ const ProfileChangeDetail: React.FC = () => {
         <Typography color="text.primary">{change?.id?.slice(0, 8) ?? '—'}</Typography>
       </Breadcrumbs>
 
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
+      <Stack direction="row" sx={{ mb: 3, alignItems: 'center', justifyContent: 'space-between' }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
             Profile Change Review
@@ -191,7 +191,7 @@ const ProfileChangeDetail: React.FC = () => {
         {/* LEFT — driver snapshot */}
         <Grid size={{ xs: 12, md: 4 }}>
           <Paper sx={{ p: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
-            <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
+            <Stack direction="row" spacing={2} sx={{ mb: 2, alignItems: 'center' }}>
               <Avatar
                 src={change?.profile_image_url ?? undefined}
                 onClick={() => change?.profile_image_url && setPreviewImage(change.profile_image_url)}

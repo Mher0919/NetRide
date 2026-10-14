@@ -9,7 +9,9 @@
 
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -51,6 +53,8 @@ export default function SpeedingViolations() {
   const [dangerousDrivers, setDangerousDrivers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dangerousOnly, setDangerousOnly] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,8 +66,12 @@ export default function SpeedingViolations() {
           getDangerousDrivers(),
         ]);
         if (cancelled) return;
+        setLoadError('');
         setViolations(v.violations ?? []);
         setDangerousDrivers(d.drivers ?? []);
+      } catch (err) {
+        console.error('Failed to fetch speeding violations', err);
+        if (!cancelled) setLoadError('Failed to load speeding violations');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -72,16 +80,18 @@ export default function SpeedingViolations() {
     return () => {
       cancelled = true;
     };
-  }, [dangerousOnly]);
+  }, [dangerousOnly, reloadKey]);
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 } }}>
+    <Box>
       <Stack
         direction={{ xs: 'column', md: 'row' }}
-        justifyContent="space-between"
-        alignItems={{ xs: 'flex-start', md: 'center' }}
         spacing={2}
-        sx={{ mb: 3 }}
+        sx={{
+          mb: 3,
+          justifyContent: 'space-between',
+          alignItems: { xs: 'flex-start', md: 'center' },
+        }}
       >
         <Box>
           <Typography variant="h4">Speeding Violations</Typography>
@@ -120,13 +130,23 @@ export default function SpeedingViolations() {
         />
       </Stack>
 
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={() => setReloadKey((k) => k + 1)}>Retry</Button>}
+        >
+          {loadError}
+        </Alert>
+      )}
+
       <Card>
         <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', p: 6 }}>
               <CircularProgress />
             </Box>
-          ) : violations.length === 0 ? (
+          ) : !loadError && violations.length === 0 ? (
             <Box sx={{ p: 6, textAlign: 'center' }}>
               <Typography variant="h6" sx={{ color: 'text.secondary' }}>
                 No violations recorded
@@ -138,7 +158,7 @@ export default function SpeedingViolations() {
             </Box>
           ) : (
             <TableContainer>
-              <Table size="small">
+              <Table size="small" sx={{ minWidth: 860 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell>Driver</TableCell>

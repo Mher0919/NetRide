@@ -16,10 +16,12 @@ import {
   Menu,
   MenuItem,
   Button,
+  Tooltip,
   useMediaQuery,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
+import CloseIcon from '@mui/icons-material/Close';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import ValidationIcon from '@mui/icons-material/VerifiedUser';
@@ -30,6 +32,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { tokens } from '../theme';
 
 const drawerWidth = 240;
 
@@ -64,6 +67,10 @@ const MainLayout: React.FC = () => {
       : []),
   ];
 
+  React.useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [location.pathname]);
+
   const closeDrawer = () => {
     if (isMobile) setMobileOpen(false);
   };
@@ -90,11 +97,14 @@ const MainLayout: React.FC = () => {
 
   return (
     <Box sx={{ display: 'flex' }}>
-      <AppBar
-        position="fixed"
-        sx={{ zIndex: (theme) => theme.zIndex.drawer + 1, boxShadow: 'none', backgroundColor: 'rgba(255, 255, 255, 0.9)', borderBottom: '1px solid rgba(0, 0, 0, 0.06)' }}
-      >
-        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 1.5, sm: 4 } }}>
+      <AppBar position="fixed" sx={{ zIndex: (t) => t.zIndex.drawer + 1 }}>
+        <Toolbar
+          sx={{
+            justifyContent: 'space-between',
+            gap: 1,
+            px: { xs: 2, sm: 3, lg: 4 },
+          }}
+        >
           <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
             {isMobile && (
               <IconButton
@@ -106,27 +116,73 @@ const MainLayout: React.FC = () => {
                 <MenuIcon />
               </IconButton>
             )}
-            <Box sx={{ width: 36, height: 36, bgcolor: 'primary.main', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', mr: 1.5, flexShrink: 0 }}>
+            <Box
+              sx={{
+                width: 36,
+                height: 36,
+                bgcolor: 'primary.main',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                mr: 1.5,
+                flexShrink: 0,
+              }}
+            >
               <StorefrontIcon sx={{ color: 'white', fontSize: 20 }} />
             </Box>
-            <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 800, letterSpacing: '-0.03em', fontSize: { xs: '1.05rem', sm: '1.25rem' } }}>
-              NetRide <Typography component="span" sx={{ fontWeight: 400, color: 'text.secondary', ml: 0.5 }}>{typeLabel[type]}</Typography>
+            <Typography
+              variant="h6"
+              noWrap
+              component="div"
+              sx={{ fontWeight: 800, letterSpacing: '-0.03em', fontSize: { xs: '1.05rem', sm: '1.25rem' } }}
+            >
+              NetRide
+              <Typography
+                component="span"
+                sx={{
+                  fontWeight: 400,
+                  color: 'text.secondary',
+                  ml: 0.5,
+                  display: { xs: 'none', sm: 'inline' },
+                }}
+              >
+                {typeLabel[type]}
+              </Typography>
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0, flexShrink: 0 }}>
             {/* Dashboard switcher — one login can own sponsor + partner + fleet accounts */}
             {session && session.portals.length > 1 && (
               <>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<SwapHorizIcon />}
-                  onClick={(e) => setSwitchEl(e.currentTarget)}
-                  sx={{ textTransform: 'none', borderRadius: 8, mr: 1 }}
+                <Tooltip title="Switch dashboard">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="inherit"
+                    startIcon={<SwapHorizIcon />}
+                    aria-label="Switch dashboard"
+                    onClick={(e) => setSwitchEl(e.currentTarget)}
+                    sx={{
+                      textTransform: 'none',
+                      borderRadius: '10px',
+                      mr: 0.5,
+                      minWidth: 0,
+                      px: { xs: 1, sm: 1.5 },
+                      '& .MuiButton-startIcon': { mr: { xs: 0, sm: 0.5 } },
+                    }}
+                  >
+                    <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+                      {typeLabel[type]}
+                    </Box>
+                  </Button>
+                </Tooltip>
+                <Menu
+                  anchorEl={switchEl}
+                  open={Boolean(switchEl)}
+                  onClose={() => setSwitchEl(null)}
+                  slotProps={{ paper: { sx: { minWidth: 240, maxWidth: 320 } } }}
                 >
-                  {typeLabel[type]}
-                </Button>
-                <Menu anchorEl={switchEl} open={Boolean(switchEl)} onClose={() => setSwitchEl(null)}>
                   <MenuItem disabled sx={{ py: 1 }}>
                     <Typography variant="caption" color="text.secondary">Switch dashboard</Typography>
                   </MenuItem>
@@ -156,24 +212,43 @@ const MainLayout: React.FC = () => {
                 </Menu>
               </>
             )}
-            <Typography variant="body2" sx={{ fontWeight: 600, mr: 1, display: { xs: 'none', sm: 'block' } }}>
+            <Typography
+              variant="body2"
+              noWrap
+              sx={{ fontWeight: 600, ml: 0.5, maxWidth: 200, display: { xs: 'none', sm: 'block' } }}
+            >
               {session?.portal.name}
             </Typography>
-            <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} sx={{ p: 0.5 }}>
+            <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} sx={{ p: 0.5 }} aria-label="Account menu">
               <Avatar sx={{ width: 34, height: 34, bgcolor: 'secondary.main', fontSize: 14, fontWeight: 700 }}>
                 {session?.portal.name?.charAt(0) || 'N'}
               </Avatar>
             </IconButton>
-            <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
-              <MenuItem disabled sx={{ py: 1.5 }}>
-                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{session?.portal.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">{session?.portal.email}</Typography>
+            <Menu
+              anchorEl={anchorEl}
+              open={Boolean(anchorEl)}
+              onClose={() => setAnchorEl(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              slotProps={{ paper: { sx: { minWidth: 220, maxWidth: 320 } } }}
+            >
+              <MenuItem disabled sx={{ py: 1.5, opacity: '1 !important' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <Typography variant="subtitle2" noWrap sx={{ fontWeight: 700 }}>
+                    {session?.portal.name}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ wordBreak: 'break-all', whiteSpace: 'normal' }}
+                  >
+                    {session?.portal.email}
+                  </Typography>
                 </Box>
               </MenuItem>
               <Divider />
-              <MenuItem onClick={handleLogout} sx={{ py: 1.2, borderRadius: 2, mx: 1, color: 'error.main' }}>
-                <ListItemIcon><LogoutIcon style={{ fontSize: 20, color: 'inherit' }} /></ListItemIcon>
+              <MenuItem onClick={handleLogout} sx={{ py: 1.2, borderRadius: 2, mx: 1, my: 0.5, color: 'error.main' }}>
+                <ListItemIcon><LogoutIcon sx={{ fontSize: 20, color: 'inherit' }} /></ListItemIcon>
                 <ListItemText primary="Logout" />
               </MenuItem>
             </Menu>
@@ -191,7 +266,14 @@ const MainLayout: React.FC = () => {
           [`& .MuiDrawer-paper`]: { width: drawerWidth, boxSizing: 'border-box', pt: 2 },
         }}
       >
-        <Toolbar />
+        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }} />
+        {isMobile && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 1 }}>
+            <IconButton aria-label="Close navigation" onClick={() => setMobileOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        )}
         <Box sx={{ overflow: 'auto', px: 2 }}>
           <List>
             {menuItems.map((item) => (
@@ -202,7 +284,8 @@ const MainLayout: React.FC = () => {
                   sx={{
                     py: 1.2,
                     px: 2,
-                    borderRadius: '12px',
+                    borderRadius: tokens.radius.control,
+                    minHeight: 44,
                     '&.Mui-selected': {
                       backgroundColor: 'primary.main',
                       color: 'white',
@@ -213,7 +296,7 @@ const MainLayout: React.FC = () => {
                   }}
                 >
                   <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
-                    {React.cloneElement(item.icon, { style: { fontSize: 20 } })}
+                    {React.cloneElement(item.icon, { sx: { fontSize: 20 } })}
                   </ListItemIcon>
                   <ListItemText primary={item.text} />
                 </ListItemButton>
@@ -222,9 +305,19 @@ const MainLayout: React.FC = () => {
           </List>
         </Box>
       </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, sm: 6 }, backgroundColor: 'background.default', minHeight: '100vh', width: { xs: '100%', md: 'auto' } }}>
-        <Toolbar />
-        <Box sx={{ maxWidth: '100%', mx: 'auto' }}>
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          p: { xs: 2, sm: 3, lg: 4 },
+          backgroundColor: 'background.default',
+          minHeight: '100dvh',
+          width: { xs: '100%', md: 'auto' },
+          minWidth: 0,
+        }}
+      >
+        <Toolbar sx={{ minHeight: { xs: 56, sm: 64 } }} />
+        <Box sx={{ maxWidth: tokens.maxContentWidth, width: '100%', mx: 'auto' }}>
           <Outlet />
         </Box>
       </Box>

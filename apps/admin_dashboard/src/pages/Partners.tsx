@@ -117,15 +117,17 @@ const Partners: React.FC = () => {
     message: '',
     severity: 'success',
   });
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await listPartners({ search, status: statusFilter });
       setPartners(data?.partners ?? []);
     } catch (err) {
       console.error('Failed to fetch partners', err);
-      setPartners([]);
+      setLoadError('We could not load partners. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -333,17 +335,17 @@ const Partners: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: { xs: 0, sm: 3 } }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
+    <Box>
+      <Stack direction="row" useFlexGap spacing={2} sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h5">
             Partners
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Business partners that sponsor promo codes and earn commissions.
           </Typography>
         </Box>
-        <Stack direction="row" gap={1}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', rowGap: 1 }}>
           <Button startIcon={<FileDownloadIcon />} onClick={handleExportPartners} sx={{ textTransform: 'none' }}>
             Export CSV
           </Button>
@@ -362,14 +364,14 @@ const Partners: React.FC = () => {
         </Stack>
       </Stack>
 
-      <Stack direction="row" gap={1} mt={3} flexWrap="wrap">
+      <Stack direction="row" spacing={1.5} useFlexGap sx={{ mt: 3, flexWrap: 'wrap', rowGap: 1.5, alignItems: 'center' }}>
         <TextField
           size="small"
           placeholder="Search name, email, phone…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          sx={{ width: 300 }}
-          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+          sx={{ width: { xs: '100%', sm: 300 } }}
+          slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
         />
         <TextField
           select
@@ -377,7 +379,7 @@ const Partners: React.FC = () => {
           label="Status"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          sx={{ width: 160 }}
+          sx={{ width: { xs: '100%', sm: 160 } }}
           slotProps={{ select: { native: true } }}
         >
           <option value="">All</option>
@@ -387,9 +389,23 @@ const Partners: React.FC = () => {
         </TextField>
       </Stack>
 
-      <Paper sx={{ mt: 2, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mt: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => fetchData()}>
+              Retry
+            </Button>
+          }
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      <Paper sx={{ mt: 2, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
         <TableContainer>
-          <Table>
+          <Table size="small" sx={{ minWidth: 860 }}>
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, color: 'text.secondary', bgcolor: '#FAFAFA' } }}>
                 <TableCell>Name</TableCell>
@@ -430,7 +446,7 @@ const Partners: React.FC = () => {
                       <TableCell>{p.active_promo_count ?? 0} / {p.promo_count ?? 0}</TableCell>
                       <TableCell>{fmtUSD(Number(p.lifetime_earnings_cents) || 0)}</TableCell>
                       <TableCell align="right" onClick={(e) => e.stopPropagation()}>
-                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                        <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                           <Button size="small" sx={{ color: '#5B7760' }} onClick={() => openEdit(p)}>
                             Edit
                           </Button>
@@ -466,17 +482,15 @@ const Partners: React.FC = () => {
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>New Partner</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} mt={1}>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField label="Business name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <TextField label="Business type" placeholder="Restaurant, Gym, Retail…" value={form.business_type} onChange={(e) => setForm({ ...form, business_type: e.target.value })} />
             <TextField label="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField label="Contact name" fullWidth value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} />
               <TextField label="Contact phone" fullWidth value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} />
             </Stack>
-            <Stack direction="row" spacing={2}>
-              <TextField label="Contact email" fullWidth value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
-            </Stack>
+            <TextField label="Contact email" fullWidth value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
 
             <Box>
               <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Partner login</Typography>
@@ -544,7 +558,7 @@ const Partners: React.FC = () => {
               type="number"
               value={form.commission_rate}
               onChange={(e) => setForm({ ...form, commission_rate: e.target.value })}
-              InputProps={{ inputProps: { min: 0, max: 100, step: 0.5 } }}
+              slotProps={{ htmlInput: { min: 0, max: 100, step: 0.5 } }}
             />
             <TextField label="Notes" multiline minRows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </Stack>
@@ -566,15 +580,15 @@ const Partners: React.FC = () => {
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Edit Partner</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} mt={1}>
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField label="Business name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
             <TextField label="Business type" placeholder="Restaurant, Gym, Retail…" value={editForm.business_type} onChange={(e) => setEditForm({ ...editForm, business_type: e.target.value })} />
             <TextField label="Address" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField label="Contact name" fullWidth value={editForm.contact_name} onChange={(e) => setEditForm({ ...editForm, contact_name: e.target.value })} />
               <TextField label="Contact phone" fullWidth value={editForm.contact_phone} onChange={(e) => setEditForm({ ...editForm, contact_phone: e.target.value })} />
             </Stack>
-            <Stack direction="row" spacing={2}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField label="Contact email" fullWidth value={editForm.contact_email} onChange={(e) => setEditForm({ ...editForm, contact_email: e.target.value })} />
               <TextField label="Partner login email" fullWidth value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
             </Stack>
@@ -606,7 +620,7 @@ const Partners: React.FC = () => {
               type="number"
               value={editForm.commission_rate}
               onChange={(e) => setEditForm({ ...editForm, commission_rate: e.target.value })}
-              InputProps={{ inputProps: { min: 0, max: 100, step: 0.5 } }}
+              slotProps={{ htmlInput: { min: 0, max: 100, step: 0.5 } }}
             />
             <TextField label="Notes" multiline minRows={2} value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} />
           </Stack>
@@ -625,15 +639,20 @@ const Partners: React.FC = () => {
       </Dialog>
 
       {/* Detail drawer */}
-      <Drawer anchor="right" open={!!selected} onClose={() => setSelected(null)} PaperProps={{ sx: { width: { xs: '100%', sm: 460 } } }}>
+      <Drawer
+        anchor="right"
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        slotProps={{ paper: { sx: { width: { xs: '100%', sm: 'min(520px, 100vw)' }, maxWidth: '100%' } } }}
+      >
         {selected && (
           <Box sx={{ p: 3 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.name}</Typography>
-              <IconButton onClick={() => setSelected(null)}><CloseIcon /></IconButton>
+            <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="h6" noWrap sx={{ fontWeight: 800, minWidth: 0 }}>{selected.name}</Typography>
+              <IconButton onClick={() => setSelected(null)} sx={{ flexShrink: 0 }}><CloseIcon /></IconButton>
             </Stack>
             <Chip size="small" label={selected.status} sx={{ mt: 1, bgcolor: statusColors[selected.status]?.bg, color: statusColors[selected.status]?.fg, fontWeight: 700 }} />
-            <Typography variant="body2" color="text.secondary" mt={1}>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               {selected.business_type} · {((Number(selected.commission_rate) || 0) * 100).toFixed(1)}% commission
             </Typography>
 
@@ -645,7 +664,7 @@ const Partners: React.FC = () => {
 
             {!detailLoading && stats && (
               <>
-                <Stack direction="row" gap={1.5} mt={3} flexWrap="wrap">
+                <Stack direction="row" spacing={1.5} useFlexGap sx={{ mt: 3, flexWrap: 'wrap', rowGap: 1.5 }}>
                   {[
                     ['Lifetime', fmtUSD(stats.lifetime_earnings_cents ?? 0)],
                     ['Pending', fmtUSD(stats.pending_earnings_cents ?? 0)],
@@ -653,14 +672,14 @@ const Partners: React.FC = () => {
                     ['Promos', `${stats.active_promos ?? 0} active`],
                     ['Rides', `${stats.total_referred_rides ?? 0}`],
                   ].map(([label, value]) => (
-                    <Paper key={label} sx={{ flex: '1 1 40%', p: 1.5, borderRadius: 3, bgcolor: '#F7F4EF', border: '1px solid rgba(0,0,0,0.06)' }}>
+                    <Paper key={label} sx={{ flex: '1 1 40%', p: 1.5, borderRadius: '16px', bgcolor: '#F7F4EF', border: '1px solid rgba(0,0,0,0.06)' }}>
                       <Typography variant="caption" color="text.secondary">{label}</Typography>
                       <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{value}</Typography>
                     </Paper>
                   ))}
                 </Stack>
 
-                <Stack direction="row" gap={1} mt={3}>
+                <Stack direction="row" spacing={1} useFlexGap sx={{ mt: 3, flexWrap: 'wrap', rowGap: 1 }}>
                   <Button size="small" variant="outlined" startIcon={<FileDownloadIcon />} onClick={handleExportRides} sx={{ textTransform: 'none' }}>
                     Export rides
                   </Button>
@@ -676,15 +695,15 @@ const Partners: React.FC = () => {
                   <Typography variant="body2" color="text.secondary">No commissions yet.</Typography>
                 )}
                 {commissions.map((c) => (
-                  <Paper key={c.id} sx={{ p: 1.5, mb: 1, borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)' }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Box>
+                  <Paper key={c.id} sx={{ p: 1.5, mb: 1, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)' }}>
+                    <Stack direction="row" spacing={1.5} useFlexGap sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
+                      <Box sx={{ minWidth: 0 }}>
                         <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmtUSD(Number(c.commission_cents) || 0)}</Typography>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="caption" color="text.secondary" noWrap>
                           Ride {String(c.ride_id ?? '').slice(0, 8)} · rate {((Number(c.commission_rate) || 0) * 100).toFixed(1)}%
                         </Typography>
                       </Box>
-                      <Stack direction="row" alignItems="center" spacing={1}>
+                      <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
                         <Chip
                           size="small"
                           label={c.status}

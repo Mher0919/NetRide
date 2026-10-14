@@ -402,7 +402,7 @@ class _TripScreenState extends State<TripScreen> {
         if (!_isActionInRange(trip, driverProvider,
             isPickup: trip.status == models.TripStatus.ACCEPTED))
           Positioned(
-            bottom: 200,
+            bottom: 280,
             left: 20,
             right: 20,
             child: IgnorePointer(
@@ -581,6 +581,7 @@ class _TripScreenState extends State<TripScreen> {
         builder: (dialogContext, setState) => AlertDialog(
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
+          scrollable: true,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24)),
           title: const Text(
@@ -606,6 +607,9 @@ class _TripScreenState extends State<TripScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(5, (index) {
                   return IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.all(6),
+                    constraints: const BoxConstraints(),
                     icon: Icon(
                       index < selectedRating ? Icons.star : Icons.star_border,
                       color: const Color(0xFFC79A4A),

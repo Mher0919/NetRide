@@ -104,11 +104,21 @@ class BottomSheetCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              _Pill(label: etaLabel, icon: Icons.access_time_rounded),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: _Pill(label: etaLabel, icon: Icons.access_time_rounded),
+                ),
+              ),
               const SizedBox(width: 8),
-              _Pill(
-                label: remainingLabel,
-                icon: Icons.straighten_rounded,
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: _Pill(
+                    label: remainingLabel,
+                    icon: Icons.straighten_rounded,
+                  ),
+                ),
               ),
               const Spacer(),
               if (onChat != null || onCall != null) _buildCommActions(),

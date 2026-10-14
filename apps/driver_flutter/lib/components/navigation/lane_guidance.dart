@@ -23,11 +23,15 @@ class LaneGuidanceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (lanes.isEmpty) return const SizedBox.shrink();
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.start,
-      children: [
-        for (final lane in lanes) _LanePictogram(lane: lane),
-      ],
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
+          for (final lane in lanes) _LanePictogram(lane: lane),
+        ],
+      ),
     );
   }
 }

@@ -2968,6 +2968,8 @@ class _MapScreenState extends State<MapScreen>
                   children: [
                     Text(
                       'NetRide Premium',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 15,
@@ -2977,6 +2979,8 @@ class _MapScreenState extends State<MapScreen>
                     SizedBox(height: 2),
                     Text(
                       'Premium SUV or executive vehicle',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 11.5,
                         color: Colors.grey,
@@ -2986,6 +2990,8 @@ class _MapScreenState extends State<MapScreen>
                     SizedBox(height: 2),
                     Text(
                       'Professional driver · Upfront fare',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 11,
                         color: Color(0xFF5B7760),
@@ -2995,40 +3001,43 @@ class _MapScreenState extends State<MapScreen>
                   ],
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    'Est. · ~$etaMinutes min',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey.shade500,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  if (fareCents > 0)
-                    AnimatedPriceReduction(
-                      originalCents: fareCents,
-                      finalCents: finalCents,
-                      savedCents: savedCents,
-                      priceStyle: const TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF2F3A32),
-                        letterSpacing: -0.5,
-                      ),
-                    )
-                  else
-                    const Text(
-                      '—',
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      'Est. · ~$etaMinutes min',
                       style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF2F3A32),
+                        fontSize: 10,
+                        color: Colors.grey.shade500,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                ],
+                    const SizedBox(height: 4),
+                    if (fareCents > 0)
+                      AnimatedPriceReduction(
+                        originalCents: fareCents,
+                        finalCents: finalCents,
+                        savedCents: savedCents,
+                        priceStyle: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF2F3A32),
+                          letterSpacing: -0.5,
+                        ),
+                      )
+                    else
+                      const Text(
+                        '—',
+                        style: TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF2F3A32),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ],
           ),

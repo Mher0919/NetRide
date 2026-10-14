@@ -146,7 +146,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 const SizedBox(height: 20),
                 Text(
                   'Create Account',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.inter(
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
                     letterSpacing: -0.5,
@@ -155,7 +155,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 const SizedBox(height: 8),
                 Text(
                   'Join NetRide and start riding today.',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.inter(
                     fontSize: 16,
                     color: Colors.grey[600],
                   ),
@@ -229,7 +229,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           )
                         : Text(
                             'Sign Up',
-                            style: GoogleFonts.poppins(
+                            style: GoogleFonts.inter(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
                             ),
@@ -274,7 +274,7 @@ class _SignupScreenState extends State<SignupScreen> {
         const SizedBox(width: 8),
         Text(
           text,
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.inter(
             fontSize: 12,
             color: isMet ? Colors.green[700] : Colors.grey[500],
             fontWeight: isMet ? FontWeight.w500 : FontWeight.normal,
@@ -300,7 +300,7 @@ class _SignupScreenState extends State<SignupScreen> {
       children: [
         Text(
           label,
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.inter(
             fontSize: 14,
             fontWeight: FontWeight.w500,
             color: isFieldEnabled ? Colors.grey[700] : Colors.grey[400],
@@ -318,7 +318,7 @@ class _SignupScreenState extends State<SignupScreen> {
             prefixIcon: Icon(icon, color: isFieldEnabled ? Colors.grey[400] : Colors.grey[300], size: 22),
             suffixIcon: suffixIcon,
             hintText: 'Enter your $label',
-            hintStyle: GoogleFonts.poppins(color: Colors.grey[400], fontSize: 15),
+            hintStyle: GoogleFonts.inter(color: Colors.grey[400], fontSize: 15),
             filled: true,
             fillColor: isFieldEnabled ? Colors.grey[50] : Colors.grey[200],
             border: OutlineInputBorder(

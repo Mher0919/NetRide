@@ -94,7 +94,7 @@ class _RatingScreenState extends State<RatingScreen> {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
         child: Column(
           children: [
             const CircleAvatar(
@@ -106,53 +106,60 @@ class _RatingScreenState extends State<RatingScreen> {
             Text(
               'How was your ride with ${widget.trip.driverInfo?.name ?? 'your driver'}?',
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700),
+              style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 32),
             
             // Rating Stars
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(5, (index) {
-                return IconButton(
-                  icon: Icon(
-                    index < _selectedRating ? Icons.star_rounded : Icons.star_outline_rounded,
-                    color: const Color(0xFFC79A4A),
-                    size: 42,
-                  ),
-                  onPressed: () => setState(() => _selectedRating = index + 1),
-                );
-              }),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  return IconButton(
+                    icon: Icon(
+                      index < _selectedRating ? Icons.star_rounded : Icons.star_outline_rounded,
+                      color: const Color(0xFFC79A4A),
+                      size: 42,
+                    ),
+                    onPressed: () => setState(() => _selectedRating = index + 1),
+                  );
+                }),
+              ),
             ),
             const SizedBox(height: 48),
 
             // Tipping Section
             Align(
               alignment: Alignment.centerLeft,
-              child: Text('Add a Tip', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14)),
+              child: Text('Add a Tip', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14)),
             ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [0.0, 1.0, 3.0, 5.0].map((amount) {
                 final isSelected = _tipAmount == amount;
-                return GestureDetector(
-                  onTap: () => setState(() => _tipAmount = amount),
-                  child: Container(
-                    width: 70,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isSelected ? Colors.black : Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: isSelected ? Colors.black : Colors.grey.shade300),
-                    ),
-                    child: Text(
-                      amount == 0 ? 'No Tip' : '\$${amount.toInt()}',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.black,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _tipAmount = amount),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: isSelected ? Colors.black : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: isSelected ? Colors.black : Colors.grey.shade300),
+                        ),
+                        child: Text(
+                          amount == 0 ? 'No Tip' : '\$${amount.toInt()}',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -180,7 +187,7 @@ class _RatingScreenState extends State<RatingScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Add to Favorites', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14)),
+                        Text('Add to Favorites', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14)),
                         Text('Prioritize this driver for future trips.', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
                       ],
                     ),

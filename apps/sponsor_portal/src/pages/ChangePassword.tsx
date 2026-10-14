@@ -47,13 +47,13 @@ const ChangePassword: React.FC = () => {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
-      <Paper sx={{ p: 4, borderRadius: 4, maxWidth: 400, width: '100%' }}>
+    <Box sx={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
+      <Paper sx={{ p: { xs: 3, sm: 4 }, borderRadius: '16px', maxWidth: 400, width: '100%' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-          <Box sx={{ width: 44, height: 44, borderRadius: 2, bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box sx={{ width: 44, height: 44, borderRadius: '12px', bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <LockResetIcon />
           </Box>
-          <Box>
+          <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>Set a new password</Typography>
             <Typography variant="caption" color="text.secondary">Required before you can use the portal</Typography>
           </Box>
@@ -66,6 +66,7 @@ const ChangePassword: React.FC = () => {
             fullWidth
             required
             autoFocus
+            autoComplete="new-password"
             helperText="At least 8 characters"
             sx={{ mb: 2 }}
           />
@@ -75,10 +76,22 @@ const ChangePassword: React.FC = () => {
             onChange={(e) => setConfirm(e.target.value)}
             fullWidth
             required
+            autoComplete="new-password"
             sx={{ mb: 3 }}
           />
           <Button type="submit" variant="contained" fullWidth size="large" disabled={loading}>
             {loading ? <CircularProgress size={22} color="inherit" /> : 'Update password'}
+          </Button>
+          <Button
+            fullWidth
+            sx={{ mt: 1 }}
+            disabled={loading}
+            onClick={() => {
+              logout();
+              navigate('/login');
+            }}
+          >
+            Sign out instead
           </Button>
         </form>
       </Paper>

@@ -319,7 +319,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text('Replace Vehicle', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+        title: Text('Replace Vehicle', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
@@ -329,7 +329,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Vehicle Details', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700)),
+              Text('Vehicle Details', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700)),
               const SizedBox(height: 16),
 
               // Year dropdown
@@ -447,7 +447,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 24),
-              Text('Upload Documents', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700)),
+              Text('Upload Documents', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700)),
               const SizedBox(height: 12),
               _buildPhotoUpload('Vehicle Registration', _registrationImage, (f) => setState(() => _registrationImage = f)),
               const SizedBox(height: 12),
@@ -465,7 +465,7 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
                 ),
                 child: _isSubmitting
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : Text('Submit for Review', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700)),
+                    : Text('Submit for Review', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700)),
               ),
             ],
           ),

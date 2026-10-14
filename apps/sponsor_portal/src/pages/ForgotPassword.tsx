@@ -94,13 +94,13 @@ const ForgotPassword: React.FC = () => {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
-      <Paper sx={{ p: 4, borderRadius: 4, maxWidth: 460, width: '100%' }}>
+    <Box sx={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
+      <Paper sx={{ p: { xs: 3, sm: 4 }, borderRadius: '16px', maxWidth: 460, width: '100%' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
-          <Box sx={{ width: 44, height: 44, borderRadius: 2, bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box sx={{ width: 44, height: 44, borderRadius: '12px', bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <StorefrontIcon />
           </Box>
-          <Box>
+          <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>Reset Password</Typography>
             <Typography variant="caption" color="text.secondary">Sponsor portal account recovery</Typography>
           </Box>
@@ -127,6 +127,7 @@ const ForgotPassword: React.FC = () => {
               fullWidth
               required
               autoFocus
+              autoComplete="email"
               sx={{ mb: 3 }}
             />
             <Button type="submit" variant="contained" fullWidth size="large" disabled={loading}>
@@ -148,8 +149,20 @@ const ForgotPassword: React.FC = () => {
               required
               autoFocus
               inputMode="numeric"
+              autoComplete="one-time-code"
               placeholder="000000"
               sx={{ mt: 1, mb: 3 }}
+              slotProps={{
+                htmlInput: {
+                  maxLength: 6,
+                  style: {
+                    textAlign: 'center',
+                    letterSpacing: '0.3em',
+                    fontSize: '1.25rem',
+                    fontWeight: 800,
+                  },
+                },
+              }}
             />
             <Button type="submit" variant="contained" fullWidth size="large" disabled={loading}>
               {loading ? <CircularProgress size={22} color="inherit" /> : 'Verify code'}
@@ -172,6 +185,7 @@ const ForgotPassword: React.FC = () => {
               fullWidth
               required
               autoFocus
+              autoComplete="new-password"
               helperText="At least 8 characters"
               sx={{ mb: 2 }}
             />
@@ -181,6 +195,7 @@ const ForgotPassword: React.FC = () => {
               onChange={(e) => setConfirm(e.target.value)}
               fullWidth
               required
+              autoComplete="new-password"
               sx={{ mb: 3 }}
             />
             <Button type="submit" variant="contained" fullWidth size="large" disabled={loading}>
@@ -189,11 +204,11 @@ const ForgotPassword: React.FC = () => {
           </form>
         )}
 
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3, textAlign: 'center' }}>
+        <Box sx={{ mt: 3, textAlign: 'center' }}>
           <Button size="small" onClick={() => navigate('/login')} sx={{ textTransform: 'none' }}>
             Back to sign in
           </Button>
-        </Typography>
+        </Box>
       </Paper>
 
       <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack({ ...snack, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>

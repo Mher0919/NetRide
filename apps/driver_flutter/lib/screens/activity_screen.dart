@@ -19,7 +19,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
   ViewState _state = ViewState.loading;
   String? _errorMessage;
   List<dynamic> _history = [];
-  bool _isDeleting = false;
+  String? _deletingId;
 
   @override
   void initState() {
@@ -72,7 +72,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _deleteActivity(String id) async {
-    setState(() => _isDeleting = true);
+    setState(() => _deletingId = id);
     try {
       final confirmed = await showDialog<bool>(
         context: context,
@@ -108,7 +108,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isDeleting = false);
+      if (mounted) setState(() => _deletingId = null);
     }
   }
 
@@ -119,7 +119,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFFEEEBE6),
         elevation: 0,
-        title: Text('Earnings & Activity', style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: Text('Earnings & Activity', style: GoogleFonts.inter(color: Colors.black, fontWeight: FontWeight.bold)),
       ),
       body: StateContainer(
         state: _state,
@@ -181,11 +181,11 @@ class _ActivityScreenState extends State<ActivityScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Total Earnings', style: GoogleFonts.poppins(color: Colors.grey, fontSize: 14)),
+          Text('Total Earnings', style: GoogleFonts.inter(color: Colors.grey, fontSize: 14)),
           const SizedBox(height: 8),
-          Text('\$${total.toStringAsFixed(2)}', style: GoogleFonts.poppins(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          Text('\$${total.toStringAsFixed(2)}', style: GoogleFonts.inter(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          Text('${completed.length} completed trips', style: GoogleFonts.poppins(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('${completed.length} completed trips', style: GoogleFonts.inter(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -200,7 +200,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
           const SizedBox(height: 16),
           Text(
             'No trips completed yet',
-            style: GoogleFonts.poppins(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w500),
+            style: GoogleFonts.inter(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w500),
           ),
         ],
       ),
@@ -243,17 +243,24 @@ class _ActivityScreenState extends State<ActivityScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(formattedDate, style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 14)),
+              Expanded(
+                child: Text(
+                  formattedDate,
+                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 14),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               Row(
                 children: [
-                  Text('$farePrefix$fare', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: fareColor)),
+                  Text('$farePrefix$fare', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: fareColor), overflow: TextOverflow.ellipsis),
                   const SizedBox(width: 8),
                   IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: _isDeleting
+                    padding: const EdgeInsets.all(8),
+                    icon: _deletingId == ride['id']
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.redAccent))
                         : const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                    onPressed: _isDeleting ? null : () => _deleteActivity(ride['id']),
+                    onPressed: _deletingId != null ? null : () => _deleteActivity(ride['id']),
                   ),
                 ],
               ),
@@ -267,7 +274,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
               Expanded(
                 child: Text(
                   ride['pickup']?['address']?.toString() ?? ride['pickup_address']?.toString() ?? 'Pickup',
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
+                  style: GoogleFonts.inter(fontSize: 12, color: Colors.grey[600]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -282,7 +289,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
               Expanded(
                 child: Text(
                   ride['destination']?['address']?.toString() ?? ride['destination_address']?.toString() ?? 'Destination',
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
+                  style: GoogleFonts.inter(fontSize: 12, color: Colors.grey[600]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -293,7 +300,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
             const Divider(height: 24),
             Row(
               children: [
-                Text('Rider rated you: ', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
+                Text('Rider rated you: ', style: GoogleFonts.inter(fontSize: 12, color: Colors.grey)),
                 const Spacer(),
                 ...List.generate(5, (i) => Icon(
                   Icons.star,
@@ -320,7 +327,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                       const SizedBox(width: 6),
                       Text(
                         'Report an issue',
-                        style: GoogleFonts.poppins(
+                        style: GoogleFonts.inter(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                           color: const Color(0xFFC65A5A),

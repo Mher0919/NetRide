@@ -1,4 +1,4 @@
-﻿import 'package:dio/dio.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -336,17 +336,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
       final code = e.response?.statusCode;
       if (code == 429) return 'Too many requests. Please wait and try again later.';
-      if (code == 413) return 'Image is too large â€” please choose a smaller one.';
+      if (code == 413) return 'Image is too large — please choose a smaller one.';
     }
     final s = e.toString().toLowerCase();
     if (s.contains('429') || s.contains('too many') || s.contains('rate limit')) {
       return 'Too many requests. Please wait and try again later.';
     }
     if (s.contains('413') || s.contains('too large')) {
-      return 'Image is too large â€” please choose a smaller one.';
+      return 'Image is too large — please choose a smaller one.';
     }
     if (s.contains('network') || s.contains('timeout') || s.contains('socket')) {
-      return 'Network error â€” please check your connection and try again.';
+      return 'Network error — please check your connection and try again.';
     }
     return 'Failed to upload image. Please try again.';
   }
@@ -381,13 +381,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text('License Verification (Step 1/2)', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('License Verification (Step 1/2)', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.badge_outlined, size: 80, color: Colors.blue),
             const SizedBox(height: 16),
-            Text('Please select a clear picture of the FRONT of your Driver\'s License.', textAlign: TextAlign.center, style: GoogleFonts.poppins()),
+            Text('Please select a clear picture of the FRONT of your Driver\'s License.', textAlign: TextAlign.center, style: GoogleFonts.inter()),
           ],
         ),
         actions: [
@@ -411,7 +411,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text('License Verification (Step 2/2)', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('License Verification (Step 2/2)', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -436,7 +436,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
             ),
             const SizedBox(height: 16),
-            Text('Now, please select a clear picture of the BACK of your Driver\'s License.', textAlign: TextAlign.center, style: GoogleFonts.poppins()),
+            Text('Now, please select a clear picture of the BACK of your Driver\'s License.', textAlign: TextAlign.center, style: GoogleFonts.inter()),
           ],
         ),
         actions: [
@@ -458,13 +458,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Submit for Verification?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Submit for Verification?', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.cloud_upload_outlined, size: 80, color: Colors.green),
             const SizedBox(height: 16),
-            Text('Are you sure you want to submit these photos for license and age verification?', textAlign: TextAlign.center, style: GoogleFonts.poppins()),
+            Text('Are you sure you want to submit these photos for license and age verification?', textAlign: TextAlign.center, style: GoogleFonts.inter()),
           ],
         ),
         actions: [
@@ -517,13 +517,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           return AlertDialog(
+            scrollable: true,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Text('Change Phone Number', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            title: Text('Change Phone Number', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('Enter your new phone number and verify it via SMS.',
-                    style: GoogleFonts.poppins(fontSize: 14)),
+                    style: GoogleFonts.inter(fontSize: 14)),
                 const SizedBox(height: 16),
                 if (!_phoneCodeSent)
                   PhoneInputField(
@@ -650,11 +651,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Change Email', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        scrollable: true,
+        title: Text('Change Email', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('A verification link will be sent to your new email address.', style: GoogleFonts.poppins(fontSize: 14)),
+            Text('A verification link will be sent to your new email address.', style: GoogleFonts.inter(fontSize: 14)),
             const SizedBox(height: 16),
             TextField(
               controller: emailController,
@@ -797,16 +799,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Why are you changing your $what?',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16)),
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16)),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLines: 3,
           maxLength: 500,
           decoration: const InputDecoration(
-            hintText: 'Tell the admin why you need this changeâ€¦',
+            hintText: 'Tell the admin why you need this change…',
             border: OutlineInputBorder(),
           ),
         ),
@@ -896,7 +899,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Logout', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Logout', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: const Text('Are you sure you want to log out?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -1331,7 +1334,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (onAction != null)
           GestureDetector(
             onTap: onAction,
-            child: const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF5B7760)),
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Icon(Icons.edit_outlined, size: 16, color: Color(0xFF5B7760)),
+            ),
           ),
       ],
     );
@@ -1350,20 +1357,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
       behavior: HitTestBehavior.opaque,
       child: Opacity(
         opacity: enabled ? 1.0 : 0.4,
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.4)),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF2F3A32)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.4)),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor ?? const Color(0xFF2F3A32)),
+                ),
               ),
-            ),
-            if (trailing != null) trailing,
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.2)),
-          ],
+              if (trailing != null) trailing,
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, size: 20, color: (textColor ?? const Color(0xFF2F3A32)).withOpacity(0.2)),
+            ],
+          ),
         ),
       ),
     );
@@ -1401,7 +1411,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 SizedBox(height: 2),
                 Text(
-                  'An admin is reviewing your recent edit. You can keep editing â€” new submissions queue after the current one is reviewed.',
+                  'An admin is reviewing your recent edit. You can keep editing — new submissions queue after the current one is reviewed.',
                   style: TextStyle(color: Color(0xFF7A2A2A), fontSize: 12, height: 1.35),
                 ),
               ],
@@ -1433,7 +1443,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final label = !configured
             ? 'Payouts are not configured yet on this server'
             : payoutReady
-                ? 'Payouts enabled â€” you can receive transfers'
+                ? 'Payouts enabled — you can receive transfers'
                 : 'Payout setup incomplete';
         final color = !configured
             ? const Color(0xFF6B6B6B)
@@ -1514,7 +1524,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-          content: Text('Checking payout status with Stripeâ€¦'),
+          content: Text('Checking payout status with Stripe…'),
           duration: Duration(seconds: 1)),
     );
     setState(() {});
@@ -1732,6 +1742,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (rawCents > 0 && tooSmall) validation = 'Minimum payout is \$10.00';
           if (rawCents > 0 && tooLarge) validation = 'Amount exceeds your balance';
           return AlertDialog(
+            scrollable: true,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: const Text('Request payout', style: TextStyle(fontWeight: FontWeight.w800)),
             content: Column(

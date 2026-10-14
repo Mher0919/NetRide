@@ -71,7 +71,7 @@ class _CancellationReasonSheetState extends State<CancellationReasonSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
+    return SingleChildScrollView(
       padding: EdgeInsets.only(
         left: 24,
         right: 24,
@@ -98,9 +98,9 @@ class _CancellationReasonSheetState extends State<CancellationReasonSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          Flexible(
-            child: ListView.separated(
+          ListView.separated(
               shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
               itemCount: _reasons.length,
               separatorBuilder: (_, __) => const SizedBox(height: 4),
               itemBuilder: (context, index) {
@@ -159,7 +159,6 @@ class _CancellationReasonSheetState extends State<CancellationReasonSheet> {
                 );
               },
             ),
-          ),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -300,7 +299,7 @@ class _ReportSheetState extends State<ReportSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
+    return SingleChildScrollView(
       padding: EdgeInsets.only(
         left: 24,
         right: 24,
@@ -370,9 +369,9 @@ class _ReportSheetState extends State<ReportSheet> {
               ),
             )
           else ...[
-            Flexible(
-              child: ListView.separated(
+            ListView.separated(
                 shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
                 itemCount: _reasons.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 4),
                 itemBuilder: (context, index) {
@@ -431,7 +430,6 @@ class _ReportSheetState extends State<ReportSheet> {
                   );
                 },
               ),
-            ),
             const SizedBox(height: 12),
             TextField(
               controller: _descriptionController,

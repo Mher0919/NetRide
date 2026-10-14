@@ -1660,25 +1660,33 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                _expired
-                    ? 'REQUEST EXPIRED'
-                    : (req.specialAttached ? 'NEW SPECIAL RIDE REQUEST' : 'NEW RIDE REQUEST'),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: _expired ? const Color(0xFFC65A5A) : const Color(0xFF5B7760),
-                  letterSpacing: 1.5,
+              Flexible(
+                child: Text(
+                  _expired
+                      ? 'REQUEST EXPIRED'
+                      : (req.specialAttached ? 'NEW SPECIAL RIDE REQUEST' : 'NEW RIDE REQUEST'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: _expired ? const Color(0xFFC65A5A) : const Color(0xFF5B7760),
+                    letterSpacing: 1.5,
+                  ),
                 ),
               ),
-              Text(
-                earnings != null
-                    ? 'You earn \$${earnings.toStringAsFixed(2)}'
-                    : '—',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF5B7760),
+              Flexible(
+                child: Text(
+                  earnings != null
+                      ? 'You earn \$${earnings.toStringAsFixed(2)}'
+                      : '—',
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF5B7760),
+                  ),
                 ),
               ),
             ],

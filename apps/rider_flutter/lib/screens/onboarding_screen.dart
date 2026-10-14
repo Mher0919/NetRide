@@ -146,20 +146,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               const SizedBox(height: 40),
               Text(
                 'Welcome to NetRide',
-                style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold),
+                style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               Text(
                 _codeSent
                     ? 'Enter the 6-digit code sent to\n${_phoneController.text}'
                     : 'Verify your phone number to start riding.',
-                style: GoogleFonts.poppins(fontSize: 16, color: Colors.grey[600]),
+                style: GoogleFonts.inter(fontSize: 16, color: Colors.grey[600]),
               ),
               const SizedBox(height: 48),
               if (!_codeSent) ...[
@@ -174,7 +176,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   _phoneValid
                       ? 'Looks good — tap Send Code to continue.'
                       : 'Enter your 10-digit US phone number.',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.inter(
                     fontSize: 12,
                     color: _phoneValid ? Colors.green[700] : Colors.grey[600],
                   ),
@@ -190,12 +192,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     onPressed: _isLoading ? null : () => setState(() => _codeSent = false),
                     child: Text(
                       "Change phone number",
-                      style: GoogleFonts.poppins(color: Colors.blue[700]),
+                      style: GoogleFonts.inter(color: Colors.blue[700]),
                     ),
                   ),
                 ),
               ],
-              const Spacer(),
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -217,6 +219,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),

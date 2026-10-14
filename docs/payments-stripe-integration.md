@@ -388,6 +388,16 @@ weekly withdrawal windows are **unchanged**.
   sponsor card entry + funding intent + budget credit (and the webhook
   ordering race where the status flips before the credit claim), and driver
   Connect gating. Run: **29 passed / 0 failed** (test mode, `sk_test_…`).
+- `cd backend && node run-colab-e2e.cjs` boots the real backend and drives
+  the exact HTTP surface the Colab dashboard calls with real JWTs and real
+  Stripe test-mode tokens: card-setup + confirm, method list/default/detach
+  (default-not-removable rule), in-dashboard funding + budget credit,
+  funding idempotency replay refusal (no double charge), tenant isolation
+  (sponsor B can never see/touch sponsor A's methods) and the withdrawal
+  endpoint. Run: **18 passed / 0 failed**.
+- Requires migration `050_special_google_business.sql` on the database
+  (adds the `google_*` sponsor columns referenced by `SponsorService`'s
+  select — apply with `node scripts/run-migrations.cjs`).
 
 ---
 
@@ -406,3 +416,11 @@ weekly withdrawal windows are **unchanged**.
    `transfer.created|updated|failed|reversed`.
 3. **Live-mode activation** remains deliberate: live keys refuse to run
    unless `STRIPE_ALLOW_LIVE=true` and `NODE_ENV=production`.
+4. **Ephemeral-key API version**: `STRIPE_EPHEMERAL_KEY_API_VERSION`
+   (default `2026-09-30.endive`) must match the API version the mobile
+   Stripe SDKs (flutter_stripe) are pinned to — the SDKs make API calls
+   under the ephemeral key's `api_version`. Bump it when upgrading
+   `flutter_stripe` to a newer release family.
+5. **Android host activity**: the Rider app's `MainActivity` must extend
+   `io.flutter.embedding.android.FlutterFragmentActivity` (flutter_stripe
+   requirement) — already applied.

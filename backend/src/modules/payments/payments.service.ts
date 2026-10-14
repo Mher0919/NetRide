@@ -624,6 +624,12 @@ export class PaymentsService {
       const row = existing.rows[0];
       if (!row?.stripe_payment_intent_id) throw new Error('A funding payment with this idempotency key is already being processed');
       const intent = await gateway.retrievePaymentIntent(row.stripe_payment_intent_id);
+      if (intent.status === 'succeeded') {
+        // Stripe keeps returning a client_secret on succeeded intents, but a
+        // replay must never hand the dashboard a second confirmable session
+        // for an obligation that was already collected.
+        throw new Error('This funding payment was already processed successfully');
+      }
       if (!intent.clientSecret) throw new Error('Funding payment already confirmed');
       return { paymentRowId: row.id, clientSecret: intent.clientSecret, paymentIntentId: row.stripe_payment_intent_id };
     }

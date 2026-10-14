@@ -78,109 +78,111 @@ class _PhoneInputFieldState extends State<PhoneInputField> {
   @override
   Widget build(BuildContext context) {
     final valid = widget.isValid;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Country selector ────────────────────────────────────────
-        Container(
-          height: 56, // match the text field height for alignment
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: Colors.grey.shade50,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade300),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<CountryDialCode>(
-              value: widget.country,
-              icon: const Icon(Icons.arrow_drop_down, size: 20),
-              items: CountryDialCode.supportedCountries
-                  .map(
-                    (c) => DropdownMenuItem(
-                      value: c,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(c.flag, style: const TextStyle(fontSize: 20)),
-                          const SizedBox(width: 8),
-                          Text(
-                            c.dialCode,
-                            style: GoogleFonts.poppins(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: null, // single country for this release; extensible later
-              // Accessibility: announce the selected country.
-              selectedItemBuilder: (context) => CountryDialCode.supportedCountries
-                  .map((c) => Semantics(
-                        label: c.selectorLabel,
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Country selector ────────────────────────────────────────
+          Container(
+            constraints: const BoxConstraints(minHeight: 56), // match the text field height for alignment
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<CountryDialCode>(
+                value: widget.country,
+                icon: const Icon(Icons.arrow_drop_down, size: 20),
+                items: CountryDialCode.supportedCountries
+                    .map(
+                      (c) => DropdownMenuItem(
+                        value: c,
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(c.flag, style: const TextStyle(fontSize: 20)),
                             const SizedBox(width: 8),
-                            Text(c.dialCode, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
+                            Text(
+                              c.dialCode,
+                              style: GoogleFonts.inter(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black,
+                              ),
+                            ),
                           ],
                         ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: null, // single country for this release; extensible later
+                // Accessibility: announce the selected country.
+                selectedItemBuilder: (context) => CountryDialCode.supportedCountries
+                    .map((c) => Semantics(
+                          label: c.selectorLabel,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(c.flag, style: const TextStyle(fontSize: 20)),
+                              const SizedBox(width: 8),
+                              Text(c.dialCode, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // ── Numeric phone field ─────────────────────────────────────
+          Expanded(
+            child: TextFormField(
+              controller: _digitsController,
+              focusNode: _digitsFocus,
+              keyboardType: TextInputType.phone,
+              textInputAction: TextInputAction.done,
+              autofillHints: const [AutofillHints.telephoneNumberNational],
+              maxLength: 14, // (555) 123-4567 -> 14 chars
+              style: GoogleFonts.inter(fontSize: 16),
+              decoration: (widget.decoration ??
+                      InputDecoration(
+                        hintText: '(555) 123-4567',
+                        counterText: '',
+                        filled: true,
+                        fillColor: Colors.grey.shade50,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Colors.black, width: 1.5),
+                        ),
+                        errorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Colors.redAccent, width: 1),
+                        ),
                       ))
-                  .toList(),
+                  .copyWith(
+                // Visual validity cue without relying on color alone.
+                suffixIcon: valid
+                    ? const Icon(Icons.check_circle_rounded, color: Colors.green)
+                    : null,
+              ),
+              // Live validation message (accessible text, not color-only).
+              validator: (value) {
+                if (value == null || value.isEmpty) return 'Enter your phone number';
+                if (!PhoneUtils.isValid(value, country: widget.country)) {
+                  return 'Please enter a valid 10-digit US phone number.';
+                }
+                return null;
+              },
             ),
           ),
-        ),
-        const SizedBox(width: 12),
-        // ── Numeric phone field ─────────────────────────────────────
-        Expanded(
-          child: TextFormField(
-            controller: _digitsController,
-            focusNode: _digitsFocus,
-            keyboardType: TextInputType.phone,
-            textInputAction: TextInputAction.done,
-            autofillHints: const [AutofillHints.telephoneNumberNational],
-            maxLength: 14, // (555) 123-4567 -> 14 chars
-            style: GoogleFonts.poppins(fontSize: 16),
-            decoration: (widget.decoration ??
-                    InputDecoration(
-                      hintText: '(555) 123-4567',
-                      counterText: '',
-                      filled: true,
-                      fillColor: Colors.grey.shade50,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Colors.black, width: 1.5),
-                      ),
-                      errorBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Colors.redAccent, width: 1),
-                      ),
-                    ))
-                .copyWith(
-              // Visual validity cue without relying on color alone.
-              suffixIcon: valid
-                  ? const Icon(Icons.check_circle_rounded, color: Colors.green)
-                  : null,
-            ),
-            // Live validation message (accessible text, not color-only).
-            validator: (value) {
-              if (value == null || value.isEmpty) return 'Enter your phone number';
-              if (!PhoneUtils.isValid(value, country: widget.country)) {
-                return 'Please enter a valid 10-digit US phone number.';
-              }
-              return null;
-            },
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

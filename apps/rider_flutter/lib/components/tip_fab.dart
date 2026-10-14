@@ -101,10 +101,11 @@ class _TipSheetState extends State<_TipSheet> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       padding: EdgeInsets.fromLTRB(24, 20, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
           Center(
             child: Container(
               width: 40,
@@ -214,6 +215,7 @@ class _TipSheetState extends State<_TipSheet> {
                 : const Text('Confirm Tip', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
+        ),
       ),
     );
   }

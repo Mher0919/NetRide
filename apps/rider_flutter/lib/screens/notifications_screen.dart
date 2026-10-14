@@ -225,6 +225,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               child: Text(_error!,
                   style: theme.textTheme.bodyMedium?.copyWith(color: theme.disabledColor)),
             ),
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton(
+                onPressed: () => _load(),
+                child: const Text('Retry'),
+              ),
+            ),
           ],
         ),
       );

@@ -201,6 +201,13 @@ const envSchema = z.object({
   PUBLIC_BACKEND_URL: z.string().optional(),
   // Deep link the mobile apps listen for after a Stripe Checkout return.
   MOBILE_PAYMENT_RETURN_URL: z.string().default('netride://payments/return'),
+  // API version used when creating customer ephemeral keys (PaymentSheet).
+  // MUST match the API version the mobile SDKs are pinned to — the native
+  // stripe_ios / stripe_android SDKs make API calls under the ephemeral
+  // key's api_version, and a mismatch fails at card-entry time. The default
+  // is the version family in use by the flutter_stripe release pinned here
+  // (same family the backend SDK is pinned to).
+  STRIPE_EPHEMERAL_KEY_API_VERSION: z.string().default('2026-09-30.endive'),
 });
 
 const parsed = envSchema.safeParse(process.env);

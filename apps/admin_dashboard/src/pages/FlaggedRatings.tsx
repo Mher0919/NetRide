@@ -67,14 +67,14 @@ const FlaggedRatings: React.FC = () => {
           <CircularProgress thickness={5} size={50} />
         </Box>
       ) : ratings.length === 0 ? (
-        <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 4 }}>
-          <Typography variant="body1" color="text.secondary" fontWeight={600}>
+        <Paper sx={{ p: 6, textAlign: 'center', borderRadius: '16px' }}>
+          <Typography variant="body1" color="text.secondary" sx={{ fontWeight: 600 }}>
             No flagged reviews yet.
           </Typography>
         </Paper>
       ) : (
-        <TableContainer component={Paper} sx={{ borderRadius: 4 }}>
-          <Table>
+        <TableContainer component={Paper} sx={{ borderRadius: '16px' }}>
+          <Table size="small" sx={{ minWidth: 760 }}>
             <TableHead>
               <TableRow>
                 <TableCell>When</TableCell>
@@ -92,11 +92,11 @@ const FlaggedRatings: React.FC = () => {
                     {r.created_at ? new Date(r.created_at).toLocaleString() : '—'}
                   </TableCell>
                   <TableCell>
-                    <Typography variant="body2" fontWeight={700}>{r.rider_name}</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{r.rider_name}</Typography>
                     <Typography variant="caption" color="text.secondary">{r.rider_email}</Typography>
                   </TableCell>
                   <TableCell>
-                    <Typography variant="body2" fontWeight={700}>{r.driver_name}</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{r.driver_name}</Typography>
                     <Typography variant="caption" color="text.secondary">{r.driver_email}</Typography>
                   </TableCell>
                   <TableCell align="right">
@@ -126,7 +126,7 @@ const FlaggedRatings: React.FC = () => {
       )}
 
       {total > 20 && (
-        <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 3 }}>
+        <Stack direction="row" spacing={2} sx={{ mt: 3, justifyContent: 'center' }}>
           <Button
             variant="outlined"
             disabled={page <= 1}

@@ -55,6 +55,7 @@ const Validations: React.FC = () => {
   const [tab, setTab] = React.useState('WAITING_FOR_SPONSOR');
   const [rows, setRows] = React.useState<ValidationRow[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   const [codeOpen, setCodeOpen] = React.useState(false);
   const [code, setCode] = React.useState('');
@@ -69,11 +70,13 @@ const Validations: React.FC = () => {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const d = await listPortalValidations(tab);
       setRows((d?.validations ?? []) as ValidationRow[]);
     } catch (err) {
       console.error('Failed to load validations', err);
+      setLoadError('We could not load validations. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -128,14 +131,14 @@ const Validations: React.FC = () => {
   return (
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 2 }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>Validations</Typography>
-          <Typography variant="body2" color="text.secondary">Enter the 6-digit code from the rider's app to confirm their visit.</Typography>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h4">Validations</Typography>
+          <Typography variant="body2" color="text.secondary">Enter the 6-digit code from the rider&rsquo;s app to confirm their visit.</Typography>
         </Box>
         <Button variant="contained" onClick={() => { setCode(''); setConfirmStep(false); setCodeOpen(true); }}>Validate code</Button>
       </Box>
 
-      <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', rowGap: 1 }} useFlexGap>
         {TABS.map((t) => (
           <Chip
             key={t}
@@ -153,14 +156,28 @@ const Validations: React.FC = () => {
       </Stack>
       {(tab === 'CREATED' || tab === 'RIDE_PENDING') && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          Upcoming codes — the rider hasn't completed their ride yet, so no code has been issued. These move to “Waiting for sponsor” once the ride finishes.
+          Upcoming codes — the rider hasn&rsquo;t completed their ride yet, so no code has been issued. These move to “Waiting for sponsor” once the ride finishes.
         </Typography>
       )}
 
-      <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
-        <Table>
+      {loadError && !loading && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => load()}>
+              Retry
+            </Button>
+          }
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      <TableContainer component={Paper} sx={{ borderRadius: '16px' }}>
+        <Table size="small" stickyHeader>
           <TableHead>
-            <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'text.secondary' } }}>
+            <TableRow>
               <TableCell>Rider</TableCell>
               <TableCell>Discount</TableCell>
               <TableCell>Ride completed</TableCell>
@@ -173,10 +190,12 @@ const Validations: React.FC = () => {
             {loading ? (
               <TableRow><TableCell colSpan={6} align="center" sx={{ py: 6 }}><CircularProgress size={28} /></TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={6} align="center" sx={{ py: 6, color: 'text.secondary' }}>Nothing here yet</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                {loadError ? 'Validations could not be loaded.' : 'Nothing here yet'}
+              </TableCell></TableRow>
             ) : (
               rows.map((r) => {
-                const sc = statusColors[r.status] ?? { bg: '#EEE', fg: '#666' };
+                const sc = statusColors[r.status ?? ''] ?? { bg: '#EEE', fg: '#666' };
                 return (
                   <TableRow key={r.id} hover>
                     <TableCell>
@@ -184,18 +203,31 @@ const Validations: React.FC = () => {
                       <Typography variant="caption" color="text.secondary">{r.rider_id?.slice(0, 8)}</Typography>
                     </TableCell>
                     <TableCell>
-                      <Chip size="small" label={`${r.discount_label} — ${fmtUSD(r.calculated_discount_cents)}`} sx={{ bgcolor: '#EDEDFF', color: '#4F46E5', fontWeight: 700 }} />
+                      <Chip
+                        size="small"
+                        label={`${r.discount_label} — ${fmtUSD(r.calculated_discount_cents)}`}
+                        title={`${r.discount_label} — ${fmtUSD(r.calculated_discount_cents)}`}
+                        sx={{
+                          bgcolor: '#EDEDFF',
+                          color: '#4F46E5',
+                          fontWeight: 700,
+                          maxWidth: 220,
+                          '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
+                        }}
+                      />
                     </TableCell>
-                    <TableCell sx={{ fontSize: 13 }}>{fmtDateTime(r.ride_completed_at)}</TableCell>
-                    <TableCell sx={{ fontSize: 13 }}>{fmtDateTime(r.validation_expires_at)}</TableCell>
+                    <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{fmtDateTime(r.ride_completed_at)}</TableCell>
+                    <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{fmtDateTime(r.validation_expires_at)}</TableCell>
                     <TableCell>
                       <Chip size="small" label={r.status} sx={{ bgcolor: sc.bg, color: sc.fg, fontWeight: 700, fontSize: 11 }} />
                     </TableCell>
                     <TableCell align="right">
-                      {r.status === 'WAITING_FOR_SPONSOR' && (
+                      {r.status === 'WAITING_FOR_SPONSOR' ? (
                         <Button size="small" color="error" onClick={() => { setCancelTarget(r); setCancelReason('VISIT_NOT_CONFIRMED'); setCancelConfirm(false); }}>
                           Cancel
                         </Button>
+                      ) : (
+                        <Typography variant="caption" color="text.disabled">—</Typography>
                       )}
                     </TableCell>
                   </TableRow>
@@ -208,7 +240,7 @@ const Validations: React.FC = () => {
 
       {/* Validate dialog */}
       <Dialog open={codeOpen} onClose={() => !submitting && setCodeOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Validate a rider code</DialogTitle>
+        <DialogTitle>Validate a rider code</DialogTitle>
         <DialogContent>
           <TextField
             label="6-digit code"
@@ -217,8 +249,15 @@ const Validations: React.FC = () => {
             fullWidth
             autoFocus
             inputMode="numeric"
+            autoComplete="one-time-code"
             placeholder="000000"
             sx={{ mt: 1 }}
+            slotProps={{
+              htmlInput: {
+                maxLength: 6,
+                style: { textAlign: 'center', letterSpacing: '0.3em', fontSize: '1.25rem', fontWeight: 800 },
+              },
+            }}
           />
           {confirmStep && (
             <Alert severity="warning" sx={{ mt: 2 }}>
@@ -228,9 +267,7 @@ const Validations: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCodeOpen(false)} disabled={submitting}>Cancel</Button>
-          {!confirmStep && code.length === 6 && (
-            <Button variant="contained" disabled={submitting} onClick={() => setConfirmStep(true)}>Continue</Button>
-          )}
+          <Button variant="contained" disabled={submitting || code.length !== 6} onClick={() => setConfirmStep(true)}>Continue</Button>
           {confirmStep && (
             <Button variant="contained" color="success" disabled={submitting} onClick={submitCode}>
               {submitting ? 'Validating…' : `Confirm ${code}`}
@@ -241,7 +278,7 @@ const Validations: React.FC = () => {
 
       {/* Cancel dialog (double confirm) */}
       <Dialog open={!!cancelTarget} onClose={() => !submitting && setCancelTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Cancel validation?</DialogTitle>
+        <DialogTitle>Cancel validation?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
             Rider <b>{cancelTarget?.rider_name}</b> will lose this special. Their reserved discount is released back to your budget.
@@ -255,7 +292,7 @@ const Validations: React.FC = () => {
                 onChange={(e) => setCancelReason(e.target.value)}
                 fullWidth
                 sx={{ mt: 2 }}
-                SelectProps={{ native: true }}
+                slotProps={{ select: { native: true } }}
               >
                 <option value="VISIT_NOT_CONFIRMED">Visit not confirmed</option>
                 <option value="DUPLICATE">Duplicate code</option>

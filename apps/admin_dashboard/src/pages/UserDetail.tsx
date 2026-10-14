@@ -62,6 +62,7 @@ const UserDetail: React.FC = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -96,7 +97,12 @@ const UserDetail: React.FC = () => {
   const isDangerous = isDriver && !!user?.driver_profile?.is_dangerous;
 
   const fetchUser = async () => {
+    if (!id) {
+      navigate('/');
+      return;
+    }
     setLoading(true);
+    setLoadError(null);
     try {
       const response = await api.get(`/admin/users/${id}`);
       setUser(response.data);
@@ -138,9 +144,13 @@ const UserDetail: React.FC = () => {
           setFleets([]);
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch user', error);
-      navigate('/');
+      if (error?.response?.status === 404) {
+        navigate('/');
+        return;
+      }
+      setLoadError('Failed to load user. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -372,6 +382,24 @@ const UserDetail: React.FC = () => {
     );
   }
 
+  if (loadError && !user) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', pt: 8 }}>
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={fetchUser} sx={{ fontWeight: 700 }}>
+              Retry
+            </Button>
+          }
+          sx={{ maxWidth: 480 }}
+        >
+          {loadError}
+        </Alert>
+      </Box>
+    );
+  }
+
   const getStatusColor = (status: string) => {
     if (status === 'VERIFIED') return 'success';
     if (status === 'PENDING') return 'warning';
@@ -382,7 +410,7 @@ const UserDetail: React.FC = () => {
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
       <Box sx={{ mb: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap', rowGap: 1 }}>
           <Button 
             startIcon={<BackIcon />} 
             onClick={() => navigate(-1)}
@@ -406,10 +434,10 @@ const UserDetail: React.FC = () => {
         </Typography>
       </Box>
 
-      <Grid container spacing={3} {...({ component: 'div' } as any)}>
+      <Grid container spacing={3}>
         {/* User Info Card */}
-        <Grid item xs={12} md={4} {...({ component: 'div' } as any)}>
-          <Paper sx={{ p: 4, borderRadius: 4, border: 'none', position: 'sticky', top: 100 }}>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Paper sx={{ p: 4, borderRadius: 4, border: 'none', position: { xs: 'static', md: 'sticky' }, top: 88, maxHeight: 'calc(100vh - 140px)', overflowY: 'auto', alignSelf: 'flex-start' }}>
             <Box sx={{ textAlign: 'center', mb: 4 }}>
               <Avatar 
                 src={profileImgError ? undefined : user.profile_image_url} 
@@ -440,12 +468,12 @@ const UserDetail: React.FC = () => {
             </Box>
             
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-              <Box>
+              <Box sx={{ minWidth: 0 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>EMAIL ADDRESS</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>{user.email}</Typography>
               </Box>
               
-              <Box>
+              <Box sx={{ minWidth: 0 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PHONE NUMBER</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>{user.phone_number || '---'}</Typography>
               </Box>
@@ -525,7 +553,7 @@ const UserDetail: React.FC = () => {
         </Grid>
 
         {/* Detailed Info & Documents */}
-        <Grid item xs={12} md={8} {...({ component: 'div' } as any)}>
+        <Grid size={{ xs: 12, md: 8 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {isDriver && hasDriverProfile && (
               <>
@@ -558,8 +586,8 @@ const UserDetail: React.FC = () => {
                     share of the 40% platform pool on <strong>future rides</strong> (driver share stays
                     60%). Without a fleet, NetRide keeps the full platform pool.
                   </Typography>
-                  <Grid container spacing={2} alignItems="flex-end" {...({ component: 'div' } as any)}>
-                    <Grid item xs={12} sm={7} {...({ component: 'div' } as any)}>
+                  <Grid container spacing={2} alignItems="flex-end">
+                    <Grid size={{ xs: 12, sm: 7 }}>
                       <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                         FLEET PARTNER
                       </Typography>
@@ -582,7 +610,7 @@ const UserDetail: React.FC = () => {
                         ))}
                       </TextField>
                     </Grid>
-                    <Grid item xs={12} sm={5} {...({ component: 'div' } as any)}>
+                    <Grid size={{ xs: 12, sm: 5 }}>
                       <Button
                         variant="contained"
                         size="small"
@@ -609,8 +637,8 @@ const UserDetail: React.FC = () => {
                       />
                     )}
                   </Box>
-                  <Grid container spacing={3} sx={{ mb: 3 }} {...({ component: 'div' } as any)}>
-                    <Grid item xs={12} sm={6} {...({ component: 'div' } as any)}>
+                  <Grid container spacing={3} sx={{ mb: 3 }}>
+                    <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>LICENSE NUMBER</Typography>
                       <TextField
                         fullWidth
@@ -621,7 +649,7 @@ const UserDetail: React.FC = () => {
                         sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                       />
                     </Grid>
-                    <Grid item xs={12} sm={6} {...({ component: 'div' } as any)}>
+                    <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>EXPIRATION DATE</Typography>
                       <TextField
                         fullWidth
@@ -681,36 +709,36 @@ const UserDetail: React.FC = () => {
                       </Box>
                       {finalizedSub ? (
                         <>
-                          <Grid container spacing={3} sx={{ mb: 3 }} {...({ component: 'div' } as any)}>
-                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                          <Grid container spacing={3} sx={{ mb: 3 }}>
+                            <Grid size={{ xs: 12, sm: 4 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>MAKE</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.make || '---'}</Typography>
                             </Grid>
-                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                            <Grid size={{ xs: 12, sm: 4 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>MODEL</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.model || '---'}</Typography>
                             </Grid>
-                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                            <Grid size={{ xs: 12, sm: 4 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>YEAR</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.year || '---'}</Typography>
                             </Grid>
-                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                            <Grid size={{ xs: 12, sm: 4 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>COLOR</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.color || '---'}</Typography>
                             </Grid>
-                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                            <Grid size={{ xs: 12, sm: 4 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PLATE NUMBER</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.license_plate_number || '---'}</Typography>
                             </Grid>
-                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                            <Grid size={{ xs: 12, sm: 4 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>PLATE STATE</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.license_plate_state || '---'}</Typography>
                             </Grid>
-                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                            <Grid size={{ xs: 12, sm: 4 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>ZIP CODE</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>{finalizedSub.zip_code || '---'}</Typography>
                             </Grid>
-                            <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                            <Grid size={{ xs: 12, sm: 4 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>REVIEWED</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>
                                 {finalizedSub.reviewed_at ? format(new Date(finalizedSub.reviewed_at), 'PP') : '---'}
@@ -718,7 +746,7 @@ const UserDetail: React.FC = () => {
                             </Grid>
                           </Grid>
                           {isRejected && finalizedSub.rejection_reason && (
-                            <Box sx={{ mt: 2, p: 2, bgcolor: '#FCE9E9', borderRadius: 2 }}>
+                            <Box sx={{ mt: 2, p: 2, bgcolor: '#FCE9E9', borderRadius: '12px' }}>
                               <Typography variant="caption" sx={{ fontWeight: 700, color: '#C65A5A' }}>REJECTION REASON</Typography>
                               <Typography variant="body2" sx={{ mt: 0.5 }}>{finalizedSub.rejection_reason}</Typography>
                             </Box>
@@ -814,7 +842,7 @@ const UserDetail: React.FC = () => {
 
                 {/* Ride Eligibility vs. Driver Preferences */}
                 {isDriver && ridePrefs && (
-                  <Paper elevation={0} sx={{ p: 3, mt: 3, borderRadius: 3, border: '1px solid #eee' }}>
+                  <Paper elevation={0} sx={{ p: 3, borderRadius: '16px', border: '1px solid #eee' }}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 0.5 }}>
                       Ride Eligibility &amp; Preferences
                     </Typography>
@@ -823,8 +851,8 @@ const UserDetail: React.FC = () => {
                       can serve. Enabled types are what the driver opted into.
                     </Typography>
 
-                    <Grid container spacing={2} {...({ component: 'div' } as any)}>
-                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                    <Grid container spacing={2}>
+                      <Grid size={{ xs: 12, sm: 4 }}>
                         <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                           VEHICLE CLASS
                         </Typography>
@@ -832,7 +860,7 @@ const UserDetail: React.FC = () => {
                           {ridePrefs.vehicleClassLabel || ridePrefs.vehicleClass}
                         </Typography>
                       </Grid>
-                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                      <Grid size={{ xs: 12, sm: 4 }}>
                         <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                           ELIGIBLE RIDE TYPES
                         </Typography>
@@ -847,7 +875,7 @@ const UserDetail: React.FC = () => {
                           ))}
                         </Box>
                       </Grid>
-                      <Grid item xs={12} sm={4} {...({ component: 'div' } as any)}>
+                      <Grid size={{ xs: 12, sm: 4 }}>
                         <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                           ENABLED RIDE TYPES
                         </Typography>
@@ -873,7 +901,7 @@ const UserDetail: React.FC = () => {
 
                 <Box>
                   <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 800 }}>General Compliance Documents</Typography>
-                  <Grid container spacing={2} {...({ component: 'div' } as any)}>
+                  <Grid container spacing={2}>
                     {(() => {
                       const firstVeh = user.driver_profile.vehicles?.[0];
                       const items = [
@@ -884,7 +912,7 @@ const UserDetail: React.FC = () => {
                         { title: 'Vehicle Inspection', key: 'inspection_photo_url', url: firstVeh?.inspection_photo_url, requestable: true },
                       ];
                       return items.filter(Boolean).map((doc, idx) => (
-                        <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
+                        <Grid size={{ xs: 12, sm: 6 }} key={idx}>
                           <Card sx={{ border: '1px solid #eee', boxShadow: 'none' }}>
                             <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <Typography variant="caption" sx={{ fontWeight: 800 }}>{doc.title}</Typography>
@@ -943,7 +971,7 @@ const UserDetail: React.FC = () => {
                                 height="220"
                                 image={doc.url}
                                 alt={doc.title}
-                                sx={{ objectFit: 'cover', bgcolor: 'white', cursor: 'pointer' }}
+                                sx={{ objectFit: 'contain', bgcolor: '#fafafa', cursor: 'pointer' }}
                                 onClick={() => window.open(doc.url, '_blank')}
                                 onError={() => setErroredDocs((prev) => ({ ...prev, [doc.key]: true }))}
                               />
@@ -1127,12 +1155,12 @@ const UserDetail: React.FC = () => {
 
                   {violations.length === 0 ? (
                     <Box
-                      sx={{
-                        p: 3,
-                        textAlign: 'center',
-                        bgcolor: 'background.default',
-                        borderRadius: 2,
-                      }}
+                        sx={{
+                          p: 3,
+                          textAlign: 'center',
+                          bgcolor: 'background.default',
+                          borderRadius: '12px',
+                        }}
                     >
                       <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                         No speeding violations on record.
@@ -1231,12 +1259,12 @@ const UserDetail: React.FC = () => {
             {!isDriver && user.role === 'RIDER' && (
               <Box>
                 <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 800 }}>Identity Verification (KYC)</Typography>
-                <Grid container spacing={2} {...({ component: 'div' } as any)}>
+                <Grid container spacing={2}>
                   {[
                     { title: 'Identity Card (Front)', key: 'id_photo_front_url', url: user.id_photo_front_url },
                     { title: 'Identity Card (Back)', key: 'id_photo_back_url', url: user.id_photo_back_url }
                   ].map((doc, idx) => (
-                    <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
+                    <Grid size={{ xs: 12, sm: 6 }} key={idx}>
                       <Card sx={{ border: '1px solid #eee', boxShadow: 'none' }}>
                         <CardContent sx={{ py: 1.5, px: 2, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Typography variant="caption" sx={{ fontWeight: 800 }}>{doc.title}</Typography>
@@ -1284,7 +1312,7 @@ const UserDetail: React.FC = () => {
                             height="340"
                             image={doc.url}
                             alt={doc.title}
-                            sx={{ objectFit: 'cover', bgcolor: 'white', cursor: 'pointer' }}
+                            sx={{ objectFit: 'contain', bgcolor: '#fafafa', cursor: 'pointer' }}
                             onClick={() => window.open(doc.url, '_blank')}
                           />
                         ) : (
@@ -1306,9 +1334,7 @@ const UserDetail: React.FC = () => {
       <Dialog 
         open={rejectDialogOpen} 
         onClose={() => setRejectDialogOpen(false)}
-        {...({
-          PaperProps: { sx: { borderRadius: 4, p: 1, maxWidth: 450 } }
-        } as any)}
+        maxWidth="xs"
       >
         <DialogTitle sx={{ fontWeight: 800 }}>Reject Verification</DialogTitle>
         <DialogContent>
@@ -1345,9 +1371,7 @@ const UserDetail: React.FC = () => {
       <Dialog
         open={requestDocsOpen}
         onClose={() => setRequestDocsOpen(false)}
-        {...({
-          PaperProps: { sx: { borderRadius: 4, p: 1, maxWidth: 450 } }
-        } as any)}
+        maxWidth="xs"
       >
         <DialogTitle sx={{ fontWeight: 800 }}>Request Document Resubmission</DialogTitle>
         <DialogContent>
@@ -1385,9 +1409,7 @@ const UserDetail: React.FC = () => {
       <Dialog
         open={clearDangerousOpen}
         onClose={() => setClearDangerousOpen(false)}
-        {...({
-          PaperProps: { sx: { borderRadius: 4, p: 1, maxWidth: 450 } }
-        } as any)}
+        maxWidth="xs"
       >
         <DialogTitle sx={{ fontWeight: 800 }}>Clear Dangerous Flag</DialogTitle>
         <DialogContent>
@@ -1431,9 +1453,7 @@ const UserDetail: React.FC = () => {
       <Dialog
         open={blockDialogOpen}
         onClose={() => setBlockDialogOpen(false)}
-        {...({
-          PaperProps: { sx: { borderRadius: 4, p: 1, maxWidth: 450 } }
-        } as any)}
+        maxWidth="xs"
       >
         <DialogTitle sx={{ fontWeight: 800 }}>Block User</DialogTitle>
         <DialogContent>

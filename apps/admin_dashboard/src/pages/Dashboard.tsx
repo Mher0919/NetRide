@@ -6,7 +6,9 @@ import {
   CircularProgress,
   Card,
   CardContent,
-  Chip
+  Chip,
+  Alert,
+  Button
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PeopleIcon from '@mui/icons-material/People';
@@ -29,27 +31,30 @@ interface Stats {
 const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchStats = React.useCallback(async () => {
+    try {
+      const response = await api.get('/admin/stats');
+      setStats(response.data);
+      setError(null);
+    } catch (error) {
+      console.error('Failed to fetch stats', error);
+      setError('We could not load platform stats. Check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const response = await api.get('/admin/stats');
-        setStats(response.data);
-      } catch (error) {
-        console.error('Failed to fetch stats', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchStats();
 
     // Poll stats every 30 seconds to keep dashboard data current
     const pollTimer = setInterval(fetchStats, 30_000);
     return () => clearInterval(pollTimer);
-  }, []);
+  }, [fetchStats]);
 
-  if (loading) {
+  if (loading && !stats) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
         <CircularProgress thickness={5} size={50} sx={{ color: 'primary.main' }} />
@@ -77,92 +82,106 @@ const Dashboard: React.FC = () => {
 
   return (
     <Box sx={{ maxWidth: '100%', mx: 'auto' }}>
-      <Typography variant="h4" sx={{ mb: 4, fontWeight: 800 }}>
+      <Typography variant="h4" sx={{ mb: 3 }}>
         Platform Overview
       </Typography>
+
+      {error && !stats && (
+        <Alert
+          severity="error"
+          sx={{ mb: 3 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => fetchStats()}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
 
       <Box 
         sx={{ 
           display: 'grid', 
           gridTemplateColumns: {
             xs: '1fr',
-            sm: 'repeat(2, 1fr)',
-            md: 'repeat(3, 1fr)',
-            lg: 'repeat(5, 1fr)'
+            sm: 'repeat(2, minmax(0, 1fr))',
+            md: 'repeat(3, minmax(0, 1fr))',
+            lg: 'repeat(6, minmax(0, 1fr))'
           }, 
-          gap: 3,
-          mb: 5 
+          gap: 2,
+          mb: 4 
         }}
       >
         {statCards.map((card) => (
-          <Card key={card.title} sx={{ border: 'none', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
-            <CardContent sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <Card key={card.title} sx={{ border: 'none', transition: 'none' }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, minWidth: 0 }}>
                 <Box sx={{ 
                   p: 1.5, 
                   borderRadius: '12px', 
                   backgroundColor: card.color, 
                   display: 'flex', 
                   color: card.iconColor,
-                  mr: 2 
+                  mr: 1.5,
+                  flexShrink: 0 
                 }}>
                   {React.cloneElement(card.icon as React.ReactElement, { 
-                    style: { fontSize: 20 }
+                    sx: { fontSize: 20 }
                   } as any)}
                 </Box>
-                <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600 }}>
+                <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ fontWeight: 600, minWidth: 0 }}>
                   {card.title}
                 </Typography>
               </Box>
-              <Typography variant="h3" sx={{ fontWeight: 800, color: 'text.primary' }}>
-                {card.value?.toLocaleString()}
+              <Typography variant="h3" sx={{ fontWeight: 800, color: 'text.primary', fontVariantNumeric: 'tabular-nums' }}>
+                {stats ? card.value?.toLocaleString() : '—'}
               </Typography>
             </CardContent>
           </Card>
         ))}
       </Box>
 
-      <Box sx={{ width: '100%', mt: 4, display: 'flex', justifyContent: 'center' }}>
-        <Paper sx={{ p: 4, borderRadius: 4, width: '90%', maxWidth: 1400, boxSizing: 'border-box', border: 'none' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              System Distribution
-            </Typography>
-            <Chip label="Live Data" size="small" sx={{ fontWeight: 700, bgcolor: 'secondary.main', color: 'white' }} />
-          </Box>
-          <Box sx={{ height: 500, width: '100%', minWidth: 0 }}>
-            {/* Explicit numeric height: avoids Recharts' first-paint
-                “width(-1) and height(-1)” measurement warning. */}
-            <ResponsiveContainer width="100%" height={500}>
-              <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#9e9e9e', fontSize: 13, fontWeight: 500 }} 
-                  dy={10}
-                />
-                <YAxis 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#9e9e9e', fontSize: 13, fontWeight: 500 }} 
-                />
-                <Tooltip 
-                  cursor={{ fill: '#f5f5f5' }}
-                  contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' }}
-                />
-                <Bar 
-                  dataKey="count" 
-                  fill="#1a1a1a" 
-                  radius={[8, 8, 0, 0]} 
-                  barSize={60}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </Box>
-        </Paper>
-      </Box>
+      <Paper sx={{ p: { xs: 2, sm: 4 }, borderRadius: '16px', maxWidth: 1400, boxSizing: 'border-box', border: 'none' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 1.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            System Distribution
+          </Typography>
+          <Chip label="Live Data" size="small" sx={{ fontWeight: 700, bgcolor: 'secondary.main', color: 'white' }} />
+        </Box>
+        <Box sx={{ height: { xs: 320, md: 500 }, width: '100%', minWidth: 0 }}>
+          {/* Explicit numeric height: avoids Recharts' first-paint
+              “width(-1) and height(-1)” measurement warning. */}
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+              <XAxis 
+                dataKey="name" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: '#9e9e9e', fontSize: 13, fontWeight: 500 }} 
+                dy={10}
+                interval="preserveStartEnd"
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: '#9e9e9e', fontSize: 13, fontWeight: 500 }} 
+              />
+              <Tooltip 
+                cursor={{ fill: '#f5f5f5' }}
+                contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' }}
+              />
+              <Bar 
+                dataKey="count" 
+                fill="#1a1a1a" 
+                radius={[8, 8, 0, 0]} 
+                maxBarSize={56}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </Box>
+      </Paper>
     </Box>
   );
 };

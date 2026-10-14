@@ -16,7 +16,11 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { portalLogin, portalVerify2FA } from '../api/portal';
+import type { PortalSession, PortalLoginPending } from '../api/portal';
 import PasswordField from '../components/PasswordField';
+
+const isLoginPending = (result: PortalSession | PortalLoginPending): result is PortalLoginPending =>
+  'otp_required' in result;
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -52,7 +56,7 @@ const Login: React.FC = () => {
         localStorage.getItem('portal_trusted_device_token'),
       );
 
-      if ('otp_required' in result && result.otp_required) {
+      if (isLoginPending(result)) {
         setShowOTP(true);
         setSnack({ open: true, message: 'A 6-digit verification code was sent to your email.', severity: 'success' });
         return;
@@ -69,14 +73,14 @@ const Login: React.FC = () => {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
-      <Paper sx={{ p: 4, borderRadius: 4, maxWidth: 400, width: '100%' }}>
+    <Box sx={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
+      <Paper sx={{ p: { xs: 3, sm: 4 }, borderRadius: '16px', maxWidth: 400, width: '100%' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
-          <Box sx={{ width: 44, height: 44, borderRadius: 2, bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box sx={{ width: 44, height: 44, borderRadius: '12px', bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <StorefrontIcon />
           </Box>
-          <Box>
-            <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>NetRide Partner</Typography>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>NetRide Portal</Typography>
             <Typography variant="caption" color="text.secondary">
               {showOTP ? 'Enter the 6-digit code sent to your email' : 'Sponsor · Partner · Fleet portal sign in'}
             </Typography>
@@ -93,6 +97,7 @@ const Login: React.FC = () => {
                 fullWidth
                 required
                 autoFocus
+                autoComplete="email"
                 sx={{ mb: 2 }}
               />
               <PasswordField
@@ -101,6 +106,7 @@ const Login: React.FC = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 fullWidth
                 required
+                autoComplete="current-password"
                 sx={{ mb: 1 }}
               />
               <Box sx={{ textAlign: 'right', mb: 3 }}>
@@ -122,9 +128,20 @@ const Login: React.FC = () => {
                 required
                 autoFocus
                 inputMode="numeric"
+                autoComplete="one-time-code"
                 placeholder="000000"
                 sx={{ mt: 1, mb: 1 }}
-                InputProps={{ inputProps: { maxLength: 6, style: { textAlign: 'center', letterSpacing: '0.4em', fontSize: '1.25rem', fontWeight: 800 } } }}
+                slotProps={{
+                  htmlInput: {
+                    maxLength: 6,
+                    style: {
+                      textAlign: 'center',
+                      letterSpacing: '0.3em',
+                      fontSize: '1.25rem',
+                      fontWeight: 800,
+                    },
+                  },
+                }}
               />
               <FormControlLabel
                 control={
@@ -149,7 +166,8 @@ const Login: React.FC = () => {
           )}
         </form>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3, textAlign: 'center' }}>
-          Credentials are issued by NetRide. Contact support at <a href="mailto:support@netride.org">support@netride.org</a>.
+          Credentials are issued by NetRide. Contact support at{' '}
+          <Link href="mailto:support@netride.org" sx={{ fontWeight: 600 }}>support@netride.org</Link>.
         </Typography>
       </Paper>
       <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack({ ...snack, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>

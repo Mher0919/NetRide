@@ -109,7 +109,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
               const SizedBox(height: 20),
               Text(
                 'Verification',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.inter(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
                   letterSpacing: -0.5,
@@ -118,7 +118,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
               const SizedBox(height: 8),
               Text(
                 'Enter the 6-digit code sent to\n${widget.email}',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.inter(
                   fontSize: 16,
                   color: Colors.grey[600],
                 ),
@@ -150,7 +150,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                         )
                       : Text(
                           'Verify',
-                          style: GoogleFonts.poppins(
+                          style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
@@ -163,7 +163,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                   onPressed: _isLoading ? null : _resendCode,
                   child: Text(
                     "Didn't receive code? Resend",
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.inter(
                       color: Colors.blue[700],
                       fontWeight: FontWeight.w600,
                     ),

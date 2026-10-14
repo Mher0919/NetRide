@@ -144,22 +144,24 @@ const SponsorLocationPicker: React.FC<Props> = ({ value, onChange, address = '',
           variant="caption"
           sx={{
             position: 'absolute',
-            top: 8,
+            bottom: 8,
             left: 8,
             bgcolor: 'rgba(255,255,255,0.92)',
             px: 1,
             py: 0.5,
-            borderRadius: 1,
+            borderRadius: '6px',
             fontWeight: 700,
             fontSize: 11,
             zIndex: 1000,
+            pointerEvents: 'none',
+            maxWidth: 'calc(100% - 16px)',
           }}
         >
           {position ? 'Click the map or drag the pin to set the SPECIALS location' : 'Click the map to set the SPECIALS location'}
         </Typography>
       </Box>
 
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 1.5 }} alignItems="center">
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 1.5, alignItems: { xs: 'stretch', sm: 'center' } }}>
         <TextField
           size="small"
           label="Latitude"

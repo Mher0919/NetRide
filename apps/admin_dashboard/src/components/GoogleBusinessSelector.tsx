@@ -11,6 +11,7 @@ import {
   Skeleton,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
@@ -266,7 +267,7 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
 
   return (
     <Box aria-label="Google business association">
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
           Google Business
         </Typography>
@@ -344,7 +345,7 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
                 {value.address}
               </Typography>
             )}
-            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 1 }}>
+            <Stack direction="row" spacing={0.5} sx={{ mt: 1, alignItems: 'center' }}>
               <CheckCircleIcon sx={{ fontSize: 15, color: '#2E7D32' }} />
               <Typography variant="caption" sx={{ color: '#2E7D32', fontWeight: 700 }}>
                 Connected to Google Maps
@@ -367,7 +368,7 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
         </>
       ) : manualMode ? (
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <PlaceIcon sx={{ color: 'text.secondary' }} />
             <Box sx={{ flex: 1 }}>
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
@@ -397,12 +398,14 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               disabled={disabled}
-              inputProps={{ 'aria-label': 'Search Google Maps for a business' }}
-              sx={{ mb: 1.5 }}
-              InputProps={{
-                startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />,
-                endAdornment: searching ? <CircularProgress size={16} /> : null,
+              slotProps={{
+                htmlInput: { 'aria-label': 'Search Google Maps for a business' },
+                input: {
+                  startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />,
+                  endAdornment: searching ? <CircularProgress size={16} /> : null,
+                },
               }}
+              sx={{ mb: 1.5 }}
             />
           )}
 
@@ -444,12 +447,14 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
                       }}
                       aria-label={`Select ${b.name}`}
                     >
-                      <Stack direction="row" spacing={1.5} alignItems="center">
+                      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
                         <BusinessThumb photoUrl={b.photoUrl} size={52} />
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
-                            {b.name}
-                          </Typography>
+                        <Box sx={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                          <Tooltip title={b.name}>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
+                              {b.name}
+                            </Typography>
+                          </Tooltip>
                           {(b.rating != null || b.reviewCount != null) && (
                             <Typography variant="caption" sx={{ color: '#5F6B62', display: 'block' }}>
                               {b.rating != null ? `★ ${b.rating.toFixed(1)}` : ''}
@@ -458,13 +463,17 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
                             </Typography>
                           )}
                           {(b.shortAddress || b.address) && (
-                            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
-                              {b.shortAddress ?? b.address}
-                            </Typography>
+                            <Tooltip title={b.shortAddress ?? b.address ?? ''}>
+                              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                                {b.shortAddress ?? b.address}
+                              </Typography>
+                            </Tooltip>
                           )}
-                          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
-                            {[b.category, fmtDistance(b.distanceMiles)].filter(Boolean).join(' · ')}
-                          </Typography>
+                          <Tooltip title={[b.category, fmtDistance(b.distanceMiles)].filter(Boolean).join(' · ')}>
+                            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                              {[b.category, fmtDistance(b.distanceMiles)].filter(Boolean).join(' · ')}
+                            </Typography>
+                          </Tooltip>
                         </Box>
                         <Box
                           aria-hidden
@@ -499,7 +508,7 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
           ) : null}
 
           <Divider sx={{ my: 1.5 }} />
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap' }}>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
             <Button
               size="small"
               onClick={() => {

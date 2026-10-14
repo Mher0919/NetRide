@@ -156,8 +156,8 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5 }}>
-        <Typography variant="h4" sx={{ fontWeight: 800 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 1.5 }}>
+        <Typography variant="h4">
           {title}
         </Typography>
         <Button 
@@ -242,11 +242,11 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', flexDirection: 'column', maxWidth: 250 }}>
-                      <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
+                      <Typography variant="body2" noWrap title={ride.pickup_address} sx={{ fontWeight: 500 }}>
                         <Box component="span" sx={{ color: 'success.main', mr: 1 }}>●</Box>
                         {ride.pickup_address}
                       </Typography>
-                      <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
+                      <Typography variant="body2" noWrap title={ride.destination_address} sx={{ fontWeight: 500 }}>
                         <Box component="span" sx={{ color: 'error.main', mr: 1 }}>■</Box>
                         {ride.destination_address}
                       </Typography>

@@ -111,9 +111,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Reset Password', style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold)),
+              Text('Reset Password', style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text('Enter your new password below.', style: GoogleFonts.poppins(color: Colors.grey)),
+              Text('Enter your new password below.', style: GoogleFonts.inter(color: Colors.grey)),
               const SizedBox(height: 32),
               if (widget.token == null)
                 Padding(
@@ -195,7 +195,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         const SizedBox(width: 8),
         Text(
           text,
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.inter(
             fontSize: 12,
             color: isMet ? Colors.green[700] : Colors.grey[500],
             fontWeight: isMet ? FontWeight.w500 : FontWeight.normal,

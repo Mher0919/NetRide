@@ -257,8 +257,7 @@ class DriverStatusCard extends StatelessWidget {
             IconButton(
               onPressed: onDismiss,
               icon: const Icon(Icons.close, color: Colors.white, size: 18),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
+              padding: const EdgeInsets.all(8),
             ),
           ],
         ],

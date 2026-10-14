@@ -380,7 +380,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   children: [
                     Text(
                       _stepLabels[_currentStep],
-                      style: GoogleFonts.poppins(
+                      style: GoogleFonts.inter(
                         fontSize: 13,
                         color: Colors.grey[600],
                         fontWeight: FontWeight.w500,
@@ -426,7 +426,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         children: [
           Text(
             'Take a Headshot',
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.inter(
               fontSize: 24,
               fontWeight: FontWeight.bold,
             ),
@@ -434,7 +434,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 8),
           Text(
             'This photo will be used for your profile and verification.',
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            style: GoogleFonts.inter(fontSize: 14, color: Colors.grey[600]),
           ),
           const SizedBox(height: 40),
           Center(
@@ -455,7 +455,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           const SizedBox(height: 8),
                           Text(
                             'Tap to upload',
-                            style: GoogleFonts.poppins(
+                            style: GoogleFonts.inter(
                               fontSize: 13,
                               color: Colors.grey,
                             ),
@@ -480,12 +480,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         children: [
           Text(
             'Personal Info',
-            style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
+            style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
             'Tell us about yourself.',
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            style: GoogleFonts.inter(fontSize: 14, color: Colors.grey[600]),
           ),
           const SizedBox(height: 32),
           _buildTextField(
@@ -517,12 +517,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         children: [
           Text(
             'Phone Verification',
-            style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
+            style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
             'We need to verify your phone number to continue.',
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            style: GoogleFonts.inter(fontSize: 14, color: Colors.grey[600]),
           ),
           const SizedBox(height: 32),
           if (!_isPhoneVerified) ...[
@@ -567,7 +567,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               const SizedBox(height: 24),
               Text(
                 'Enter the 6-digit code sent to\n${_phoneController.text}',
-                style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+                style: GoogleFonts.inter(fontSize: 14, color: Colors.grey[600]),
               ),
               const SizedBox(height: 24),
               Row(
@@ -632,14 +632,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       children: [
                         Text(
                           'Phone Verified',
-                          style: GoogleFonts.poppins(
+                          style: GoogleFonts.inter(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                           ),
                         ),
                         Text(
                           _phoneController.text,
-                          style: GoogleFonts.poppins(
+                          style: GoogleFonts.inter(
                             fontSize: 14,
                             color: Colors.grey[600],
                           ),
@@ -779,12 +779,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         children: [
           Text(
             'Identity Documents',
-            style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
+            style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
             'Upload clear photos of your documents.',
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            style: GoogleFonts.inter(fontSize: 14, color: Colors.grey[600]),
           ),
           const SizedBox(height: 32),
           Row(
@@ -821,7 +821,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 12),
           Text(
             'We also verify your documents with our compliance team.',
-            style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey),
+            style: GoogleFonts.inter(fontSize: 12, color: Colors.grey),
           ),
         ],
       ),
@@ -848,12 +848,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             children: [
               Text(
                 'Your Vehicle',
-                style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
+                style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Text(
                 'Select your vehicle manufacturer.',
-                style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+                style: GoogleFonts.inter(fontSize: 14, color: Colors.grey[600]),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -904,7 +904,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 icon: const Icon(Icons.add_circle_outline, color: Colors.black),
                 label: Text(
                   "Didn't find your car?",
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.inter(
                     color: Colors.black,
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
@@ -939,7 +939,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             children: [
               Text(
                 _selectedCarMake!,
-                style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
+                style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -986,7 +986,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 icon: const Icon(Icons.add_circle_outline, color: Colors.black),
                 label: Text(
                   "Didn't find your car?",
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.inter(
                     color: Colors.black,
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
@@ -1018,7 +1018,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               Expanded(
                 child: Text(
                   '${_selectedCarMake} ${_selectedCarModel ?? "Custom"}',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.inter(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1057,7 +1057,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 16),
           Text(
             'License Plate & Location',
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.inter(
               fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
@@ -1119,7 +1119,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Brand',
-                        style: GoogleFonts.poppins(
+                        style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: Colors.grey[700])),
@@ -1129,7 +1129,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         decoration: _inputDecoration('e.g. Lucid')),
                     const SizedBox(height: 14),
                     Text('Model',
-                        style: GoogleFonts.poppins(
+                        style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: Colors.grey[700])),
@@ -1139,7 +1139,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         decoration: _inputDecoration('e.g. Air')),
                     const SizedBox(height: 14),
                     Text('Year',
-                        style: GoogleFonts.poppins(
+                        style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: Colors.grey[700])),
@@ -1155,7 +1155,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                     const SizedBox(height: 14),
                     Text('Color',
-                        style: GoogleFonts.poppins(
+                        style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: Colors.grey[700])),
@@ -1211,7 +1211,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         children: [
           Text(
             'Review Application',
-            style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
+            style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 24),
           if (_profileImageUrl != null) ...[
@@ -1275,7 +1275,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   child: Text(
                     'After submission, your application will be reviewed. '
                     'Your background check status will be updated within 24 hours.',
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.inter(
                       fontSize: 13,
                       color: Colors.amber[900],
                     ),
@@ -1292,7 +1292,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget _sectionHeader(String text) {
     return Text(
       text,
-      style: GoogleFonts.poppins(
+      style: GoogleFonts.inter(
         fontSize: 14,
         fontWeight: FontWeight.w600,
         color: Colors.grey[700],
@@ -1437,7 +1437,15 @@ class _ReviewItem extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
         ],
       ),
     );

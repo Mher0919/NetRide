@@ -120,7 +120,7 @@ const Reports: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box>
       <Box>
         <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
           Ride Reports
@@ -133,19 +133,21 @@ const Reports: React.FC = () => {
       <Stack direction="row" spacing={1.5} sx={{ mt: 3, mb: 2, flexWrap: 'wrap' }}>
         <TextField
           size="small"
-          sx={{ minWidth: 260 }}
+          sx={{ minWidth: { xs: '100%', sm: 260 } }}
           placeholder="Search reporter / reported / reason…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') fetchData();
           }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" />
-              </InputAdornment>
-            ),
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            },
           }}
         />
         <FormControl size="small" sx={{ minWidth: 160 }}>
@@ -181,8 +183,8 @@ const Reports: React.FC = () => {
           <Typography color="text.secondary">No reports match these filters.</Typography>
         </Paper>
       ) : (
-        <TableContainer component={Paper} sx={{ borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
-          <Table size="small">
+        <TableContainer component={Paper} sx={{ borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
+          <Table size="small" sx={{ minWidth: 860 }}>
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 800, textTransform: 'uppercase', fontSize: 11, letterSpacing: 0.5 } }}>
                 <TableCell>Filed</TableCell>

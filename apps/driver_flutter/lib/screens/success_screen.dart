@@ -18,13 +18,13 @@ class SuccessScreen extends StatelessWidget {
               const SizedBox(height: 24),
               Text(
                 'Application Submitted!',
-                style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold),
+                style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
               Text(
                 'Our team will review your documents. This usually takes 1-3 business days.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(fontSize: 16, color: Colors.grey[600]),
+                style: GoogleFonts.inter(fontSize: 16, color: Colors.grey[600]),
               ),
               const SizedBox(height: 48),
               SizedBox(

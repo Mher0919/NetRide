@@ -5,6 +5,7 @@ import {
   Paper,
   TextField,
   InputAdornment,
+  Button,
   Table,
   TableBody,
   TableCell,
@@ -43,6 +44,7 @@ const Referrals: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   const [statusFilter, setStatusFilter] = React.useState('');
   const [search, setSearch] = React.useState('');
+  const [loadError, setLoadError] = React.useState('');
 
   const [snack, setSnack] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
@@ -53,6 +55,7 @@ const Referrals: React.FC = () => {
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     try {
+      setLoadError('');
       const s = await getReferralStats();
       setStats(s);
       if (tab === 0) {
@@ -67,6 +70,7 @@ const Referrals: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to fetch referrals', err);
+      setLoadError('Failed to load referral data');
       setSnack({ open: true, message: 'Failed to load referral data', severity: 'error' });
     } finally {
       setLoading(false);
@@ -79,7 +83,7 @@ const Referrals: React.FC = () => {
   }, [fetchData]);
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box>
       <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
         Referrals
       </Typography>
@@ -87,7 +91,7 @@ const Referrals: React.FC = () => {
         Referral relationships, rewards ledger and fraud flags.
       </Typography>
 
-      <Stack direction="row" gap={1.5} mt={3} flexWrap="wrap">
+      <Stack direction="row" sx={{ gap: 1.5, mt: 3, flexWrap: 'wrap' }}>
         {[
           ['Relationships', stats?.relationships_total ?? '—'],
           ['Pending first ride', stats?.pending_first_ride ?? '—'],
@@ -107,7 +111,17 @@ const Referrals: React.FC = () => {
         ))}
       </Stack>
 
-      <Paper sx={{ mt: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={() => fetchData()}>Retry</Button>}
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      <Paper sx={{ mt: 3, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
         <Box sx={{ px: 2, pt: 1 }}>
           <Tabs value={tab} onChange={(_e, v) => setTab(v)} sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 700 } }}>
             <Tab label="Relationships" />
@@ -117,14 +131,14 @@ const Referrals: React.FC = () => {
         </Box>
 
         {(tab === 0 || tab === 1) && (
-          <Stack direction="row" gap={1} px={2} py={2} flexWrap="wrap">
+          <Stack direction="row" sx={{ gap: 1, px: 2, py: 2, flexWrap: 'wrap' }}>
             <TextField
               size="small"
               placeholder={tab === 0 ? 'Search names / emails…' : 'Search flagged…'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              sx={{ width: 300 }}
-              InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+              sx={{ width: { xs: '100%', sm: 300 } }}
+              slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
             />
             {tab === 0 && (
               <TextField
@@ -133,7 +147,7 @@ const Referrals: React.FC = () => {
                 label="Status"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                sx={{ width: 200 }}
+                sx={{ width: { xs: '100%', sm: 200 } }}
                 slotProps={{ select: { native: true } }}
               >
                 <option value="">All</option>
@@ -146,7 +160,7 @@ const Referrals: React.FC = () => {
         )}
 
         <TableContainer>
-          <Table>
+          <Table sx={{ minWidth: 860 }}>
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, color: 'text.secondary', bgcolor: '#FAFAFA' } }}>
                 {tab === 0 && (
@@ -186,21 +200,21 @@ const Referrals: React.FC = () => {
                   </TableCell>
                 </TableRow>
               )}
-              {!loading && tab === 0 && relationships.length === 0 && (
+              {!loading && !loadError && tab === 0 && relationships.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 5, color: 'text.secondary' }}>
                     No relationships found
                   </TableCell>
                 </TableRow>
               )}
-              {!loading && tab === 1 && flags.length === 0 && (
+              {!loading && !loadError && tab === 1 && flags.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={4} align="center" sx={{ py: 5, color: 'text.secondary' }}>
                     No abuse flags — all clean
                   </TableCell>
                 </TableRow>
               )}
-              {!loading && tab === 2 && ledger.length === 0 && (
+              {!loading && !loadError && tab === 2 && ledger.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 5, color: 'text.secondary' }}>
                     No rewards granted yet
@@ -249,7 +263,7 @@ const Referrals: React.FC = () => {
                     {f.ride_completed} completed · {f.ride_cancelled} cancelled of {f.ride_total} total
                   </TableCell>
                   <TableCell>
-                    <Stack direction="row" gap={0.5} flexWrap="wrap">
+                    <Stack direction="row" sx={{ gap: 0.5, flexWrap: 'wrap' }}>
                       {(f.flags ?? []).map((flag: string) => (
                         <Chip
                           key={flag}

@@ -224,8 +224,8 @@ const RideDetail: React.FC = () => {
         </Button>
       </Box>
 
-      <Grid container spacing={3} {...({ component: 'div' } as any)}>
-        <Grid item xs={12} lg={8} {...({ component: 'div' } as any)}>
+      <Grid container spacing={3}>
+        <Grid size={{ xs: 12, lg: 8 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 1.5 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
               <Box sx={{ width: 28, height: 0, borderTop: '4px dashed #3f51b5' }} />
@@ -240,7 +240,7 @@ const RideDetail: React.FC = () => {
                 label="Actual route unavailable — no GPS samples captured" />
             )}
           </Box>
-          <Paper sx={{ height: 650, p: 0, borderRadius: 4, overflow: 'hidden', border: 'none' }}>
+          <Paper sx={{ height: { xs: 360, md: 650 }, p: 0, borderRadius: '16px', overflow: 'hidden', border: 'none' }}>
             <RideMap 
               pickup={{ lat: ride.pickup_lat, lng: ride.pickup_lng, address: ride.pickup_address }}
               destination={{ lat: ride.destination_lat, lng: ride.destination_lng, address: ride.destination_address }}
@@ -253,7 +253,7 @@ const RideDetail: React.FC = () => {
           </Paper>
         </Grid>
 
-        <Grid item xs={12} lg={4} {...({ component: 'div' } as any)}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <Paper sx={{ p: 3, borderRadius: 4, border: 'none' }}>
               <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 700, mb: 3 }}>

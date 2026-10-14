@@ -69,7 +69,7 @@ class StateContainer extends StatelessWidget {
             const SizedBox(height: 24),
             Text(
               'Something went wrong',
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.inter(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
                 color: const Color(0xFF2F3A32),
@@ -79,7 +79,7 @@ class StateContainer extends StatelessWidget {
             Text(
               errorMessage ?? 'We encountered an issue while processing your request. Please try again.',
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.inter(
                 fontSize: 14,
                 color: const Color(0xFF2F3A32).withOpacity(0.6),
               ),

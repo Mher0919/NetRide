@@ -245,7 +245,7 @@ class _FavoriteDriversScreenState extends State<FavoriteDriversScreen> {
           GestureDetector(
             onTap: () => _removeFavorite(driver),
             child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: const Color(0xFFC65A5A).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),

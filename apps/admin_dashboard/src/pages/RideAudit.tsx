@@ -89,9 +89,9 @@ const RideAudit: React.FC = () => {
         </Typography>
       </Box>
 
-      <Grid container spacing={4} {...({ component: 'div' } as any)}>
+      <Grid container spacing={4}>
         {/* Left Column: Timeline & Ratings */}
-        <Grid item xs={12} lg={5} {...({ component: 'div' } as any)}>
+        <Grid size={{ xs: 12, lg: 5 }}>
           <Paper sx={{ p: 3, mb: 4, borderRadius: 4, border: 'none' }}>
             <Typography variant="subtitle1" gutterBottom sx={{ display: 'flex', alignItems: 'center', fontWeight: 700, mb: 3 }}>
               <TimelineIcon sx={{ mr: 1.5, color: 'primary.main' }} /> Trip Lifecycle
@@ -173,7 +173,7 @@ const RideAudit: React.FC = () => {
         </Grid>
 
         {/* Right Column: Compliance Snapshot */}
-        <Grid item xs={12} lg={7} {...({ component: 'div' } as any)}>
+        <Grid size={{ xs: 12, lg: 7 }}>
           <Paper sx={{ p: 4, borderRadius: 4, border: 'none' }}>
             <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 4 }}>
               <Box>
@@ -187,14 +187,14 @@ const RideAudit: React.FC = () => {
               <Chip label="IMMUTABLE RECORD" size="small" variant="outlined" sx={{ fontWeight: 800, fontSize: '0.65rem' }} />
             </Box>
 
-            <Grid container spacing={2.5} {...({ component: 'div' } as any)}>
+            <Grid container spacing={2.5}>
               {[
                 { title: 'Driver License', status: 'VERIFIED', expiry: snapshot.license_expiry, url: snapshot.license_photo },
                 { title: 'Commercial Insurance', status: 'VERIFIED', url: snapshot.insurance_photo },
                 { title: 'Vehicle Registration', status: 'VERIFIED', url: snapshot.registration_photo },
                 { title: 'Inspection Certificate', status: snapshot.inspection_status, expiry: snapshot.inspection_expiry, url: snapshot.inspection_photo }
               ].map((doc, idx) => (
-                <Grid item xs={12} sm={6} key={idx} {...({ component: 'div' } as any)}>
+                <Grid size={{ xs: 12, sm: 6 }} key={idx}>
                   <Card sx={{ border: '1px solid', borderColor: 'divider', boxShadow: 'none', transition: 'all 0.2s', '&:hover': { borderColor: 'primary.main', transform: 'scale(1.02)' } }}>
                     <CardContent sx={{ p: 2, pb: 1 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
