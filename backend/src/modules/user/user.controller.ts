@@ -4,21 +4,16 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 import { UserService } from './user.service';
 import { z } from 'zod';
 import { AuthService } from '../auth/auth.service';
+import { fileUrlSchema } from '../../security/file-url';
 
 export const updateProfileSchema = z.object({
   body: z.object({
     phone_number: z.string().optional(),
     full_name: z.string().optional(),
-    profile_image_url: z.string().optional(),
+    profile_image_url: fileUrlSchema().optional(),
     date_of_birth: z.string().optional(),
   }),
 });
-
-// Accepts either a full URL or a relative /api/files/{id} path.
-const fileUrlSchema = () => z.string().refine(
-  v => v.startsWith('/api/files/') || z.string().url().safeParse(v).success,
-  { message: 'Must be a valid URL or /api/files/{id} path' }
-);
 
 export const verifyIdentitySchema = z.object({
   body: z.object({

@@ -4,20 +4,19 @@ exports.DriverController = void 0;
 const driver_service_1 = require("./driver.service");
 const zod_1 = require("zod");
 const vehicleData_service_1 = require("../../services/vehicleData.service");
-// Accepts either a full URL or a relative /api/files/{id} path.
-const fileUrlSchema = () => zod_1.z.string().refine(v => v.startsWith('/api/files/') || zod_1.z.string().url().safeParse(v).success, { message: 'Must be a valid URL or /api/files/{id} path' });
+const file_url_1 = require("../../security/file-url");
 const OnboardSchema = zod_1.z.object({
     personalInfo: zod_1.z.object({
         full_name: zod_1.z.string().optional(),
         phone_number: zod_1.z.string(),
         date_of_birth: zod_1.z.string(),
-        profile_image_url: fileUrlSchema(),
+        profile_image_url: (0, file_url_1.fileUrlSchema)(),
     }),
     identity: zod_1.z.object({
-        license_photo_url: fileUrlSchema(),
-        license_photo_back_url: fileUrlSchema(),
-        insurance_photo_url: fileUrlSchema(),
-        registration_photo_url: fileUrlSchema(),
+        license_photo_url: (0, file_url_1.fileUrlSchema)(),
+        license_photo_back_url: (0, file_url_1.fileUrlSchema)(),
+        insurance_photo_url: (0, file_url_1.fileUrlSchema)(),
+        registration_photo_url: (0, file_url_1.fileUrlSchema)(),
     }),
     vehicle: zod_1.z.object({
         license_plate_number: zod_1.z.string(),
@@ -34,7 +33,7 @@ const UpdateProfileSchema = zod_1.z.object({
     full_name: zod_1.z.string().optional(),
     phone_number: zod_1.z.string().optional(),
     date_of_birth: zod_1.z.string().optional(),
-    profile_image_url: fileUrlSchema().optional(),
+    profile_image_url: (0, file_url_1.fileUrlSchema)().optional(),
     license_number: zod_1.z.string().optional(),
     license_expiry_date: zod_1.z.string().optional(),
     vehicle_id: zod_1.z.string().uuid().optional(),
@@ -46,8 +45,8 @@ const UpdateProfileSchema = zod_1.z.object({
     interior_color: zod_1.z.string().optional(),
 });
 const VerifyIdentitySchema = zod_1.z.object({
-    license_photo_url: fileUrlSchema(),
-    license_photo_back_url: fileUrlSchema(),
+    license_photo_url: (0, file_url_1.fileUrlSchema)(),
+    license_photo_back_url: (0, file_url_1.fileUrlSchema)(),
     date_of_birth: zod_1.z.string().optional(),
     license_number: zod_1.z.string().optional(),
 });
@@ -55,12 +54,12 @@ const ProfileChangeChangesSchema = zod_1.z.object({
     full_name: zod_1.z.string().min(2).max(80).optional(),
     phone_number: zod_1.z.string().regex(/^\+?[0-9 ()\-]{7,20}$/).optional(),
     date_of_birth: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    profile_image_url: fileUrlSchema().optional(),
+    profile_image_url: (0, file_url_1.fileUrlSchema)().optional(),
     license_number: zod_1.z.string().min(3).max(40).optional(),
     license_plate_number: zod_1.z.string().min(1).max(15).optional(),
-    license_plate_photo_url: fileUrlSchema().optional(),
-    inspection_photo_url: fileUrlSchema().optional(),
-    car_photo_urls: zod_1.z.array(fileUrlSchema()).max(4).optional(),
+    license_plate_photo_url: (0, file_url_1.fileUrlSchema)().optional(),
+    inspection_photo_url: (0, file_url_1.fileUrlSchema)().optional(),
+    car_photo_urls: zod_1.z.array((0, file_url_1.fileUrlSchema)()).max(4).optional(),
     make: zod_1.z.string().min(1).max(40).optional(),
     model: zod_1.z.string().min(1).max(40).optional(),
     year: zod_1.z.number().int().min(2011).max(new Date().getFullYear() + 1).optional(),
@@ -94,9 +93,9 @@ const SubmitNewVehicleSchema = zod_1.z.object({
     license_plate_number: zod_1.z.string().min(1, 'License plate is required'),
     license_plate_state: zod_1.z.string().min(1, 'License plate state is required'),
     zip_code: zod_1.z.string().min(1, 'ZIP code is required'),
-    registration_photo_url: zod_1.z.string().url('Valid registration photo URL is required'),
-    insurance_photo_url: zod_1.z.string().url('Valid insurance photo URL is required'),
-    inspection_photo_url: zod_1.z.string().url('Valid inspection photo URL is required'),
+    registration_photo_url: (0, file_url_1.fileUrlSchema)(),
+    insurance_photo_url: (0, file_url_1.fileUrlSchema)(),
+    inspection_photo_url: (0, file_url_1.fileUrlSchema)(),
 });
 class DriverController {
     static async getOnboardingProgress(req, res) {

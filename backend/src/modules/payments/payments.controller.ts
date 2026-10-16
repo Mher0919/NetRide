@@ -13,6 +13,11 @@ import { ConnectService } from './connect.service';
 import { getFareBreakdown } from './fare-breakdown.service';
 import { StripeWebhookService } from './webhook.service';
 import { tryGetStripeGateway } from './stripe.gateway';
+import {
+  buildMobilePaymentReturnUrl,
+  sanitizePaymentReturnKind,
+  sanitizePaymentReturnState,
+} from './return-target';
 import type { AuthRequest } from '../../middleware/auth.middleware';
 
 function publicBaseUrl(): string {
@@ -213,8 +218,10 @@ export class PaymentsController {
    * user back to the app deep link.
    */
   static async returnHandler(req: AuthRequest, res: Response) {
-    const kind = typeof req.query.kind === 'string' ? req.query.kind : 'card';
-    const state = typeof req.query.state === 'string' ? req.query.state : 'success';
+    // Both values are attacker-controllable query parameters: allowlist them
+    // before they are echoed into the netride:// deep link.
+    const kind = sanitizePaymentReturnKind(req.query.kind);
+    const state = sanitizePaymentReturnState(req.query.state);
     const sessionId = typeof req.query.session_id === 'string' ? req.query.session_id : null;
     if (sessionId && state === 'success') {
       try {
@@ -229,7 +236,7 @@ export class PaymentsController {
         // Best-effort: the webhook remains the source of truth.
       }
     }
-    const deepLink = `${env.MOBILE_PAYMENT_RETURN_URL}?kind=${encodeURIComponent(kind)}&state=${encodeURIComponent(state)}`;
+    const deepLink = buildMobilePaymentReturnUrl(env.MOBILE_PAYMENT_RETURN_URL, kind, state);
     res.redirect(302, deepLink);
   }
 

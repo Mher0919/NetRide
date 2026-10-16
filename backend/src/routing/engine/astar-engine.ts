@@ -36,9 +36,15 @@ export class AStarEngine {
    */
   async loadGraph(graphPath?: string): Promise<void> {
     const start = Date.now();
-    const filePath = graphPath ?? env.ROUTING_GRAPH_PATH ?? path.join(__dirname, '../../data/routing-graph.bin');
+    // The graph path comes from operator configuration (env/CLI), never from
+    // a request. Canonicalize it and require a regular file so a
+    // misconfigured path can never resolve to a directory, device, or FIFO.
+    const filePath = path.resolve(
+      graphPath ?? env.ROUTING_GRAPH_PATH ?? path.join(__dirname, '../../data/routing-graph.bin'),
+    );
 
-    if (!fs.existsSync(filePath)) {
+    const graphStat = await fs.promises.stat(filePath).catch(() => null);
+    if (!graphStat?.isFile()) {
       throw new Error(`Routing graph not found at ${filePath}. Run preprocessing first.`);
     }
 

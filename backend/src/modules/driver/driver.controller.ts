@@ -4,12 +4,7 @@ import { DriverService } from './driver.service';
 import { z } from 'zod';
 import { VehicleDataService } from '../../services/vehicleData.service';
 import { pool } from '../../config/database';
-
-// Accepts either a full URL or a relative /api/files/{id} path.
-const fileUrlSchema = () => z.string().refine(
-  v => v.startsWith('/api/files/') || z.string().url().safeParse(v).success,
-  { message: 'Must be a valid URL or /api/files/{id} path' }
-);
+import { fileUrlSchema } from '../../security/file-url';
 
 const OnboardSchema = z.object({
   personalInfo: z.object({
@@ -105,9 +100,9 @@ const SubmitNewVehicleSchema = z.object({
   license_plate_number: z.string().min(1, 'License plate is required'),
   license_plate_state: z.string().min(1, 'License plate state is required'),
   zip_code: z.string().min(1, 'ZIP code is required'),
-  registration_photo_url: z.string().url('Valid registration photo URL is required'),
-  insurance_photo_url: z.string().url('Valid insurance photo URL is required'),
-  inspection_photo_url: z.string().url('Valid inspection photo URL is required'),
+  registration_photo_url: fileUrlSchema(),
+  insurance_photo_url: fileUrlSchema(),
+  inspection_photo_url: fileUrlSchema(),
 });
 
 export class DriverController {

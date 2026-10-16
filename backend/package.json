@@ -5,7 +5,7 @@
   "main": "src/app.ts",
   "scripts": {
     "start": "ts-node src/app.ts",
-    "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
+    "dev": "tsx watch src/app.ts",
     "build": "tsc",
     "test": "node ../tests/unit/backend/run-tests.cjs",
     "test:astar": "node ../tests/unit/backend/run-tests.cjs astar",
@@ -42,6 +42,10 @@
   "prisma": {
     "seed": "node prisma/seed.js"
   },
+  "overrides": {
+    "qs": "^6.16.1",
+    "deepmerge-ts": "^8.0.2"
+  },
   "dependencies": {
     "@mapbox/polyline": "^1.2.1",
     "@prisma/client": "^6.19.3",
@@ -49,13 +53,13 @@
     "@socket.io/redis-adapter": "^8.3.0",
     "@supabase/supabase-js": "^2.110.3",
     "@types/pbf": "^3.0.5",
-    "axios": "^1.6.2",
+    "axios": "^1.20.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.7.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "firebase-admin": "^14.2.0",
+    "firebase-admin": "^14.3.1",
     "form-data": "^4.0.6",
     "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
@@ -64,7 +68,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "ngeohash": "^0.6.3",
-    "nodemailer": "^8.0.6",
+    "nodemailer": "^10.1.1",
     "p-throttle": "^4.1.1",
     "pbf": "^5.1.2",
     "pg": "^8.11.3",
@@ -85,13 +89,12 @@
     "@types/multer": "^1.4.13",
     "@types/ngeohash": "^0.6.8",
     "@types/node": "^20.10.4",
-    "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.10.9",
     "@types/uuid": "^9.0.7",
     "pino-pretty": "^11.1.0",
     "prisma": "^6.19.3",
     "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
+    "tsx": "^4.20.0",
     "typescript": "^5.3.3"
   }
 }

@@ -19,7 +19,8 @@
         android:label="NetRide Driver"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false">
         <!-- Default channel for FCM display messages (channels are also
              created at runtime by NotificationService). -->
         <meta-data

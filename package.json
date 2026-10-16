@@ -6,9 +6,6 @@
     "test": "npm --prefix backend test",
     "test:e2e": "npm --prefix backend run e2e:cancellation"
   },
-  "dependencies": {
-    "expo": "54.0.0"
-  },
   "devDependencies": {
     "typescript": "^5.9.3"
   }

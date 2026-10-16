@@ -1,4 +1,5 @@
 .aider*
+node_modules/
 .env
 backend/.env
 **/.env
@@ -6,6 +7,10 @@ osrm-data/
 
 GoogleService-Info.plist
 **/ios/Runner/GoogleService-Info.plist
+# Firebase config carries a project API key; keep it out of the repo
+# (recoverable from git history — rotate the key, see the security report).
+google-services.json
+**/google-services.json
 
 uploads/
 backend/uploads/

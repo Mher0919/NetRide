@@ -1929,6 +1929,20 @@ class _StripeConnectOnboardingWebViewState
               ..setJavaScriptMode(JavaScriptMode.unrestricted)
               ..setNavigationDelegate(
                 NavigationDelegate(
+                  // Stripe-hosted payout onboarding is the only page this
+                  // WebView should ever render. Block every other host so a
+                  // tampered/redirected URL cannot turn this screen into an
+                  // in-app phishing surface with JavaScript enabled.
+                  onNavigationRequest: (request) {
+                    final uri = Uri.tryParse(request.url);
+                    final host = uri?.host.toLowerCase() ?? '';
+                    final allowed = uri != null &&
+                        uri.scheme == 'https' &&
+                        (host == 'stripe.com' || host.endsWith('.stripe.com'));
+                    return allowed
+                        ? NavigationDecision.navigate
+                        : NavigationDecision.prevent;
+                  },
                   onPageFinished: (_) {
                     if (mounted) setState(() => _loaded = true);
                   },

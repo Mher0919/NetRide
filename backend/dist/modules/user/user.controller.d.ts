@@ -5,7 +5,7 @@ export declare const updateProfileSchema: z.ZodObject<{
     body: z.ZodObject<{
         phone_number: z.ZodOptional<z.ZodString>;
         full_name: z.ZodOptional<z.ZodString>;
-        profile_image_url: z.ZodOptional<z.ZodString>;
+        profile_image_url: z.ZodOptional<z.ZodEffects<z.ZodString, string, string>>;
         date_of_birth: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         phone_number?: string | undefined;

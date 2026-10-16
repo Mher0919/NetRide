@@ -8,8 +8,6 @@ exports.EmailService = void 0;
 const googleapis_1 = require("googleapis");
 const env_1 = require("../config/env");
 const nodemailer_1 = __importDefault(require("nodemailer"));
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
 class EmailService {
     static formatDocTypes(types) {
         return types.map(t => this.DOC_TYPE_LABELS[t] || t).join(', ');
@@ -68,34 +66,6 @@ class EmailService {
             console.error('❌ [GMAIL API] Send Error:', error.message);
             throw error;
         }
-    }
-    /**
-     * Helper to resolve an image URL (data or http) to a CID attachment.
-     */
-    static getAttachment(url, filename, cid) {
-        if (!url)
-            return null;
-        if (url.startsWith('data:')) {
-            return {
-                filename,
-                content: url.split('base64,')[1],
-                encoding: 'base64',
-                cid
-            };
-        }
-        // If it's an HTTP URL pointing to our server's uploads
-        if (url.includes('/uploads/')) {
-            const filePart = url.split('/uploads/')[1];
-            const filePath = path_1.default.join(__dirname, '../../uploads', filePart);
-            if (fs_1.default.existsSync(filePath)) {
-                return {
-                    filename,
-                    path: filePath,
-                    cid
-                };
-            }
-        }
-        return null;
     }
     static async sendPasswordChangeVerification(email, fullName, token) {
         try {

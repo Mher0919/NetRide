@@ -4,20 +4,19 @@ exports.UserController = exports.verifyIdentitySchema = exports.updateProfileSch
 const user_service_1 = require("./user.service");
 const zod_1 = require("zod");
 const auth_service_1 = require("../auth/auth.service");
+const file_url_1 = require("../../security/file-url");
 exports.updateProfileSchema = zod_1.z.object({
     body: zod_1.z.object({
         phone_number: zod_1.z.string().optional(),
         full_name: zod_1.z.string().optional(),
-        profile_image_url: zod_1.z.string().optional(),
+        profile_image_url: (0, file_url_1.fileUrlSchema)().optional(),
         date_of_birth: zod_1.z.string().optional(),
     }),
 });
-// Accepts either a full URL or a relative /api/files/{id} path.
-const fileUrlSchema = () => zod_1.z.string().refine(v => v.startsWith('/api/files/') || zod_1.z.string().url().safeParse(v).success, { message: 'Must be a valid URL or /api/files/{id} path' });
 exports.verifyIdentitySchema = zod_1.z.object({
     body: zod_1.z.object({
-        id_photo_front_url: fileUrlSchema(),
-        id_photo_back_url: fileUrlSchema(),
+        id_photo_front_url: (0, file_url_1.fileUrlSchema)(),
+        id_photo_back_url: (0, file_url_1.fileUrlSchema)(),
         date_of_birth: zod_1.z.string().optional(),
     }),
 });

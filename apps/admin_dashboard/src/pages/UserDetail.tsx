@@ -56,6 +56,7 @@ import { SpeedingBadge } from '../components/SpeedingBadge';
 import EarningsPanel from '../components/EarningsPanel';
 import GroupIcon from '@mui/icons-material/Groups';
 import { format } from '../utils/date';
+import { openSafeExternalUrl, openSafeExternalUrls } from '../utils/safeUrl';
 
 const UserDetail: React.FC = () => {
   const { id, section } = useParams();
@@ -972,13 +973,13 @@ const UserDetail: React.FC = () => {
                                 image={doc.url}
                                 alt={doc.title}
                                 sx={{ objectFit: 'contain', bgcolor: '#fafafa', cursor: 'pointer' }}
-                                onClick={() => window.open(doc.url, '_blank')}
+                                onClick={() => openSafeExternalUrl(doc.url)}
                                 onError={() => setErroredDocs((prev) => ({ ...prev, [doc.key]: true }))}
                               />
                             ) : doc.url ? (
                               <Box sx={{ height: 220, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', bgcolor: 'white', gap: 1 }}>
                                 <Typography variant="caption" color="text.disabled" sx={{ fontWeight: 700 }}>IMAGE UNAVAILABLE</Typography>
-                                <Button size="small" variant="text" onClick={() => window.open(doc.url, '_blank')}>Open in new tab</Button>
+                                <Button size="small" variant="text" onClick={() => openSafeExternalUrl(doc.url)}>Open in new tab</Button>
                               </Box>
                             ) : (
                               <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'white' }}>
@@ -1058,12 +1059,7 @@ const UserDetail: React.FC = () => {
                                           size="small"
                                           variant="text"
                                           color="info"
-                                          onClick={() => {
-                                            const urls = r.new_document_url.startsWith('[')
-                                              ? JSON.parse(r.new_document_url)
-                                              : [r.new_document_url];
-                                            urls.forEach((u: string) => window.open(u, '_blank'));
-                                          }}
+                                          onClick={() => openSafeExternalUrls(r.new_document_url)}
                                           sx={{ borderRadius: '8px', height: 30, fontSize: '0.7rem' }}
                                         >
                                           View Docs
@@ -1313,7 +1309,7 @@ const UserDetail: React.FC = () => {
                             image={doc.url}
                             alt={doc.title}
                             sx={{ objectFit: 'contain', bgcolor: '#fafafa', cursor: 'pointer' }}
-                            onClick={() => window.open(doc.url, '_blank')}
+                            onClick={() => openSafeExternalUrl(doc.url)}
                           />
                         ) : (
                           <Box sx={{ height: 340, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'white' }}>

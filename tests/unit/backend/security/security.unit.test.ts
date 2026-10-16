@@ -21,6 +21,12 @@ import {
   assertPublicSignupRole,
 } from '../../../../backend/src/modules/auth/role-resolution';
 import { maxTipDollarsForFare, validateTipAmount } from '../../../../backend/src/security/tip-policy';
+import { fileUrlSchema } from '../../../../backend/src/security/file-url';
+import {
+  buildMobilePaymentReturnUrl,
+  sanitizePaymentReturnKind,
+  sanitizePaymentReturnState,
+} from '../../../../backend/src/modules/payments/return-target';
 
 // ---------------------------------------------------------------------------
 // 1. File access matrix — deny by default
@@ -226,4 +232,52 @@ test('tips: cannot exceed the fare, and never the $100 hard cap', () => {
   assert.equal(maxTipDollarsForFare(12.5), 13);
   assert.equal(maxTipDollarsForFare(0), 5);                // test rides keep a small allowance
   assert.equal(maxTipDollarsForFare(NaN), 5);
+});
+
+// ---------------------------------------------------------------------------
+// 8. File URL validation — non-web schemes never reach the dashboard
+// ---------------------------------------------------------------------------
+
+test('file urls: http(s) URLs and /api/files paths are accepted', () => {
+  assert.equal(fileUrlSchema().safeParse('https://cdn.example.com/a.png').success, true);
+  assert.equal(fileUrlSchema().safeParse('http://localhost:3000/x.jpg').success, true);
+  assert.equal(
+    fileUrlSchema().safeParse('/api/files/123e4567-e89b-12d3-a456-426614174000').success,
+    true,
+  );
+});
+
+test('file urls: javascript:, data:, file:, ftp: and scheme-relative URLs are rejected', () => {
+  for (const bad of [
+    'javascript:alert(1)',
+    'data:text/html;base64,PHNjcmlwdD4=',
+    'file:///etc/passwd',
+    'ftp://example.com/x.png',
+    '//evil.example.com/x.png',
+    '',
+  ]) {
+    assert.equal(fileUrlSchema().safeParse(bad).success, false, `${bad} must be rejected`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 9. Payment deep-link return — kind/state are allowlisted
+// ---------------------------------------------------------------------------
+
+test('payments: known kind/state values pass through', () => {
+  assert.equal(sanitizePaymentReturnKind('topup'), 'topup');
+  assert.equal(sanitizePaymentReturnState('cancel'), 'cancel');
+  assert.equal(sanitizePaymentReturnState('refresh'), 'refresh');
+});
+
+test('payments: unknown/attacker values fall back to safe defaults', () => {
+  assert.equal(sanitizePaymentReturnKind('javascript:alert(1)'), 'card');
+  assert.equal(sanitizePaymentReturnState('"><script>'), 'success');
+  assert.equal(sanitizePaymentReturnKind(undefined), 'card');
+  assert.equal(sanitizePaymentReturnState(42), 'success');
+});
+
+test('payments: the built deep link only carries allowlisted values', () => {
+  const url = buildMobilePaymentReturnUrl('netride://payments/return', 'EVIL', 'x&y=z');
+  assert.equal(url, 'netride://payments/return?kind=card&state=success');
 });

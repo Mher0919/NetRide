@@ -70,6 +70,21 @@ import { SpeedingDetector } from './services/speeding_detector';
 import { trajectoryEvents } from './modules/location/locations.service';
 
 const app = express();
+// Baseline security headers for every response. The API never serves
+// documents, so a locked-down CSP costs nothing and neutralizes accidental
+// HTML reflection; X-Frame-Options/Referrer-Policy protect the Stripe
+// return pages from clickjacking and referrer leakage. HSTS is emitted on
+// every response (browsers ignore it outside HTTPS) without
+// includeSubDomains so it cannot affect sibling hosts on shared domains.
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+  next();
+});
 // API responses must never be revalidated from the browser's HTTP cache:
 // Express's default weak ETag + browser revalidation turned every admin
 // dashboard poll into a 304 "not modified" replay of a stale cached ride

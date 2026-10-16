@@ -25,6 +25,7 @@ import StarIcon from '@mui/icons-material/Star';
 import { useNavigate, useParams, Link as RouterLink } from 'react-router-dom';
 import api from '../api';
 import { format } from '../utils/date';
+import { openSafeExternalUrl } from '../utils/safeUrl';
 
 const RideAudit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -219,7 +220,7 @@ const RideAudit: React.FC = () => {
                         image={doc.url}
                         alt={doc.title}
                         sx={{ objectFit: 'cover', bgcolor: '#f5f5f5', cursor: 'pointer', borderTop: '1px solid rgba(0,0,0,0.05)' }}
-                        onClick={() => window.open(doc.url, '_blank')}
+                        onClick={() => openSafeExternalUrl(doc.url)}
                       />
                     ) : (
                       <Box sx={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#fafafa', borderTop: '1px solid rgba(0,0,0,0.05)' }}>

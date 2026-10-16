@@ -7,6 +7,37 @@ const app = express();
 const PORT = process.env.PORT || 5173;
 const DIST_DIR = path.join(__dirname, 'dist');
 
+// Security headers for every response. The CSP only allows what the Vite
+// bundle actually loads: same-origin assets, Google Fonts, https images
+// (map tiles, backend-served files), and https/wss connections to the
+// configured API. `frame-ancestors 'none'` blocks clickjacking of the
+// authenticated dashboard.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self' https: wss:",
+  "frame-src 'none'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "worker-src 'self' blob:",
+].join('; ');
+
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('Content-Security-Policy', CSP);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
 // Fingerprinted Vite assets are safe to cache long. index.html is NOT
 // fingerprinted, so it must never be cached — otherwise a deploy would leave
 // browsers on a stale shell that references deleted hashed assets.

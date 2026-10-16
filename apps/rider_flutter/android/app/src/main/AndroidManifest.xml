@@ -9,7 +9,8 @@
         android:label="NetRide Rider"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false">
         <!-- Default notification channel for FCM display messages. Tapping a
              system notification with a payload others than the default channel
              still arrives on the app's channel, created at runtime by

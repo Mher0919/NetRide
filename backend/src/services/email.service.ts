@@ -2,8 +2,7 @@
 import { google } from 'googleapis';
 import { env } from '../config/env';
 import nodemailer from 'nodemailer';
-import fs from 'fs';
-import path from 'path';
+import type { SendMailOptions } from 'nodemailer';
 
 export class EmailService {
   private static oauth2Client = new google.auth.OAuth2(
@@ -37,7 +36,7 @@ export class EmailService {
    * Internal helper to send emails using Gmail API but with Nodemailer's 
    * easy MIME/Attachment generation.
    */
-  private static async sendEmail(options: nodemailer.SendMailOptions): Promise<void> {
+  private static async sendEmail(options: SendMailOptions): Promise<void> {
     if (!env.GMAIL_USER_EMAIL || !env.GMAIL_REFRESH_TOKEN || !env.GMAIL_CLIENT_ID || !env.GMAIL_CLIENT_SECRET) {
       console.error('❌ [GMAIL API] Cannot send email. Gmail credentials (USER_EMAIL, REFRESH_TOKEN, CLIENT_ID, CLIENT_SECRET) are missing in .env.');
       throw new Error('Email service not configured. Please check backend .env file.');
@@ -88,37 +87,6 @@ export class EmailService {
       console.error('❌ [GMAIL API] Send Error:', error.message);
       throw error;
     }
-  }
-
-  /**
-   * Helper to resolve an image URL (data or http) to a CID attachment.
-   */
-  private static getAttachment(url: string, filename: string, cid: string) {
-    if (!url) return null;
-
-    if (url.startsWith('data:')) {
-      return {
-        filename,
-        content: url.split('base64,')[1],
-        encoding: 'base64',
-        cid
-      };
-    }
-
-    // If it's an HTTP URL pointing to our server's uploads
-    if (url.includes('/uploads/')) {
-      const filePart = url.split('/uploads/')[1];
-      const filePath = path.join(__dirname, '../../uploads', filePart);
-      if (fs.existsSync(filePath)) {
-        return {
-          filename,
-          path: filePath,
-          cid
-        };
-      }
-    }
-
-    return null;
   }
 
   static async sendPasswordChangeVerification(email: string, fullName: string, token: string): Promise<void> {

@@ -8,10 +8,6 @@ export declare class EmailService {
      * easy MIME/Attachment generation.
      */
     private static sendEmail;
-    /**
-     * Helper to resolve an image URL (data or http) to a CID attachment.
-     */
-    private static getAttachment;
     static sendPasswordChangeVerification(email: string, fullName: string, token: string): Promise<void>;
     static sendOTP(email: string, code: string): Promise<void>;
     static sendDriverRegistrationNotice(data: any): Promise<void>;
