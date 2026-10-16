@@ -234,6 +234,10 @@ io.use(async (socket, next) => {
     const pureToken = token.toString().replace('Bearer ', '');
     const decoded = AuthService.verifyToken(pureToken);
 
+    // Reject tokens of deactivated users / demoted admins / pre-password-change
+    // admin tokens (fails closed on lookup errors).
+    await AuthService.assertTokenStillValid(decoded);
+
     // Resolve the ACTIVE session role from the application context supplied
     // by the connecting client (e.g. the Driver App sends `role: 'driver'`,
     // the Rider App sends `role: 'rider'`). This is the single source of
