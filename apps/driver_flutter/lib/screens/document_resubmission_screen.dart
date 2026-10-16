@@ -82,7 +82,11 @@ class _DocumentResubmissionScreenState
 
     setState(() => _isUploading = true);
     try {
-      final url = await AuthService.uploadImage(File(pickedFile.path));
+      // Derive the server-side storage category from the document column
+      // (e.g. 'insurance_photo_url' → 'insurance'). All document categories
+      // are stored privately.
+      final fileType = docType.replaceAll('_url', '').replaceAll('_photo', '');
+      final url = await AuthService.uploadImage(File(pickedFile.path), fileType: fileType);
       if (!mounted) return;
       setState(() {
         _uploads[docType]?.add(url);
@@ -435,6 +439,7 @@ class _DocumentResubmissionScreenState
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
                     resolveFileUrl(url),
+                    headers: fileAuthHeaders(),
                     fit: BoxFit.cover,
                     width: double.infinity,
                     height: double.infinity,
@@ -501,6 +506,7 @@ class _DocumentResubmissionScreenState
               borderRadius: BorderRadius.circular(16),
               child: Image.network(
                 resolveFileUrl(url),
+                headers: fileAuthHeaders(),
                 fit: BoxFit.contain,
                 width: double.infinity,
                 height: double.infinity,

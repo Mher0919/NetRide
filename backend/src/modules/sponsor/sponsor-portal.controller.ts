@@ -340,7 +340,9 @@ export class SponsorPortalController {
     try {
       const setupIntentId = typeof req.body?.setupIntentId === 'string' ? req.body.setupIntentId.trim() : '';
       if (!setupIntentId) return res.status(400).json({ error: 'setupIntentId is required' });
-      const result = await PaymentsService.applySetupIntentSucceeded(setupIntentId);
+      const result = await PaymentsService.applySetupIntentSucceeded(setupIntentId, {
+        sponsorId: req.sponsor!.id,
+      });
       res.json(result);
     } catch (err: any) {
       res.status(400).json({ error: err.message });

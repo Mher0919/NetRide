@@ -1,4 +1,5 @@
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 
 /// Resolves any /api/files/{id} URL — relative or absolute — to a
 /// fully-qualified URL that works from the current environment (emulator,
@@ -27,3 +28,13 @@ String resolveFileUrl(String url) {
 
   return url;
 }
+
+/// Headers for private-file image requests. Verification documents require
+/// the backend JWT; public profile photos ignore the header. Returns an empty
+/// map when no token is cached yet (the warm-up request will populate it).
+Map<String, String> fileAuthHeaders() {
+  final token = AuthService.cachedJwt;
+  if (token == null || token.isEmpty) return const {};
+  return {'Authorization': 'Bearer $token'};
+}
+

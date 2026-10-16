@@ -64,12 +64,12 @@ export const dispatchAcceptOutcomeTotal = new client.Counter({
   registers: [register],
 });
 
-// --- Routing engine (provider-agnostic: ORS today, swappable tomorrow) -----
+// --- Routing engine (Google Routes is the sole live engine) -----------------
 
 /** Total calls to the active routing engine, labeled by outcome. */
 export const routingEngineRequestsTotal = new client.Counter({
   name: 'netride_routing_engine_requests_total',
-  help: 'Routing engine calls (ORS/GraphHopper/...), labeled by outcome.',
+  help: 'Routing engine calls, labeled by outcome.',
   labelNames: ['status'] as const, // ok | empty | error | bad_input
   registers: [register],
 });
@@ -78,22 +78,6 @@ export const routingEngineRequestsTotal = new client.Counter({
 export const routingEngineDurationSeconds = new client.Histogram({
   name: 'netride_routing_engine_duration_seconds',
   help: 'Routing engine call latency in seconds.',
-  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
-  registers: [register],
-});
-
-/** @deprecated retained for dashboards that still reference OSRM metrics. */
-export const osrmRequestsTotal = new client.Counter({
-  name: 'netride_osrm_requests_total',
-  help: 'Deprecated: use netride_routing_engine_requests_total.',
-  labelNames: ['cache', 'engine'] as const,
-  registers: [register],
-});
-
-/** @deprecated retained for dashboards that still reference OSRM metrics. */
-export const osrmRequestDurationSeconds = new client.Histogram({
-  name: 'netride_osrm_request_duration_seconds',
-  help: 'Deprecated: use netride_routing_engine_duration_seconds.',
   buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
   registers: [register],
 });
@@ -120,7 +104,7 @@ export const socketEventsTotal = new client.Counter({
 export const routingRequestsTotal = new client.Counter({
   name: 'netride_routing_requests_total',
   help: 'Routing plan requests, labeled by cache hit and engine.',
-  labelNames: ['cache', 'engine'] as const, // cache: hit|miss ; engine: osrm|mapbox|synthetic
+  labelNames: ['cache', 'engine'] as const, // cache: hit|miss ; engine: google|local
   registers: [register],
 });
 

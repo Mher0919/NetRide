@@ -269,12 +269,39 @@ export class PaymentsService {
    * Server-side confirmation of a completed SetupIntent. Called by the app
    * right after the PaymentSheet succeeds (instant feedback) AND by the
    * verified webhook — both paths are idempotent.
+   *
+   * When `expected` is provided the SetupIntent's Stripe customer must belong
+   * to the calling principal, so a leaked/foreign setupIntentId cannot write
+   * card metadata onto another account.
    */
-  static async applySetupIntentSucceeded(setupIntentId: string): Promise<{ applied: boolean }> {
+  static async applySetupIntentSucceeded(
+    setupIntentId: string,
+    expected?: { userId?: string; sponsorId?: string },
+  ): Promise<{ applied: boolean }> {
     const gateway = gatewayOrNull();
     if (!gateway) return { applied: false };
     const si = await gateway.retrieveSetupIntent(setupIntentId);
     if (si.status !== 'succeeded') return { applied: false };
+
+    if (expected?.userId) {
+      const owner = await pool.query(
+        `SELECT user_id FROM stripe_customers WHERE stripe_customer_id = $1`,
+        [si.customerId],
+      );
+      if (owner.rows[0]?.user_id !== expected.userId) {
+        throw new Error('SetupIntent does not belong to this account');
+      }
+    }
+    if (expected?.sponsorId) {
+      const owner = await pool.query(
+        `SELECT id FROM sponsors WHERE stripe_customer_id = $1`,
+        [si.customerId],
+      );
+      if (owner.rows[0]?.id !== expected.sponsorId) {
+        throw new Error('SetupIntent does not belong to this sponsor account');
+      }
+    }
+
     await this.applySetupIntentResult(si);
     return { applied: true };
   }
@@ -388,9 +415,12 @@ export class PaymentsService {
       [args.userId, amountCents, env.STRIPE_CURRENCY, customer.customerId, idempotencyKey],
     );
     if (insert.rows.length === 0) {
+      // Owner-scoped replay: a colliding key belonging to ANOTHER user must
+      // never leak this caller a foreign checkout URL.
       const existing = await pool.query(
-        `SELECT id, metadata->>'url' AS url, status FROM stripe_payments WHERE idempotency_key = $1`,
-        [idempotencyKey],
+        `SELECT id, metadata->>'url' AS url, status FROM stripe_payments
+          WHERE idempotency_key = $1 AND user_id = $2`,
+        [idempotencyKey, args.userId],
       );
       const row = existing.rows[0];
       if (row?.url) return { url: row.url, paymentRowId: row.id };
@@ -617,9 +647,11 @@ export class PaymentsService {
       [args.sponsorId, amountCents, env.STRIPE_CURRENCY, customerId, idempotencyKey],
     );
     if (insert.rows.length === 0) {
+      // Owner-scoped replay — never hand sponsor A sponsor B's client_secret.
       const existing = await pool.query(
-        `SELECT id, stripe_payment_intent_id FROM stripe_payments WHERE idempotency_key = $1`,
-        [idempotencyKey],
+        `SELECT id, stripe_payment_intent_id FROM stripe_payments
+          WHERE idempotency_key = $1 AND sponsor_id = $2`,
+        [idempotencyKey, args.sponsorId],
       );
       const row = existing.rows[0];
       if (!row?.stripe_payment_intent_id) throw new Error('A funding payment with this idempotency key is already being processed');
@@ -671,12 +703,37 @@ export class PaymentsService {
    * Reconciles a sponsor funding PaymentIntent after the Elements flow
    * confirms it in-browser (webhook remains the source of truth; this adds
    * instant feedback and covers webhook-delivery gaps in dev/test).
+   *
+   * SECURITY: the PaymentIntent must provably belong to this exact funding
+   * row — matching stored intent id (when known), Stripe customer, amount,
+   * and metadata referencing the row. Without these bindings a stale or
+   * unrelated succeeded PaymentIntent (e.g. a $1 charge) could be replayed
+   * to confirm an arbitrary, larger funding row.
    */
   static async reconcileSponsorFundingIntent(paymentRowId: string, paymentIntentId: string | null): Promise<{ status: string }> {
     const gateway = gatewayOrNull();
     if (!gateway) return { status: 'unknown' };
     if (!paymentIntentId) return { status: 'unknown' };
+
+    const rowRes = await pool.query(
+      `SELECT id, sponsor_id, amount_cents, stripe_customer_id, stripe_payment_intent_id
+         FROM stripe_payments
+        WHERE id = $1 AND purpose = 'SPONSOR_BUDGET_TOPUP'`,
+      [paymentRowId],
+    );
+    const row = rowRes.rows[0];
+    if (!row) return { status: 'unknown' };
+
     const intent = await gateway.retrievePaymentIntent(paymentIntentId);
+
+    const storedIntentMatches = !row.stripe_payment_intent_id || row.stripe_payment_intent_id === paymentIntentId;
+    const metadataMatches = intent.metadata?.stripe_payment_id === paymentRowId;
+    const amountMatches = Number(intent.amountCents) === Number(row.amount_cents);
+    const customerMatches = !row.stripe_customer_id || intent.customerId === row.stripe_customer_id;
+    if (!storedIntentMatches || !metadataMatches || !amountMatches || !customerMatches) {
+      throw new Error('Payment intent does not match this funding record');
+    }
+
     if (intent.status === 'succeeded') {
       await this.applySponsorBudgetTopup({ stripePaymentId: paymentRowId, paymentIntentId });
       return { status: 'SUCCEEDED' };
@@ -728,8 +785,9 @@ export class PaymentsService {
     );
     if (insert.rows.length === 0) {
       const existing = await pool.query(
-        `SELECT id, metadata->>'url' AS url FROM stripe_payments WHERE idempotency_key = $1`,
-        [idempotencyKey],
+        `SELECT id, metadata->>'url' AS url FROM stripe_payments
+          WHERE idempotency_key = $1 AND sponsor_id = $2`,
+        [idempotencyKey, args.sponsorId],
       );
       if (existing.rows[0]?.url) return { url: existing.rows[0].url, paymentRowId: existing.rows[0].id };
       throw new Error('A funding payment with this idempotency key is already being processed');
@@ -828,8 +886,9 @@ export class PaymentsService {
     );
     if (claimed.rows.length === 0) {
       const existing = await pool.query(
-        `SELECT id, status, stripe_payment_intent_id, failure_reason FROM stripe_payments WHERE idempotency_key = $1`,
-        [args.idempotencyKey],
+        `SELECT id, status, stripe_payment_intent_id, failure_reason FROM stripe_payments
+          WHERE idempotency_key = $1 AND user_id = $2`,
+        [args.idempotencyKey, args.riderId],
       );
       const row = existing.rows[0];
       return {
@@ -958,6 +1017,7 @@ export class PaymentsService {
   static async applyCheckoutSessionCompleted(session: {
     id: string;
     mode: string | null;
+    paymentStatus?: string | null;
     paymentIntentId: string | null;
     setupIntentId: string | null;
     metadata: Record<string, string>;
@@ -1007,6 +1067,10 @@ export class PaymentsService {
     }
 
     if (session.mode === 'payment') {
+      // Delayed-notification payment methods (bank debits, etc.) can fire
+      // checkout.session.completed while funds are still processing. Only a
+      // session Stripe reports as `paid` may credit a wallet/budget.
+      if (session.paymentStatus !== 'paid') return;
       const metadata = session.metadata ?? {};
       const paymentRowId = metadata.stripe_payment_id;
       if (!paymentRowId) return;
@@ -1038,7 +1102,7 @@ export class PaymentsService {
       `UPDATE stripe_payments
        SET status = 'PROCESSING', stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $2), updated_at = NOW()
        WHERE id = $1 AND purpose = 'RIDER_WALLET_TOPUP'
-         AND (status IN ('PENDING','REQUIRES_ACTION','FAILED')
+         AND (status IN ('PENDING','REQUIRES_ACTION','FAILED','PROCESSING')
               OR (status = 'SUCCEEDED' AND NOT EXISTS (
                     SELECT 1 FROM wallet_transactions wt
                     WHERE wt.idempotency_key = 'wallet-topup:' || stripe_payments.id)))
@@ -1051,13 +1115,24 @@ export class PaymentsService {
     }
     const row = claim.rows[0];
 
-    await WalletService.post(row.user_id, Number(row.amount_cents), 'WALLET_TOPUP', {
-      idempotencyKey: `wallet-topup:${row.id}`,
-      description: 'Wallet top-up via Stripe',
-      referenceType: 'stripe_payment',
-      referenceId: row.id,
-      stripePaymentIntentId: args.paymentIntentId ?? undefined,
-    });
+    try {
+      await WalletService.post(row.user_id, Number(row.amount_cents), 'WALLET_TOPUP', {
+        idempotencyKey: `wallet-topup:${row.id}`,
+        description: 'Wallet top-up via Stripe',
+        referenceType: 'stripe_payment',
+        referenceId: row.id,
+        stripePaymentIntentId: args.paymentIntentId ?? undefined,
+      });
+    } catch (err: any) {
+      // A crash/failure between claim and credit must not leave the row
+      // wedged in PROCESSING (which no future webhook retry would re-claim).
+      await pool.query(
+        `UPDATE stripe_payments SET status = 'FAILED', failure_reason = $2, updated_at = NOW()
+          WHERE id = $1 AND status = 'PROCESSING'`,
+        [row.id, String(err?.message ?? 'wallet credit failed').slice(0, 300)],
+      ).catch(() => undefined);
+      throw err;
+    }
 
     await pool.query(
       `UPDATE stripe_payments SET status = 'SUCCEEDED', succeeded_at = NOW(), updated_at = NOW() WHERE id = $1`,
@@ -1084,10 +1159,11 @@ export class PaymentsService {
       `UPDATE stripe_payments
        SET status = 'PROCESSING', stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $2), updated_at = NOW()
        WHERE id = $1 AND purpose = 'SPONSOR_BUDGET_TOPUP'
-         AND (status IN ('PENDING','REQUIRES_ACTION','FAILED')
+         AND (status IN ('PENDING','REQUIRES_ACTION','FAILED','PROCESSING')
               OR (status = 'SUCCEEDED' AND ledger_entry_id IS NULL))
+         AND (stripe_payment_intent_id IS NULL OR $3::text IS NULL OR stripe_payment_intent_id = $3)
        RETURNING id, sponsor_id, amount_cents`,
-      [args.stripePaymentId, args.paymentIntentId],
+      [args.stripePaymentId, args.paymentIntentId, args.paymentIntentId],
     );
     if (claim.rows.length === 0) {
       const row = await pool.query(`SELECT amount_cents FROM stripe_payments WHERE id = $1`, [args.stripePaymentId]);
@@ -1096,13 +1172,25 @@ export class PaymentsService {
     const row = claim.rows[0];
     const amountCents = Number(row.amount_cents);
 
-    const ledgerEntryId = await SponsorService.creditFundedBudget(row.sponsor_id, amountCents, {
-      reason: 'Stripe budget funding',
-      referenceType: 'stripe_payment',
-      referenceId: row.id,
-      idempotencyKey: `sponsor-funding:${row.id}`,
-      actorRole: 'SPONSOR',
-    });
+    let ledgerEntryId: string | null;
+    try {
+      ledgerEntryId = await SponsorService.creditFundedBudget(row.sponsor_id, amountCents, {
+        reason: 'Stripe budget funding',
+        referenceType: 'stripe_payment',
+        referenceId: row.id,
+        idempotencyKey: `sponsor-funding:${row.id}`,
+        actorRole: 'SPONSOR',
+      });
+    } catch (err: any) {
+      // Never leave a paid funding row wedged in PROCESSING; a later webhook
+      // retry/reconcile must be able to re-claim it.
+      await pool.query(
+        `UPDATE stripe_payments SET status = 'FAILED', failure_reason = $2, updated_at = NOW()
+          WHERE id = $1 AND status = 'PROCESSING'`,
+        [row.id, String(err?.message ?? 'budget credit failed').slice(0, 300)],
+      ).catch(() => undefined);
+      throw err;
+    }
 
     await pool.query(
       `UPDATE stripe_payments

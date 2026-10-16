@@ -136,7 +136,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (pickedFile != null) {
       setState(() => _isSaving = true);
       try {
-        final url = await AuthService.uploadImage(File(pickedFile.path));
+        final url = await AuthService.uploadImage(File(pickedFile.path), fileType: 'profile');
         await UserService.updateProfile({'profile_image_url': url});
         setState(() {
           _profileImageUrl = url;
@@ -285,8 +285,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _isSaving = true);
     try {
-      final frontUrl = await AuthService.uploadImage(File(frontImage.path));
-      final backUrl = await AuthService.uploadImage(File(backImage.path));
+      final frontUrl = await AuthService.uploadImage(File(frontImage.path), fileType: 'id_photo');
+      final backUrl = await AuthService.uploadImage(File(backImage.path), fileType: 'id_photo');
 
       await ApiService.dio.post('/user/verify-identity', data: {
         'id_photo_front_url': frontUrl,

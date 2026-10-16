@@ -24,6 +24,24 @@ const SnapSchema = z.object({
 });
 
 /**
+ * Diagnostic/state-changing routing endpoints are administrator-only. The
+ * global identifyUser middleware populates req.user from the bearer token;
+ * this guard rejects anonymous and non-admin callers.
+ */
+function requireAdmin(req: Request, res: Response): boolean {
+  const user = (req as any).user;
+  if (!user) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return false;
+  }
+  if (String(user.role).toUpperCase() !== 'ADMIN') {
+    res.status(403).json({ error: 'Administrator privileges required.' });
+    return false;
+  }
+  return true;
+}
+
+/**
  * POST /api/routing/route
  * Full route: distance + duration + geometry + steps.
  */
@@ -128,7 +146,8 @@ router.post('/snap', async (req: Request, res: Response) => {
  * GET /api/routing/stats
  * Engine statistics and health check.
  */
-router.get('/stats', (_req: Request, res: Response) => {
+router.get('/stats', (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
   const stats = astarEngine.stats();
   res.json({
     ...stats,
@@ -139,9 +158,10 @@ router.get('/stats', (_req: Request, res: Response) => {
 
 /**
  * POST /api/routing/cache/clear
- * Clear all routing caches.
+ * Clear all routing caches. Administrator-only (state-changing / DoS vector).
  */
-router.post('/cache/clear', (_req: Request, res: Response) => {
+router.post('/cache/clear', (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
   astarEngine.clearCache();
   res.json({ success: true, message: 'Cache cleared' });
 });

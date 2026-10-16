@@ -14,6 +14,8 @@ import { pool } from '../../config/database';
 import bcrypt from 'bcryptjs';
 import { UserRole } from '../../types';
 import { AuditEventsService } from '../../services/audit-events.service';
+import { findPortalIdentityByEmail, isPortalIdentity } from '../portal/portal-identities';
+import { TEST_EMAIL_SQL } from '../../utils/testUser';
 
 export const PARTNER_STATUSES = ['ACTIVE', 'INACTIVE', 'ARCHIVED'] as const;
 export type PartnerStatus = (typeof PARTNER_STATUSES)[number];
@@ -58,15 +60,22 @@ function normalizePartner(r: any) {
 }
 
 export class PartnerService {
-  static async list(search: string, status: string, limit = 50, offset = 0) {
+  static async list(search: string, status: string, limit = 50, offset = 0, includeTest = false) {
+    // Test accounts (E2E/sandbox seeds) are hidden by default so they never
+    // bury real partners; admins opt in with includeTest.
+    const testSql = TEST_EMAIL_SQL(`COALESCE(u.email, p.contact_email, '')`);
     const res = await pool.query(
       `SELECT p.*,
+              COALESCE(u.email, p.contact_email) AS login_email,
+              ${testSql} AS is_test,
               (SELECT COUNT(*)::int FROM promo_codes pc WHERE pc.partner_id = p.id AND pc.active) AS active_promo_count,
               (SELECT COUNT(*)::int FROM promo_codes pc WHERE pc.partner_id = p.id) AS promo_count
        FROM partners p
+       LEFT JOIN users u ON u.id = p.user_id
        WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%' OR p.contact_email ILIKE '%' || $1 || '%'
               OR p.contact_phone ILIKE '%' || $1 || '%')
          AND ($2 = '' OR p.status = $2)
+         ${includeTest ? '' : `AND NOT ${testSql}`}
        ORDER BY p.created_at DESC
        LIMIT $3 OFFSET $4`,
       [search || '', status || '', Math.min(Math.max(limit, 1), 200), Math.max(offset, 0)],
@@ -83,9 +92,10 @@ static async create(input: PartnerInput, adminId: string) {
     const mode: PartnerUserMode = input.user_mode ?? 'AUTO';
     const loginEmail = input.email?.trim().toLowerCase() ?? null;
 
-    // Resolve which user the partner dashboard belongs to BEFORE opening the
-    // transaction. One email = one user row, so the same person can hold a
-    // partner account and a sponsor/fleet account under a single login.
+    // Resolve which identity the partner dashboard belongs to BEFORE opening
+    // the transaction. A COLAB identity (sponsor/partner/fleet) can hold all
+    // three portal dashboards under one login; a driver/rider with the same
+    // email is a SEPARATE identity and never interferes.
     let linkedUserId: string | null = null;
     let linkedExisting = false;
     let resolvedLoginEmail = loginEmail;
@@ -94,21 +104,27 @@ static async create(input: PartnerInput, adminId: string) {
       if (!input.user_id) throw new Error('Select an existing user to link (user_id is required).');
       const userRes = await pool.query('SELECT id, email FROM users WHERE id = $1', [input.user_id]);
       if (userRes.rows.length === 0) throw new Error('The selected user no longer exists.');
+      if (!(await isPortalIdentity(input.user_id))) {
+        throw new Error(
+          'That account is a rider/driver/admin identity, not a colab account. Partner logins can only be linked to an existing sponsor, partner or fleet identity.',
+        );
+      }
       linkedUserId = userRes.rows[0].id;
       resolvedLoginEmail = userRes.rows[0].email;
       linkedExisting = true;
     } else if (mode === 'NEW') {
       if (!loginEmail) throw new Error('A partner login email is required.');
       if (!input.password) throw new Error('A partner login password is required.');
-      const dup = await pool.query('SELECT id FROM users WHERE email = $1', [loginEmail]);
-      if (dup.rows.length > 0) {
-        throw new Error('An account with this email already exists. Choose "Use existing user" to link it instead.');
+      const dup = await findPortalIdentityByEmail(loginEmail);
+      if (dup) {
+        throw new Error('A colab account with this email already exists. Choose "Use existing user" to link it instead.');
       }
     } else {
-      // AUTO (legacy): attach to an existing login by email when present.
+      // AUTO (legacy): attach to an existing COLAB login by email when
+      // present — never a driver/rider/admin row.
       if (!loginEmail) throw new Error('A partner login email is required.');
-      const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [loginEmail]);
-      linkedUserId = existingUser.rows[0]?.id ?? null;
+      const existingIdentity = await findPortalIdentityByEmail(loginEmail);
+      linkedUserId = existingIdentity?.id ?? null;
       linkedExisting = !!linkedUserId;
     }
 
@@ -184,8 +200,11 @@ static async create(input: PartnerInput, adminId: string) {
         },
       });
       return normalizePartner(partner);
-    } catch (err) {
+    } catch (err: any) {
       try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      if (err?.code === '23505') {
+        throw new Error('A colab account with this email already exists. Choose "Use existing user" to link it instead.');
+      }
       throw err;
     } finally {
       client.release();
@@ -236,8 +255,8 @@ static async create(input: PartnerInput, adminId: string) {
       if (linkRes.rows.length > 0) {
         const userId = linkRes.rows[0].id;
         if (input.email && input.email.trim().toLowerCase() !== existing.email?.toLowerCase()) {
-          const clash = await client.query(`SELECT 1 FROM users WHERE email = $1 AND id <> $2`, [input.email.trim().toLowerCase(), userId]);
-          if (clash.rows.length > 0) throw new Error('That email is already in use by another account.');
+          const clash = await findPortalIdentityByEmail(input.email, client);
+          if (clash && clash.id !== userId) throw new Error('That email is already in use by another colab account.');
           await client.query(`UPDATE users SET email = $1 WHERE id = $2`, [input.email.trim().toLowerCase(), userId]);
         }
         if (input.name && input.name.trim() !== existing.name) {
@@ -279,6 +298,17 @@ static async create(input: PartnerInput, adminId: string) {
       [status, id],
     );
     if (res.rows.length === 0) throw new Error('Partner not found');
+    if (status === 'ACTIVE') {
+      // Re-activating restores the login too: recover colab identities that
+      // were hard-disabled by the legacy portal-disable path. Consumer rows
+      // are never touched.
+      await pool.query(
+        `UPDATE users SET is_active = TRUE
+         WHERE role IN ('SPONSOR','PARTNER','FLEET')
+           AND id = (SELECT user_id FROM partners WHERE id = $1 AND user_id IS NOT NULL)`,
+        [id],
+      );
+    }
     await AuditEventsService.record({
       actorId: adminId,
       actorRole: 'ADMIN',
@@ -323,7 +353,10 @@ static async create(input: PartnerInput, adminId: string) {
            LIMIT 1`,
           [partner.user_id],
         );
-        if (shared.rows.length === 0) {
+        // Deactivate the lingering login only when it is a colab identity
+        // that no other portal account uses. Driver/rider/admin identities
+        // are never touched (they cannot own portal accounts post-058).
+        if (shared.rows.length === 0 && (await isPortalIdentity(partner.user_id, client))) {
           await client.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [partner.user_id]);
         }
       }

@@ -1,8 +1,12 @@
 # Local dev override: point the backend at Supabase (the same DB the app's
 # Supabase OAuth uses), because the local postgres container has a stale,
 # incompatible schema. Render uses its own DATABASE_URL and ignores this file.
+#
+# SECURITY: never hard-code credentials here. Export the connection string
+# from your shell or a gitignored .env file before `docker compose up`, e.g.
+#   $env:SUPABASE_DB_URL = "postgresql://postgres.<ref>:<password>@<host>:5432/postgres"
 services:
   backend:
     environment:
-      DATABASE_URL: "postgresql://postgres.lpcnkfqagpouwzikedzl:MMkrtumy_0919@aws-1-us-east-2.pooler.supabase.com:5432/postgres"
-      DATABASE_REPLICA_URL: "postgresql://postgres.lpcnkfqagpouwzikedzl:MMkrtumy_0919@aws-1-us-east-2.pooler.supabase.com:5432/postgres"
+      DATABASE_URL: ${SUPABASE_DB_URL:?set SUPABASE_DB_URL before running docker compose}
+      DATABASE_REPLICA_URL: ${SUPABASE_DB_URL:?set SUPABASE_DB_URL before running docker compose}

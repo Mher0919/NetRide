@@ -746,6 +746,12 @@ class DriverService {
         let payoutId;
         try {
             await client.query('BEGIN');
+            // Serialize withdrawals per driver: the pre-check above runs outside any
+            // lock, so two concurrent requests could both pass it and create two
+            // same-week payouts. The advisory lock makes the re-check + debit +
+            // insert atomic for a single driver.
+            await client.query(`SELECT pg_advisory_xact_lock(hashtext('driver-withdrawal:' || $1)::bigint)`, [userId]);
+            await (0, withdrawal_service_1.assertDriverCanWithdraw)(userId);
             // Debit wallet
             const upd = await client.query(`UPDATE driver_wallets SET balance_cents = balance_cents - $1, updated_at = NOW()
          WHERE driver_id = $2 AND balance_cents >= $1 RETURNING balance_cents`, [amountCents, userId]);
@@ -1089,14 +1095,26 @@ class DriverService {
         try {
             await client.query('BEGIN');
             await client.query(`INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`, [driverId]);
+            // Claim the ride credit FIRST. The partial unique index on
+            // payouts(ride_id) WHERE method='RIDE_CREDIT' makes this insert the
+            // idempotency gate: if a credit for this ride already exists the
+            // insert returns no row and the wallet must NOT be touched. Mutating
+            // the balance before this check (the previous order) double-credited
+            // the driver on concurrent/retried completions.
+            const claim = await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
+         VALUES ($1, $2, 0, $2, 'PAID', 'RIDE_CREDIT', $3)
+         ON CONFLICT (ride_id) WHERE method = 'RIDE_CREDIT' DO NOTHING
+         RETURNING id`, [driverId, driverNetCents, rideId]);
+            if ((claim.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                console.log(`[WALLET] ↩️ Ride ${rideId}: completion credit already accounted for — no-op`);
+                return;
+            }
             await client.query(`UPDATE driver_wallets
          SET balance_cents = balance_cents + $1,
              lifetime_earnings_cents = lifetime_earnings_cents + $1,
              updated_at = NOW()
          WHERE driver_id = $2`, [driverNetCents, driverId]);
-            await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
-         VALUES ($1, $2, 0, $2, 'PAID', 'RIDE_CREDIT', $3)
-         ON CONFLICT (ride_id) WHERE method = 'RIDE_CREDIT' DO NOTHING`, [driverId, driverNetCents, rideId]);
             console.log(`[WALLET] 💰 Ride ${rideId}: rider paid $${(safeFare / 100).toFixed(2)}, driver received $${(driverNetCents / 100).toFixed(2)} (fare share $${(driverShareCents / 100).toFixed(2)} + tip $${(safeTip / 100).toFixed(2)})`);
             await client.query('COMMIT');
         }
@@ -1126,14 +1144,23 @@ class DriverService {
         try {
             await client.query('BEGIN');
             await client.query(`INSERT INTO driver_wallets (driver_id) VALUES ($1) ON CONFLICT (driver_id) DO NOTHING`, [driverId]);
+            // Claim the tip credit FIRST (idempotency gate), exactly like
+            // creditOnRideComplete: a repeated request must never re-credit the
+            // wallet even though the delta math is usually zero.
+            const claim = await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
+         VALUES ($1, $2, 0, $2, 'PAID', 'TIP_CREDIT', $3)
+         ON CONFLICT (ride_id) WHERE method = 'TIP_CREDIT' DO NOTHING
+         RETURNING id`, [driverId, safeTip, rideId]);
+            if ((claim.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK');
+                console.log(`[WALLET] ↩️ Ride ${rideId}: after-trip tip already credited — no-op`);
+                return;
+            }
             await client.query(`UPDATE driver_wallets
          SET balance_cents = balance_cents + $1,
              lifetime_earnings_cents = lifetime_earnings_cents + $1,
              updated_at = NOW()
          WHERE driver_id = $2`, [safeTip, driverId]);
-            await client.query(`INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
-         VALUES ($1, $2, 0, $2, 'PAID', 'TIP_CREDIT', $3)
-         ON CONFLICT (ride_id) WHERE method = 'TIP_CREDIT' DO NOTHING`, [driverId, safeTip, rideId]);
             console.log(`[WALLET] 💰 Ride ${rideId}: after-trip tip of $${(safeTip / 100).toFixed(2)} credited to driver ${driverId}`);
             await client.query('COMMIT');
         }

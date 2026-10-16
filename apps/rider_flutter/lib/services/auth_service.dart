@@ -266,7 +266,7 @@ class AuthService {
     }
   }
 
-  static Future<String> uploadImage(File file) async {
+  static Future<String> uploadImage(File file, {String fileType = 'general'}) async {
     try {
       final bytes = await file.readAsBytes();
       final base64Image = base64Encode(bytes);
@@ -277,6 +277,10 @@ class AuthService {
         'image': base64Image,
         'mimetype': mimetype,
         'filename': filename,
+        // Server-side classification: 'profile' is the only publicly
+        // readable category. Everything else (IDs, licenses, ...) is stored
+        // privately and requires authorization to fetch.
+        'file_type': fileType,
       });
       return response.data['url'];
     } catch (e) {

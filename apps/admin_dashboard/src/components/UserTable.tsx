@@ -72,7 +72,24 @@ const UserTable: React.FC<UserTableProps> = ({ role, title }) => {
   }, [role, paginationModel, search, showTest]);
 
   const columns: GridColDef[] = [
-    { field: 'full_name', headerName: 'Name', flex: 1, minWidth: 150 },
+    {
+      field: 'full_name',
+      headerName: 'Name',
+      flex: 1,
+      minWidth: 150,
+      renderCell: (params: GridRenderCellParams) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{params.value}</span>
+          {params.row?.is_test && (
+            <Chip
+              label="TEST"
+              size="small"
+              sx={{ height: 18, fontSize: 10, fontWeight: 800, bgcolor: '#FFF4E5', color: '#B26A00', flexShrink: 0 }}
+            />
+          )}
+        </Box>
+      ),
+    },
     { field: 'email', headerName: 'Email', flex: 1, minWidth: 200 },
     { field: 'phone_number', headerName: 'Phone', flex: 0.8, minWidth: 120 },
     {

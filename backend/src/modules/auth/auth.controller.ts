@@ -5,26 +5,32 @@ import { z } from 'zod';
 import { UserRole } from '../../types';
 import { AuthRequest } from '../../middleware/auth.middleware';
 
+// Self-registration roles. ADMIN/PARTNER/FLEET accounts are provisioned by
+// administrators only — the public auth surface must never mint them.
+const PublicRoleSchema = z.enum([UserRole.RIDER, UserRole.DRIVER]);
+
 const OAuthSchema = z.object({
   email: z.string().email(),
   full_name: z.string(),
   profile_image_url: z.string().nullable().optional(),
-  role: z.nativeEnum(UserRole),
-  token: z.string().nullable().optional(),
+  role: PublicRoleSchema,
+  // Mandatory: proves ownership of the email via Supabase. Without it the
+  // endpoint would allow account impersonation.
+  token: z.string().min(10),
 });
 
 const SignupPasswordSchema = z.object({
   email: z.string().email(),
   full_name: z.string().min(2),
   password: z.string().min(6),
-  role: z.nativeEnum(UserRole),
+  role: PublicRoleSchema,
 });
 
 const LoginPasswordSchema = z.object({
   email: z.string().email(),
   password: z.string(),
   trusted_device_token: z.string().nullable().optional(),
-  app_role: z.string().optional(),
+  app_role: PublicRoleSchema.optional(),
 });
 
 const ChangePasswordSchema = z.object({
@@ -44,6 +50,21 @@ const ResetPasswordSchema = z.object({
 const RequestPasswordChangeSchema = z.object({
   currentPassword: z.string(),
 });
+
+function escapeHtml(value: unknown): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function jsStringLiteral(value: unknown): string {
+  return JSON.stringify(String(value)).replace(/</g, '\\u003c');
+}
+
+const RESET_TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class AuthController {
   static async signupPassword(req: Request, res: Response) {
@@ -164,7 +185,11 @@ export class AuthController {
 
   static async renderResetPasswordForm(req: Request, res: Response) {
     const { token } = req.query;
-    if (!token) return res.status(400).send('<h1>Invalid Link</h1>');
+    if (!token || typeof token !== 'string' || !RESET_TOKEN_RE.test(token)) {
+      return res.status(400).send('<h1>Invalid Link</h1>');
+    }
+    const safeTokenAttr = escapeHtml(token);
+    const safeTokenJs = jsStringLiteral(token);
 
     res.send(`
       <!DOCTYPE html>
@@ -185,7 +210,7 @@ export class AuthController {
           <h2>Create New Password</h2>
           <p>Please enter your new password below.</p>
           <form id="resetForm">
-            <input type="hidden" name="token" value="${token}">
+            <input type="hidden" name="token" value="${safeTokenAttr}">
             <input type="password" id="password" placeholder="New Password" required minlength="6">
             <input type="password" id="confirm" placeholder="Confirm New Password" required minlength="6">
             <button type="submit" id="submitBtn">Update Password</button>
@@ -213,7 +238,7 @@ export class AuthController {
               const response = await fetch('/api/auth/reset-password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: '${token}', newPassword: password })
+                body: JSON.stringify({ token: ${safeTokenJs}, newPassword: password })
               });
               const data = await response.json();
               if (response.ok) {
@@ -239,11 +264,13 @@ export class AuthController {
 
   static async oauth(req: Request, res: Response) {
     try {
-      console.log(`[AUTH] 📥 Incoming OAuth request:`, req.body);
       const validatedData = OAuthSchema.parse(req.body);
       const result = await AuthService.handleOAuth(validatedData);
       res.json(result);
     } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid authentication request.' });
+      }
       console.error(`[AUTH] ❌ OAuth error:`, error.message || error);
       res.status(400).json({ error: error.message });
     }
@@ -266,11 +293,14 @@ export class AuthController {
         email: z.string().email(),
         code: z.string().length(6),
         full_name: z.string().optional(),
-        role: z.nativeEnum(UserRole).optional(),
+        role: PublicRoleSchema.optional(),
       }).parse(req.body);
       const result = await AuthService.verifyOTP(validatedData);
       res.json(result);
     } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid or expired verification code.' });
+      }
       console.error(`[AUTH] ❌ OTP verification error: ${error.message}`);
       res.status(400).json({ error: 'Invalid or expired verification code.' });
     }

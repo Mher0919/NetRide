@@ -2,7 +2,7 @@
 
 Everything below is implemented in the working tree and passes `tsc --noEmit`
 on both `backend/` and `apps/admin_dashboard/`, plus the backend unit-test
-suite (`node run-tests.cjs`).
+suite (`cd backend && npm test`).
 
 ## 1. The bug fixed first (admin dashboard fetch failures)
 
@@ -114,8 +114,8 @@ server-side; no secrets introduced.
 
 ## 8. Tests
 
-`backend/src/services/__tests__/financial-ledger.unit.test.ts` (registered in
-`run-tests.cjs`, 5 tests, `node:test`):
+`tests/unit/backend/services/financial-ledger.unit.test.ts` (registered in
+`tests/unit/backend/run-tests.cjs`, 5 tests, `node:test`):
 - `centsValue`: BIGINT-as-string cents are **not** multiplied by 100 (guards
   the 100× regression), handles BigInt/number/null/garbage
 - `settlementStatusFor`: fully covered → SETTLED; any shortfall →
@@ -124,7 +124,7 @@ server-side; no secrets introduced.
 
 ## 9. Env vars
 
-None added. Reuse existing `DATABASE_URL` etc.; `run-tests.cjs` already pins
+None added. Reuse existing `DATABASE_URL` etc.; the test runner already pins
 `REDIS_URL`/`PORT` for offline test runs.
 
 ## 10. Manual verification steps

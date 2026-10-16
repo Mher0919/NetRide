@@ -19,15 +19,20 @@ export type WebhookOutcome = 'processed' | 'skipped' | 'failed';
 
 export class StripeWebhookService {
   static async handleEvent(event: StripeWebhookEvent): Promise<WebhookOutcome> {
+    // Claim the event; a FAILED prior attempt is re-claimable so Stripe's
+    // automatic retry (or an operator re-send) can actually reprocess it.
+    // PROCESSING/PROCESSED/SKIPPED duplicates are skipped as before.
     const claim = await pool.query(
       `INSERT INTO stripe_webhook_events (stripe_event_id, type, payload, status)
        VALUES ($1, $2, $3::jsonb, 'PROCESSING')
-       ON CONFLICT (stripe_event_id) DO NOTHING
+       ON CONFLICT (stripe_event_id) DO UPDATE
+         SET status = 'PROCESSING', error = NULL
+         WHERE stripe_webhook_events.status = 'FAILED'
        RETURNING stripe_event_id`,
       [event.id, event.type, JSON.stringify(sanitizeEvent(event))],
     );
     if (claim.rows.length === 0) {
-      return 'skipped'; // duplicate delivery
+      return 'skipped'; // duplicate delivery / already processed
     }
 
     try {

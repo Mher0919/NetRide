@@ -17,6 +17,7 @@
 import { pool } from '../../config/database';
 import { getIo } from '../../gateway/io-handle';
 import { computeWalletCharge } from './wallet-cap';
+import { AuditEventsService } from '../../services/audit-events.service';
 
 export type WalletTxType =
   | 'ADMIN_GRANT'
@@ -131,6 +132,47 @@ export class WalletService {
         [userId],
       );
 
+      // Claim the ledger row FIRST (idempotency gate). The unique index on
+      // wallet_transactions(idempotency_key) serializes concurrent retries:
+      // the loser's insert waits on the winner's transaction, then returns 0
+      // rows and rolls back WITHOUT touching the balance. The previous order
+      // (balance update before the idempotent insert) let two concurrent
+      // retries both mutate the balance while only one ledger row survived.
+      const tx = await useClient.query(
+        `INSERT INTO wallet_transactions
+           (user_id, amount_cents, type, reference_type, reference_id, ride_id,
+            description, balance_after_cents, idempotency_key, stripe_payment_intent_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9)
+         ON CONFLICT (idempotency_key) DO NOTHING
+         RETURNING id`,
+        [
+          userId,
+          delta,
+          type,
+          opts.referenceType ?? null,
+          opts.referenceId ?? null,
+          opts.rideId ?? null,
+          opts.description ?? null,
+          opts.idempotencyKey ?? null,
+          opts.stripePaymentIntentId ?? null,
+        ],
+      );
+
+      if (opts.idempotencyKey && (tx.rowCount ?? 0) === 0) {
+        await useClient.query('ROLLBACK');
+        began = false;
+        const existing = await pool.query(
+          `SELECT id, balance_after_cents FROM wallet_transactions WHERE idempotency_key = $1 LIMIT 1`,
+          [opts.idempotencyKey],
+        );
+        return {
+          balance_cents: Number(existing.rows[0]?.balance_after_cents ?? 0),
+          delta_cents: delta,
+          transaction_id: existing.rows[0]?.id ?? '',
+          applied: true,
+        };
+      }
+
       if (delta < 0) {
         // Guarded debit — refuses to overdraw the wallet.
         const upd = await useClient.query(
@@ -163,26 +205,12 @@ export class WalletService {
       );
       const balanceAfter = Number(balRes.rows[0].balance_cents);
 
-      const tx = await useClient.query(
-        `INSERT INTO wallet_transactions
-           (user_id, amount_cents, type, reference_type, reference_id, ride_id,
-            description, balance_after_cents, idempotency_key, stripe_payment_intent_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (idempotency_key) DO NOTHING
-         RETURNING id`,
-        [
-          userId,
-          delta,
-          type,
-          opts.referenceType ?? null,
-          opts.referenceId ?? null,
-          opts.rideId ?? null,
-          opts.description ?? null,
-          balanceAfter,
-          opts.idempotencyKey ?? null,
-          opts.stripePaymentIntentId ?? null,
-        ],
-      );
+      if (tx.rows[0]?.id) {
+        await useClient.query(
+          `UPDATE wallet_transactions SET balance_after_cents = $2 WHERE id = $1`,
+          [tx.rows[0].id, balanceAfter],
+        );
+      }
 
       await useClient.query('COMMIT');
       began = false;
@@ -269,7 +297,7 @@ export class WalletService {
     });
   }
 
-  /** Admin grant (or ADJUSTMENT when negative). */
+  /** Admin grant (or ADJUSTMENT when negative). Always audit-logged. */
   static async adminGrant(
     adminId: string,
     userId: string,
@@ -279,11 +307,29 @@ export class WalletService {
     const delta = Math.round(amountCents);
     if (delta === 0) throw new Error('Grant amount must be non-zero');
     const type: WalletTxType = delta > 0 ? 'ADMIN_GRANT' : 'ADJUSTMENT';
-    return this.post(userId, delta, type, {
+    const result = await this.post(userId, delta, type, {
       idempotencyKey: `admin:wallet:${adminId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
       description: reason || (type === 'ADMIN_GRANT' ? 'Admin wallet grant' : 'Admin wallet adjustment'),
       referenceType: 'admin',
     });
+
+    // Sensitive financial admin action — always leave an audit trail
+    // (fire-and-forget; never blocks the grant).
+    void AuditEventsService.record({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: type === 'ADMIN_GRANT' ? 'WALLET_GRANT' : 'WALLET_ADJUSTMENT',
+      entityType: 'user_wallet',
+      entityId: userId,
+      details: {
+        amountCents: delta,
+        reason: reason || null,
+        transactionId: result.transaction_id,
+        balanceAfterCents: result.balance_cents,
+      },
+    });
+
+    return result;
   }
 
   static async listTransactions(userId: string, limit = 50, offset = 0) {

@@ -10,9 +10,9 @@ export declare class AuthController {
     static deleteAccount(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static deactivateAccount(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static renderResetPasswordForm(req: Request, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
-    static oauth(req: Request, res: Response): Promise<void>;
+    static oauth(req: Request, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static requestOTP(req: Request, res: Response): Promise<void>;
-    static verifyOTP(req: Request, res: Response): Promise<void>;
+    static verifyOTP(req: Request, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static requestPhoneOTP(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static verifyPhoneOTP(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static requestAdmin2FA(req: Request, res: Response): Promise<void>;

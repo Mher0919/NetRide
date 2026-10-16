@@ -273,9 +273,9 @@ class _ReplaceVehicleScreenState extends State<ReplaceVehicleScreen> {
 
     setState(() => _isSubmitting = true);
     try {
-      final regUrl = await AuthService.uploadImage(_registrationImage!);
-      final insUrl = await AuthService.uploadImage(_insuranceImage!);
-      final inspUrl = await AuthService.uploadImage(_inspectionImage!);
+      final regUrl = await AuthService.uploadImage(_registrationImage!, fileType: 'registration');
+      final insUrl = await AuthService.uploadImage(_insuranceImage!, fileType: 'insurance');
+      final inspUrl = await AuthService.uploadImage(_inspectionImage!, fileType: 'inspection');
 
       await UserService.submitNewVehicle({
         'make': _selectedMake!.trim(),

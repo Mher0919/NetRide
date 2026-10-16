@@ -67,6 +67,7 @@ const UserPicker: React.FC<{
               {o.is_partner && <Chip size="small" label="Partner" sx={{ bgcolor: '#EDEDFF', color: '#4F46E5', fontWeight: 700, fontSize: 10 }} />}
               {o.is_sponsor && <Chip size="small" label="Sponsor" sx={{ bgcolor: '#E5F0EB', color: '#2E7D32', fontWeight: 700, fontSize: 10 }} />}
               {o.is_fleet && <Chip size="small" label="Fleet" sx={{ bgcolor: '#FFF4E5', color: '#B26A00', fontWeight: 700, fontSize: 10 }} />}
+              {o.is_test && <Chip size="small" label="TEST" sx={{ bgcolor: '#FFF4E5', color: '#B26A00', fontWeight: 800, fontSize: 10 }} />}
             </Box>
           </Box>
         </Paper>

@@ -10,6 +10,7 @@ import { PartnerService } from '../partner/partner.service';
 import { CreditsService } from '../credits/credits.service';
 import { ReferralService } from '../referral/referral.service';
 import { AuditEventsService } from '../../services/audit-events.service';
+import { TEST_EMAIL_SQL } from '../../utils/testUser';
 
 const PartnerBaseSchema = z.object({
   name: z.string().trim().min(2).max(200),
@@ -90,7 +91,8 @@ export class AdminRewardsController {
     try {
       const limit = parseInt(req.query.limit ?? '50');
       const offset = parseInt(req.query.offset ?? '0');
-      const partners = await PartnerService.list(req.query.search ?? '', req.query.status ?? '', limit, offset);
+      const includeTest = String(req.query.includeTest ?? '') === 'true';
+      const partners = await PartnerService.list(req.query.search ?? '', req.query.status ?? '', limit, offset, includeTest);
       res.json({ partners });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Unable to list partners' });
@@ -108,21 +110,29 @@ export class AdminRewardsController {
   }
 
   /**
-   * Search users that can be linked to a new partner / sponsor dashboard.
-   * Returns which portal accounts each user already owns so the admin can
-   * confidently pick the same identity (one email may be both).
+   * Search COLAB identities (sponsor/partner/fleet) that can be linked to a
+   * new partner / sponsor / fleet dashboard. Driver, rider and admin
+   * identities are deliberately excluded — they are separate account classes
+   * and can never be granted portal access by linking. Returns which portal
+   * accounts each identity already owns so the admin can confidently pick
+   * the same colab identity (one email may own several dashboards).
    */
   static async searchPortalUsers(req: any, res: Response) {
     try {
       const search = String(req.query.search ?? '').trim();
       const limit = Math.min(Math.max(parseInt(req.query.limit ?? '20', 10) || 20, 1), 50);
+      const includeTest = String(req.query.includeTest ?? '') === 'true';
+      const testSql = TEST_EMAIL_SQL('u.email');
       const result = await pool.query(
         `SELECT u.id, u.email, u.full_name, u.role, u.is_active,
+                ${testSql} AS is_test,
                 EXISTS(SELECT 1 FROM partners p WHERE p.user_id = u.id) AS is_partner,
                 EXISTS(SELECT 1 FROM sponsor_portal_accounts spa WHERE spa.user_id = u.id) AS is_sponsor,
                 EXISTS(SELECT 1 FROM fleet_portal_accounts fpa WHERE fpa.user_id = u.id) AS is_fleet
          FROM users u
-         WHERE ($1 = '' OR u.email ILIKE '%' || $1 || '%' OR u.full_name ILIKE '%' || $1 || '%')
+         WHERE u.role IN ('SPONSOR','PARTNER','FLEET')
+           AND ($1 = '' OR u.email ILIKE '%' || $1 || '%' OR u.full_name ILIKE '%' || $1 || '%')
+           ${includeTest ? '' : `AND NOT ${testSql}`}
          ORDER BY u.created_at DESC
          LIMIT $2`,
         [search, limit],

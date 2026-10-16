@@ -21,6 +21,15 @@ Future<void> _registerDeviceForCurrentUser() async {
 class AuthService {
   static final ValueNotifier<bool> isAuthenticatedNotifier = ValueNotifier<bool>(false);
 
+  /// In-memory copy of the backend JWT. Private-file images are fetched with
+  /// `Image.network(headers: ...)` which needs the token synchronously; the
+  /// Dio interceptor and every login path keep this warm.
+  static String? cachedJwt;
+
+  static void rememberJwt(String? token) {
+    cachedJwt = (token != null && token.isNotEmpty) ? token : null;
+  }
+
   static void _updateProvider(String token) {
     try {
       final context = ApiService.navigatorKey.currentContext;
@@ -56,6 +65,7 @@ class AuthService {
           await prefs.setString('jwt_token', jwtToken);
           await prefs.setString('user_id', data['user']['id']);
           await prefs.setString('user_role', data['user']['role']);
+          rememberJwt(jwtToken);
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
           isAuthenticatedNotifier.value = true;
@@ -133,6 +143,7 @@ class AuthService {
           await prefs.setString('jwt_token', jwtToken);
           await prefs.setString('user_id', data['user']['id']);
           await prefs.setString('user_role', data['user']['role']);
+          rememberJwt(jwtToken);
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
           isAuthenticatedNotifier.value = true;
@@ -170,6 +181,7 @@ class AuthService {
           await prefs.setString('jwt_token', jwtToken);
           await prefs.setString('user_id', data['user']['id']);
           await prefs.setString('user_role', data['user']['role']);
+          rememberJwt(jwtToken);
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
           isAuthenticatedNotifier.value = true;
@@ -209,6 +221,7 @@ class AuthService {
           await prefs.setString('jwt_token', jwtToken);
           await prefs.setString('user_id', data['user']['id']);
           await prefs.setString('user_role', data['user']['role']);
+          rememberJwt(jwtToken);
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
           isAuthenticatedNotifier.value = true;
@@ -288,7 +301,7 @@ class AuthService {
     }
   }
 
-  static Future<String> uploadImage(File file) async {
+  static Future<String> uploadImage(File file, {String fileType = 'general'}) async {
     try {
       final bytes = await file.readAsBytes();
       final base64Image = base64Encode(bytes);
@@ -299,6 +312,10 @@ class AuthService {
         'image': base64Image,
         'mimetype': mimetype,
         'filename': filename,
+        // Server-side classification: 'profile' is the only publicly
+        // readable category. Verification documents are stored privately
+        // and require authorization to fetch.
+        'file_type': fileType,
       });
       return response.data['url'];
     } catch (e) {
@@ -425,6 +442,7 @@ class AuthService {
     await prefs.remove('jwt_token');
     await prefs.remove('user_id');
     await prefs.remove('user_role');
+    rememberJwt(null);
     isAuthenticatedNotifier.value = false;
   }
 

@@ -1,33 +1,16 @@
 # NetRide Render Blueprint
 #
-# Two services:
-#   1. netride-osrm   — self-hosted OSRM routing for LA (CH algorithm, 512 MB)
-#   2. netride-backend — Node/TypeScript API (standard plan, 2 GB)
-#
-# OSRM runs as a separate service so its ~300 MB footprint doesn't compete
-# with the Node.js heap. The backend talks to OSRM over Render's internal DNS.
+# One backend API service plus the two web dashboards:
+#   1. netride-backend        — Node/TypeScript API
+#   2. netride-partner-portal — sponsor + partner + fleet dashboards
+#   3. netride-admin-dashboard
 #
 # Usage:
 #   1. Render dashboard -> New -> Blueprint -> connect this repo.
-#   2. Render reads this file and creates both services.
+#   2. Render reads this file and creates the services.
 #   3. Fill in the secret env vars marked sync:false in the Environment tab.
 
 services:
-  # --------------------------------------------------------------------------
-  # OSRM Routing Service (LA only)
-  # --------------------------------------------------------------------------
-  - type: web
-    name: netride-osrm
-    runtime: docker
-    dockerfilePath: ./osrm/Dockerfile
-    rootDir: osrm
-    plan: starter # 512 MB RAM — CH algorithm fits easily
-    healthCheckPath: /
-    autoDeploy: true
-    envVars:
-      - key: PORT
-        value: "5000"
-
   # --------------------------------------------------------------------------
   # Backend API
   # --------------------------------------------------------------------------
@@ -44,12 +27,6 @@ services:
         value: production
       - key: PORT
         value: "3000"
-      # ---- OSRM routing (self-hosted, separate service) ----
-      # Render internal DNS: http://<service-name>.internal:<port>
-      - key: OSRM_BASE_URL
-        value: "http://netride-osrm.internal:5000"
-      - key: OSRM_TIMEOUT_MS
-        value: "5000"
       # ---- Secrets you MUST set in the dashboard (sync: false) ----
       - key: DATABASE_URL
         sync: false
@@ -65,17 +42,14 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: ORS_API_KEY
+      - key: GOOGLE_ROUTES_API_KEY
         sync: false
-      - key: MAPBOX_ACCESS_TOKEN
+      - key: GOOGLE_MAPS_API_KEY
         sync: false
-      # ---- Face verification tunables (defaults from .env.example) ----
-      - key: FACE_MATCH_THRESHOLD
-        value: "0.45"
-      - key: FACE_CHECK_INTERVAL_HOURS
-        value: "12"
-      - key: FACE_LOCATION_JUMP_MILES
-        value: "5"
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false
+      - key: GEOAPIFY_API_KEY
+        sync: false
 
   # --------------------------------------------------------------------------
   # Unified Partner Portal (sponsor + partner + fleet dashboards)

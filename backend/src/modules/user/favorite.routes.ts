@@ -1,20 +1,42 @@
 import { Router } from 'express';
 import { prisma } from '../../services/prisma.service';
+import { pool } from '../../config/database';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { AuthRequest } from '../../middleware/auth.middleware';
 
 const router = Router();
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A rider may only favorite a driver they actually completed a ride with.
+ * Without this check, any authenticated rider could favorite an arbitrary
+ * driver UUID and read the driver's profile/PII through GET /favorites.
+ */
+async function hasCompletedRideWith(riderId: string, driverId: string): Promise<boolean> {
+    const res = await pool.query(
+        `SELECT 1 FROM rides
+          WHERE rider_id = $1 AND driver_id = $2 AND status = 'COMPLETED'
+          LIMIT 1`,
+        [riderId, driverId],
+    );
+    return (res.rowCount ?? 0) > 0;
+}
 
 // Add a driver to favorites
 router.post('/favorites', authMiddleware, async (req: AuthRequest, res) => {
     const { driverId } = req.body;
     const riderId = req.user!.id;
 
-    if (!driverId) {
-        return res.status(400).json({ error: 'Driver ID is required.' });
+    if (!driverId || typeof driverId !== 'string' || !UUID_RE.test(driverId)) {
+        return res.status(400).json({ error: 'A valid driver ID is required.' });
     }
 
     try {
+        if (!(await hasCompletedRideWith(riderId, driverId))) {
+            return res.status(403).json({ error: 'You can only favorite a driver you have completed a ride with.' });
+        }
+
         await (prisma as any).favoriteDriver.create({
             data: {
                 rider_id: riderId,

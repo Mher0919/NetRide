@@ -1,9 +1,4 @@
-# Build inputs for the embedded OSRM engine (downloaded/extracted locally or
-# at build time). Never commit these large binaries.
+# Local build inputs for the A* routing graph. Never commit these large
+# binaries — keep a copy of the OSM extract here and run:
+#   npx ts-node src/scripts/preprocess-map.ts ./data/LosAngeles.osm.pbf
 *.pbf
-
-# la.osrm is the pre-baked CH road network, tracked via Git LFS
-# (.gitattributes) so it IS committed — do not ignore it.
-*.osrm.names
-*.osrm.properties
-*.osrm.timestamp

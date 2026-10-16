@@ -439,7 +439,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 40),
           Center(
             child: GestureDetector(
-              onTap: () => _pickImage((url) => _profileImageUrl = url),
+              onTap: () => _pickImage((url) => _profileImageUrl = url, fileType: 'profile'),
               child: CircleAvatar(
                 radius: 80,
                 backgroundColor: Colors.grey[100],
@@ -793,7 +793,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: _buildImagePickerBox(
                   label: 'License\nFront',
                   imageUrl: _licensePhotoFrontUrl,
-                  onTap: () => _pickImage((url) => _licensePhotoFrontUrl = url),
+                  onTap: () => _pickImage((url) => _licensePhotoFrontUrl = url, fileType: 'license'),
                 ),
               ),
               const SizedBox(width: 16),
@@ -801,7 +801,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: _buildImagePickerBox(
                   label: 'License\nBack',
                   imageUrl: _licensePhotoBackUrl,
-                  onTap: () => _pickImage((url) => _licensePhotoBackUrl = url),
+                  onTap: () => _pickImage((url) => _licensePhotoBackUrl = url, fileType: 'license'),
                 ),
               ),
             ],
@@ -810,13 +810,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           _buildImagePickerBox(
             label: 'Insurance Certificate',
             imageUrl: _insurancePhotoUrl,
-            onTap: () => _pickImage((url) => _insurancePhotoUrl = url),
+            onTap: () => _pickImage((url) => _insurancePhotoUrl = url, fileType: 'insurance'),
           ),
           const SizedBox(height: 16),
           _buildImagePickerBox(
             label: 'Vehicle Registration',
             imageUrl: _registrationPhotoUrl,
-            onTap: () => _pickImage((url) => _registrationPhotoUrl = url),
+            onTap: () => _pickImage((url) => _registrationPhotoUrl = url, fileType: 'registration'),
           ),
           const SizedBox(height: 12),
           Text(
@@ -1337,7 +1337,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           borderRadius: BorderRadius.circular(12),
           image: imageUrl != null
               ? DecorationImage(
-                  image: CachedNetworkImageProvider(resolveFileUrl(imageUrl)), fit: BoxFit.cover)
+                  image: NetworkImage(
+                    resolveFileUrl(imageUrl),
+                    headers: fileAuthHeaders(),
+                  ),
+                  fit: BoxFit.cover)
               : null,
         ),
         child: imageUrl == null
@@ -1354,11 +1358,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Future<void> _pickImage(Function(String) onUpload) async {
+  Future<void> _pickImage(Function(String) onUpload, {String fileType = 'general'}) async {
     final pickedFile = await pickImageWithSource(context, imageQuality: 70);
     if (pickedFile != null) {
       try {
-        final url = await AuthService.uploadImage(File(pickedFile.path));
+        final url = await AuthService.uploadImage(File(pickedFile.path), fileType: fileType);
         onUpload(url);
         setState(() {});
       } catch (e) {

@@ -281,7 +281,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     try {
-      final url = await AuthService.uploadImage(File(pickedFile.path));
+      final url = await AuthService.uploadImage(File(pickedFile.path), fileType: 'profile');
       _uploadInProgress = false;
       setState(() => _isSaving = false);
 
@@ -482,8 +482,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _isSaving = true);
     try {
-      final frontUrl = await AuthService.uploadImage(File(frontImage.path));
-      final backUrl = await AuthService.uploadImage(File(backImage.path));
+      final frontUrl = await AuthService.uploadImage(File(frontImage.path), fileType: 'license');
+      final backUrl = await AuthService.uploadImage(File(backImage.path), fileType: 'license');
 
       await ApiService.dio.post('/driver/verify-identity', data: {
         'license_photo_url': frontUrl,

@@ -2,7 +2,7 @@
 
 Everything below is implemented in the working tree and passes verification
 on the states claimed: `tsc --noEmit` clean on `backend/`, `apps/admin_dashboard/`
-and `apps/sponsor_portal/`; the backend unit-test suite (`node run-tests.cjs`,
+and `apps/sponsor_portal/`; the backend unit-test suite (`cd backend && npm test`,
 including the 11 new sponsor tests) passes with zero failures; both web apps
 build (`npm run build`); the rider Flutter app is free of analyzer **errors**
 (`flutter analyze lib` — remaining items are pre-existing info/warnings, none
@@ -120,8 +120,8 @@ codes + double confirm, releases reserved budget), customers, settings
 
 ## 9. Tests (backend)
 
-`backend/src/modules/sponsor/__tests__/sponsor-discount.unit.test.ts`
-(registered in `run-tests.cjs`, **11 tests, all pass**):
+`tests/unit/backend/modules/sponsor/sponsor-discount.unit.test.ts`
+(registered in `tests/unit/backend/run-tests.cjs`, **11 tests, all pass**):
 - `computeSponsorDiscount`: percentage of fare; capped by
   `max_discount_percent`; never exceeds the fare; fixed amount clamped to
   fare; garbage input never goes negative
@@ -201,7 +201,7 @@ Full suite run: zero failures. `npx tsc --noEmit` in `backend/`: clean.
 
 No new env vars required — reuses `JWT_SECRET`, `DATABASE_URL` and the
 existing `WalletService`/`CreditsService`/`payout` machinery.
-`run-tests.cjs` already pins `REDIS_URL`/`PORT` for offline runs.
+`tests/unit/backend/run-tests.cjs` already pins `REDIS_URL`/`PORT` for offline runs.
 
 ## 14. Manual verification steps (dev database — already done here)
 
@@ -211,7 +211,7 @@ existing `WalletService`/`CreditsService`/`payout` machinery.
 2. Seed a sponsor (applied ✓): Blue Bottle Coffee — Downtown, 20% up to 25%,
    $15,000.00 = 1,500,000 cents, ACTIVE + eligible; `GET /api/specials`
    returns it.
-3. `node run-tests.cjs` → sponsor block 11/11; full suite 0 failures.
+3. `cd backend && npm test` → sponsor block 11/11; full suite 0 failures.
 4. Admin `/sponsors` (admin dashboard, `npm run dev`): create sponsor →
    portal account create shows the one-time password; budget adjust CREDIT
    appears in the Ledger; analytics tiles populate.
@@ -240,8 +240,8 @@ existing `WalletService`/`CreditsService`/`payout` machinery.
 - Backend: `app.ts`, `socket-validation.ts`, `socket.gateway.ts`,
   `ride.service.ts`, `wallet.service.ts`, `credits.service.ts`,
   `modules/sponsor/*` (services, controllers, routes, notifications,
-  `__tests__/sponsor-discount.unit.test.ts`), `migrations/046a_*.sql`,
-  `migrations/046_sponsors.sql`, `prisma/schema.prisma`, `run-tests.cjs`.
+  tests under `tests/unit/backend/modules/sponsor/`), `migrations/046a_*.sql`,
+  `migrations/046_sponsors.sql`, `prisma/schema.prisma`, `tests/unit/backend/run-tests.cjs`.
 - Admin: `pages/Sponsors.tsx`, `api/admin.ts`, `components/MainLayout.tsx`,
   `App.tsx`.
 - Portal: `apps/sponsor_portal/**` (new app).
@@ -255,7 +255,7 @@ existing `WalletService`/`CreditsService`/`payout` machinery.
 | Check | Result |
 |---|---|
 | `backend` `tsc --noEmit` | clean |
-| `backend` `node run-tests.cjs` | 0 failures (sponsor 11/11) |
+| `backend` `npm test` | 0 failures (sponsor 11/11) |
 | `admin_dashboard` tsc + build | clean / ✓ built |
 | `sponsor_portal` tsc + lint + build | clean / 0 problems / ✓ built |
 | `rider_flutter` `flutter analyze` | no errors in new files |

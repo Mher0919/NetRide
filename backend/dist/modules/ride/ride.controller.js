@@ -506,6 +506,15 @@ class RideController {
      */
     static async callConnectTwiML(req, res) {
         try {
+            // Authentication: this endpoint is deliberately outside JWT auth
+            // because Twilio's Voice SDK calls it. The request must therefore be
+            // authenticated by Twilio's request signature. Without a valid
+            // signature the caller is rejected — knowing a trip UUID is not
+            // authorization.
+            if (!twilio_service_1.TwilioService.isConfigured() || !twilio_service_1.TwilioService.validateSignature(req)) {
+                res.status(403).type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>Unauthorized call.</Say></Response>');
+                return;
+            }
             const tripId = (req.body?.tripId ?? req.query?.tripId);
             const userId = (req.body?.userId ?? req.query?.userId);
             if (!tripId || !userId) {
@@ -532,6 +541,9 @@ class RideController {
      */
     static async callStatusCallback(req, res) {
         try {
+            if (!twilio_service_1.TwilioService.isConfigured() || !twilio_service_1.TwilioService.validateSignature(req)) {
+                return res.status(403).json({ error: 'Invalid Twilio signature' });
+            }
             const sid = req.body?.CallSid ?? '';
             const status = req.body?.CallStatus ?? '';
             console.log(`[CALL] Twilio callback sid=${sid} status=${status}`);

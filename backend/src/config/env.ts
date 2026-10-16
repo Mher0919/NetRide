@@ -22,19 +22,6 @@ const envSchema = z.object({
   // Self-hosted A* routing engine. Loads preprocessed graph from disk.
   // Fast, free, and runs entirely in-memory. No external API calls.
   ROUTING_GRAPH_PATH: z.string().optional(),
-  // ---- Fallback routing engine: OSRM (self-hosted) -------------------------
-  // Base URL of the self-hosted OSRM service (e.g. http://netride-osrm.internal:5000).
-  // Used as fallback when A* engine is unavailable or graph not loaded.
-  OSRM_BASE_URL: z.string().optional(),
-  // Per-request timeout to the local OSRM engine (ms).
-  OSRM_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).optional(),
-  // Path on disk to the pre-processed OSRM road network (.osrm family).
-  OSRM_DATA_PATH: z.string().default('./data/la.osrm'),
-  // ---- Fallback routing engine: OpenRouteService (ORS) --------------------
-  // Get API key from https://openrouteservice.org/
-  ORS_API_KEY: z.string().optional(),
-  ORS_PROFILE: z.string().default('driving-car'),
-  ORS_TIMEOUT_MS: z.union([z.string(), z.number()]).transform(Number).default(8000),
   // ---- Dispatch Engine (v2) -----------------------------------------------
   // Initial preferred search radius (km). The engine starts here and expands
   // through secondary/max radii when no suitable driver is found.

@@ -213,7 +213,7 @@ export const getFlaggedRatings = async (params: { page?: number; limit?: number 
 
 // ----- Partners ------------------------------------------------------------
 
-export const listPartners = async (params: { search?: string; status?: string; limit?: number; offset?: number } = {}) => {
+export const listPartners = async (params: { search?: string; status?: string; limit?: number; offset?: number; includeTest?: boolean } = {}) => {
   const response = await api.get('/admin/partners', { params });
   return response.data as { partners: any[] };
 };
@@ -232,10 +232,11 @@ export interface PortalUserOption {
   is_partner: boolean;
   is_sponsor: boolean;
   is_fleet: boolean;
+  is_test?: boolean;
 }
 
-export const searchPortalUsers = async (search: string, limit = 20) => {
-  const response = await api.get('/admin/portal-users', { params: { search, limit } });
+export const searchPortalUsers = async (search: string, limit = 20, includeTest = false) => {
+  const response = await api.get('/admin/portal-users', { params: { search, limit, includeTest: includeTest ? 'true' : 'false' } });
   return response.data as { users: PortalUserOption[] };
 };
 
@@ -391,8 +392,8 @@ export const downloadBlob = (blob: Blob, filename: string) => {
 
 // ----- Fleet partners (041) -------------------------------------------------
 
-export const listFleets = async () => {
-  const response = await api.get('/admin/fleets');
+export const listFleets = async (params: { includeTest?: boolean } = {}) => {
+  const response = await api.get('/admin/fleets', { params });
   return response.data as { fleets: any[] };
 };
 
@@ -430,6 +431,11 @@ export const resetFleetPortalPassword = async (fleetId: string) => {
 
 export const disableFleetPortalAccount = async (fleetId: string) => {
   const response = await api.post(`/admin/fleets/${fleetId}/portal-account/disable`);
+  return response.data as { message: string };
+};
+
+export const enableFleetPortalAccount = async (fleetId: string) => {
+  const response = await api.post(`/admin/fleets/${fleetId}/portal-account/enable`);
   return response.data as { message: string };
 };
 
@@ -479,7 +485,7 @@ export const resolveReport = async (id: string, data: { status: string; action: 
 
 // ----- Sponsors / SPECIALS (046) -------------------------------------------
 
-export const listSponsors = async (params: { search?: string; status?: string; limit?: number; offset?: number } = {}) => {
+export const listSponsors = async (params: { search?: string; status?: string; limit?: number; offset?: number; includeTest?: boolean } = {}) => {
   const response = await api.get('/admin/sponsors', { params });
   return response.data as { sponsors: Array<Record<string, unknown>>; total: number };
 };
@@ -549,6 +555,11 @@ export const resetSponsorPortalPassword = async (id: string) => {
 
 export const disableSponsorPortalAccount = async (id: string) => {
   const response = await api.post(`/admin/sponsors/${id}/portal-account/disable`);
+  return response.data;
+};
+
+export const enableSponsorPortalAccount = async (id: string) => {
+  const response = await api.post(`/admin/sponsors/${id}/portal-account/enable`);
   return response.data;
 };
 

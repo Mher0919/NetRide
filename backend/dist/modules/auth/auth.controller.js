@@ -4,24 +4,29 @@ exports.AuthController = void 0;
 const auth_service_1 = require("./auth.service");
 const zod_1 = require("zod");
 const types_1 = require("../../types");
+// Self-registration roles. ADMIN/PARTNER/FLEET accounts are provisioned by
+// administrators only — the public auth surface must never mint them.
+const PublicRoleSchema = zod_1.z.enum([types_1.UserRole.RIDER, types_1.UserRole.DRIVER]);
 const OAuthSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     full_name: zod_1.z.string(),
     profile_image_url: zod_1.z.string().nullable().optional(),
-    role: zod_1.z.nativeEnum(types_1.UserRole),
-    token: zod_1.z.string().nullable().optional(),
+    role: PublicRoleSchema,
+    // Mandatory: proves ownership of the email via Supabase. Without it the
+    // endpoint would allow account impersonation.
+    token: zod_1.z.string().min(10),
 });
 const SignupPasswordSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     full_name: zod_1.z.string().min(2),
     password: zod_1.z.string().min(6),
-    role: zod_1.z.nativeEnum(types_1.UserRole),
+    role: PublicRoleSchema,
 });
 const LoginPasswordSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string(),
     trusted_device_token: zod_1.z.string().nullable().optional(),
-    app_role: zod_1.z.string().optional(),
+    app_role: PublicRoleSchema.optional(),
 });
 const ChangePasswordSchema = zod_1.z.object({
     currentPassword: zod_1.z.string().optional(),
@@ -37,6 +42,18 @@ const ResetPasswordSchema = zod_1.z.object({
 const RequestPasswordChangeSchema = zod_1.z.object({
     currentPassword: zod_1.z.string(),
 });
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+function jsStringLiteral(value) {
+    return JSON.stringify(String(value)).replace(/</g, '\\u003c');
+}
+const RESET_TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 class AuthController {
     static async signupPassword(req, res) {
         try {
@@ -156,8 +173,11 @@ class AuthController {
     }
     static async renderResetPasswordForm(req, res) {
         const { token } = req.query;
-        if (!token)
+        if (!token || typeof token !== 'string' || !RESET_TOKEN_RE.test(token)) {
             return res.status(400).send('<h1>Invalid Link</h1>');
+        }
+        const safeTokenAttr = escapeHtml(token);
+        const safeTokenJs = jsStringLiteral(token);
         res.send(`
       <!DOCTYPE html>
       <html>
@@ -177,7 +197,7 @@ class AuthController {
           <h2>Create New Password</h2>
           <p>Please enter your new password below.</p>
           <form id="resetForm">
-            <input type="hidden" name="token" value="${token}">
+            <input type="hidden" name="token" value="${safeTokenAttr}">
             <input type="password" id="password" placeholder="New Password" required minlength="6">
             <input type="password" id="confirm" placeholder="Confirm New Password" required minlength="6">
             <button type="submit" id="submitBtn">Update Password</button>
@@ -205,7 +225,7 @@ class AuthController {
               const response = await fetch('/api/auth/reset-password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: '${token}', newPassword: password })
+                body: JSON.stringify({ token: ${safeTokenJs}, newPassword: password })
               });
               const data = await response.json();
               if (response.ok) {
@@ -230,12 +250,14 @@ class AuthController {
     }
     static async oauth(req, res) {
         try {
-            console.log(`[AUTH] 📥 Incoming OAuth request:`, req.body);
             const validatedData = OAuthSchema.parse(req.body);
             const result = await auth_service_1.AuthService.handleOAuth(validatedData);
             res.json(result);
         }
         catch (error) {
+            if (error instanceof zod_1.z.ZodError) {
+                return res.status(400).json({ error: 'Invalid authentication request.' });
+            }
             console.error(`[AUTH] ❌ OAuth error:`, error.message || error);
             res.status(400).json({ error: error.message });
         }
@@ -257,12 +279,15 @@ class AuthController {
                 email: zod_1.z.string().email(),
                 code: zod_1.z.string().length(6),
                 full_name: zod_1.z.string().optional(),
-                role: zod_1.z.nativeEnum(types_1.UserRole).optional(),
+                role: PublicRoleSchema.optional(),
             }).parse(req.body);
             const result = await auth_service_1.AuthService.verifyOTP(validatedData);
             res.json(result);
         }
         catch (error) {
+            if (error instanceof zod_1.z.ZodError) {
+                return res.status(400).json({ error: 'Invalid or expired verification code.' });
+            }
             console.error(`[AUTH] ❌ OTP verification error: ${error.message}`);
             res.status(400).json({ error: 'Invalid or expired verification code.' });
         }

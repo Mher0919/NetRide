@@ -9,6 +9,7 @@ import { pool } from '../../config/database';
 import { centsValue } from '../../services/financial-ledger.service';
 import { SponsorService, discountLabelFor, SponsorStatus } from './sponsor.service';
 import { SpecialRedemptionService } from './special-redemption.service';
+import { isTestEmail } from '../../utils/testUser';
 import {
   GooglePlacesService,
   isValidPlaceId,
@@ -90,6 +91,7 @@ export class AdminSponsorController {
         status: String(req.query.status ?? ''),
         limit: Number(req.query.limit ?? 50),
         offset: Number(req.query.offset ?? 0),
+        includeTest: String(req.query.includeTest ?? '') === 'true',
       });
       res.json({ sponsors: rows.map((s) => ({
         ...s,
@@ -118,6 +120,7 @@ export class AdminSponsorController {
           ...sponsor,
           discountLabel: discountLabelFor(sponsor),
           spendableCents: sponsor.remaining_budget_cents - sponsor.reserved_budget_cents,
+          is_test: isTestEmail(sponsor.email),
         },
         portalAccount: portal ? {
           email: portal.email,
@@ -398,6 +401,15 @@ export class AdminSponsorController {
     }
   }
 
+  static async enablePortalAccount(req: AdminReq, res: Response) {
+    try {
+      await SponsorService.enablePortalAccount(req.params.id, { id: req.user!.id, role: 'ADMIN' });
+      res.json({ message: 'Portal account enabled' });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
   // ------------------------------------------------------- fleet portal accounts
 
   static async createFleetPortalAccount(req: AdminReq, res: Response) {
@@ -433,6 +445,15 @@ export class AdminSponsorController {
     try {
       await SponsorService.disableFleetPortalAccount(req.params.id, { id: req.user!.id, role: 'ADMIN' });
       res.json({ message: 'Fleet portal account disabled' });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  static async enableFleetPortalAccount(req: AdminReq, res: Response) {
+    try {
+      await SponsorService.enableFleetPortalAccount(req.params.id, { id: req.user!.id, role: 'ADMIN' });
+      res.json({ message: 'Fleet portal account enabled' });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

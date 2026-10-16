@@ -4,9 +4,6 @@ export declare const env: {
     DATABASE_URL: string;
     REDIS_URL: string;
     JWT_SECRET: string;
-    OSRM_DATA_PATH: string;
-    ORS_PROFILE: string;
-    ORS_TIMEOUT_MS: number;
     DISPATCH_INITIAL_RADIUS_KM: number;
     DISPATCH_SECONDARY_RADIUS_KM: number;
     DISPATCH_MAX_RADIUS_KM: number;
@@ -64,9 +61,6 @@ export declare const env: {
     GOOGLE_ROUTES_API_KEY?: string | undefined;
     GOOGLE_PLACES_API_KEY?: string | undefined;
     ROUTING_GRAPH_PATH?: string | undefined;
-    OSRM_BASE_URL?: string | undefined;
-    OSRM_TIMEOUT_MS?: number | undefined;
-    ORS_API_KEY?: string | undefined;
     GMAIL_CLIENT_ID?: string | undefined;
     GMAIL_CLIENT_SECRET?: string | undefined;
     GMAIL_REFRESH_TOKEN?: string | undefined;

@@ -20,6 +20,7 @@ import '../components/tip_fab.dart';
 import '../components/driver_cancelled_dialog.dart';
 import '../widgets/branded_map_tile.dart';
 import '../widgets/special_ready_dialog.dart';
+import '../utils/file_url.dart';
 import 'rating_screen.dart';
 import 'chat_sheet.dart';
 import 'report_sheet.dart';
@@ -421,12 +422,13 @@ class _TripScreenState extends State<TripScreen> {
                   children: [
                     Row(
                       children: [
-                        const CircleAvatar(
-                          backgroundColor: Color(0xFFF7F4EF),
-                          child: Icon(
-                            Icons.local_taxi,
-                            color: Color(0xFF5B7760),
-                          ),
+                        // Assigned driver's public profile photo. Keyed by
+                        // driver id so a rematch/cancellation can never leave
+                        // the previous driver's image visible, and falls back
+                        // to a neutral avatar while loading / on error.
+                        _DriverAvatar(
+                          key: ValueKey('driver-photo-${driver.id}'),
+                          photoUrl: driver.photoUrl,
                         ),
                         const SizedBox(width: 16),
                         Expanded(
@@ -1058,6 +1060,57 @@ class _RideActionMenu extends StatelessWidget {
           size: 22,
           color: Color(0xFF2F3A32),
         ),
+      ),
+    );
+  }
+}
+
+/// Assigned driver's profile photo with a light-green placeholder while
+/// loading and a neutral fallback avatar when the image cannot be loaded.
+class _DriverAvatar extends StatelessWidget {
+  final String? photoUrl;
+
+  const _DriverAvatar({super.key, this.photoUrl});
+
+  static const double _size = 52;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = photoUrl;
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: ClipOval(
+        child: (url != null && url.isNotEmpty)
+            ? Image.network(
+                resolveFileUrl(url),
+                width: _size,
+                height: _size,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return const _DriverAvatarPlaceholder();
+                },
+                errorBuilder: (_, __, ___) => const _DriverAvatarPlaceholder(),
+              )
+            : const _DriverAvatarPlaceholder(),
+      ),
+    );
+  }
+}
+
+class _DriverAvatarPlaceholder extends StatelessWidget {
+  const _DriverAvatarPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFFE8F1E9),
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.person_rounded,
+        color: Color(0xFF5B7760),
+        size: 26,
       ),
     );
   }

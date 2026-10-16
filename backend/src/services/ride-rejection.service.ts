@@ -40,7 +40,7 @@ export type RideDriverInteractionStatus =
 
 /**
  * Exported SQL (offline-testable contract, see
- * services/__tests__/ride-rejection.unit.test.ts). The upsert targets the
+ * tests/unit/backend/services/ride-rejection.unit.test.ts). The upsert targets the
  * (ride_id, driver_id) primary-key pair, so repeated interactions collapse
  * into the same single record. interaction_type is preserved (a REJECTED is
  * never silently rewritten by a stale retry, and vice versa) — only missing

@@ -88,7 +88,7 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             d.full_name as driver_name, d.email as driver_email, d.profile_image_url as driver_photo_url, d.rating as driver_rating, d.rating_count as driver_rides,
              dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
              dv.license_plate_number as driver_vehicle_plate
       FROM rides r
@@ -180,7 +180,7 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             d.full_name as driver_name, d.email as driver_email, d.profile_image_url as driver_photo_url, d.rating as driver_rating, d.rating_count as driver_rides,
              dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
              dv.license_plate_number as driver_vehicle_plate
       FROM rides r
@@ -197,7 +197,7 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             d.full_name as driver_name, d.email as driver_email, d.profile_image_url as driver_photo_url, d.rating as driver_rating, d.rating_count as driver_rides,
              dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
              dv.license_plate_number as driver_vehicle_plate
       FROM rides r
@@ -214,7 +214,7 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             d.full_name as driver_name, d.email as driver_email, d.profile_image_url as driver_photo_url, d.rating as driver_rating, d.rating_count as driver_rides,
              dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
              dv.license_plate_number as driver_vehicle_plate
       FROM rides r
@@ -231,7 +231,7 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*, 
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             d.full_name as driver_name, d.email as driver_email, d.profile_image_url as driver_photo_url, d.rating as driver_rating, d.rating_count as driver_rides,
              dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
              dv.license_plate_number as driver_vehicle_plate
       FROM rides r
@@ -249,7 +249,7 @@ export class RideRepository {
     const res = await pool.query(`
       SELECT r.*,
              u.full_name as rider_name, u.email as rider_email, u.rating as rider_rating, u.rating_count as rider_rides,
-             d.full_name as driver_name, d.email as driver_email, d.rating as driver_rating, d.rating_count as driver_rides,
+             d.full_name as driver_name, d.email as driver_email, d.profile_image_url as driver_photo_url, d.rating as driver_rating, d.rating_count as driver_rides,
              dv.make as driver_vehicle_make, dv.model as driver_vehicle_model,
              dv.license_plate_number as driver_vehicle_plate
       FROM rides r
@@ -337,10 +337,16 @@ export class RideRepository {
         email: row.rider_email,
         rating: row.rider_rating !== null ? parseFloat(row.rider_rating) : 5.0,
         total_rides: row.rider_rides !== null ? parseInt(row.rider_rides) : 0,
+        // NOTE: the rider's profile photo is deliberately NOT exposed here.
+        // The driver-facing payload must never carry the rider's image.
       },
       driver_info: row.driver_id ? {
+        id: row.driver_id,
         name: row.driver_name || '',
         email: row.driver_email,
+        // Public profile photo of the ASSIGNED driver — shown on the rider's
+        // active-trip screen. Never a verification document.
+        photo_url: row.driver_photo_url || undefined,
         rating: row.driver_rating !== null ? parseFloat(row.driver_rating) : 5.0,
         total_rides: row.driver_rides !== null ? parseInt(row.driver_rides) : 0,
         // Real vehicle identity from the driver's vehicle record — never

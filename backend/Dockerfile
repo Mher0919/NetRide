@@ -1,6 +1,6 @@
 # backend/Dockerfile
 #
-# Node.js backend only. OSRM runs as a separate Render service.
+# Node.js backend image (single service).
 
 # ---- Build stage -----------------------------------------------------------
 FROM node:20-bookworm-slim AS builder

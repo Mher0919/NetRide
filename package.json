@@ -2,6 +2,10 @@
   "name": "NetRide",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "test": "npm --prefix backend test",
+    "test:e2e": "npm --prefix backend run e2e:cancellation"
+  },
   "dependencies": {
     "expo": "54.0.0"
   },

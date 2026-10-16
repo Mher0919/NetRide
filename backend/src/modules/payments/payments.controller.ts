@@ -95,7 +95,9 @@ export class PaymentsController {
   static async confirmSetupIntent(req: AuthRequest, res: Response) {
     try {
       const body = ConfirmSetupIntentSchema.parse(req.body ?? {});
-      const result = await PaymentsService.applySetupIntentSucceeded(body.setupIntentId);
+      const result = await PaymentsService.applySetupIntentSucceeded(body.setupIntentId, {
+        userId: req.user!.id,
+      });
       res.json(result);
     } catch (err: any) {
       res.status(400).json({ error: err.message });

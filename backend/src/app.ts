@@ -13,6 +13,8 @@ import { AuthService } from './modules/auth/auth.service';
 import { setupSocketGateway } from './gateway/socket.gateway';
 import { rateLimitMiddleware } from './middleware/rateLimit.middleware';
 import { identifyUser } from './middleware/identifyUser.middleware';
+import { authMiddleware } from './middleware/auth.middleware';
+import { attachPrivateFileAccessTokens } from './middleware/fileAccessToken.middleware';
 import { initSentry } from './observability/sentry';
 import { logger } from './observability/logger';
 import { requestContext, requestLogger } from './middleware/pinoHttp';
@@ -165,9 +167,15 @@ app.use(requestLogger);
 // Must run BEFORE rate-limit so authenticated requests use user-based keys.
 app.use(identifyUser);
 app.use(rateLimitMiddleware);
+// Admin JSON responses may embed private document references; this mints
+// short-lived, purpose-scoped access tokens for the authenticated admin
+// (public profile photos are left untouched). MUST run after identifyUser so
+// req.user is populated.
+app.use('/api/admin', attachPrivateFileAccessTokens);
 
-// Serve static files from the uploads directory
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// NOTE: the old anonymous `express.static` mount on /uploads was removed.
+// Every stored file must pass the resource-level authorization in
+// /api/files/:id — a static mount bypasses it entirely.
 
 // Backwards-compatible health endpoint (same shape as before).
 // New load-balancer-friendly endpoints live at /health/live and
@@ -287,7 +295,9 @@ app.use('/api', portalRoutes);
 app.use('/api/admin', adminSponsorRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin/payments', adminPaymentsRoutes);
-app.post('/api/upload', UploadService.upload);
+// Uploads require an authenticated identity: the owner of the file is taken
+// from the verified token, never from the request body.
+app.post('/api/upload', authMiddleware, UploadService.upload);
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -697,6 +707,19 @@ async function runMigrations() {
       console.log('✅ Notifications + heatmap schema (040) applied');
     }
 
+    // File-security classification + RLS hardening (057). Guarded on the
+    // storage_files.visibility column this migration introduces.
+    const hasFileVisibility = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'storage_files' AND column_name = 'visibility'"
+    );
+    if (hasFileVisibility.rowCount === 0) {
+      console.log('⚡ Applying file-security + RLS hardening schema (057)...');
+      const schemaPath = path.join(__dirname, '../migrations/057_file_security_and_rls_hardening.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ File-security + RLS hardening schema (057) applied');
+    }
+
     console.log('🚀 All migrations completed');
   } catch (err: any) {
     console.error('❌ Migration/Seeding failed:', err.message);
@@ -782,17 +805,6 @@ export function startServer(): void {
       // silent — the endpoint may not be ready yet during cold start
     });
   }, 60_000);
-
-  // Ping OSRM every 60s to prevent its free-tier service from spinning down.
-  if (env.OSRM_BASE_URL) {
-    const osrmUrl = `${env.OSRM_BASE_URL}/health`;
-    setInterval(() => {
-      const client = osrmUrl.startsWith('https') ? require('https') : require('http');
-      client.get(osrmUrl, (res: any) => {
-        res.resume();
-      }).on('error', () => {});
-    }, 60_000);
-  }
 
   // Pre-cache routes for the launch market (Hollywood / UCLA / Beverly Hills
   // / Westwood). preCacheHotZones computes the full grid — the routing

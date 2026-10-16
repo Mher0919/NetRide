@@ -75,5 +75,5 @@ export declare class RideController {
      * here — billing-side metrics live in the Twilio console. Endpoint
      * exists so Twilio's request signature validation can succeed.
      */
-    static callStatusCallback(req: any, res: Response): Promise<void>;
+    static callStatusCallback(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
 }

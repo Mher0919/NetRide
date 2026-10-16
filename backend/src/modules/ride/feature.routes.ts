@@ -6,6 +6,7 @@ import { getIo } from '../../gateway/io-handle';
 import { isTestEmail } from '../../utils/testUser';
 import { DriverService } from '../driver/driver.service';
 import { getRevenueAllocationForRide } from '../../services/pricing.service';
+import { validateTipAmount } from '../../security/tip-policy';
 
 const router = Router();
 
@@ -15,10 +16,11 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
     const { amount } = req.body;
     const riderId = req.user!.id;
 
-    if (amount == null || isNaN(parseFloat(amount)) || parseFloat(amount) < 0) {
-        return res.status(400).json({ error: 'A valid tip amount is required.' });
+    const preCheck = validateTipAmount(amount, 0);
+    if (!preCheck.ok) {
+        return res.status(400).json({ error: preCheck.error });
     }
-    const numericAmount = parseFloat(amount);
+    const numericAmount = preCheck.amount!;
     // A zero tip is a no-op success — the app's rating screen can re-submit
     // a zero-tip state and must never be trapped on a 400 for "no tip".
     if (numericAmount === 0) {
@@ -33,7 +35,15 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
         if (!ride) return res.status(404).json({ error: 'Ride not found.' });
         if (ride.rider_id !== riderId) return res.status(403).json({ error: 'Unauthorized.' });
 
-        const numericAmount = parseFloat(amount);
+        // Server-side bounds: a tip is at most the ride fare (min $5, hard
+        // ceiling $100). Without a cap, an attacker could mint an arbitrary
+        // driver wallet credit through the post-completion credit path.
+        const fareDollars = Math.max(0, parseFloat((ride as any).fare_amount ?? '0') || 0);
+        const bounded = validateTipAmount(numericAmount, fareDollars);
+        if (!bounded.ok) {
+            return res.status(400).json({ error: bounded.error });
+        }
+
         const oldTipCents = Math.round(
             parseFloat((ride as any).tip_amount ?? '0') * 100
         );

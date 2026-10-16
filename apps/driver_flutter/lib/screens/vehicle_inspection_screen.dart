@@ -181,7 +181,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
 
     setState(() => _isUploading = true);
     try {
-      final url = await AuthService.uploadImage(File(pickedFile.path));
+      final url = await AuthService.uploadImage(File(pickedFile.path), fileType: 'inspection');
       if (!mounted) return;
       setState(() {
         _uploadedUrls.add(url);
@@ -1028,6 +1028,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
                     resolveFileUrl(url),
+                    headers: fileAuthHeaders(),
                     fit: BoxFit.cover,
                     width: double.infinity,
                     height: double.infinity,
@@ -1090,6 +1091,7 @@ class _VehicleInspectionScreenState extends State<VehicleInspectionScreen> {
               borderRadius: BorderRadius.circular(16),
               child: Image.network(
                 resolveFileUrl(url),
+                headers: fileAuthHeaders(),
                 fit: BoxFit.contain,
                 width: double.infinity,
                 height: double.infinity,

@@ -13,6 +13,7 @@ import { redis } from '../../config/redis';
 import { OTPService } from '../auth/otp.service';
 import { SponsorService } from '../sponsor/sponsor.service';
 import { PartnerService } from '../partner/partner.service';
+import { findPortalIdentityByEmail } from './portal-identities';
 
 const LoginSchema = z.object({
   email: z.string().email(),
@@ -89,11 +90,11 @@ export class PortalController {
     try {
       const { email } = z.object({ email: z.string().email() }).parse(req.body);
       const normalized = String(email).trim().toLowerCase();
-      const userRes = await pool.query(
-        `SELECT id FROM users WHERE email = $1`,
-        [normalized],
-      );
-      if (userRes.rows.length > 0) {
+      // Only a colab (portal-class) identity can trigger a portal reset code.
+      // A driver/rider account sharing the email is a different identity and
+      // must never receive portal reset mail.
+      const identity = await findPortalIdentityByEmail(normalized);
+      if (identity) {
         await OTPService.generateOTP(normalized);
       }
     } catch {
@@ -120,9 +121,9 @@ export class PortalController {
       const { token, newPassword } = ResetPasswordSchema.parse(req.body);
       const email = await redis.get(`portal_pwd_reset:${token}`);
       if (!email) return res.status(400).json({ error: 'This link has expired or is invalid.' });
-      const userRes = await pool.query(`SELECT id FROM users WHERE email = $1`, [email]);
-      if (!userRes.rows[0]) return res.status(400).json({ error: 'Account not found.' });
-      await PortalAuthService.changePassword(userRes.rows[0].id, newPassword);
+      const identity = await findPortalIdentityByEmail(email);
+      if (!identity) return res.status(400).json({ error: 'Account not found.' });
+      await PortalAuthService.changePassword(identity.id, newPassword);
       await redis.del(`portal_pwd_reset:${token}`);
       res.json({ message: 'Password reset successfully. You can now log in.' });
     } catch (error: any) {

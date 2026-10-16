@@ -29,8 +29,14 @@ export class WalletController {
   static async adminGrant(req: any, res: Response) {
     try {
       const { userId, amountCents, reason } = req.body ?? {};
+      const MAX_GRANT_CENTS = 1_000_000; // $10,000 per adjustment
       if (!userId || typeof amountCents !== 'number' || !Number.isFinite(amountCents)) {
         return res.status(400).json({ error: 'userId and amountCents are required' });
+      }
+      if (amountCents === 0 || Math.abs(amountCents) > MAX_GRANT_CENTS) {
+        return res.status(400).json({
+          error: `amountCents must be non-zero and at most ${MAX_GRANT_CENTS} (absolute value).`,
+        });
       }
       const result = await WalletService.adminGrant(
         req.user.id,

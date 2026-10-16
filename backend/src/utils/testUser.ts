@@ -1,30 +1,55 @@
 // backend/src/utils/testUser.ts
 //
-// Email-based detection of "test" accounts so the test loop can skip the
-// payment side of a ride and still credit the driver wallet. We use a
-// simple regex so no schema change is required.
+// Detection of "test" accounts so E2E/dev seed data can be separated from
+// real accounts across the admin dashboard. We use a simple regex so no
+// schema change is required.
 //
 // A user is considered a test user when their email matches one of:
-//   - contains a `+test`, `+sandbox`, or `+dev` plus-tag
-//   - the local part starts with `test`, `sandbox`, or `dev`
-//   - the domain is `@netride.test`
+//   - contains a `+test`, `+sandbox`, `+dev` or `+e2e` plus-tag
+//   - the local part (or a `-`/`_`/`.` separated segment) is
+//     `test`, `sandbox`, `dev` or `e2e` (e.g. `partner-test@…`)
+//   - the local part starts with `test`/`sandbox`/`dev`/`e2e`
+//   - the domain is a test domain: `netride.test`, `netride.dev`,
+//     `test.netride`, `test.netride.com`, or a reserved example domain
 //
-// The matching rule is intentionally permissive — every test/dev
-// workflow we've seen uses one of those patterns. If you need to
-// onboard a new test account, just create it with one of those
-// substrings in the email and the bypass will activate.
+// `TEST_EMAIL_SQL(column)` is the canonical SQL rendering of the same rule —
+// every admin list query must use it so TS and SQL can never drift.
 import { pool } from '../config/database';
 
 const TEST_EMAIL_REGEX =
-  /(^|\+)(test|sandbox|dev)([-_.]|$)/i;
+  /(^|[-_.+])(test|sandbox|dev|e2e)([-_.+0-9@]|$)|^(test|sandbox|dev|e2e)([-_.+0-9@]|$)/i;
 
-const TEST_DOMAINS = ['netride.test', 'netride.dev'];
+const TEST_DOMAINS = [
+  'netride.test',
+  'netride.dev',
+  'test.netride',
+  'test.netride.com',
+  'example.com',
+  'example.org',
+];
 
 export function isTestEmail(email: string | null | undefined): boolean {
   if (!email) return false;
-  const lower = email.toLowerCase();
+  const lower = email.trim().toLowerCase();
   if (TEST_EMAIL_REGEX.test(lower)) return true;
   return TEST_DOMAINS.some((d) => lower.endsWith('@' + d));
+}
+
+/**
+ * Canonical SQL predicate for the test-email rule. `column` must be a
+ * trusted SQL fragment (a column reference such as `u.email`), never user
+ * input. Returns a boolean expression safe to inline in WHERE/SELECT.
+ */
+export function TEST_EMAIL_SQL(column: string): string {
+  return `(
+    ${column} ~* '(^|[-_.+])(test|sandbox|dev|e2e)([-_.+0-9@]|$)'
+    OR lower(${column}) LIKE '%@netride.test'
+    OR lower(${column}) LIKE '%@netride.dev'
+    OR lower(${column}) LIKE '%@test.netride'
+    OR lower(${column}) LIKE '%@test.netride.com'
+    OR lower(${column}) LIKE '%@example.com'
+    OR lower(${column}) LIKE '%@example.org'
+  )`;
 }
 
 /**

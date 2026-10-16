@@ -30,6 +30,8 @@ import {
   Tooltip,
   ToggleButton,
   ToggleButtonGroup,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
@@ -54,6 +56,7 @@ import {
   createSponsorPortalAccount,
   resetSponsorPortalPassword,
   disableSponsorPortalAccount,
+  enableSponsorPortalAccount,
   type PortalUserOption,
 } from '../api/admin';
 import UserPicker from '../components/UserPicker';
@@ -119,6 +122,7 @@ const Sponsors: React.FC = () => {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
+  const [showTest, setShowTest] = React.useState(false);
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -162,7 +166,7 @@ const Sponsors: React.FC = () => {
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     try {
-      const data = await listSponsors({ search, status: statusFilter, limit: 200 });
+      const data = await listSponsors({ search, status: statusFilter, limit: 200, includeTest: showTest });
       setSponsors(data?.sponsors ?? []);
       setTotal(data?.total ?? 0);
       setLoadError(null);
@@ -172,7 +176,7 @@ const Sponsors: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter]);
+  }, [search, statusFilter, showTest]);
 
   React.useEffect(() => {
     const id = window.setTimeout(fetchData, 250);
@@ -420,6 +424,16 @@ const Sponsors: React.FC = () => {
     }
   };
 
+  const handlePortalEnable = async () => {
+    try {
+      await enableSponsorPortalAccount(selected.id);
+      notify('Portal account enabled');
+      loadDetail(selected.id);
+    } catch (err: unknown) {
+      notify(errMsg(err, 'Enable failed'), 'error');
+    }
+  };
+
   const openEdit = () => {
     if (!sponsor) return;
     setEditForm({
@@ -538,8 +552,8 @@ const Sponsors: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ minWidth: 0 }}>
           <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
             Sponsors
           </Typography>
@@ -547,13 +561,13 @@ const Sponsors: React.FC = () => {
             {total} business that fund rider SPECIALS. Budgets reserve → settle → deplete.
           </Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate} sx={{ flexShrink: 0 }}>
           New Sponsor
         </Button>
       </Box>
 
       <Paper sx={{ p: 2, mb: 3, borderRadius: 3 }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { sm: 'center' } }}>
           <TextField
             size="small"
             placeholder="Search sponsors…"
@@ -583,6 +597,11 @@ const Sponsors: React.FC = () => {
             <option value="DEPLETED">Depleted</option>
             <option value="SUSPENDED">Suspended</option>
           </TextField>
+          <FormControlLabel
+            control={<Switch size="small" checked={showTest} onChange={(e) => setShowTest(e.target.checked)} />}
+            label="Show test accounts"
+            sx={{ ml: { sm: 'auto' }, '& .MuiFormControlLabel-label': { fontSize: 13, fontWeight: 600 } }}
+          />
         </Stack>
       </Paper>
 
@@ -636,7 +655,12 @@ const Sponsors: React.FC = () => {
                           <StorefrontIcon sx={{ fontSize: 20 }} />
                         </Box>
                         <Box>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{s.business_name}</Typography>
+                          <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>{s.business_name}</Typography>
+                            {Boolean(s.is_test) && (
+                              <Chip size="small" label="TEST" sx={{ height: 18, fontSize: 10, fontWeight: 800, bgcolor: '#FFF4E5', color: '#B26A00' }} />
+                            )}
+                          </Stack>
                           <Typography variant="caption" color="text.secondary">
                             {s.google_place_id ? 'Google-connected' : 'Manual'} · {s.city ?? '—'}
                           </Typography>
@@ -837,7 +861,7 @@ const Sponsors: React.FC = () => {
       </Dialog>
 
       {/* Detail drawer */}
-      <Drawer anchor="right" open={!!selected} onClose={() => setSelected(null)} sx={{ '& .MuiDrawer-paper': { width: { xs: '100%', sm: 'min(720px, 100vw)' }, maxWidth: '100%' } }}>
+      <Drawer anchor="right" open={!!selected} onClose={() => setSelected(null)} sx={{ zIndex: (t) => t.zIndex.drawer + 2, '& .MuiDrawer-paper': { width: { xs: '100%', sm: 'min(720px, 100vw)' }, maxWidth: '100%' } }}>
         {selected && (
           <Box sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
@@ -1087,10 +1111,17 @@ const Sponsors: React.FC = () => {
                         <Typography variant="body2" color="text.secondary">Last login: {fmtDateTime(detail.portalAccount.lastLoginAt)}</Typography>
                         <Stack direction="row" spacing={1}>
                           <Button size="small" variant="contained" onClick={() => runAction(handlePortalReset)}>Reset password</Button>
-                          {detail.portalAccount.isActive && (
+                          {detail.portalAccount.isActive ? (
                             <Button size="small" color="error" onClick={() => runAction(handlePortalDisable)}>Disable login</Button>
+                          ) : (
+                            <Button size="small" color="success" onClick={() => runAction(handlePortalEnable)}>Enable login</Button>
                           )}
                         </Stack>
+                        {!detail.portalAccount.isActive && (
+                          <Typography variant="caption" color="text.secondary">
+                            This login is disabled. Re-enabling restores access for the sponsor immediately.
+                          </Typography>
+                        )}
                       </Stack>
                     ) : (
                       <Stack spacing={2}>
@@ -1114,19 +1145,26 @@ const Sponsors: React.FC = () => {
                             Use existing user
                           </ToggleButton>
                         </ToggleButtonGroup>
-                        <Stack direction="row" spacing={1}>
-                          {portalForm.mode === 'EXISTING' ? (
-                            <UserPicker value={portalUser} onChange={setPortalUser} label="Existing login to link" />
-                          ) : (
-                            <TextField
-                              size="small"
-                              placeholder="sponsor@business.com"
-                              value={portalForm.email}
-                              onChange={(e) => setPortalForm({ ...portalForm, email: e.target.value })}
-                              sx={{ flex: 1 }}
-                            />
-                          )}
-                          <Button size="small" variant="contained" onClick={handlePortalCreate}>
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            {portalForm.mode === 'EXISTING' ? (
+                              <UserPicker value={portalUser} onChange={setPortalUser} label="Existing login to link" />
+                            ) : (
+                              <TextField
+                                size="small"
+                                placeholder="sponsor@business.com"
+                                value={portalForm.email}
+                                onChange={(e) => setPortalForm({ ...portalForm, email: e.target.value })}
+                                fullWidth
+                              />
+                            )}
+                          </Box>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            onClick={handlePortalCreate}
+                            sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+                          >
                             {portalForm.mode === 'EXISTING' ? 'Link account' : 'Create account'}
                           </Button>
                         </Stack>

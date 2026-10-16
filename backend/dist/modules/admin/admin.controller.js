@@ -40,12 +40,15 @@ const database_1 = require("../../config/database");
 const speeding_detector_1 = require("../../services/speeding_detector");
 const email_service_1 = require("../../services/email.service");
 const storage_service_1 = require("../../services/storage.service");
+const file_policy_1 = require("../../security/file-policy");
 const io_handle_1 = require("../../gateway/io-handle");
 const pricing_service_1 = require("../../services/pricing.service");
 const report_service_1 = require("../reporting/report.service");
 const report_reasons_1 = require("../reporting/report.reasons");
 const financial_ledger_service_1 = require("../../services/financial-ledger.service");
 const audit_events_service_1 = require("../../services/audit-events.service");
+const testUser_1 = require("../../utils/testUser");
+const portal_identities_1 = require("../portal/portal-identities");
 class AdminController {
     static toJSON(value) {
         if (typeof value === 'bigint')
@@ -89,13 +92,27 @@ class AdminController {
     // ============================================================
     static async listFleets(req, res) {
         try {
+            const includeTest = String(req.query.includeTest ?? '') === 'true';
+            const testSql = (0, testUser_1.TEST_EMAIL_SQL)(`COALESCE(pa.email, f.contact_email, '')`);
+            // Aggregates are scalar subqueries: joining drivers × snapshots would
+            // fan out and inflate both the driver count and the earnings sum.
             const fleets = await database_1.pool.query(`SELECT f.*,
-                COUNT(d.user_id)::int AS driver_count,
-                COALESCE(SUM((s.fleet_allocations->0->>'cents')::bigint), 0)::bigint AS fleet_earnings_cents
+                (SELECT COUNT(*)::int FROM drivers d WHERE d.fleet_id = f.id) AS driver_count,
+                (SELECT COALESCE(SUM((s.fleet_allocations->0->>'cents')::bigint), 0)::bigint
+                   FROM ride_price_snapshots s WHERE s.driver_fleet_id = f.id) AS fleet_earnings_cents,
+                pa.email AS portal_email,
+                pa.is_active AS portal_is_active,
+                pa.user_active AS portal_user_active,
+                ${testSql} AS is_test
          FROM fleet_partners f
-         LEFT JOIN drivers d ON d.fleet_id = f.id
-         LEFT JOIN ride_price_snapshots s ON s.driver_fleet_id = f.id
-         GROUP BY f.id
+         LEFT JOIN LATERAL (
+           SELECT u.email, fpa.is_active, u.is_active AS user_active
+           FROM fleet_portal_accounts fpa
+           JOIN users u ON u.id = fpa.user_id
+           WHERE fpa.fleet_id = f.id
+           LIMIT 1
+         ) pa ON TRUE
+         ${includeTest ? '' : `WHERE NOT ${testSql}`}
          ORDER BY f.name`);
             res.json({ fleets: fleets.rows });
         }
@@ -206,7 +223,10 @@ class AdminController {
            UNION ALL
            SELECT 1 FROM sponsor_portal_accounts WHERE user_id = $1
            LIMIT 1`, [portalUserId]);
-                if (shared.rows.length === 0) {
+                // Deactivate the lingering login only when it is a colab identity
+                // that no other portal account uses. Driver/rider/admin identities
+                // are never touched (they cannot own portal accounts post-058).
+                if (shared.rows.length === 0 && (await (0, portal_identities_1.isPortalIdentity)(portalUserId, client))) {
                     await client.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [portalUserId]);
                 }
             }
@@ -338,11 +358,36 @@ class AdminController {
                 where.role = role;
             }
         }
-        // Test users are auto-generated E2E accounts (@test.netride). They flood
-        // the first pages (sorted by created_at DESC) and bury real users, so
-        // they are hidden by default; admins opt in with includeTest=true.
+        // Test accounts (E2E/sandbox/dev seeds) flood the first pages (sorted by
+        // created_at DESC) and bury real users, so they are hidden by default;
+        // admins opt in with includeTest=true. Keep this in sync with
+        // TEST_EMAIL_SQL in utils/testUser.ts (Prisma cannot express a regex, so
+        // the rule is mirrored with boundary fragments).
         if (includeTest !== 'true') {
-            where.NOT = { email: { endsWith: '@test.netride' } };
+            const testFragments = [
+                '-test', '_test', '.test', '+test',
+                '-sandbox', '_sandbox', '.sandbox', '+sandbox',
+                '-dev', '_dev', '.dev', '+dev',
+                '-e2e', '_e2e', '.e2e', '+e2e',
+            ].map((fragment) => ({ email: { contains: fragment, mode: 'insensitive' } }));
+            const testPrefixes = [
+                'test@', 'test-', 'test_', 'test.', 'test+',
+                'sandbox@', 'sandbox-', 'sandbox_', 'sandbox.', 'sandbox+',
+                'dev@', 'dev-', 'dev_', 'dev.', 'dev+',
+                'e2e@', 'e2e-', 'e2e_', 'e2e.', 'e2e+',
+            ].map((prefix) => ({ email: { startsWith: prefix, mode: 'insensitive' } }));
+            where.NOT = {
+                OR: [
+                    { email: { endsWith: '@netride.test', mode: 'insensitive' } },
+                    { email: { endsWith: '@netride.dev', mode: 'insensitive' } },
+                    { email: { endsWith: '@test.netride', mode: 'insensitive' } },
+                    { email: { endsWith: '@test.netride.com', mode: 'insensitive' } },
+                    { email: { endsWith: '@example.com', mode: 'insensitive' } },
+                    { email: { endsWith: '@example.org', mode: 'insensitive' } },
+                    ...testFragments,
+                    ...testPrefixes,
+                ],
+            };
         }
         if (status)
             where.verification_status = status;
@@ -403,6 +448,7 @@ class AdminController {
                     }));
                 }
             }
+            users = users.map((u) => ({ ...u, is_test: (0, testUser_1.isTestEmail)(u.email) }));
             res.json(AdminController.toJSON({
                 users,
                 total,
@@ -2504,11 +2550,20 @@ class AdminController {
             }
             const fileType = field.replace(/_url$/, '');
             const adminId = req.user?.id || id;
+            const normalizedMime = (0, file_policy_1.validateUploadMime)(mimetype);
+            if (!normalizedMime) {
+                return res.status(415).json({ error: 'Unsupported file type. Only JPEG, PNG, WebP and HEIC images are accepted.' });
+            }
+            // Only the public profile photo is stored publicly. Every verification
+            // document goes to the private bucket and is served exclusively through
+            // the authorized /api/files/:id route.
+            const visibility = field === 'profile_image_url' ? 'public' : 'private';
             const { id: fileId, url } = await storage_service_1.StorageService.upload(buffer, {
                 userId: id,
                 fileType,
                 originalName: field,
-                mimetype,
+                mimetype: normalizedMime,
+                visibility,
             });
             // Update the database with the portable /api/files/:id URL
             await database_1.pool.query(`UPDATE ${mapping.table} SET ${mapping.column} = $1 WHERE ${mapping.table === 'users' ? 'id' : 'user_id'} = $2`, [url, id]);

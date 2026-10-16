@@ -11,6 +11,8 @@ import { SmsService } from '../../services/sms.service';
 import { OTPService } from './otp.service';
 import { UserRole } from '../../types';
 import { PartnerService } from '../partner/partner.service';
+import { resolveSessionRole, assertPublicSignupRole } from './role-resolution';
+import { sanitizeUser } from '../../security/user-sanitize';
 
 export class AuthService {
   static async requestPhoneOTP(userId: string, phoneNumber: string, role?: string) {
@@ -94,7 +96,17 @@ export class AuthService {
     password: string;
     role: UserRole;
   }) {
-    const existingRes = await pool.query('SELECT id FROM users WHERE email = $1', [data.email]);
+    // Self-registration may only ever create RIDER/DRIVER accounts. ADMIN/
+    // PARTNER/FLEET roles are provisioned by administrators.
+    const role = assertPublicSignupRole(data.role);
+
+    // Consumer signup checks only the CONSUMER identity namespace. A colab
+    // (sponsor/partner/fleet) account may hold the same email — the two are
+    // independent identities (migration 058).
+    const existingRes = await pool.query(
+      `SELECT id FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`,
+      [data.email],
+    );
     if (existingRes.rows.length > 0) {
       throw new Error('User already exists');
     }
@@ -104,11 +116,11 @@ export class AuthService {
       `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
        RETURNING *`,
-      [data.email, data.full_name, passwordHash, data.role, false, true]
+      [data.email, data.full_name, passwordHash, role, false, true]
     );
     const user = createRes.rows[0];
 
-    if (data.role === UserRole.DRIVER) {
+    if (role === UserRole.DRIVER) {
       await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
     }
 
@@ -117,7 +129,13 @@ export class AuthService {
   }
 
   static async loginWithPassword(data: { email: string; password?: string; trusted_device_token?: string | null; app_role?: string }) {
-    const userRes = await pool.query('SELECT * FROM users WHERE email = $1', [data.email]);
+    // Driver/rider (consumer) login resolves ONLY consumer identities. A colab
+    // account with the same email is a separate identity and must never be
+    // authenticated by the rider/driver app (and vice versa).
+    const userRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`,
+      [data.email],
+    );
     const user = userRes.rows[0];
 
     if (!user) {
@@ -197,7 +215,7 @@ export class AuthService {
     const passwordExpired = diffDays > expirationDays;
 
     const onboarding = await this.getOnboardingStatus(user.id);
-    return { user, token, phone_number_required: phoneNumberRequired, password_expired: passwordExpired, onboarding };
+    return { user: sanitizeUser(user), token, phone_number_required: phoneNumberRequired, password_expired: passwordExpired, onboarding };
   }
 
   static async changePassword(userId: string, data: { currentPassword?: string, newPassword: string }) {
@@ -218,7 +236,13 @@ export class AuthService {
   }
 
   static async forgotPassword(email: string) {
-    const userRes = await pool.query('SELECT id, full_name FROM users WHERE email = $1', [email]);
+    // Consumer app password reset: only consumer identities. The colab portal
+    // has its own reset flow and must not reset a driver/rider password (or
+    // vice versa) even when the emails match.
+    const userRes = await pool.query(
+      `SELECT id, full_name FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`,
+      [email],
+    );
     const user = userRes.rows[0];
     if (!user) throw new Error('If an account exists with this email, you will receive a reset link');
 
@@ -340,43 +364,49 @@ export class AuthService {
     role: string;
     token?: string | null;
   }) {
+    // Self-registration/OAuth may only resolve to RIDER or DRIVER.
+    const role = assertPublicSignupRole(data.role);
     let email = data.email;
 
-    // 1. Verify Supabase Token if provided (Mandatory for security)
-    if (data.token) {
-      try {
-        if (!env.SUPABASE_URL) throw new Error('SUPABASE_URL not configured');
-        
-        // Sanitize URL to avoid double slashes
-        const baseUrl = env.SUPABASE_URL.replace(/\/$/, '');
-        const verifyUrl = `${baseUrl}/auth/v1/user`;
-        
-        console.log(`[AUTH] 🛡️ Verifying Supabase token for ${email} at ${verifyUrl}`);
+    // 1. The Supabase token is MANDATORY. Without it the client-supplied
+    // email is unverified and could impersonate any existing account. There
+    // is no fallback: fail closed.
+    if (!data.token) {
+      throw new Error('Authentication verification token is required');
+    }
+    try {
+      if (!env.SUPABASE_URL) throw new Error('SUPABASE_URL not configured');
 
-        // We call Supabase API directly to verify the token. 
-        // This handles any algorithm (HS256, ES256, etc.) automatically.
-        const response = await axios.get(verifyUrl, {
-          headers: {
-            'Authorization': `Bearer ${data.token}`,
-            'apikey': env.SUPABASE_ANON_KEY,
-          },
-        });
-        
-        if (response.data && response.data.email) {
-          email = response.data.email;
-          console.log(`[AUTH] ✅ Supabase token verified via API for ${email}`);
-        } else {
-          throw new Error('Invalid response from Supabase');
-        }
-      } catch (err: any) {
-        const errorMsg = err.response?.data?.msg || err.message;
-        console.error(`[AUTH] ❌ Supabase token verification failed:`, errorMsg);
-        throw new Error(`Authentication verification failed: ${errorMsg}`);
+      // Sanitize URL to avoid double slashes
+      const baseUrl = env.SUPABASE_URL.replace(/\/$/, '');
+      const verifyUrl = `${baseUrl}/auth/v1/user`;
+
+      // We call Supabase API directly to verify the token. 
+      // This handles any algorithm (HS256, ES256, etc.) automatically.
+      const response = await axios.get(verifyUrl, {
+        headers: {
+          'Authorization': `Bearer ${data.token}`,
+          'apikey': env.SUPABASE_ANON_KEY,
+        },
+      });
+      
+      if (response.data && response.data.email) {
+        email = response.data.email;
+      } else {
+        throw new Error('Invalid response from Supabase');
       }
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.msg || err.message;
+      console.error(`[AUTH] ❌ Supabase token verification failed:`, errorMsg);
+      throw new Error(`Authentication verification failed: ${errorMsg}`);
     }
 
-    // 2. Find User
-    const existingRes = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    // 2. Find the CONSUMER identity for this email (a colab account with the
+    // same email is a separate identity and must not absorb the OAuth login).
+    const existingRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`,
+      [email],
+    );
     let user = existingRes.rows[0];
 
     if (!user) {
@@ -385,11 +415,11 @@ export class AuthService {
         `INSERT INTO users (email, full_name, profile_image_url, role, is_verified, is_active, password_changed_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())
          RETURNING *`,
-        [email, data.full_name, data.profile_image_url, data.role, false, true]
+        [email, data.full_name, data.profile_image_url, role, false, true]
       );
       user = createRes.rows[0];
 
-      if (data.role === 'DRIVER') {
+      if (role === 'DRIVER') {
         await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
       }
     } else {
@@ -401,7 +431,7 @@ export class AuthService {
 
       // Dual-role support: create a driver profile for the existing user
       // so they can complete driver onboarding without losing their rider account.
-      if (data.role === 'DRIVER') {
+      if (role === 'DRIVER') {
         const driverCheck = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [user.id]);
         if (driverCheck.rows.length === 0) {
           await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
@@ -409,12 +439,12 @@ export class AuthService {
       }
     }
 
-    const active = await this.resolveActiveRole(user.id, data.role);
+    const active = await this.resolveActiveRole(user.id, role);
     const token = this.generateToken(user, active.role);
     const phoneNumberRequired = !user.phone_number;
     const onboarding = await this.getOnboardingStatus(user.id);
 
-    return { user, token, phone_number_required: phoneNumberRequired, onboarding };
+    return { user: sanitizeUser(user), token, phone_number_required: phoneNumberRequired, onboarding };
   }
 
   static async requestOTP(email: string) {
@@ -433,12 +463,21 @@ export class AuthService {
       throw new Error('Invalid or expired verification code');
     }
 
-    // Find User
-    const existingRes = await pool.query('SELECT * FROM users WHERE email = $1', [data.email]);
+    // Find the CONSUMER identity for this email (colab accounts with the same
+    // email are separate identities — never touched by consumer OTP flows).
+    const existingRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`,
+      [data.email],
+    );
     let user = existingRes.rows[0];
 
+    // Self-registration may only create RIDER/DRIVER accounts. For existing
+    // accounts the role hint may only add a driver profile — it can never
+    // rewrite users.role.
+    const role = data.role != null ? assertPublicSignupRole(data.role) : null;
+
     if (!user) {
-      if (!data.full_name || !data.role) {
+      if (!data.full_name || !role) {
         throw new Error('User not found. Please sign up.');
       }
 
@@ -447,11 +486,11 @@ export class AuthService {
         `INSERT INTO users (email, full_name, role, is_verified, is_active, password_changed_at)
          VALUES ($1, $2, $3, $4, $5, NOW())
          RETURNING *`,
-        [data.email, data.full_name, data.role, false, true]
+        [data.email, data.full_name, role, false, true]
       );
       user = createRes.rows[0];
 
-      if (data.role === 'DRIVER') {
+      if (role === 'DRIVER') {
         await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
       }
     } else {
@@ -462,7 +501,7 @@ export class AuthService {
       }
 
       // Dual-role support: create a driver profile for the existing user
-      if (data.role === 'DRIVER') {
+      if (role === 'DRIVER') {
         const driverCheck = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [user.id]);
         if (driverCheck.rows.length === 0) {
           await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
@@ -470,12 +509,12 @@ export class AuthService {
       }
     }
 
-    const active = await this.resolveActiveRole(user.id, data.role);
+    const active = await this.resolveActiveRole(user.id, role);
     const token = this.generateToken(user, active.role);
     const phoneNumberRequired = !user.phone_number;
     const onboarding = await this.getOnboardingStatus(user.id);
 
-    return { user, token, phone_number_required: phoneNumberRequired, onboarding };
+    return { user: sanitizeUser(user), token, phone_number_required: phoneNumberRequired, onboarding };
   }
 
   static async requestPasswordChange(userId: string, currentPassword: string) {
@@ -512,7 +551,10 @@ export class AuthService {
   }
 
   static async requestAdmin2FA(email: string) {
-    const userRes = await pool.query('SELECT role FROM users WHERE email = $1', [email]);
+    const userRes = await pool.query(
+      `SELECT role FROM users WHERE email = $1 AND role = 'ADMIN'`,
+      [email],
+    );
     const user = userRes.rows[0];
     if (!user || user.role !== UserRole.ADMIN) {
       throw new Error('Unauthorized');
@@ -528,7 +570,10 @@ export class AuthService {
       throw new Error('Invalid or expired verification code');
     }
 
-    const userRes = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const userRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1 AND role = 'ADMIN'`,
+      [email],
+    );
     const user = userRes.rows[0];
     if (!user || user.role !== UserRole.ADMIN) {
       throw new Error('Unauthorized');
@@ -536,7 +581,7 @@ export class AuthService {
 
     const token = this.generateToken(user);
     const trustedDeviceToken = this.generateTrustedDeviceToken(user);
-    return { user, token, trustedDeviceToken };
+    return { user: sanitizeUser(user), token, trustedDeviceToken };
   }
 
   /**
@@ -584,8 +629,6 @@ export class AuthService {
     userId: string,
     appRoleHint?: string | null,
   ): Promise<{ role: string; driverId: string | null; riderId: string | null }> {
-    const hint = (appRoleHint ?? '').toString().trim().toUpperCase();
-
     // If the user's database role is ADMIN, always resolve as ADMIN
     // regardless of the app hint. The hint-based logic below is for
     // dual-role (RIDER + DRIVER) users only.
@@ -593,7 +636,11 @@ export class AuthService {
       'SELECT role FROM users WHERE id = $1',
       [userId]
     );
-    if (userRes.rows.length > 0 && userRes.rows[0].role === UserRole.ADMIN) {
+    const dbRole = userRes.rows[0]?.role ?? null;
+
+    // A non-admin can never obtain an ADMIN session. ADMIN comes exclusively
+    // from the authoritative users.role column — never from a client hint.
+    if (dbRole === UserRole.ADMIN) {
       return { role: 'ADMIN', driverId: null, riderId: userId };
     }
 
@@ -607,24 +654,7 @@ export class AuthService {
     // authenticated user.
     const riderId = userId;
     const driverId = hasDriverProfile ? userId : null;
-
-    let role: string;
-    if (hint === 'ADMIN') {
-      role = 'ADMIN';
-    } else if (hint === 'DRIVER' && hasDriverProfile) {
-      role = 'DRIVER';
-    } else if (hint === 'RIDER') {
-      role = 'RIDER';
-    } else if (hint === 'DRIVER') {
-      // Driver app context but no driver profile yet — they are about to
-      // start driver onboarding. Resolve as RIDER-identity-bearing until the
-      // driver profile exists; the app routing will send them to onboarding.
-      role = 'RIDER';
-    } else if (hasDriverProfile) {
-      role = 'RIDER';
-    } else {
-      role = 'RIDER';
-    }
+    const role = resolveSessionRole(dbRole, hasDriverProfile, appRoleHint);
 
     return { role, driverId, riderId };
   }

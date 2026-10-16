@@ -187,18 +187,6 @@ export const geoapifyBreaker = circuitBreakerRegistry.get('geoapify', {
   timeout: 60_000,
 });
 
-export const osrmBreaker = circuitBreakerRegistry.get('osrm', {
-  failureThreshold: 5,
-  successThreshold: 2,
-  timeout: 30_000,
-});
-
-export const orsBreaker = circuitBreakerRegistry.get('ors', {
-  failureThreshold: 5,
-  successThreshold: 2,
-  timeout: 60_000,
-});
-
 export const twilioBreaker = circuitBreakerRegistry.get('twilio', {
   failureThreshold: 10,
   successThreshold: 3,

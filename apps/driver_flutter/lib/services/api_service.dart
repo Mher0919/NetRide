@@ -73,6 +73,9 @@ class ApiService {
 
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
+          // Keep the synchronous token cache warm for private-file image
+          // requests (Image.network headers).
+          AuthService.rememberJwt(token);
         } else if (!options.path.startsWith('auth/')) {
           debugPrint('[API DEBUG] ⚠️ NO TOKEN FOUND IN PREFS for ${options.path}');
         }

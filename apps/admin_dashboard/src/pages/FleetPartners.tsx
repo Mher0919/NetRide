@@ -22,6 +22,8 @@ import {
   Snackbar,
   Alert,
   InputAdornment,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -41,6 +43,7 @@ import {
   createFleetPortalAccount,
   resetFleetPortalPassword,
   disableFleetPortalAccount,
+  enableFleetPortalAccount,
 } from '../api/admin';
 
 const fmtUSD = (cents: number | null | undefined) =>
@@ -58,6 +61,7 @@ const FleetPartners: React.FC = () => {
   const [fleets, setFleets] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState('');
+  const [showTest, setShowTest] = React.useState(false);
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editTarget, setEditTarget] = React.useState<any>(null);
@@ -88,7 +92,7 @@ const FleetPartners: React.FC = () => {
     setLoading(true);
     try {
       setLoadError('');
-      const data = await listFleets();
+      const data = await listFleets({ includeTest: showTest });
       setFleets(data?.fleets ?? []);
     } catch (err) {
       console.error('Failed to fetch fleets', err);
@@ -97,7 +101,7 @@ const FleetPartners: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showTest]);
 
   React.useEffect(() => {
     fetchData();
@@ -239,7 +243,9 @@ const FleetPartners: React.FC = () => {
     try {
       const result = await createFleetPortalAccount(portalTarget.id, portalEmail.trim());
       setPortalResult(result);
+      setPortalTarget((t: any) => (t ? { ...t, portal_email: result.email ?? portalEmail.trim(), portal_is_active: true } : t));
       setSnack({ open: true, message: 'Fleet portal account created', severity: 'success' });
+      fetchData();
     } catch (err: any) {
       setSnack({ open: true, message: err?.response?.data?.error || 'Failed to create portal account', severity: 'error' });
     } finally {
@@ -252,8 +258,9 @@ const FleetPartners: React.FC = () => {
     setPortalLoading(true);
     try {
       const result = await resetFleetPortalPassword(portalTarget.id);
-      setPortalResult({ email: '', temporaryPassword: result.temporaryPassword });
+      setPortalResult({ email: portalTarget.portal_email ?? '', temporaryPassword: result.temporaryPassword });
       setSnack({ open: true, message: 'Fleet portal password reset', severity: 'success' });
+      fetchData();
     } catch (err: any) {
       setSnack({ open: true, message: err?.response?.data?.error || 'Failed to reset password', severity: 'error' });
     } finally {
@@ -267,9 +274,27 @@ const FleetPartners: React.FC = () => {
     try {
       await disableFleetPortalAccount(portalTarget.id);
       setPortalResult(null);
+      setPortalTarget((t: any) => (t ? { ...t, portal_is_active: false } : t));
       setSnack({ open: true, message: 'Fleet portal account disabled', severity: 'success' });
+      fetchData();
     } catch (err: any) {
       setSnack({ open: true, message: err?.response?.data?.error || 'Failed to disable portal account', severity: 'error' });
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleEnablePortal = async () => {
+    if (!portalTarget) return;
+    setPortalLoading(true);
+    try {
+      await enableFleetPortalAccount(portalTarget.id);
+      setPortalResult(null);
+      setPortalTarget((t: any) => (t ? { ...t, portal_is_active: true } : t));
+      setSnack({ open: true, message: 'Fleet portal account enabled', severity: 'success' });
+      fetchData();
+    } catch (err: any) {
+      setSnack({ open: true, message: err?.response?.data?.error || 'Failed to enable portal account', severity: 'error' });
     } finally {
       setPortalLoading(false);
     }
@@ -286,14 +311,21 @@ const FleetPartners: React.FC = () => {
             Fleet operators earn a configured share of the 40% platform pool. Driver share stays 60%.
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={openCreate}
-          sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none', fontWeight: 700 }}
-        >
-          New Fleet
-        </Button>
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <FormControlLabel
+            control={<Switch size="small" checked={showTest} onChange={(e) => setShowTest(e.target.checked)} />}
+            label="Show test accounts"
+            sx={{ '& .MuiFormControlLabel-label': { fontSize: 13, fontWeight: 600 } }}
+          />
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={openCreate}
+            sx={{ backgroundColor: '#5B7760', '&:hover': { backgroundColor: '#4A6352' }, textTransform: 'none', fontWeight: 700 }}
+          >
+            New Fleet
+          </Button>
+        </Stack>
       </Stack>
 
       {loadError && (
@@ -338,7 +370,12 @@ const FleetPartners: React.FC = () => {
                 fleets.map((f) => (
                   <TableRow key={f.id} hover>
                     <TableCell>
-                      <Typography sx={{ fontWeight: 700 }}>{f.name}</Typography>
+                      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                        <Typography sx={{ fontWeight: 700 }}>{f.name}</Typography>
+                        {Boolean(f.is_test) && (
+                          <Chip size="small" label="TEST" sx={{ height: 18, fontSize: 10, fontWeight: 800, bgcolor: '#FFF4E5', color: '#B26A00' }} />
+                        )}
+                      </Stack>
                       {(f.contact_name || f.contact_email) && (
                         <Typography variant="caption" color="text.secondary">
                           {f.contact_name ?? ''}{f.contact_name && f.contact_email ? ' · ' : ''}{f.contact_email ?? ''}
@@ -514,11 +551,41 @@ const FleetPartners: React.FC = () => {
         <DialogTitle>Fleet Portal Account · {portalTarget?.name}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              The fleet logs into the NetRide Partner Portal to track its earnings. A temporary
-              password is generated below — the fleet must change it on first login.
-            </Typography>
-            {!portalResult ? (
+            {portalTarget?.portal_email ? (
+              <>
+                <Typography variant="body2">
+                  Login: <b>{portalTarget.portal_email}</b>
+                </Typography>
+                <Typography variant="body2">
+                  Status:{' '}
+                  <Chip
+                    size="small"
+                    label={portalTarget.portal_is_active ? 'ACTIVE' : 'DISABLED'}
+                    sx={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      bgcolor: portalTarget.portal_is_active ? '#E5F0EB' : '#FCE9E9',
+                      color: portalTarget.portal_is_active ? '#5B7760' : '#C65A5A',
+                    }}
+                  />
+                </Typography>
+                {!portalTarget.portal_is_active && (
+                  <Typography variant="caption" color="text.secondary">
+                    This login is disabled. Re-enabling restores access for the fleet operator immediately.
+                  </Typography>
+                )}
+                <Typography variant="body2" color="text.secondary">
+                  The fleet logs into the NetRide Partner Portal to track its earnings. A reset
+                  password must be changed on next login.
+                </Typography>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                The fleet logs into the NetRide Partner Portal to track its earnings. A temporary
+                password is generated below — the fleet must change it on first login.
+              </Typography>
+            )}
+            {!portalTarget?.portal_email && !portalResult && (
               <>
                 <TextField
                   label="Portal login email"
@@ -536,7 +603,8 @@ const FleetPartners: React.FC = () => {
                   {portalLoading ? <CircularProgress size={20} color="inherit" /> : 'Create account'}
                 </Button>
               </>
-            ) : (
+            )}
+            {portalResult && (
               <Alert severity="info" variant="outlined">
                 <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Temporary password</Typography>
                 <Typography
@@ -553,16 +621,29 @@ const FleetPartners: React.FC = () => {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button
-            size="small"
-            color="error"
-            disabled={portalLoading}
-            onClick={handleDisablePortal}
-            sx={{ textTransform: 'none', mr: 'auto' }}
-          >
-            Disable account
-          </Button>
-          {portalResult && (
+          {portalTarget?.portal_email && portalTarget.portal_is_active && (
+            <Button
+              size="small"
+              color="error"
+              disabled={portalLoading}
+              onClick={handleDisablePortal}
+              sx={{ textTransform: 'none', mr: 'auto' }}
+            >
+              Disable account
+            </Button>
+          )}
+          {portalTarget?.portal_email && !portalTarget.portal_is_active && (
+            <Button
+              size="small"
+              color="success"
+              disabled={portalLoading}
+              onClick={handleEnablePortal}
+              sx={{ textTransform: 'none', mr: 'auto' }}
+            >
+              Enable account
+            </Button>
+          )}
+          {portalTarget?.portal_email && (
             <Button
               size="small"
               disabled={portalLoading}

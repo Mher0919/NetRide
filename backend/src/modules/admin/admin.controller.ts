@@ -6,6 +6,7 @@ import { pool } from '../../config/database';
 import { SpeedingDetector } from '../../services/speeding_detector';
 import { EmailService } from '../../services/email.service';
 import { StorageService } from '../../services/storage.service';
+import { validateUploadMime } from '../../security/file-policy';
 import { getIo } from '../../gateway/io-handle';
 import {
   getProfiles,
@@ -18,6 +19,8 @@ import { ReportService } from '../reporting/report.service';
 import { reportReasonLabel, PartyRole } from '../reporting/report.reasons';
 import { FinancialLedgerService } from '../../services/financial-ledger.service';
 import { AuditEventsService } from '../../services/audit-events.service';
+import { isTestEmail, TEST_EMAIL_SQL } from '../../utils/testUser';
+import { isPortalIdentity } from '../portal/portal-identities';
 
 export class AdminController {
   private static toJSON(value: any): any {
@@ -62,14 +65,28 @@ export class AdminController {
 
   static async listFleets(req: AuthRequest, res: Response) {
     try {
+      const includeTest = String(req.query.includeTest ?? '') === 'true';
+      const testSql = TEST_EMAIL_SQL(`COALESCE(pa.email, f.contact_email, '')`);
+      // Aggregates are scalar subqueries: joining drivers × snapshots would
+      // fan out and inflate both the driver count and the earnings sum.
       const fleets = await pool.query(
         `SELECT f.*,
-                COUNT(d.user_id)::int AS driver_count,
-                COALESCE(SUM((s.fleet_allocations->0->>'cents')::bigint), 0)::bigint AS fleet_earnings_cents
+                (SELECT COUNT(*)::int FROM drivers d WHERE d.fleet_id = f.id) AS driver_count,
+                (SELECT COALESCE(SUM((s.fleet_allocations->0->>'cents')::bigint), 0)::bigint
+                   FROM ride_price_snapshots s WHERE s.driver_fleet_id = f.id) AS fleet_earnings_cents,
+                pa.email AS portal_email,
+                pa.is_active AS portal_is_active,
+                pa.user_active AS portal_user_active,
+                ${testSql} AS is_test
          FROM fleet_partners f
-         LEFT JOIN drivers d ON d.fleet_id = f.id
-         LEFT JOIN ride_price_snapshots s ON s.driver_fleet_id = f.id
-         GROUP BY f.id
+         LEFT JOIN LATERAL (
+           SELECT u.email, fpa.is_active, u.is_active AS user_active
+           FROM fleet_portal_accounts fpa
+           JOIN users u ON u.id = fpa.user_id
+           WHERE fpa.fleet_id = f.id
+           LIMIT 1
+         ) pa ON TRUE
+         ${includeTest ? '' : `WHERE NOT ${testSql}`}
          ORDER BY f.name`,
       );
       res.json({ fleets: fleets.rows });
@@ -188,7 +205,10 @@ export class AdminController {
            LIMIT 1`,
           [portalUserId],
         );
-        if (shared.rows.length === 0) {
+        // Deactivate the lingering login only when it is a colab identity
+        // that no other portal account uses. Driver/rider/admin identities
+        // are never touched (they cannot own portal accounts post-058).
+        if (shared.rows.length === 0 && (await isPortalIdentity(portalUserId, client))) {
           await client.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [portalUserId]);
         }
       }
@@ -322,11 +342,36 @@ export class AdminController {
         where.role = role as UserRole;
       }
     }
-    // Test users are auto-generated E2E accounts (@test.netride). They flood
-    // the first pages (sorted by created_at DESC) and bury real users, so
-    // they are hidden by default; admins opt in with includeTest=true.
+    // Test accounts (E2E/sandbox/dev seeds) flood the first pages (sorted by
+    // created_at DESC) and bury real users, so they are hidden by default;
+    // admins opt in with includeTest=true. Keep this in sync with
+    // TEST_EMAIL_SQL in utils/testUser.ts (Prisma cannot express a regex, so
+    // the rule is mirrored with boundary fragments).
     if (includeTest !== 'true') {
-      where.NOT = { email: { endsWith: '@test.netride' } };
+      const testFragments = [
+        '-test', '_test', '.test', '+test',
+        '-sandbox', '_sandbox', '.sandbox', '+sandbox',
+        '-dev', '_dev', '.dev', '+dev',
+        '-e2e', '_e2e', '.e2e', '+e2e',
+      ].map((fragment) => ({ email: { contains: fragment, mode: 'insensitive' as const } }));
+      const testPrefixes = [
+        'test@', 'test-', 'test_', 'test.', 'test+',
+        'sandbox@', 'sandbox-', 'sandbox_', 'sandbox.', 'sandbox+',
+        'dev@', 'dev-', 'dev_', 'dev.', 'dev+',
+        'e2e@', 'e2e-', 'e2e_', 'e2e.', 'e2e+',
+      ].map((prefix) => ({ email: { startsWith: prefix, mode: 'insensitive' as const } }));
+      where.NOT = {
+        OR: [
+          { email: { endsWith: '@netride.test', mode: 'insensitive' } },
+          { email: { endsWith: '@netride.dev', mode: 'insensitive' } },
+          { email: { endsWith: '@test.netride', mode: 'insensitive' } },
+          { email: { endsWith: '@test.netride.com', mode: 'insensitive' } },
+          { email: { endsWith: '@example.com', mode: 'insensitive' } },
+          { email: { endsWith: '@example.org', mode: 'insensitive' } },
+          ...testFragments,
+          ...testPrefixes,
+        ],
+      };
     }
     if (status) where.verification_status = status as VerificationStatus;
     if (search) {
@@ -393,6 +438,8 @@ export class AdminController {
           }));
         }
       }
+
+      users = users.map((u: any) => ({ ...u, is_test: isTestEmail(u.email) }));
 
       res.json(AdminController.toJSON({
         users,
@@ -2912,11 +2959,22 @@ export class AdminController {
       const fileType = field.replace(/_url$/, '');
       const adminId = req.user?.id || id;
 
+      const normalizedMime = validateUploadMime(mimetype);
+      if (!normalizedMime) {
+        return res.status(415).json({ error: 'Unsupported file type. Only JPEG, PNG, WebP and HEIC images are accepted.' });
+      }
+
+      // Only the public profile photo is stored publicly. Every verification
+      // document goes to the private bucket and is served exclusively through
+      // the authorized /api/files/:id route.
+      const visibility = field === 'profile_image_url' ? 'public' : 'private';
+
       const { id: fileId, url } = await StorageService.upload(buffer, {
         userId: id,
         fileType,
         originalName: field,
-        mimetype,
+        mimetype: normalizedMime,
+        visibility,
       });
 
       // Update the database with the portable /api/files/:id URL

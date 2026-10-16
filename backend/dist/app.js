@@ -51,6 +51,8 @@ const auth_service_1 = require("./modules/auth/auth.service");
 const socket_gateway_1 = require("./gateway/socket.gateway");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
 const identifyUser_middleware_1 = require("./middleware/identifyUser.middleware");
+const auth_middleware_1 = require("./middleware/auth.middleware");
+const fileAccessToken_middleware_1 = require("./middleware/fileAccessToken.middleware");
 const sentry_1 = require("./observability/sentry");
 const logger_1 = require("./observability/logger");
 const pinoHttp_1 = require("./middleware/pinoHttp");
@@ -200,8 +202,14 @@ app.use(pinoHttp_1.requestLogger);
 // Must run BEFORE rate-limit so authenticated requests use user-based keys.
 app.use(identifyUser_middleware_1.identifyUser);
 app.use(rateLimit_middleware_1.rateLimitMiddleware);
-// Serve static files from the uploads directory
-app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../uploads')));
+// Admin JSON responses may embed private document references; this mints
+// short-lived, purpose-scoped access tokens for the authenticated admin
+// (public profile photos are left untouched). MUST run after identifyUser so
+// req.user is populated.
+app.use('/api/admin', fileAccessToken_middleware_1.attachPrivateFileAccessTokens);
+// NOTE: the old anonymous `express.static` mount on /uploads was removed.
+// Every stored file must pass the resource-level authorization in
+// /api/files/:id — a static mount bypasses it entirely.
 // Backwards-compatible health endpoint (same shape as before).
 // New load-balancer-friendly endpoints live at /health/live and
 // /health/ready (see health.controller.ts).
@@ -311,7 +319,9 @@ app.use('/api', portal_routes_1.default);
 app.use('/api/admin', admin_sponsor_routes_1.default);
 app.use('/api/payments', payments_routes_1.default);
 app.use('/api/admin/payments', admin_payments_routes_1.default);
-app.post('/api/upload', upload_service_1.UploadService.upload);
+// Uploads require an authenticated identity: the owner of the file is taken
+// from the verified token, never from the request body.
+app.post('/api/upload', auth_middleware_1.authMiddleware, upload_service_1.UploadService.upload);
 // Global Error Handler
 app.use((err, req, res, next) => {
     console.error('[SERVER] 💥 Unhandled Error:', err);
@@ -661,6 +671,16 @@ async function runMigrations() {
             await database_1.pool.query(schema);
             console.log('✅ Notifications + heatmap schema (040) applied');
         }
+        // File-security classification + RLS hardening (057). Guarded on the
+        // storage_files.visibility column this migration introduces.
+        const hasFileVisibility = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'storage_files' AND column_name = 'visibility'");
+        if (hasFileVisibility.rowCount === 0) {
+            console.log('⚡ Applying file-security + RLS hardening schema (057)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/057_file_security_and_rls_hardening.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ File-security + RLS hardening schema (057) applied');
+        }
         console.log('🚀 All migrations completed');
     }
     catch (err) {
@@ -739,16 +759,6 @@ function startServer() {
                 // silent — the endpoint may not be ready yet during cold start
             });
         }, 60000);
-        // Ping OSRM every 60s to prevent its free-tier service from spinning down.
-        if (env_1.env.OSRM_BASE_URL) {
-            const osrmUrl = `${env_1.env.OSRM_BASE_URL}/health`;
-            setInterval(() => {
-                const client = osrmUrl.startsWith('https') ? require('https') : require('http');
-                client.get(osrmUrl, (res) => {
-                    res.resume();
-                }).on('error', () => { });
-            }, 60000);
-        }
         // Pre-cache routes for the launch market (Hollywood / UCLA / Beverly Hills
         // / Westwood). preCacheHotZones computes the full grid — the routing
         // service caches the results so future identical requests are instant.

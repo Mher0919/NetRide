@@ -100,8 +100,11 @@ export interface Trip {
     total_rides: number;
   };
   driver_info?: {
+    id: string;
     name: string;
     email?: string;
+    /** Public profile photo of the assigned driver (never a document). */
+    photo_url?: string;
     rating: number;
     total_rides: number;
     vehicle?: string;

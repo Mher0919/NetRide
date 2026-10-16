@@ -25,6 +25,8 @@ import {
   Alert,
   ToggleButton,
   ToggleButtonGroup,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
@@ -63,6 +65,7 @@ const Partners: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
+  const [showTest, setShowTest] = React.useState(false);
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -123,7 +126,7 @@ const Partners: React.FC = () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const data = await listPartners({ search, status: statusFilter });
+      const data = await listPartners({ search, status: statusFilter, includeTest: showTest });
       setPartners(data?.partners ?? []);
     } catch (err) {
       console.error('Failed to fetch partners', err);
@@ -131,7 +134,7 @@ const Partners: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter]);
+  }, [search, statusFilter, showTest]);
 
   React.useEffect(() => {
     const id = window.setTimeout(fetchData, 250);
@@ -387,6 +390,11 @@ const Partners: React.FC = () => {
           <option value="INACTIVE">Inactive</option>
           <option value="ARCHIVED">Archived</option>
         </TextField>
+        <FormControlLabel
+          control={<Switch size="small" checked={showTest} onChange={(e) => setShowTest(e.target.checked)} />}
+          label="Show test accounts"
+          sx={{ ml: { sm: 'auto' }, '& .MuiFormControlLabel-label': { fontSize: 13, fontWeight: 600 } }}
+        />
       </Stack>
 
       {loadError && (
@@ -437,7 +445,14 @@ const Partners: React.FC = () => {
                   const c = statusColors[p.status] ?? statusColors.INACTIVE;
                   return (
                     <TableRow key={p.id} hover onClick={() => openPartner(p)} sx={{ cursor: 'pointer' }}>
-                      <TableCell sx={{ fontWeight: 600 }}>{p.name}</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>
+                        <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                          <span>{p.name}</span>
+                          {Boolean(p.is_test) && (
+                            <Chip size="small" label="TEST" sx={{ height: 18, fontSize: 10, fontWeight: 800, bgcolor: '#FFF4E5', color: '#B26A00' }} />
+                          )}
+                        </Stack>
+                      </TableCell>
                       <TableCell>{p.business_type}</TableCell>
                       <TableCell>
                         <Chip size="small" label={p.status} sx={{ bgcolor: c.bg, color: c.fg, fontWeight: 700 }} />
@@ -643,6 +658,7 @@ const Partners: React.FC = () => {
         anchor="right"
         open={!!selected}
         onClose={() => setSelected(null)}
+        sx={{ zIndex: (t) => t.zIndex.drawer + 2 }}
         slotProps={{ paper: { sx: { width: { xs: '100%', sm: 'min(520px, 100vw)' }, maxWidth: '100%' } } }}
       >
         {selected && (

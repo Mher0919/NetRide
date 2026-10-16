@@ -220,9 +220,9 @@ Alternatively use the Dashboard → Developer → Events list in the browser.
 
 ```bash
 cd backend
-node scripts/seed-payment-fixtures.cjs   # sponsor + 2 riders + 2 drivers (@netride.test)
-node scripts/reset-payment-fixtures.cjs  # wipe them any time
-node run-payments-integration.cjs        # offline money-flow tests (fake Stripe, real DB)
+npm run fixtures:seed-payment        # sponsor + 2 riders + 2 drivers (@netride.test)
+npm run fixtures:reset-payment       # wipe them any time
+npm run test:integration:payments    # offline money-flow tests (fake Stripe, real DB)
 ```
 
 > The seeded `@netride.test` accounts are exempt from the saved-card booking
@@ -238,7 +238,7 @@ npm --prefix ../apps/admin_dashboard run dev
 npm --prefix ../apps/sponsor_portal run dev
 # rider app: flutter run -d <device>  (use the seeded test credentials)
 
-node run-stripe-e2e.cjs                   # real test-mode Stripe flow (needs test keys)
+npm run e2e:stripe                       # real test-mode Stripe flow (needs test keys)
 ```
 
 ### 3.6 Test cards (Stripe official — TEST values only, no real money moves)
@@ -260,9 +260,9 @@ https://docs.stripe.com/testing
 
 | Suite | Command | Coverage | Status |
 |---|---|---|---|
-| Unit (255 tests) | `cd backend && node run-tests.cjs` | fare breakdown math, additional-charge due, settlement states, Stripe env interlock, gateway injection guard (+ pre-existing suites) | ✅ run and green |
-| Settlement integration (54 asserts) | `cd backend && node run-payments-integration.cjs` | $10 special success (rider $5 + sponsor $5, driver $6 from original fare, no double-pay), expiry (rider charged $5 once, sponsor $0), decline + retry, ordinary ride, consent/security | ✅ run and green (fake Stripe adapter, real Postgres) |
-| Real Stripe sandbox E2E | `cd backend && node run-stripe-e2e.cjs` | customer, top-up session, off-session charge with test card, webhook application | ⛔ not run — requires sandbox credentials (script self-skips without `sk_test_…`) |
+| Unit (255 tests) | `cd backend && npm test` | fare breakdown math, additional-charge due, settlement states, Stripe env interlock, gateway injection guard (+ pre-existing suites) | ✅ run and green |
+| Settlement integration (54 asserts) | `cd backend && npm run test:integration:payments` | $10 special success (rider $5 + sponsor $5, driver $6 from original fare, no double-pay), expiry (rider charged $5 once, sponsor $0), decline + retry, ordinary ride, consent/security | ✅ run and green (fake Stripe adapter, real Postgres) |
+| Real Stripe sandbox E2E | `cd backend && npm run e2e:stripe` | customer, top-up session, off-session charge with test card, webhook application | ⛔ not run — requires sandbox credentials (script self-skips without `sk_test_…`) |
 
 The fake gateway only activates via `setStripeGatewayForTests`, which throws
 when `NODE_ENV=production` — a test-only adapter can never be active in
@@ -382,13 +382,13 @@ weekly withdrawal windows are **unchanged**.
 
 ### 7.5 Verification
 
-- `cd backend && node run-stripe-e2e.cjs` now covers the in-app flows against
+- `cd backend && npm run e2e:stripe` now covers the in-app flows against
   real test-mode Stripe: SetupIntent + ephemeral key, server-side setup
   confirmation, saved-method list/default/detach, off-session charge,
   sponsor card entry + funding intent + budget credit (and the webhook
   ordering race where the status flips before the credit claim), and driver
   Connect gating. Run: **29 passed / 0 failed** (test mode, `sk_test_…`).
-- `cd backend && node run-colab-e2e.cjs` boots the real backend and drives
+- `cd backend && npm run e2e:colab` boots the real backend and drives
   the exact HTTP surface the Colab dashboard calls with real JWTs and real
   Stripe test-mode tokens: card-setup + confirm, method list/default/detach
   (default-not-removable rule), in-dashboard funding + budget credit,

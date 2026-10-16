@@ -7,12 +7,25 @@
 // (cold start, after a reconnect, etc).
 
 import { Router } from 'express';
-import { authMiddleware } from '../../middleware/auth.middleware';
+import { authMiddleware, AuthRequest } from '../../middleware/auth.middleware';
 import { NavigationService } from '../../services/navigation.service';
 import { RerouteService } from '../../services/reroute.service';
 import { pool } from '../../config/database';
 
 const router = Router();
+
+/**
+ * Resource-level authorization: only the rider or the assigned driver of a
+ * trip may read/refresh its route. Authentication alone (or knowledge of a
+ * trip UUID) is never sufficient.
+ */
+async function isTripParty(tripId: string, userId: string): Promise<boolean> {
+  const res = await pool.query(
+    'SELECT 1 FROM rides WHERE id = $1 AND (rider_id = $2 OR driver_id = $2)',
+    [tripId, userId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
 
 /**
  * POST /api/navigation/reroute
@@ -25,7 +38,7 @@ const router = Router();
  * The RerouteService decides between: stored ride leg → OD route cache
  * → Google Routes API (last resort).
  */
-router.post('/reroute', authMiddleware, async (req, res) => {
+router.post('/reroute', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { tripId, leg, lat, lng } = req.body || {};
     if (!tripId || !leg || typeof lat !== 'number' || typeof lng !== 'number') {
@@ -37,13 +50,10 @@ router.post('/reroute', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "leg must be 'pickup' or 'destination'" });
     }
 
-    // Look up the leg endpoint from PG.
-    const rideRes = await pool.query(
-      'SELECT pickup_lat, pickup_lng, destination_lat, destination_lng FROM rides WHERE id = $1',
-      [tripId]
-    );
-    const ride = rideRes.rows[0];
-    if (!ride) return res.status(404).json({ error: 'Trip not found' });
+    // Only a party to the trip may refresh its route.
+    if (!(await isTripParty(tripId, req.user!.id))) {
+      return res.status(403).json({ error: 'You are not a party to this trip.' });
+    }
 
     // Reroute through the decision ladder (stored leg → OD cache → Google).
     const route = await RerouteService.reroute(tripId, leg, lat, lng);
@@ -59,7 +69,7 @@ router.post('/reroute', authMiddleware, async (req, res) => {
  * GET /api/navigation/cached?tripId=...&leg=...
  * Returns the cached route leg if it exists, else { route: null }.
  */
-router.get('/cached', authMiddleware, async (req, res) => {
+router.get('/cached', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const tripId = req.query.tripId as string | undefined;
     const leg = req.query.leg as string | undefined;
@@ -68,6 +78,11 @@ router.get('/cached', authMiddleware, async (req, res) => {
     }
     if (leg !== 'pickup' && leg !== 'destination') {
       return res.status(400).json({ error: "leg must be 'pickup' or 'destination'" });
+    }
+
+    // Only a party to the trip may read its cached route.
+    if (!(await isTripParty(tripId, req.user!.id))) {
+      return res.status(403).json({ error: 'You are not a party to this trip.' });
     }
 
     const route = await NavigationService.getCachedRouteLeg(tripId, leg);

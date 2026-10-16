@@ -9,3 +9,8 @@ GoogleService-Info.plist
 
 uploads/
 backend/uploads/
+
+# Test run artifacts
+backend/*.log
+tests/**/*.log
+tests/**/artifacts/

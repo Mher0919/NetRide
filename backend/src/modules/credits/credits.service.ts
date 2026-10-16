@@ -122,6 +122,43 @@ export class CreditsService {
         [userId],
       );
 
+      // Claim the ledger row FIRST (idempotency gate) — mirrors
+      // WalletService.post. Concurrent retries with the same key serialize
+      // on the unique index; the loser rolls back without mutating balance.
+      const tx = await useClient.query(
+        `INSERT INTO credit_transactions
+           (user_id, amount_cents, type, reference_type, reference_id, ride_id,
+            description, balance_after_cents, idempotency_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8)
+         ON CONFLICT (idempotency_key) DO NOTHING
+         RETURNING id`,
+        [
+          userId,
+          delta,
+          type,
+          opts.referenceType ?? null,
+          opts.referenceId ?? null,
+          opts.rideId ?? null,
+          opts.description ?? null,
+          opts.idempotencyKey ?? null,
+        ],
+      );
+
+      if (opts.idempotencyKey && (tx.rowCount ?? 0) === 0) {
+        await useClient.query('ROLLBACK');
+        began = false;
+        const existing = await pool.query(
+          `SELECT id, balance_after_cents FROM credit_transactions WHERE idempotency_key = $1 LIMIT 1`,
+          [opts.idempotencyKey],
+        );
+        return {
+          balance_cents: Number(existing.rows[0]?.balance_after_cents ?? 0),
+          delta_cents: delta,
+          transaction_id: existing.rows[0]?.id ?? '',
+          applied: true,
+        };
+      }
+
       if (delta < 0) {
         // Guarded debit — refuses to overdraw the account.
         const upd = await useClient.query(
@@ -152,25 +189,12 @@ export class CreditsService {
       );
       const balanceAfter = Number(balRes.rows[0].balance_cents);
 
-      const tx = await useClient.query(
-        `INSERT INTO credit_transactions
-           (user_id, amount_cents, type, reference_type, reference_id, ride_id,
-            description, balance_after_cents, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (idempotency_key) DO NOTHING
-         RETURNING id`,
-        [
-          userId,
-          delta,
-          type,
-          opts.referenceType ?? null,
-          opts.referenceId ?? null,
-          opts.rideId ?? null,
-          opts.description ?? null,
-          balanceAfter,
-          opts.idempotencyKey ?? null,
-        ],
-      );
+      if (tx.rows[0]?.id) {
+        await useClient.query(
+          `UPDATE credit_transactions SET balance_after_cents = $2 WHERE id = $1`,
+          [tx.rows[0].id, balanceAfter],
+        );
+      }
 
       await useClient.query('COMMIT');
       began = false;

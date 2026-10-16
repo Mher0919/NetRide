@@ -104,10 +104,13 @@ const partnerMiddleware = async (req, res, next) => {
         return res.status(403).json({ error: 'Access denied. Partner account required.' });
     }
     try {
+        // Strict identity link only: a contact-email fallback would let an
+        // account of another class (e.g. a rider with the same email as a
+        // partner's contact email) resolve someone else's partner dashboard.
         const result = await database_1.pool.query(`SELECT p.id, p.name, p.status, p.must_change_password
        FROM partners p
-       WHERE p.user_id = $1 OR p.contact_email ILIKE $2
-       LIMIT 1`, [req.user.id, req.user.email]);
+       WHERE p.user_id = $1
+       LIMIT 1`, [req.user.id]);
         if (result.rows.length === 0) {
             return res.status(403).json({ error: 'Partner account not found.' });
         }

@@ -50,6 +50,35 @@ export class TwilioService {
     return `trip-${tripId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 60)}`;
   }
 
+  /**
+   * Validates the `X-Twilio-Signature` header on webhook requests
+   * (call/connect TwiML + call/status callback). Fails closed: missing
+   * credentials or missing/invalid signature returns false.
+   */
+  static validateSignature(req: any): boolean {
+    const authToken = env.TWILIO_AUTH_TOKEN;
+    if (!authToken) return false;
+    const signature = req.headers?.['x-twilio-signature'];
+    if (!signature || typeof signature !== 'string') return false;
+
+    const forwardedProto = String(req.headers?.['x-forwarded-proto'] ?? '').split(',')[0].trim();
+    const forwardedHost = String(req.headers?.['x-forwarded-host'] ?? '').split(',')[0].trim();
+    const protocol = forwardedProto || req.protocol || 'https';
+    const host = forwardedHost || req.get?.('host') || '';
+    if (!host) return false;
+    const url = `${protocol}://${host}${req.originalUrl}`;
+
+    const params: Record<string, any> = {};
+    for (const [key, value] of Object.entries(req.query ?? {})) params[key] = value;
+    for (const [key, value] of Object.entries(req.body ?? {})) params[key] = value;
+
+    try {
+      return twilio.validateRequest(authToken, signature, url, params);
+    } catch {
+      return false;
+    }
+  }
+
   static mintAccessToken(userId: string, tripId: string): CallToken {
     if (!this.isConfigured()) {
       throw new Error(

@@ -49,6 +49,7 @@ class DriverInfo {
   final String? email;
   final String? vehicle;
   final String? plate;
+  final String? photoUrl;
   final double rating;
   final int totalRides;
   final Location? location;
@@ -59,6 +60,7 @@ class DriverInfo {
     this.email,
     this.vehicle,
     this.plate,
+    this.photoUrl,
     this.rating = 5.0,
     this.totalRides = 0,
     this.location,
@@ -73,6 +75,7 @@ class DriverInfo {
       email: json['email'],
       vehicle: json['vehicle']?.toString(),
       plate: json['plate']?.toString(),
+      photoUrl: json['photo_url']?.toString(),
       rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
       totalRides: json['totalRides'] as int? ?? 0,
       location: json['location'] != null ? Location.fromJson(json['location']) : null,

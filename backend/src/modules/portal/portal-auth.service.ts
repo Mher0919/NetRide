@@ -20,6 +20,7 @@ import { env } from '../../config/env';
 import { redis } from '../../config/redis';
 import { AuditEventsService } from '../../services/audit-events.service';
 import { OTPService } from '../auth/otp.service';
+import { findPortalIdentityByEmail, type PortalIdentity } from './portal-identities';
 
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL_DAYS = 30;
@@ -55,24 +56,43 @@ export interface PortalSession {
 
 const PORTAL_PRIORITY: PortalType[] = ['SPONSOR', 'PARTNER', 'FLEET'];
 
+const PORTAL_ACCESS_DISABLED =
+  'Your login is disabled. Contact NetRide support to restore access.';
+const PORTAL_ACCESS_NOT_ENABLED =
+  'Portal access is not enabled for this account. Contact NetRide support.';
+const IDENTITY_DISABLED =
+  'Your account is disabled. Contact NetRide support.';
+
+interface PortalRowState {
+  type: PortalType;
+  id: string;
+  name: string;
+  mustChangePassword: boolean;
+  blocked: boolean;
+}
+
 /**
- * All portal accounts attached to a user. Row-level status rules:
- *  - SPONSOR: portal account must be active; SUSPENDED sponsor blocks
- *    access unless the password still has to be changed.
- *  - PARTNER: partner must be ACTIVE unless must_change_password.
- *  - FLEET: portal account + fleet must be active unless must_change_password.
+ * All portal accounts attached to a PORTAL identity — including disabled
+ * ones, so callers can distinguish "no portal access" from "access
+ * disabled". Row-level status rules:
+ *  - SPONSOR: a disabled portal row is a hard block; a SUSPENDED sponsor
+ *    blocks access unless the password still has to be changed.
+ *  - PARTNER: partner must be ACTIVE unless must_change_password. Partners
+ *    are disabled/re-enabled via their partner status (no separate row flag).
+ *  - FLEET: a disabled portal row is a hard block; an inactive fleet blocks
+ *    access unless must_change_password.
  */
-async function resolvePortals(userId: string, email: string): Promise<PortalInfo[]> {
+async function resolvePortalStates(userId: string, email: string): Promise<PortalRowState[]> {
   const res = await pool.query(
     `SELECT type, id, name, must_change_password, blocked
      FROM (
        SELECT 'SPONSOR'::text AS type, spa.sponsor_id::text AS id, u.full_name AS name,
               spa.must_change_password,
-              (s.status = 'SUSPENDED' AND NOT spa.must_change_password) AS blocked
+              ((NOT spa.is_active) OR (s.status = 'SUSPENDED' AND NOT spa.must_change_password)) AS blocked
        FROM sponsor_portal_accounts spa
        JOIN sponsors s ON s.id = spa.sponsor_id
        JOIN users u ON u.id = spa.user_id
-       WHERE spa.user_id = $1 AND spa.is_active = TRUE
+       WHERE spa.user_id = $1
        UNION ALL
        SELECT 'PARTNER'::text AS type, p.id::text AS id, p.name AS name,
               p.must_change_password,
@@ -82,7 +102,7 @@ async function resolvePortals(userId: string, email: string): Promise<PortalInfo
        UNION ALL
        SELECT 'FLEET'::text AS type, fpa.fleet_id::text AS id, f.name AS name,
               fpa.must_change_password,
-              ((NOT fpa.is_active OR NOT f.is_active) AND NOT fpa.must_change_password) AS blocked
+              ((NOT fpa.is_active) OR (NOT f.is_active AND NOT fpa.must_change_password)) AS blocked
        FROM fleet_portal_accounts fpa
        JOIN fleet_partners f ON f.id = fpa.fleet_id
        WHERE fpa.user_id = $1
@@ -91,23 +111,38 @@ async function resolvePortals(userId: string, email: string): Promise<PortalInfo
     [userId],
   );
 
-  return res.rows
-    .filter((r: any) => !r.blocked)
-    .map((r: any) => ({
-      type: r.type as PortalType,
+  return res.rows.map((r: any) => ({
+    type: r.type as PortalType,
+    id: r.id,
+    name: r.name,
+    mustChangePassword: r.must_change_password,
+    blocked: r.blocked,
+  }));
+}
+
+/** Unblocked portal accounts for a portal identity. */
+async function resolvePortals(userId: string, email: string): Promise<PortalInfo[]> {
+  const states = await resolvePortalStates(userId, email);
+  return states
+    .filter((r) => !r.blocked)
+    .map((r) => ({
+      type: r.type,
       id: r.id,
       name: r.name,
       email,
-      mustChangePassword: r.must_change_password,
+      mustChangePassword: r.mustChangePassword,
     }));
 }
 
 export class PortalAuthService {
   /** Issues access + refresh tokens for a resolved portal user (shared by login + 2FA). */
-  private static async issueSession(user: { id: string; email: string; role: string }): Promise<PortalSession> {
-    const portals = await resolvePortals(user.id, user.email);
+  private static async issueSession(
+    user: { id: string; email: string; role: string },
+    resolved?: PortalInfo[],
+  ): Promise<PortalSession> {
+    const portals = resolved ?? (await resolvePortals(user.id, user.email));
     if (portals.length === 0) {
-      throw new Error('Portal access is not enabled for this account. Contact NetRide support.');
+      throw new Error(PORTAL_ACCESS_NOT_ENABLED);
     }
 
     const token = jwt.sign(
@@ -165,21 +200,28 @@ export class PortalAuthService {
     const normalizedEmail = String(email ?? '').trim().toLowerCase();
     if (!normalizedEmail || !password) throw new Error('Email and password are required');
 
-    const userRes = await pool.query(
-      `SELECT id, email, password_hash, is_active, role FROM users WHERE email = $1`,
-      [normalizedEmail],
-    );
-    const user = userRes.rows[0];
+    // Resolve ONLY the colab (portal-class) identity for this email. A driver
+    // or rider account with the same email is a different identity and can
+    // neither authenticate here nor influence this login's outcome.
+    const user = await findPortalIdentityByEmail(normalizedEmail);
     if (!user || !user.password_hash) throw new Error('Invalid email or password');
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) throw new Error('Invalid email or password');
-    if (!user.is_active) throw new Error('Your account is disabled. Contact NetRide support.');
+    if (!user.is_active) throw new Error(IDENTITY_DISABLED);
 
-    const portals = await resolvePortals(user.id, user.email);
-    if (portals.length === 0) {
-      throw new Error('Portal access is not enabled for this account. Contact NetRide support.');
-    }
+    const states = await resolvePortalStates(user.id, user.email);
+    if (states.length === 0) throw new Error(PORTAL_ACCESS_NOT_ENABLED);
+    const portals: PortalInfo[] = states
+      .filter((s) => !s.blocked)
+      .map((s) => ({
+        type: s.type,
+        id: s.id,
+        name: s.name,
+        email: user.email,
+        mustChangePassword: s.mustChangePassword,
+      }));
+    if (portals.length === 0) throw new Error(PORTAL_ACCESS_DISABLED);
 
     // 2FA — skip the emailed code only for a remembered device (token valid ≤30 days).
     let isTrusted = false;
@@ -208,7 +250,7 @@ export class PortalAuthService {
       };
     }
 
-    return this.issueSession(user);
+    return this.issueSession(user, portals);
   }
 
   /**
@@ -241,12 +283,13 @@ export class PortalAuthService {
 
     const { userId } = JSON.parse(pendingData);
     const userRes = await pool.query(
-      `SELECT id, email, is_active, role FROM users WHERE id = $1 AND email = $2`,
+      `SELECT id, email, is_active, role FROM users
+       WHERE id = $1 AND email = $2 AND role IN ('SPONSOR','PARTNER','FLEET')`,
       [userId, normalizedEmail],
     );
     const user = userRes.rows[0];
     if (!user) throw new Error('Invalid email');
-    if (!user.is_active) throw new Error('Your account is disabled. Contact NetRide support.');
+    if (!user.is_active) throw new Error(IDENTITY_DISABLED);
 
     const session = await this.issueSession(user);
     const trustedDeviceToken = this.generateTrustedDeviceToken(user);
@@ -260,7 +303,8 @@ export class PortalAuthService {
     const parsed = JSON.parse(data);
 
     const userRes = await pool.query(
-      `SELECT id, email, is_active, role FROM users WHERE id = $1`,
+      `SELECT id, email, is_active, role FROM users
+       WHERE id = $1 AND role IN ('SPONSOR','PARTNER','FLEET')`,
       [parsed.userId],
     );
     const user = userRes.rows[0];
@@ -269,7 +313,16 @@ export class PortalAuthService {
       throw new Error('Account is disabled');
     }
 
-    const portals = await resolvePortals(user.id, user.email);
+    const states = await resolvePortalStates(user.id, user.email);
+    const portals = states
+      .filter((s) => !s.blocked)
+      .map((s) => ({
+        type: s.type,
+        id: s.id,
+        name: s.name,
+        email: user.email,
+        mustChangePassword: s.mustChangePassword,
+      }));
     if (portals.length === 0) {
       await redis.del(`portal_refresh:${refreshToken}`);
       throw new Error('Portal access is not enabled for this account.');

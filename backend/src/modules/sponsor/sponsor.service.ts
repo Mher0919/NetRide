@@ -23,6 +23,8 @@ import { pool } from '../../config/database';
 import { centsValue } from '../../services/financial-ledger.service';
 import { AuditEventsService } from '../../services/audit-events.service';
 import { env } from '../../config/env';
+import { findPortalIdentityByEmail, isPortalIdentity } from '../portal/portal-identities';
+import { TEST_EMAIL_SQL, isTestEmail } from '../../utils/testUser';
 
 export type SponsorshipDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
 export type SponsorStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'DEPLETED';
@@ -553,7 +555,10 @@ export class SponsorService {
            LIMIT 1`,
           [portalUserId],
         );
-        if (shared.rows.length === 0) {
+        // Deactivate the lingering login only when it is a colab identity
+        // that no other portal account uses. Driver/rider/admin identities
+        // are never touched (they cannot own portal accounts post-058).
+        if (shared.rows.length === 0 && (await isPortalIdentity(portalUserId, client))) {
           await client.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [portalUserId]);
         }
       }
@@ -674,7 +679,7 @@ export class SponsorService {
 
   // --------------------------------------------------------------- Analytics
 
-  static async listSponsors(opts: { search?: string; status?: string; limit?: number; offset?: number } = {}) {
+  static async listSponsors(opts: { search?: string; status?: string; limit?: number; offset?: number; includeTest?: boolean } = {}) {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
     const offset = Math.max(opts.offset ?? 0, 0);
     const params: unknown[] = [];
@@ -687,15 +692,23 @@ export class SponsorService {
       params.push(opts.status.toUpperCase());
       where.push(`status = $${params.length}`);
     }
+    // Test accounts (E2E/sandbox seeds) are hidden by default so they never
+    // bury real sponsors; admins opt in with includeTest.
+    const testSql = TEST_EMAIL_SQL(`COALESCE(email, '')`);
+    if (!opts.includeTest) where.push(`NOT ${testSql}`);
     const res = await pool.query(
-      `${SPONSOR_SELECT}
+      `SELECT *, ${testSql} AS is_test
+       FROM sponsors
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, limit, offset],
     );
     const total = await pool.query(`SELECT COUNT(*)::int AS n FROM sponsors${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`, params);
-    return { rows: res.rows.map(normalizeSponsor), total: total.rows[0]?.n ?? 0 };
+    return {
+      rows: res.rows.map((r: any) => ({ ...normalizeSponsor(r), is_test: !!r.is_test })),
+      total: total.rows[0]?.n ?? 0,
+    };
   }
 
   static async getLedger(sponsorId: string, opts: { limit?: number; offset?: number } = {}) {
@@ -809,15 +822,17 @@ export class SponsorService {
   }
 
   /**
-   * Creates (or resets) the sponsor's portal login. One email = one user row,
-   * so a person can hold a sponsor and a partner dashboard under the same
-   * login. Supported modes:
-   *  - EXISTING (userId): link an existing user — their credentials are never
-   *    touched, so the identity shared with their partner dashboard stays the
-   *    same. No temporary password is issued.
-   *  - NEW (email): create a fresh user (errors if the email already exists).
-   *  - AUTO (email, legacy): attach by email when a user exists, otherwise
-   *    create one. Used only by older API clients.
+   * Creates (or resets) the sponsor's portal login. A colab identity
+   * (sponsor/partner/fleet) can be shared across those dashboards under one
+   * email; a driver/rider account with the same email is a SEPARATE identity
+   * and never interferes. Supported modes:
+   *  - EXISTING (userId): link an existing colab identity — their credentials
+   *    are never touched. Drivers/riders/admins are rejected.
+   *  - NEW (email): create a fresh colab identity. Errors only when another
+   *    colab identity already owns the email; a driver/rider owning the same
+   *    email does not block this.
+   *  - AUTO (email, legacy): attach to an existing colab identity by email
+   *    when present, otherwise create one. Used only by older API clients.
    */
   static async createPortalAccount(
     sponsorId: string,
@@ -857,15 +872,20 @@ export class SponsorService {
           [input.userId],
         );
         if (userRes.rows.length === 0) throw new Error('The selected user no longer exists.');
+        if (!(await isPortalIdentity(input.userId!, client))) {
+          throw new Error(
+            'That account is a rider/driver/admin identity, not a colab account. Portal logins can only be linked to an existing sponsor, partner or fleet identity — create a new login instead.',
+          );
+        }
         userId = userRes.rows[0].id;
         resolvedEmail = userRes.rows[0].email;
         // The user already owns these credentials — never reset them, and
         // never force a password change on the linked dashboard.
         mustChangePassword = false;
       } else if (mode === 'NEW') {
-        const dup = await client.query(`SELECT id FROM users WHERE email = $1`, [normalizedEmail]);
-        if (dup.rows.length > 0) {
-          throw new Error('An account with this email already exists. Choose "Use existing user" to link it instead.');
+        const dup = await findPortalIdentityByEmail(normalizedEmail!, client);
+        if (dup) {
+          throw new Error('A colab account with this email already exists. Choose "Use existing user" to link it instead.');
         }
         const userRes = await client.query(
           `INSERT INTO users (email, password_hash, full_name, role, is_active)
@@ -876,19 +896,20 @@ export class SponsorService {
         userId = userRes.rows[0].id;
         mustChangePassword = true;
       } else if (userId) {
-        // AUTO reset: an account already exists for this sponsor — reset the
-        // password of the currently linked user (legacy behaviour).
+        // AUTO reset: this sponsor is already linked to a colab identity —
+        // reset that identity's password (legacy behaviour).
         await client.query(
           `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
           [passwordHash, userId],
         );
         mustChangePassword = true;
       } else {
-        // AUTO attach: link to an existing login by email (a partner or fleet
-        // user who now also sponsors) — never overwrite role or display name.
-        const byEmail = await client.query(`SELECT id FROM users WHERE email = $1`, [normalizedEmail]);
-        if (byEmail.rows.length > 0) {
-          userId = byEmail.rows[0].id;
+        // AUTO attach: link to an existing COLAB identity by email (a partner
+        // or fleet user who now also sponsors) — never a driver/rider/admin
+        // row, and never overwrite role or display name.
+        const identity = await findPortalIdentityByEmail(normalizedEmail!, client);
+        if (identity) {
+          userId = identity.id;
           await client.query(
             `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
             [passwordHash, userId],
@@ -932,8 +953,15 @@ export class SponsorService {
         linkedExisting: mode === 'EXISTING',
         userId: userId!,
       };
-    } catch (err) {
+    } catch (err: any) {
       try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      if (err?.code === '23505') {
+        const constraint = String(err?.constraint ?? '');
+        if (constraint.includes('email')) {
+          throw new Error('A colab account with this email already exists. Choose "Use existing user" to link it instead.');
+        }
+        throw new Error('This login is already linked to another sponsor dashboard.');
+      }
       throw err;
     } finally {
       client.release();
@@ -974,6 +1002,12 @@ export class SponsorService {
     return { password: newPassword };
   }
 
+  /**
+   * Disables ONLY this sponsor portal login. The identity row is never
+   * deactivated: the same colab identity may own a partner/fleet dashboard,
+   * and (since migration 058) a driver/rider always has a separate identity.
+   * A disabled login is permanently re-enablable via enablePortalAccount().
+   */
   static async disablePortalAccount(sponsorId: string, actor?: { id?: string; role?: string }) {
     const account = await this.getPortalAccountForSponsor(sponsorId);
     if (!account) return;
@@ -981,11 +1015,40 @@ export class SponsorService {
       `UPDATE sponsor_portal_accounts SET is_active = FALSE, updated_at = NOW() WHERE sponsor_id = $1`,
       [sponsorId],
     );
-    await pool.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [account.user_id]);
     AuditEventsService.record({
       actorId: actor?.id ?? null,
       actorRole: actor?.role ?? 'ADMIN',
       action: 'sponsor_portal_account_disabled',
+      entityType: 'sponsor',
+      entityId: sponsorId,
+    }).catch(() => undefined);
+  }
+
+  /** Re-enables a previously disabled sponsor portal login. */
+  static async enablePortalAccount(sponsorId: string, actor?: { id?: string; role?: string }) {
+    const account = await this.getPortalAccountForSponsor(sponsorId);
+    if (!account) throw new Error('No portal account exists for this sponsor');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE sponsor_portal_accounts SET is_active = TRUE, updated_at = NOW() WHERE sponsor_id = $1`,
+        [sponsorId],
+      );
+      // Recover identities that were hard-disabled by the legacy disable
+      // path (which set users.is_active = FALSE).
+      await client.query(`UPDATE users SET is_active = TRUE WHERE id = $1`, [account.user_id]);
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+    AuditEventsService.record({
+      actorId: actor?.id ?? null,
+      actorRole: actor?.role ?? 'ADMIN',
+      action: 'sponsor_portal_account_enabled',
       entityType: 'sponsor',
       entityId: sponsorId,
     }).catch(() => undefined);
@@ -1036,12 +1099,14 @@ export class SponsorService {
           [passwordHash, userId],
         );
       } else {
-        // Attach to an existing account if the email is already a portal
-        // login (a partner or sponsor user who now also operates a fleet) —
-        // never overwrite their role or display name.
-        const byEmail = await client.query(`SELECT id FROM users WHERE email = $1`, [email.trim().toLowerCase()]);
-        if (byEmail.rows.length > 0) {
-          userId = byEmail.rows[0].id;
+        // Attach to an existing COLAB identity if the email already owns a
+        // portal login (a partner or sponsor who now also operates a fleet) —
+        // never a driver/rider/admin row, never overwrite their role or
+        // display name. A driver/rider with the same email is a different
+        // identity and gets a brand-new fleet login.
+        const identity = await findPortalIdentityByEmail(email.trim().toLowerCase(), client);
+        if (identity) {
+          userId = identity.id;
           await client.query(
             `UPDATE users SET password_hash = $1, is_active = TRUE WHERE id = $2`,
             [passwordHash, userId],
@@ -1077,8 +1142,15 @@ export class SponsorService {
       }).catch(() => undefined);
 
       return { password };
-    } catch (err) {
+    } catch (err: any) {
       try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      if (err?.code === '23505') {
+        const constraint = String(err?.constraint ?? '');
+        if (constraint.includes('email')) {
+          throw new Error('A colab account with this email already exists. Use that login or choose another email.');
+        }
+        throw new Error('This login is already linked to another fleet dashboard.');
+      }
       throw err;
     } finally {
       client.release();
@@ -1109,6 +1181,10 @@ export class SponsorService {
     return { password: newPassword };
   }
 
+  /**
+   * Disables ONLY this fleet portal login (mirrors disablePortalAccount:
+   * identity rows are never deactivated).
+   */
   static async disableFleetPortalAccount(fleetId: string, actor?: { id?: string; role?: string }) {
     const account = await this.getFleetPortalAccountForFleet(fleetId);
     if (!account) return;
@@ -1116,11 +1192,38 @@ export class SponsorService {
       `UPDATE fleet_portal_accounts SET is_active = FALSE, updated_at = NOW() WHERE fleet_id = $1`,
       [fleetId],
     );
-    await pool.query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [account.user_id]);
     AuditEventsService.record({
       actorId: actor?.id ?? null,
       actorRole: actor?.role ?? 'ADMIN',
       action: 'fleet_portal_account_disabled',
+      entityType: 'fleet',
+      entityId: fleetId,
+    }).catch(() => undefined);
+  }
+
+  /** Re-enables a previously disabled fleet portal login. */
+  static async enableFleetPortalAccount(fleetId: string, actor?: { id?: string; role?: string }) {
+    const account = await this.getFleetPortalAccountForFleet(fleetId);
+    if (!account) throw new Error('No portal account exists for this fleet');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE fleet_portal_accounts SET is_active = TRUE, updated_at = NOW() WHERE fleet_id = $1`,
+        [fleetId],
+      );
+      await client.query(`UPDATE users SET is_active = TRUE WHERE id = $1`, [account.user_id]);
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+    AuditEventsService.record({
+      actorId: actor?.id ?? null,
+      actorRole: actor?.role ?? 'ADMIN',
+      action: 'fleet_portal_account_enabled',
       entityType: 'fleet',
       entityId: fleetId,
     }).catch(() => undefined);
