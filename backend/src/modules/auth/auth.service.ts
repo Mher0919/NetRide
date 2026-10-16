@@ -125,7 +125,14 @@ export class AuthService {
     }
 
     await OTPService.generateOTP(data.email);
+    // Bind the OTP to this signup: verifyOTP requires this marker.
+    await redis.set(this.loginChallengeKey(data.email), '1', 'EX', Math.floor(OTPService.CODE_TTL_MS / 1000));
     return { otp_required: true, phone_number_required: true, message: 'Verification code sent to email' };
+  }
+
+  /** Redis key marking that a password-verified login/signup challenge is pending. */
+  private static loginChallengeKey(email: string): string {
+    return `login_otp_challenge:${email}`;
   }
 
   static async loginWithPassword(data: { email: string; password?: string; trusted_device_token?: string | null; app_role?: string }) {
@@ -200,6 +207,8 @@ export class AuthService {
     // /auth/verify-otp, which then issues the session token.
     if (user.role !== UserRole.ADMIN) {
       await OTPService.generateOTP(user.email);
+      // Bind the OTP to a password-verified login: verifyOTP requires this marker.
+      await redis.set(this.loginChallengeKey(user.email), '1', 'EX', Math.floor(OTPService.CODE_TTL_MS / 1000));
       return {
         otp_required: true,
         message: 'Verification code sent to email',
@@ -458,10 +467,37 @@ export class AuthService {
     full_name?: string;
     role?: string;
   }) {
+    // Enforce the login-flow binding BEFORE the OTP is checked or consumed.
+    // An OTP obtained through the public request-otp endpoint must never be
+    // sufficient on its own to authenticate an existing account that is
+    // protected by a password.
+    const challengeKey = this.loginChallengeKey(data.email);
+    const preRes = await pool.query(
+      `SELECT role, password_hash FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`,
+      [data.email],
+    );
+    const pre = preRes.rows[0];
+    if (pre) {
+      // Administrators authenticate exclusively through the dedicated
+      // password + admin 2FA flow (verifyAdmin2FA); never through this endpoint.
+      if (pre.role === UserRole.ADMIN) {
+        throw new Error('Invalid or expired verification code');
+      }
+      // Password-protected accounts must have completed the password step
+      // (or signup), which sets a server-side challenge marker.
+      if (pre.password_hash) {
+        const challenge = await redis.get(challengeKey);
+        if (!challenge) {
+          throw new Error('Invalid or expired verification code');
+        }
+      }
+    }
+
     const isValid = await OTPService.verifyOTP(data.email, data.code);
     if (!isValid) {
       throw new Error('Invalid or expired verification code');
     }
+    await redis.del(challengeKey);
 
     // Find the CONSUMER identity for this email (colab accounts with the same
     // email are separate identities — never touched by consumer OTP flows).
