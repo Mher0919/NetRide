@@ -12,6 +12,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
+const { resolveMigrationFile } = require('./lib/migration-file.cjs');
 
 const url = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
 const DIR = path.resolve(__dirname, '..', 'migrations');
@@ -50,7 +51,12 @@ const DIR = path.resolve(__dirname, '..', 'migrations');
       skipped++;
       continue;
     }
-    const sql = fs.readFileSync(path.join(DIR, f), 'utf8');
+    const filePath = resolveMigrationFile(DIR, f);
+    if (!filePath) {
+      console.log(`[skip] ${f} rejected by filename guard`);
+      continue;
+    }
+    const sql = fs.readFileSync(filePath, 'utf8');
     console.log(`[apply] ${f} (${sql.length} bytes)`);
     try {
       await c.query('BEGIN');

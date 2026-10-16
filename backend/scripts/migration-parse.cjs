@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { resolveMigrationFile } = require('./lib/migration-file.cjs');
 
 const DIR = path.resolve(__dirname, '..', 'migrations');
 
@@ -65,6 +66,8 @@ const target = process.argv[2];
 const files = fs.readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort();
 for (const f of target ? [target] : files) {
   if (!files.includes(f)) { console.log(`[missing] ${f}`); continue; }
-  const sql = stripComments(fs.readFileSync(path.join(DIR, f), 'utf8'));
+  const filePath = resolveMigrationFile(DIR, f);
+  if (!filePath) { console.log(`[skip] ${f} rejected by filename guard`); continue; }
+  const sql = stripComments(fs.readFileSync(filePath, 'utf8'));
   fmt(f, parseArtefacts(sql));
 }

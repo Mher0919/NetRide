@@ -28,6 +28,7 @@ import {
   RequestRideSchema,
   RiderDestinationChangedSchema,
 } from '../utils/socket-validation';
+import { safeParseBounded } from '../utils/zod-parse';
 import { isOnline, markOnline, markOffline, touchPresence, pushChatMessage, pushIncomingCall } from '../services/push-notification.service';
 import { notifyDriverArrived } from '../services/notification.service';
 import { recordRiderActivity } from '../services/demand.service';
@@ -1071,7 +1072,7 @@ export function setupSocketGateway(io: Server) {
         lng: z.number().min(-180).max(180),
       });
       socket.on('reportActivity', (payload: unknown) => {
-        const parsed = reportActivitySchema.safeParse(payload);
+        const parsed = safeParseBounded(reportActivitySchema, payload);
         if (!parsed.success) return;
         recordRiderActivity({
           riderId: id,

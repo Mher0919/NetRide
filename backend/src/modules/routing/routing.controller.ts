@@ -59,7 +59,7 @@ export class RoutingController {
         return;
       }
       if (err?.name === 'ZodError') {
-        res.status(400).json({ error: 'Invalid request body', detail: err.errors });
+        res.status(400).json({ error: 'Invalid request body', detail: err.issues });
         return;
       }
       logger.error({ err: err.message }, 'routing_plan_failed');
@@ -100,7 +100,7 @@ export class RoutingController {
         return;
       }
       if (err?.name === 'ZodError') {
-        res.status(400).json({ error: 'Invalid request body', detail: err.errors });
+        res.status(400).json({ error: 'Invalid request body', detail: err.issues });
         return;
       }
       logger.error({ err: err.message }, 'routing_google_plan_failed');

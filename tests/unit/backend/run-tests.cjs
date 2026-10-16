@@ -68,6 +68,10 @@ const SUITES = [
   './modules/payments/payments.unit.test.ts',
   './modules/payments/withdrawal.unit.test.ts',
   './security/security.unit.test.ts',
+  './security/zod-dos.unit.test.ts',
+  './security/safe-path.unit.test.ts',
+  './security/security-headers.unit.test.ts',
+  './security/migration-file-guard.unit.test.cjs',
 ];
 
 const filter = process.argv[2];

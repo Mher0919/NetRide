@@ -71,7 +71,7 @@ router.post('/route', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      res.status(400).json({ error: 'Invalid request', details: err.errors });
+      res.status(400).json({ error: 'Invalid request', details: err.issues });
       return;
     }
     logger.error({ err: err.message }, 'astar_api_route_error');
@@ -104,7 +104,7 @@ router.post('/distance', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      res.status(400).json({ error: 'Invalid request', details: err.errors });
+      res.status(400).json({ error: 'Invalid request', details: err.issues });
       return;
     }
     logger.error({ err: err.message }, 'astar_api_distance_error');
@@ -134,7 +134,7 @@ router.post('/snap', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      res.status(400).json({ error: 'Invalid request', details: err.errors });
+      res.status(400).json({ error: 'Invalid request', details: err.issues });
       return;
     }
     logger.error({ err: err.message }, 'astar_api_snap_error');

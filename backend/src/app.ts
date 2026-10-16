@@ -18,6 +18,8 @@ import { attachPrivateFileAccessTokens } from './middleware/fileAccessToken.midd
 import { initSentry } from './observability/sentry';
 import { logger } from './observability/logger';
 import { requestContext, requestLogger } from './middleware/pinoHttp';
+import { jsonShapeGuard } from './middleware/jsonShapeGuard.middleware';
+import { securityHeaders } from './middleware/securityHeaders.middleware';
 import healthRouter from './health/health.controller';
 import fileRoutes from './routes/files.routes';
 import { register } from './observability/metrics';
@@ -73,24 +75,16 @@ const app = express();
 // Baseline security headers for every response. The API never serves
 // documents, so a locked-down CSP costs nothing and neutralizes accidental
 // HTML reflection; X-Frame-Options/Referrer-Policy protect the Stripe
-// return pages from clickjacking and referrer leakage. HSTS is emitted on
-// every response (browsers ignore it outside HTTPS) without
-// includeSubDomains so it cannot affect sibling hosts on shared domains.
-app.use((_req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('Strict-Transport-Security', 'max-age=15552000');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
-  next();
-});
+// return pages from clickjacking and referrer leakage; HSTS is emitted only
+// when the request arrived over TLS.
+app.use(securityHeaders);
 // API responses must never be revalidated from the browser's HTTP cache:
 // Express's default weak ETag + browser revalidation turned every admin
 // dashboard poll into a 304 "not modified" replay of a stale cached ride
 // list — the dashboard kept showing an empty/old state no matter what the
 // DB said. A live operational dashboard reads current truth on every poll.
 app.disable('etag');
+app.disable('x-powered-by');
 // Belt-and-braces: private, uncacheable for all admin/monitoring responses.
 app.use('/api/admin', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -174,6 +168,11 @@ app.post(
 );
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ limit: '8mb', extended: true }));
+// The byte limit above does not bound element counts: an 8 MB array of
+// invalid values would make zod allocate one issue object per element and
+// OOM the process (CVE-2023-54404 class). Reject absurd shapes before any
+// route/schema sees them.
+app.use(jsonShapeGuard());
 // Request-id + child logger context. Mount BEFORE rate-limit so even
 // 429s get a log line and a metric.
 app.use(requestContext);

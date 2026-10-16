@@ -2,10 +2,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validate = void 0;
 const zod_1 = require("zod");
+const zod_parse_1 = require("../utils/zod-parse");
 const validate = (schema) => {
     return async (req, res, next) => {
         try {
-            await schema.parseAsync({
+            // parseBoundedAsync passes the CVE-2023-54404 `abortEarly` mitigation
+            // so a hostile payload cannot fan out into one issue per element.
+            await (0, zod_parse_1.parseBoundedAsync)(schema, {
                 body: req.body,
                 query: req.query,
                 params: req.params,
@@ -16,7 +19,7 @@ const validate = (schema) => {
             if (error instanceof zod_1.ZodError) {
                 return res.status(400).json({
                     error: 'Validation failed. Please ensure all required fields are provided and correctly formatted.',
-                    details: error.errors.map(err => ({
+                    details: error.issues.map(err => ({
                         field: err.path.join('.'),
                         message: err.message,
                     })),

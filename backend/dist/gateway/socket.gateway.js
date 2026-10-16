@@ -46,6 +46,7 @@ const types_1 = require("../types");
 const env_1 = require("../config/env");
 const geohash = __importStar(require("ngeohash"));
 const socket_validation_1 = require("../utils/socket-validation");
+const zod_parse_1 = require("../utils/zod-parse");
 const push_notification_service_1 = require("../services/push-notification.service");
 const notification_service_1 = require("../services/notification.service");
 const demand_service_1 = require("../services/demand.service");
@@ -985,7 +986,7 @@ function setupSocketGateway(io) {
                 lng: zod_1.z.number().min(-180).max(180),
             });
             socket.on('reportActivity', (payload) => {
-                const parsed = reportActivitySchema.safeParse(payload);
+                const parsed = (0, zod_parse_1.safeParseBounded)(reportActivitySchema, payload);
                 if (!parsed.success)
                     return;
                 (0, demand_service_1.recordRiderActivity)({

@@ -1,9 +1,8 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const app = express();
 const PORT = process.env.PORT || 5173;
 const DIST_DIR = path.join(__dirname, 'dist');
 
@@ -27,44 +26,62 @@ const CSP = [
   "worker-src 'self' blob:",
 ].join('; ');
 
-app.disable('x-powered-by');
-app.use((_req, res, next) => {
-  res.setHeader('Content-Security-Policy', CSP);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Strict-Transport-Security', 'max-age=15552000');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  next();
-});
+export function createApp({ distDir = DIST_DIR } = {}) {
+  const app = express();
 
-// Fingerprinted Vite assets are safe to cache long. index.html is NOT
-// fingerprinted, so it must never be cached — otherwise a deploy would leave
-// browsers on a stale shell that references deleted hashed assets.
-app.use(express.static(DIST_DIR, {
-  maxAge: '1y',
-  immutable: true,
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('index.html')) {
-      res.setHeader('Cache-Control', 'no-cache');
+  // Render terminates TLS one hop in front of this process; trust that single
+  // hop so `req.secure` reflects X-Forwarded-Proto and HSTS is only emitted
+  // for real HTTPS requests (never for plain-HTTP local development).
+  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
+
+  app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy', CSP);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    if (req.secure) {
+      res.setHeader('Strict-Transport-Security', 'max-age=15552000');
     }
-  },
-}));
-
-// SPA fallback — client-side routes (/, /login, /rides/active, ...) return
-// index.html so React Router renders them on refresh/direct access instead of
-// Render answering "Not Found". Only GET/HEAD HTML navigation is rewritten;
-// API calls and static asset paths are never intercepted.
-app.use((req, res, next) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-  if (req.path.startsWith('/api/')) return next();
-  if (path.extname(req.path)) return next();
-  if (!req.accepts('html')) return next();
-  res.sendFile(path.join(DIST_DIR, 'index.html'), {
-    headers: { 'Cache-Control': 'no-cache' },
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
   });
-});
 
-app.listen(PORT, () => {
-  console.log(`Admin dashboard server running on port ${PORT}`);
-});
+  // Fingerprinted Vite assets are safe to cache long. index.html is NOT
+  // fingerprinted, so it must never be cached — otherwise a deploy would leave
+  // browsers on a stale shell that references deleted hashed assets.
+  app.use(express.static(distDir, {
+    maxAge: '1y',
+    immutable: true,
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }));
+
+  // SPA fallback — client-side routes (/, /login, /rides/active, ...) return
+  // index.html so React Router renders them on refresh/direct access instead of
+  // Render answering "Not Found". Only GET/HEAD HTML navigation is rewritten;
+  // API calls and static asset paths are never intercepted.
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    if (req.path.startsWith('/api/')) return next();
+    if (path.extname(req.path)) return next();
+    if (!req.accepts('html')) return next();
+    res.sendFile(path.join(distDir, 'index.html'), {
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+  });
+
+  return app;
+}
+
+const isMain = process.argv[1]
+  && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+
+if (isMain) {
+  createApp().listen(PORT, () => {
+    console.log(`Admin dashboard server running on port ${PORT}`);
+  });
+}

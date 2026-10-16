@@ -43,6 +43,12 @@ function initFirebase(): void {
   // Fall back to file path
   if (!serviceAccount && env.FCM_SERVICE_ACCOUNT_PATH) {
     try {
+      // The path is operator configuration, but require a regular file so a
+      // misconfiguration can never point the read at a device/FIFO.
+      const stat = fs.statSync(env.FCM_SERVICE_ACCOUNT_PATH);
+      if (!stat.isFile()) {
+        throw new Error('FCM service account path is not a regular file');
+      }
       const raw = fs.readFileSync(env.FCM_SERVICE_ACCOUNT_PATH, 'utf-8');
       serviceAccount = JSON.parse(raw);
       logger.info({ path: env.FCM_SERVICE_ACCOUNT_PATH }, '[FCM] Initialized from service account file');

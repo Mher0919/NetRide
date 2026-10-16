@@ -4,6 +4,7 @@
 // Ensures all socket events have proper structure before processing.
 
 import { z } from 'zod';
+import { safeParseBounded } from './zod-parse';
 
 // ============================================
 // Shared schemas
@@ -133,7 +134,9 @@ export function validate<T>(
   socket: any,
   eventName: string
 ): ValidationResult<T> {
-  const result = schema.safeParse(data);
+  // Bounded parse: CVE-2023-54404 hardening (stop at the first aborting
+  // issue so a hostile payload cannot fan out into one issue per element).
+  const result = safeParseBounded(schema, data);
   
   if (!result.success) {
     const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');

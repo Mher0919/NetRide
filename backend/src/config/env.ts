@@ -135,12 +135,12 @@ const envSchema = z.object({
   DRIVER_SCORE_CACHE_TTL_S: z.union([z.string(), z.number()]).transform(Number).default(300),
 
   // ---- Kill switches / legacy flags ---------------------------------------
-  LOAD_TEST: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-  LEGACY_RATE_LIMIT: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-  LEGACY_SYNC_MATCHING: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-  LEGACY_SEQUENTIAL_DISPATCH: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-  LEGACY_DB_SCORE: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-  LEGACY_INLINE_PG: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  LOAD_TEST: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  LEGACY_RATE_LIMIT: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  LEGACY_SYNC_MATCHING: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  LEGACY_SEQUENTIAL_DISPATCH: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  LEGACY_DB_SCORE: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  LEGACY_INLINE_PG: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   DIRECT_DATABASE_URL: z.string().optional(),
   GEOAPIFY_API_KEY: z.string().optional(),
   DATABASE_REPLICA_URL: z.string().optional(),
@@ -192,7 +192,7 @@ const envSchema = z.object({
   STRIPE_CONNECT_CLIENT_ID: z.string().optional(),
   // Hard interlock: live keys (sk_live_…) are refused unless this is 'true'
   // AND NODE_ENV=production. Prevents a test/dev process ever touching live.
-  STRIPE_ALLOW_LIVE: z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+  STRIPE_ALLOW_LIVE: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   // Default currency for all Stripe amounts (lowercase ISO-4217).
   STRIPE_CURRENCY: z.string().default('usd'),
   // Public base URL of this backend, used to build Stripe return URLs

@@ -135,12 +135,12 @@ const envSchema = zod_1.z.object({
     DISPATCH_FANOUT_SIZE: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(5),
     DRIVER_SCORE_CACHE_TTL_S: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).transform(Number).default(300),
     // ---- Kill switches / legacy flags ---------------------------------------
-    LOAD_TEST: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-    LEGACY_RATE_LIMIT: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-    LEGACY_SYNC_MATCHING: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-    LEGACY_SEQUENTIAL_DISPATCH: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-    LEGACY_DB_SCORE: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
-    LEGACY_INLINE_PG: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    LOAD_TEST: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+    LEGACY_RATE_LIMIT: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+    LEGACY_SYNC_MATCHING: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+    LEGACY_SEQUENTIAL_DISPATCH: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+    LEGACY_DB_SCORE: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+    LEGACY_INLINE_PG: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default(false),
     DIRECT_DATABASE_URL: zod_1.z.string().optional(),
     GEOAPIFY_API_KEY: zod_1.z.string().optional(),
     DATABASE_REPLICA_URL: zod_1.z.string().optional(),
@@ -188,7 +188,7 @@ const envSchema = zod_1.z.object({
     STRIPE_CONNECT_CLIENT_ID: zod_1.z.string().optional(),
     // Hard interlock: live keys (sk_live_…) are refused unless this is 'true'
     // AND NODE_ENV=production. Prevents a test/dev process ever touching live.
-    STRIPE_ALLOW_LIVE: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default('false'),
+    STRIPE_ALLOW_LIVE: zod_1.z.enum(['true', 'false']).transform(v => v === 'true').default(false),
     // Default currency for all Stripe amounts (lowercase ISO-4217).
     STRIPE_CURRENCY: zod_1.z.string().default('usd'),
     // Public base URL of this backend, used to build Stripe return URLs

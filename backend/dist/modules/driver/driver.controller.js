@@ -269,7 +269,7 @@ class DriverController {
         }
         catch (error) {
             if (error?.name === 'ZodError') {
-                return res.status(400).json({ error: 'Invalid request payload.', details: error.errors });
+                return res.status(400).json({ error: 'Invalid request payload.', details: error.issues });
             }
             const msg = error?.message ?? 'Failed to submit profile change.';
             const code = msg.includes('PROFILE_CHANGE_PENDING') ? 409
@@ -403,7 +403,7 @@ class DriverController {
         }
         catch (error) {
             if (error?.name === 'ZodError') {
-                return res.status(400).json({ error: 'Invalid vehicle data.', details: error.errors });
+                return res.status(400).json({ error: 'Invalid vehicle data.', details: error.issues });
             }
             console.error(`[DRIVER] ❌ Submit new vehicle error: ${error.message}`);
             res.status(400).json({ error: error.message || 'Failed to submit new vehicle.' });
@@ -447,7 +447,7 @@ class DriverController {
         }
         catch (error) {
             if (error?.name === 'ZodError') {
-                return res.status(400).json({ error: 'Invalid vehicle data.', details: error.errors });
+                return res.status(400).json({ error: 'Invalid vehicle data.', details: error.issues });
             }
             console.error(`[DRIVER] ❌ Submit vehicle resubmission error: ${error.message}`);
             res.status(400).json({ error: error.message || 'Failed to submit vehicle resubmission.' });

@@ -1,11 +1,14 @@
 // backend/src/middleware/validate.middleware.ts
 import { Request, Response, NextFunction } from 'express';
-import { AnyZodObject, ZodError } from 'zod';
+import { ZodType, ZodError } from 'zod';
+import { parseBoundedAsync } from '../utils/zod-parse';
 
-export const validate = (schema: AnyZodObject) => {
+export const validate = (schema: ZodType) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await schema.parseAsync({
+      // parseBoundedAsync passes the CVE-2023-54404 `abortEarly` mitigation
+      // so a hostile payload cannot fan out into one issue per element.
+      await parseBoundedAsync(schema, {
         body: req.body,
         query: req.query,
         params: req.params,
@@ -15,7 +18,7 @@ export const validate = (schema: AnyZodObject) => {
       if (error instanceof ZodError) {
         return res.status(400).json({
           error: 'Validation failed. Please ensure all required fields are provided and correctly formatted.',
-          details: error.errors.map(err => ({
+          details: error.issues.map(err => ({
             field: err.path.join('.'),
             message: err.message,
           })),

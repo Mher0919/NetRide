@@ -56,6 +56,8 @@ const fileAccessToken_middleware_1 = require("./middleware/fileAccessToken.middl
 const sentry_1 = require("./observability/sentry");
 const logger_1 = require("./observability/logger");
 const pinoHttp_1 = require("./middleware/pinoHttp");
+const jsonShapeGuard_middleware_1 = require("./middleware/jsonShapeGuard.middleware");
+const securityHeaders_middleware_1 = require("./middleware/securityHeaders.middleware");
 const health_controller_1 = __importDefault(require("./health/health.controller"));
 const files_routes_1 = __importDefault(require("./routes/files.routes"));
 const metrics_1 = require("./observability/metrics");
@@ -107,24 +109,16 @@ const app = (0, express_1.default)();
 // Baseline security headers for every response. The API never serves
 // documents, so a locked-down CSP costs nothing and neutralizes accidental
 // HTML reflection; X-Frame-Options/Referrer-Policy protect the Stripe
-// return pages from clickjacking and referrer leakage. HSTS is emitted on
-// every response (browsers ignore it outside HTTPS) without
-// includeSubDomains so it cannot affect sibling hosts on shared domains.
-app.use((_req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Strict-Transport-Security', 'max-age=15552000');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
-    next();
-});
+// return pages from clickjacking and referrer leakage; HSTS is emitted only
+// when the request arrived over TLS.
+app.use(securityHeaders_middleware_1.securityHeaders);
 // API responses must never be revalidated from the browser's HTTP cache:
 // Express's default weak ETag + browser revalidation turned every admin
 // dashboard poll into a 304 "not modified" replay of a stale cached ride
 // list — the dashboard kept showing an empty/old state no matter what the
 // DB said. A live operational dashboard reads current truth on every poll.
 app.disable('etag');
+app.disable('x-powered-by');
 // Belt-and-braces: private, uncacheable for all admin/monitoring responses.
 app.use('/api/admin', (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -209,6 +203,11 @@ app.set('trust proxy', 1);
 app.post('/api/payments/webhook', express_1.default.raw({ type: 'application/json', limit: '2mb' }), payments_controller_1.PaymentsController.webhook);
 app.use(express_1.default.json({ limit: '8mb' }));
 app.use(express_1.default.urlencoded({ limit: '8mb', extended: true }));
+// The byte limit above does not bound element counts: an 8 MB array of
+// invalid values would make zod allocate one issue object per element and
+// OOM the process (CVE-2023-54404 class). Reject absurd shapes before any
+// route/schema sees them.
+app.use((0, jsonShapeGuard_middleware_1.jsonShapeGuard)());
 // Request-id + child logger context. Mount BEFORE rate-limit so even
 // 429s get a log line and a metric.
 app.use(pinoHttp_1.requestContext);

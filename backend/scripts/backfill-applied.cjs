@@ -14,6 +14,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
+const { isSafeMigrationFile, resolveMigrationFile } = require('./lib/migration-file.cjs');
 
 const url = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
 const DIR = path.resolve(__dirname, '..', 'migrations');
@@ -36,9 +37,11 @@ function stripComments(src) {
 }
 
 async function probe(url, f) {
+  const filePath = resolveMigrationFile(DIR, f);
+  if (!filePath) throw new Error(`Refusing to read unsafe migration filename: ${f}`);
   const c = new Client({ connectionString: url });
   await c.connect();
-  const sql = stripComments(fs.readFileSync(path.join(DIR, f), 'utf8'));
+  const sql = stripComments(fs.readFileSync(filePath, 'utf8'));
 
   // Built once per probe to keep the work bounded.
   const colCache = new Map();
@@ -133,6 +136,13 @@ async function probe(url, f) {
   let eligible = 0;
   let skipped = 0;
   for (const f of todo) {
+    // Allowlist first (mirrors run-migrations.cjs): the target must be an
+    // actual file in migrations/, which alone makes traversal impossible.
+    if (!files.includes(f)) {
+      console.log(`[skip] ${f} not in migrations/`);
+      continue;
+    }
+    if (!isSafeMigrationFile(f)) { skipped++; continue; }
     if (applied.has(f)) { skipped++; continue; }
     const missing = await probe(url, f);
     eligible++;
