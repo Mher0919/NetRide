@@ -662,4 +662,40 @@ export class AuthService {
   static verifyToken(token: string): any {
     return jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
   }
+
+  /**
+   * Server-side revocation check for an already signature-verified access
+   * token. A JWT is valid for up to 30 days, so the claims alone must not be
+   * trusted: the subject is re-read from the database on every request.
+   *
+   *  - the user must still exist and be active (deactivation/blocking);
+   *  - a token carrying the ADMIN role must still belong to a user whose
+   *    stored role is ADMIN (demotion), and must have been issued no earlier
+   *    than the last password change (password change/reset).
+   *
+   * Throws on any failure; resolves with no value when the token is current.
+   */
+  static async assertTokenStillValid(decoded: any): Promise<void> {
+    if (!decoded || typeof decoded.id !== 'string' || !decoded.id) {
+      throw new Error('Invalid token subject');
+    }
+    const res = await pool.query(
+      'SELECT role, is_active, password_changed_at FROM users WHERE id = $1',
+      [decoded.id],
+    );
+    const row = res.rows[0];
+    if (!row) throw new Error('Token subject no longer exists');
+    if (row.is_active === false) throw new Error('Account is deactivated');
+
+    if (decoded.role === UserRole.ADMIN) {
+      if (row.role !== UserRole.ADMIN) throw new Error('Administrator role revoked');
+      if (row.password_changed_at) {
+        const changedAtSec = Math.floor(new Date(row.password_changed_at).getTime() / 1000);
+        const iat = Number(decoded.iat);
+        if (!Number.isFinite(iat) || iat < changedAtSec) {
+          throw new Error('Token issued before last password change');
+        }
+      }
+    }
+  }
 }

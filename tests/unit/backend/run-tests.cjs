@@ -65,6 +65,7 @@ const SUITES = [
   './modules/portal/portal-identity.unit.test.ts',
   './modules/auth/otp.unit.test.ts',
   './modules/auth/auth-enumeration.unit.test.ts',
+  './modules/auth/token-revocation.unit.test.ts',
   './modules/payments/payments.unit.test.ts',
   './modules/payments/withdrawal.unit.test.ts',
   './security/security.unit.test.ts',
