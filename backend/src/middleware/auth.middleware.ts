@@ -12,7 +12,7 @@ export interface AuthRequest extends Request {
   };
 }
 
-export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const authMiddleware = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.split(' ')[1];
 
@@ -22,14 +22,27 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
     return res.status(401).json({ error: 'Unauthorized: No token provided' });
   }
 
+  let decoded: any;
   try {
-    const decoded = AuthService.verifyToken(token);
-    req.user = decoded;
-    next();
+    decoded = AuthService.verifyToken(token);
   } catch (err: any) {
     console.error(`[AUTH] ❌ Verification failed for ${req.originalUrl}: ${err.message}`);
     return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
+
+  // Re-check the token subject against current database state so that
+  // deactivated users, demoted administrators and tokens predating a
+  // password change are rejected immediately instead of at JWT expiry.
+  try {
+    await AuthService.assertTokenStillValid(decoded);
+  } catch (err: any) {
+    // Fail closed: a lookup failure must never grant access.
+    console.error(`[AUTH] ❌ Token no longer valid for ${req.originalUrl}: ${err.message}`);
+    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
+
+  req.user = decoded;
+  next();
 };
 
 export const adminMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {

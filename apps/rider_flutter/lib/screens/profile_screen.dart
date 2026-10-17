@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
+import '../services/secure_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 import 'dart:math' as math;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
@@ -64,8 +64,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadProfile({bool showLoading = false}) async {
     if (showLoading) setState(() => _state = ViewState.loading);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      if (!prefs.containsKey('jwt_token')) {
+      if (!SecureTokenStore.hasToken) {
         setState(() => _state = ViewState.success);
         return;
       }
@@ -1019,4 +1018,3 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
-

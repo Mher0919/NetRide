@@ -69,13 +69,22 @@ export async function handleMatchRide(io: Server) {
           } else {
             const trip = await RideRepository.findById(data.tripId);
             if (trip && trip.status === TripStatus.REQUESTED) {
-              await RideRepository.updateStatus(data.tripId, TripStatus.CANCELLED);
-              io.to(`rider:${trip.rider_id}`).emit('tripUpdate', {
-                ...trip,
-                status: TripStatus.CANCELLED,
-                cancelReason: 'No drivers available after extended search',
-              });
-              io.to('monitoring:all_rides').emit('tripUpdate', { ...trip, status: TripStatus.CANCELLED });
+              // Atomic cancel: only a still-REQUESTED ride may be cancelled.
+              // If a driver accepted in the meantime the update matches zero
+              // rows and throws — the accept wins the race.
+              try {
+                await RideRepository.updateStatus(data.tripId, TripStatus.CANCELLED, {
+                  expectedStatuses: [TripStatus.REQUESTED],
+                });
+                io.to(`rider:${trip.rider_id}`).emit('tripUpdate', {
+                  ...trip,
+                  status: TripStatus.CANCELLED,
+                  cancelReason: 'No drivers available after extended search',
+                });
+                io.to('monitoring:all_rides').emit('tripUpdate', { ...trip, status: TripStatus.CANCELLED });
+              } catch (raceErr: any) {
+                console.log(`[MATCH] Ride ${data.tripId} changed state before cancel — accept wins: ${raceErr.message}`);
+              }
             }
             console.log(`[MATCH] No drivers after ${MAX_MATCH_RETRIES} retries, cancelling ${data.tripId}`);
             matchJobsTotal.inc({ outcome: 'no_drivers' });

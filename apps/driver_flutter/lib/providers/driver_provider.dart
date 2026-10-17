@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../services/secure_token_store.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -292,8 +293,7 @@ class DriverProvider with ChangeNotifier {
     // re-initialize it so the built-in reconnector gets a fresh start.
     if (_socket == null || !_socket!.connected) {
       debugPrint('[CACHE] Socket disconnected on foreground — reinitializing');
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token');
+      final token = SecureTokenStore.token;
       if (token != null) {
         initSocket(token);
       }

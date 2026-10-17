@@ -5,8 +5,8 @@
 // sole authority). An opaque UUID generated once per install and persisted
 // locally — NOT a hardware identifier, so no device tracking is involved.
 
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class DeviceIdentity {
   static const _key = 'netride_install_id';

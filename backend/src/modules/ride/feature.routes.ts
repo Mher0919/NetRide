@@ -16,15 +16,11 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
     const { amount } = req.body;
     const riderId = req.user!.id;
 
-    const preCheck = validateTipAmount(amount, 0);
-    if (!preCheck.ok) {
-        return res.status(400).json({ error: preCheck.error });
-    }
-    const numericAmount = preCheck.amount!;
-    // A zero tip is a no-op success — the app's rating screen can re-submit
-    // a zero-tip state and must never be trapped on a 400 for "no tip".
-    if (numericAmount === 0) {
-        return res.json({ message: 'Tip successfully added.' });
+    // Shape check only — the fare-dependent cap requires the ride record
+    // (binding it to fare 0 first incorrectly capped every tip at $5).
+    const numericAmount = typeof amount === 'number' ? amount : parseFloat(String(amount));
+    if (!Number.isFinite(numericAmount) || numericAmount < 0) {
+        return res.status(400).json({ error: 'A valid tip amount is required.' });
     }
 
     try {
@@ -34,6 +30,9 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
 
         if (!ride) return res.status(404).json({ error: 'Ride not found.' });
         if (ride.rider_id !== riderId) return res.status(403).json({ error: 'Unauthorized.' });
+        if (ride.status === 'CANCELLED') {
+            return res.status(400).json({ error: 'Tips are not available for cancelled rides.' });
+        }
 
         // Server-side bounds: a tip is at most the ride fare (min $5, hard
         // ceiling $100). Without a cap, an attacker could mint an arbitrary
@@ -42,6 +41,12 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
         const bounded = validateTipAmount(numericAmount, fareDollars);
         if (!bounded.ok) {
             return res.status(400).json({ error: bounded.error });
+        }
+
+        // A zero tip is a no-op success — the app's rating screen can
+        // re-submit a zero-tip state and must never be trapped on a 400.
+        if (numericAmount === 0) {
+            return res.json({ message: 'Tip successfully added.' });
         }
 
         const oldTipCents = Math.round(

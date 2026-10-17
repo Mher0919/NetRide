@@ -1,8 +1,8 @@
 import 'dart:async';
+import 'services/secure_token_store.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/ride_provider.dart';
 import 'providers/specials_provider.dart';
 import 'services/communication_service.dart';
@@ -117,8 +117,11 @@ void main() async {
   // notification navigates.
   await NotificationService.instance.init(onTap: _routeFromNotification);
 
-  final prefs = await SharedPreferences.getInstance();
-  String? token = prefs.getString('jwt_token');
+  // Hydrate credentials from platform secure storage (Android Keystore /
+  // iOS Keychain) and migrate any legacy plaintext SharedPreferences token.
+  await SecureTokenStore.init();
+
+  String? token = SecureTokenStore.token;
   
   final supabase = Supabase.instance.client;
   if (token != null && AuthService.isJwtExpired(token)) {
@@ -133,7 +136,7 @@ void main() async {
         debugPrint('[MAIN] ✅ Session refreshed. Syncing with backend...');
         final success = await AuthService.syncWithBackend();
         if (success) {
-          token = prefs.getString('jwt_token');
+          token = SecureTokenStore.token;
         } else {
           debugPrint('[MAIN] ❌ Sync failed after refresh. Clearing...');
           await AuthService.logout();
@@ -153,7 +156,7 @@ void main() async {
     debugPrint('[MAIN] 💡 Supabase session found but no backend token. Syncing...');
     final success = await AuthService.syncWithBackend();
     if (success) {
-      token = prefs.getString('jwt_token');
+      token = SecureTokenStore.token;
     }
   }
 
@@ -257,8 +260,7 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
   Future<void> _onAuthChanged() async {
     if (AuthService.isAuthenticatedNotifier.value != true) return;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token');
+      final token = SecureTokenStore.token;
       if (token == null || token.isEmpty) return;
       final provider = context.read<RideProvider>();
       provider.updateToken(token);

@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../services/secure_token_store.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
@@ -1031,8 +1032,7 @@ class RideProvider with ChangeNotifier {
   Future<void> onAppForegrounded() async {
     if (_socket == null || !_socket!.connected) {
       debugPrint('[RIDE] Socket disconnected on foreground — reinitializing');
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token');
+      final token = SecureTokenStore.token;
       if (token != null) {
         initSocket(token);
       }

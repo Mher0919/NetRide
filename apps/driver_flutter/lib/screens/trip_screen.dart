@@ -1,9 +1,9 @@
 import 'dart:async';
+import '../services/secure_token_store.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/driver_provider.dart';
 import '../models/trip_models.dart' as models;
@@ -492,8 +492,7 @@ class _TripScreenState extends State<TripScreen> {
     navService.stopNavigation();
     NavigationVoiceService.instance.stop();
 
-    final prefs = await SharedPreferences.getInstance();
-    final ownId = prefs.getString('user_id');
+    final ownId = SecureTokenStore.userId;
     final isOwnCancel = ownId != null && cancelled.cancelledBy == ownId;
 
     final provider = Provider.of<DriverProvider>(context, listen: false);
@@ -778,8 +777,7 @@ class _TripScreenState extends State<TripScreen> {
   // ---- In-trip chat + masked call helpers --------------------------------
 
   Future<String?> _readUserId() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('user_id');
+    return SecureTokenStore.userId;
   }
 
   Future<void> _openChat(BuildContext context, models.Trip trip) async {

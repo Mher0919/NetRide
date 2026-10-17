@@ -1,11 +1,11 @@
 import 'dart:async';
+import '../services/secure_token_store.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/driver_provider.dart';
 import '../models/trip_models.dart' as models;
 import '../services/user_service.dart';
@@ -126,8 +126,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
   Future<void> _fetchProfile() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      if (!prefs.containsKey('jwt_token')) return;
+      if (!SecureTokenStore.hasToken) return;
 
       // Use cache-first fetch via DriverProvider
       final provider = Provider.of<DriverProvider>(context, listen: false);

@@ -163,18 +163,47 @@ export class RideRepository {
       values.push(extra.compliance_snapshot);
     }
 
-    let where = 'WHERE id = $2';
-    if (status === TripStatus.COMPLETED) {
-      where += ` AND status IN ('ACCEPTED', 'DRIVER_ARRIVING', 'IN_PROGRESS')`;
+    // State-machine guard: every target status declares the source statuses
+    // it may legally come from. This prevents state regressions (e.g. a
+    // COMPLETED ride being flipped back to CANCELLED) and makes the write
+    // atomic against concurrent transitions. Callers may pass an explicit
+    // `expectedStatuses` to narrow the guard further (used by queue jobs
+    // that must only cancel a still-REQUESTED ride).
+    const ALLOWED_TRANSITIONS: Record<string, TripStatus[]> = {
+      ACCEPTED: [TripStatus.REQUESTED],
+      DRIVER_ARRIVING: [TripStatus.ACCEPTED],
+      IN_PROGRESS: [TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVING],
+      COMPLETED: [TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVING, TripStatus.IN_PROGRESS],
+      CANCELLED: [TripStatus.REQUESTED, TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVING, TripStatus.IN_PROGRESS],
+    };
+
+    let allowedFrom: TripStatus[] | undefined = ALLOWED_TRANSITIONS[status];
+    if (Array.isArray(extra.expectedStatuses) && extra.expectedStatuses.length > 0) {
+      const expected = extra.expectedStatuses as TripStatus[];
+      allowedFrom = allowedFrom
+        ? allowedFrom.filter((s) => expected.includes(s))
+        : expected;
     }
+    if (!allowedFrom || allowedFrom.length === 0) {
+      throw new Error(`Unsupported or disallowed ride status transition to ${status}`);
+    }
+
+    const allowedPlaceholders = allowedFrom
+      .map((s) => {
+        values.push(s);
+        return `$${values.length}`;
+      })
+      .join(', ');
+
+    const where = `WHERE id = $2 AND status IN (${allowedPlaceholders})`;
 
     const updateRes = await pool.query(
       `UPDATE rides SET ${fields.join(', ')} ${where}`,
       values
     );
 
-    if (status === TripStatus.COMPLETED && updateRes.rowCount === 0) {
-      throw new Error('Ride cannot be completed from its current state');
+    if (updateRes.rowCount === 0) {
+      throw new Error(`Ride cannot be updated to ${status} from its current state`);
     }
 
     const res = await pool.query(`
@@ -292,8 +321,15 @@ export class RideRepository {
   }
 
   static async delete(id: string, userId: string): Promise<boolean> {
+    // History deletion is participant-scoped AND terminal-only: an active
+    // ride must be cancelled through the state machine (which cleans up
+    // offers/routes/messages and notifies the counterparty), never
+    // hard-deleted underneath a live trip.
     const res = await pool.query(
-      'DELETE FROM rides WHERE id = $1 AND (rider_id = $2 OR driver_id = $2)',
+      `DELETE FROM rides
+       WHERE id = $1
+         AND (rider_id = $2 OR driver_id = $2)
+         AND status IN ('COMPLETED', 'CANCELLED')`,
       [id, userId]
     );
     return (res.rowCount ?? 0) > 0;

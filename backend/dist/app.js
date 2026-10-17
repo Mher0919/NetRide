@@ -47,6 +47,7 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const env_1 = require("./config/env");
 const database_1 = require("./config/database");
+const redis_1 = require("./config/redis");
 const auth_service_1 = require("./modules/auth/auth.service");
 const socket_gateway_1 = require("./gateway/socket.gateway");
 const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
@@ -159,6 +160,9 @@ const io = new socket_io_1.Server(httpServer, {
         methods: ['GET', 'POST'],
         credentials: true,
     },
+    // Explicit payload cap (Socket.IO's default, made intentional): socket
+    // events carry small JSON envelopes; anything larger is abuse.
+    maxHttpBufferSize: 1000000,
 });
 exports.io = io;
 // Step 10: Socket.IO redis adapter for multi-instance support.
@@ -252,15 +256,42 @@ app.get('/metrics', async (_req, res) => {
 app.get('/api/ping', (req, res) => {
     res.json({ status: 'pong', time: new Date().toISOString() });
 });
+// Connection-level throttle: a handshake is expensive (JWT verification +
+// two identity lookups + presence write + per-connection timer), so a single
+// source cannot open connections without bound. Shared across instances via
+// Redis; fails open on Redis outages (mirrors the HTTP limiter) so a cache
+// outage can never take real-time down.
+const SOCKET_CONN_LIMIT = { max: 30, windowMs: 60 * 1000 };
+async function socketHandshakeAllowed(ip) {
+    try {
+        const key = `socket_conn:${ip}`;
+        const count = await redis_1.redis.incr(key);
+        if (count === 1)
+            await redis_1.redis.pexpire(key, SOCKET_CONN_LIMIT.windowMs);
+        return count <= SOCKET_CONN_LIMIT.max;
+    }
+    catch (err) {
+        console.warn(`[AUTH] socket connection throttle unavailable: ${err.message}`);
+        return true;
+    }
+}
 // Middleware for Socket.io auth
 io.use(async (socket, next) => {
     const token = socket.handshake.auth.token || socket.handshake.headers.authorization;
     if (!token) {
         return next(new Error('Authentication error: No token provided'));
     }
+    const remoteIp = socket.handshake.address || 'unknown';
+    if (!(await socketHandshakeAllowed(remoteIp))) {
+        console.warn(`[AUTH] ❌ Socket connection throttle exceeded for ${remoteIp}`);
+        return next(new Error('Authentication error: Too many connection attempts'));
+    }
     try {
         const pureToken = token.toString().replace('Bearer ', '');
         const decoded = auth_service_1.AuthService.verifyToken(pureToken);
+        // Reject tokens of deactivated users / demoted admins / pre-password-
+        // change sessions immediately (fails closed on lookup errors).
+        await auth_service_1.AuthService.assertTokenStillValid(decoded);
         // Resolve the ACTIVE session role from the application context supplied
         // by the connecting client (e.g. the Driver App sends `role: 'driver'`,
         // the Rider App sends `role: 'rider'`). This is the single source of
@@ -268,21 +299,12 @@ io.use(async (socket, next) => {
         // MUST NOT be inferred from the frozen `users.role` column alone. A
         // dual-role user (same email owning both profiles) is identified by the
         // app they launched, never by account-existence order.
+        //
+        // Fails CLOSED: if the live profile cannot be resolved (DB blip), the
+        // connection is refused rather than silently granting the stale JWT
+        // role-claim — an attacker cannot win access by inducing DB errors.
         const appRoleHint = socket.handshake.auth.role;
-        let active;
-        try {
-            active = await auth_service_1.AuthService.resolveActiveRole(decoded.id, appRoleHint);
-        }
-        catch (roleErr) {
-            // DB blip (pooler timeout, replica failover): never reject the whole
-            // real-time connection because role resolution hit the database. The
-            // JWT's frozen role claim is authoritative enough to keep the
-            // connection alive; the next reconnect re-resolves the live profile.
-            // This mirrors the fail-open philosophy used across the codebase
-            // (rate limiter, routing cache, vehicle data).
-            console.warn(`[AUTH] ⚠️ Role resolution failed for ${decoded.id} (${roleErr.message}) — falling back to JWT role ${decoded.role}`);
-            active = { role: decoded.role, driverId: null, riderId: decoded.id };
-        }
+        const active = await auth_service_1.AuthService.resolveActiveRole(decoded.id, appRoleHint);
         socket.user = {
             id: decoded.id,
             // Active application/session role — used for all downstream branching,
@@ -694,6 +716,16 @@ async function runMigrations() {
             const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
             await database_1.pool.query(schema);
             console.log('✅ File-security + RLS hardening schema (057) applied');
+        }
+        // Purpose binding for one-time codes (060). Guarded on the
+        // verification_codes.purpose column this migration introduces.
+        const hasOtpPurpose = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'verification_codes' AND column_name = 'purpose'");
+        if (hasOtpPurpose.rowCount === 0) {
+            console.log('⚡ Applying OTP purpose binding schema (060)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/060_otp_purpose.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ OTP purpose binding schema (060) applied');
         }
         console.log('🚀 All migrations completed');
     }

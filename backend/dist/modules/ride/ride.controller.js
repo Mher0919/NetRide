@@ -158,8 +158,16 @@ class RideController {
             if (!raterId)
                 return res.status(401).json({ error: 'Unauthorized' });
             const validatedData = RateRideSchema.parse(req.body);
-            // Handle Favorite Driver Logic
-            if (validatedData.favorite) {
+            // Rate FIRST: RideService.rateRide enforces that the caller is a
+            // participant of a COMPLETED ride. Favoriting must never happen for a
+            // ride the caller is not authorized to see (previously any authenticated
+            // user could favorite the driver of an arbitrary ride UUID).
+            const result = await ride_service_1.RideService.rateRide({
+                ...validatedData,
+                rater_id: raterId,
+            });
+            // Handle Favorite Driver Logic (authorized rider only, post-rating).
+            if (validatedData.favorite && req.user?.role !== 'DRIVER') {
                 const ride = await prisma_service_1.prisma.ride.findUnique({ where: { id: validatedData.ride_id } });
                 if (ride?.driver_id) {
                     await prisma_service_1.prisma.favoriteDriver.upsert({
@@ -173,14 +181,10 @@ class RideController {
                             rider_id: raterId,
                             driver_id: ride.driver_id
                         },
-                        update: {} // No change needed if already favorite
+                        update: {} // No change here if already favorite
                     });
                 }
             }
-            const result = await ride_service_1.RideService.rateRide({
-                ...validatedData,
-                rater_id: raterId,
-            });
             res.json(result);
         }
         catch (error) {
@@ -516,12 +520,19 @@ class RideController {
                 return;
             }
             const tripId = (req.body?.tripId ?? req.query?.tripId);
-            const userId = (req.body?.userId ?? req.query?.userId);
-            if (!tripId || !userId) {
-                res.status(400).type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>Missing call context.</Say></Response>');
+            const claimedUserId = (req.body?.userId ?? req.query?.userId);
+            // The CALLER's identity is the Voice SDK token identity, which Twilio
+            // passes as `From=client:<identity>`. The token is minted with
+            // identity = userId (mintCallToken), so the call may only be
+            // authorized for the user who actually placed it — a body-supplied
+            // userId alone must never authorize a conference join.
+            const from = String(req.body?.From ?? req.query?.From ?? '');
+            const tokenIdentity = from.startsWith('client:') ? from.slice('client:'.length) : '';
+            if (!tripId || !tokenIdentity || (claimedUserId && claimedUserId !== tokenIdentity)) {
+                res.status(403).type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>You are not authorized for this call.</Say></Response>');
                 return;
             }
-            const party = await RideController.assertTripParty(tripId, userId, null);
+            const party = await RideController.assertTripParty(tripId, tokenIdentity, null);
             if (!party.ok) {
                 res.status(party.code).type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>You are not authorized for this call.</Say></Response>');
                 return;

@@ -4,6 +4,7 @@
 // Mounted at /api/admin behind authMiddleware + adminMiddleware.
 
 import { Response } from 'express';
+import crypto from 'crypto';
 import { z } from 'zod';
 import { pool } from '../../config/database';
 import { PartnerService } from '../partner/partner.service';
@@ -47,6 +48,9 @@ const PartnerCreateSchema = PartnerBaseSchema.superRefine((value, ctx) => {
 
 const PartnerUpdateSchema = PartnerBaseSchema.partial().partial();
 
+/** Financial caps: a promo can never promise more than $1,000,000 per use. */
+const PROMO_MAX_DISCOUNT_CENTS = 100_000_000;
+
 const PromoCreateSchema = z.object({
   code: z.string().trim().min(2).max(32).transform((v) => v.toUpperCase()),
   partner_id: z.string().uuid().nullable().optional(),
@@ -56,9 +60,20 @@ const PromoCreateSchema = z.object({
   expires_at: z.string().datetime().nullable().optional(),
   active: z.boolean().default(true),
   min_ride_fare_cents: z.number().int().min(0).default(0),
-  max_discount_cents: z.number().int().min(0).default(0),
+  max_discount_cents: z.number().int().min(0).max(PROMO_MAX_DISCOUNT_CENTS).default(0),
   single_use_per_rider: z.boolean().default(true),
 });
+
+/**
+ * Clamp a paging query parameter to a safe integer. `parseInt` alone lets
+ * `NaN`/negative/huge values reach SQL as bound parameters and (for NaN)
+ * surface raw driver errors through the error response.
+ */
+function safeInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.trunc(parsed), min), max);
+}
 
 const PromoUpdateSchema = PromoCreateSchema.partial().omit({ code: true });
 
@@ -89,8 +104,8 @@ export class AdminRewardsController {
 
   static async listPartners(req: any, res: Response) {
     try {
-      const limit = parseInt(req.query.limit ?? '50');
-      const offset = parseInt(req.query.offset ?? '0');
+      const limit = safeInt(req.query.limit, 50, 1, 200);
+      const offset = safeInt(req.query.offset, 0, 0, 1_000_000);
       const includeTest = String(req.query.includeTest ?? '') === 'true';
       const partners = await PartnerService.list(req.query.search ?? '', req.query.status ?? '', limit, offset, includeTest);
       res.json({ partners });
@@ -186,11 +201,15 @@ export class AdminRewardsController {
 
   static async listPartnerCommissions(req: any, res: Response) {
     try {
-      const limit = parseInt(req.query.limit ?? '50');
-      const offset = parseInt(req.query.offset ?? '0');
+      const limit = safeInt(req.query.limit, 50, 1, 200);
+      const offset = safeInt(req.query.offset, 0, 0, 1_000_000);
+      // Only documented statuses may be filtered on (an arbitrary string
+      // must never reach the query layer as a filter value).
+      const rawStatus = String(req.query.status ?? '').toUpperCase();
+      const status = (COMMISSION_STATUSES as readonly string[]).includes(rawStatus) ? rawStatus : '';
       const commissions = await PartnerService.commissions(
         req.params.id,
-        req.query.status ?? '',
+        status,
         limit,
         offset,
       );
@@ -202,8 +221,16 @@ export class AdminRewardsController {
 
   static async markCommissionPaid(req: any, res: Response) {
     try {
-      const reference = String(req.body.reference ?? '').trim();
-      const result = await PartnerService.markCommissionPaid(req.params.commissionId, reference, req.user.id);
+      const reference = String(req.body.reference ?? '').trim().slice(0, 200);
+      // The commission must belong to the partner in the URL — without this
+      // binding the :id segment was decorative and any commission could be
+      // paid through any partner route.
+      const result = await PartnerService.markCommissionPaid(
+        req.params.commissionId,
+        reference,
+        req.user.id,
+        req.params.id,
+      );
       res.json(result);
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Unable to mark commission paid' });
@@ -269,8 +296,8 @@ export class AdminRewardsController {
 
   static async listPromos(req: any, res: Response) {
     try {
-      const limit = parseInt(req.query.limit ?? '50');
-      const offset = parseInt(req.query.offset ?? '0');
+      const limit = safeInt(req.query.limit, 50, 1, 200);
+      const offset = safeInt(req.query.offset, 0, 0, 1_000_000);
       const rows = await pool.query(
         `SELECT p.*, pt.name AS partner_name, pt.status AS partner_status
          FROM promo_codes p
@@ -367,7 +394,45 @@ export class AdminRewardsController {
       const existing = await pool.query(`SELECT * FROM promo_codes WHERE id = $1`, [req.params.id]);
       if (existing.rows.length === 0) return res.status(404).json({ error: 'Promo not found' });
 
+      // Re-validate the FINAL merged state (not just the fields supplied):
+      // an already-mutated / legacy row must not persist invalid financial
+      // settings through a partial update.
       const merged = { ...existing.rows[0], ...input };
+      const validated = PromoCreateSchema.safeParse({
+        code: merged.code,
+        partner_id: merged.partner_id ?? null,
+        discount_type: merged.discount_type,
+        discount_value: Number(merged.discount_value),
+        max_uses: Number(merged.max_uses),
+        expires_at: merged.expires_at ? new Date(merged.expires_at).toISOString() : null,
+        active: !!merged.active,
+        min_ride_fare_cents: Number(merged.min_ride_fare_cents),
+        max_discount_cents: Number(merged.max_discount_cents),
+        single_use_per_rider: !!merged.single_use_per_rider,
+      });
+      if (!validated.success) {
+        return res.status(400).json({ error: 'Promo settings are invalid.' });
+      }
+
+      // A promo can never be re-pointed at a suspended/nonexistent partner
+      // (mirrors createPromo) and its use cap can never drop below the
+      // number of times it has already been used.
+      if (validated.data.partner_id) {
+        const partner = await PartnerService.getById(validated.data.partner_id);
+        if (!partner) return res.status(404).json({ error: 'Partner not found' });
+        if (partner.status !== 'ACTIVE') {
+          return res.status(400).json({ error: 'Only active partners can own promos' });
+        }
+      }
+      if (
+        Number(validated.data.max_uses) > 0 &&
+        Number(validated.data.max_uses) < Number(existing.rows[0].times_used ?? 0)
+      ) {
+        return res.status(400).json({
+          error: `max_uses cannot be lower than the promo's existing usage (${existing.rows[0].times_used}).`,
+        });
+      }
+
       const rows = await pool.query(
         `UPDATE promo_codes SET
            partner_id = $1, discount_type = $2, discount_value = $3, max_uses = $4,
@@ -440,7 +505,9 @@ export class AdminRewardsController {
       const rows = await pool.query(`SELECT * FROM promo_codes WHERE id = $1`, [req.params.id]);
       if (rows.rows.length === 0) return res.status(404).json({ error: 'Promo not found' });
       const p = rows.rows[0];
-      const newCode = `${p.code}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      // Promo codes are redeemable value — the clone suffix must be
+      // unpredictable (Math.random is a seeded PRNG, not a security source).
+      const newCode = `${p.code}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       const created = await pool.query(
         `INSERT INTO promo_codes
            (code, partner_id, discount_type, discount_value, max_uses, expires_at,
@@ -482,8 +549,8 @@ export class AdminRewardsController {
 
   static async listReferrals(req: any, res: Response) {
     try {
-      const limit = parseInt(req.query.limit ?? '50');
-      const offset = parseInt(req.query.offset ?? '0');
+      const limit = safeInt(req.query.limit, 50, 1, 200);
+      const offset = safeInt(req.query.offset, 0, 0, 1_000_000);
       const rows = await ReferralService.adminList(req.query.status ?? '', req.query.search ?? '', limit, offset);
       res.json({ relationships: rows });
     } catch (err: any) {
@@ -506,8 +573,8 @@ export class AdminRewardsController {
 
   static async listCreditAccounts(req: any, res: Response) {
     try {
-      const limit = parseInt(req.query.limit ?? '50');
-      const offset = parseInt(req.query.offset ?? '0');
+      const limit = safeInt(req.query.limit, 50, 1, 200);
+      const offset = safeInt(req.query.offset, 0, 0, 1_000_000);
       const rows = await CreditsService.listAccountsAdmin(req.query.search ?? '', limit, offset);
       res.json({ accounts: rows });
     } catch (err: any) {
@@ -543,8 +610,8 @@ export class AdminRewardsController {
 
   static async creditTransactionsAdmin(req: any, res: Response) {
     try {
-      const limit = parseInt(req.query.limit ?? '50');
-      const offset = parseInt(req.query.offset ?? '0');
+      const limit = safeInt(req.query.limit, 50, 1, 200);
+      const offset = safeInt(req.query.offset, 0, 0, 1_000_000);
       const rows = await pool.query(
         `SELECT ct.*, u.full_name AS user_name, u.email AS user_email
          FROM credit_transactions ct
@@ -573,8 +640,8 @@ export class AdminRewardsController {
 
   static async commissionLedger(req: any, res: Response) {
     try {
-      const limit = parseInt(req.query.limit ?? '50');
-      const offset = parseInt(req.query.offset ?? '0');
+      const limit = safeInt(req.query.limit, 50, 1, 200);
+      const offset = safeInt(req.query.offset, 0, 0, 1_000_000);
       const status = COMMISSION_STATUSES.includes(req.query.status) ? req.query.status : '';
       const rows = await pool.query(
         `SELECT c.*, pt.name AS partner_name, pt.business_type,
@@ -603,8 +670,8 @@ export class AdminRewardsController {
 
   static async rewardLedger(req: any, res: Response) {
     try {
-      const limit = parseInt(req.query.limit ?? '50');
-      const offset = parseInt(req.query.offset ?? '0');
+      const limit = safeInt(req.query.limit, 50, 1, 200);
+      const offset = safeInt(req.query.offset, 0, 0, 1_000_000);
       const rows = await pool.query(
         `SELECT rl.*, u.full_name AS user_name, u.email AS user_email,
                 rfr.full_name AS referrer_name, rfd.full_name AS referred_name

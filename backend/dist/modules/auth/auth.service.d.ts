@@ -1,5 +1,24 @@
 import { UserRole } from '../../types';
 export declare class AuthService {
+    /**
+     * Server-side markers proving that a password/gate has been completed
+     * before an emailed code may be exchanged for a session. A public
+     * `/auth/request-otp` call never sets one, so an intercepted code alone
+     * cannot authenticate a password-protected account.
+     */
+    private static loginChallengeKey;
+    private static adminChallengeKey;
+    /** SHA-256 digest of an opaque one-time token (tokens are never stored raw). */
+    private static hashToken;
+    private static setChallenge;
+    /**
+     * True while a challenge marker is pending. The marker is only cleared
+     * after a SUCCESSFUL verification, so a typo does not force the user
+     * through the password step again (the code itself still has a 5-attempt
+     * cap and the endpoint is rate-limited).
+     */
+    private static hasChallenge;
+    private static clearChallenge;
     static requestPhoneOTP(userId: string, phoneNumber: string, role?: string): Promise<{
         status: string;
         message: string;
@@ -72,8 +91,9 @@ export declare class AuthService {
     static changePassword(userId: string, data: {
         currentPassword?: string;
         newPassword: string;
-    }): Promise<{
+    }, activeRole?: string): Promise<{
         message: string;
+        token: string;
     }>;
     static forgotPassword(email: string): Promise<{
         message: string;
@@ -196,4 +216,19 @@ export declare class AuthService {
         riderId: string | null;
     }>;
     static verifyToken(token: string): any;
+    /**
+     * Server-side revocation check for an already signature-verified access
+     * token. A JWT is valid for up to 30 days, so the claims alone must not be
+     * trusted: the subject is re-read from the database on every authenticated
+     * request.
+     *
+     *  - the user must still exist and be active (deactivation);
+     *  - a token carrying the ADMIN role must still belong to a user whose
+     *    stored role is ADMIN (demotion);
+     *  - a token issued before the account's last password change is rejected
+     *    (password change/reset invalidates every older session).
+     *
+     * Throws on any failure; resolves with no value when the token is current.
+     */
+    static assertTokenStillValid(decoded: any): Promise<void>;
 }

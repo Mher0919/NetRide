@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'services/secure_token_store.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -85,12 +86,16 @@ void main() async {
   // google-services.json is present) and configure tap navigation.
   await NotificationService.instance.init(onTap: _routeFromNotification);
 
+  // Hydrate credentials from platform secure storage (Android Keystore /
+  // iOS Keychain) and migrate any legacy plaintext SharedPreferences token.
+  await SecureTokenStore.init();
+
   final prefs = await SharedPreferences.getInstance();
 
   // Initialize the cache layer
   await CacheService.instance.init(prefs);
 
-  String? token = prefs.getString('jwt_token');
+  String? token = SecureTokenStore.token;
 
   final supabase = Supabase.instance.client;
   if (token != null && AuthService.isJwtExpired(token)) {
@@ -105,7 +110,7 @@ void main() async {
         debugPrint('[MAIN] ✅ Session refreshed. Syncing with backend...');
         final success = await AuthService.syncWithBackend();
         if (success) {
-          token = prefs.getString('jwt_token');
+          token = SecureTokenStore.token;
         } else {
           debugPrint('[MAIN] ❌ Sync failed after refresh. Clearing...');
           await AuthService.logout();
@@ -125,7 +130,7 @@ void main() async {
     debugPrint('[MAIN] 💡 Supabase session found but no backend token. Syncing...');
     final success = await AuthService.syncWithBackend();
     if (success) {
-      token = prefs.getString('jwt_token');
+      token = SecureTokenStore.token;
     }
   }
 

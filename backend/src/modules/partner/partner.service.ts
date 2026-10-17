@@ -481,7 +481,12 @@ static async create(input: PartnerInput, adminId: string) {
    * Admin marks a commission PAID. Idempotent: paying twice does nothing.
    * Partner counters stay consistent with the ledger inside one transaction.
    */
-  static async markCommissionPaid(commissionId: string, reference: string, adminId: string) {
+  static async markCommissionPaid(
+    commissionId: string,
+    reference: string,
+    adminId: string,
+    partnerId?: string,
+  ) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -491,6 +496,11 @@ static async create(input: PartnerInput, adminId: string) {
       );
       const c = res.rows[0];
       if (!c) throw new Error('Commission not found');
+      // When the caller supplies the owning partner (route scoping), the
+      // commission must actually belong to it.
+      if (partnerId && String(c.partner_id) !== String(partnerId)) {
+        throw new Error('Commission not found for this partner');
+      }
       if (c.status === 'PAID') {
         await client.query('COMMIT');
         return { alreadyPaid: true, commission: c };

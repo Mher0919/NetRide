@@ -420,6 +420,8 @@ class AdminController {
                         take: Number(limit),
                         orderBy: { created_at: 'desc' },
                         include: { driver_profile: true },
+                        // Never ship credential material or push tokens to the dashboard.
+                        omit: { password_hash: true, fcm_token: true },
                     }),
                     prisma_service_1.prisma.user.count({ where }),
                 ]);
@@ -432,6 +434,7 @@ class AdminController {
                         take: Number(limit),
                         orderBy: { created_at: 'desc' },
                         include: { driver_profile: true },
+                        omit: { password_hash: true, fcm_token: true },
                     }),
                     prisma_service_1.prisma.user.count({ where }),
                 ]);

@@ -5,6 +5,7 @@
 // stay on the existing /sponsor/* endpoints.
 
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import { z } from 'zod';
 import { PortalAuthService } from './portal-auth.service';
 import { PortalRequest } from '../../middleware/portal.middleware';
@@ -95,7 +96,9 @@ export class PortalController {
       // must never receive portal reset mail.
       const identity = await findPortalIdentityByEmail(normalized);
       if (identity) {
-        await OTPService.generateOTP(normalized);
+        // Bound to the RESET purpose: this code can never complete a login,
+        // and a login code can never mint a password reset.
+        await OTPService.generateOTP(normalized, 'PORTAL_RESET');
       }
     } catch {
       // validation failures and DB errors return the same generic response
@@ -106,10 +109,12 @@ export class PortalController {
   static async verifyResetOTP(req: Request, res: Response) {
     try {
       const { email, code } = z.object({ email: z.string().email(), code: z.string().length(6) }).parse(req.body);
-      const valid = await OTPService.verifyOTP(email, code);
+      const normalized = String(email).trim().toLowerCase();
+      const valid = await OTPService.verifyOTP(normalized, code, 'PORTAL_RESET');
       if (!valid) return res.status(400).json({ error: 'Invalid or expired verification code.' });
-      const resetToken = require('crypto').randomUUID();
-      await redis.set(`portal_pwd_reset:${resetToken}`, email, 'EX', 3600);
+      const resetToken = crypto.randomUUID();
+      // Only the digest is stored; the raw token exists only in this response.
+      await redis.set(`portal_pwd_reset:${this.hashToken(resetToken)}`, normalized, 'EX', 3600);
       res.json({ resetToken });
     } catch (error: any) {
       res.status(400).json({ error: error.message || 'Failed to verify code.' });
@@ -119,16 +124,22 @@ export class PortalController {
   static async resetPassword(req: Request, res: Response) {
     try {
       const { token, newPassword } = ResetPasswordSchema.parse(req.body);
-      const email = await redis.get(`portal_pwd_reset:${token}`);
+      const key = `portal_pwd_reset:${this.hashToken(token)}`;
+      const email = await redis.get(key);
       if (!email) return res.status(400).json({ error: 'This link has expired or is invalid.' });
       const identity = await findPortalIdentityByEmail(email);
-      if (!identity) return res.status(400).json({ error: 'Account not found.' });
+      if (!identity) return res.status(400).json({ error: 'This link has expired or is invalid.' });
       await PortalAuthService.changePassword(identity.id, newPassword);
-      await redis.del(`portal_pwd_reset:${token}`);
+      await redis.del(key);
       res.json({ message: 'Password reset successfully. You can now log in.' });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
+  }
+
+  /** SHA-256 digest for opaque one-time tokens (never stored raw). */
+  private static hashToken(token: string): string {
+    return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
   }
 
   // -------------------------------------------------------------- dashboard

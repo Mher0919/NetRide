@@ -134,6 +134,11 @@ async function resolvePortals(userId: string, email: string): Promise<PortalInfo
     }));
 }
 
+const REFRESH_TTL_SECONDS = REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60;
+const REFRESH_INDEX_TTL_SECONDS = REFRESH_TTL_SECONDS + 60;
+const refreshKey = (token: string) => `portal_refresh:${token}`;
+const refreshIndexKey = (userId: string) => `portal_refresh_index:${userId}`;
+
 export class PortalAuthService {
   /** Issues access + refresh tokens for a resolved portal user (shared by login + 2FA). */
   private static async issueSession(
@@ -153,11 +158,18 @@ export class PortalAuthService {
 
     const refreshToken = crypto.randomUUID();
     await redis.set(
-      `portal_refresh:${refreshToken}`,
-      JSON.stringify({ userId: user.id, email: user.email }),
+      refreshKey(refreshToken),
+      JSON.stringify({ userId: user.id, email: user.email, issuedAt: Date.now() }),
       'EX',
-      REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60,
+      REFRESH_TTL_SECONDS,
     );
+    // Per-user index so a password change can revoke every outstanding
+    // refresh token for the account (session invalidation on credential
+    // change), not just the one that happened to be presented here.
+    await redis
+      .sadd(refreshIndexKey(user.id), refreshToken)
+      .then(() => redis.expire(refreshIndexKey(user.id), REFRESH_INDEX_TTL_SECONDS))
+      .catch(() => undefined);
 
     const portal = portals.find((p) => p.type === 'SPONSOR') ?? portals[0];
 
@@ -242,7 +254,7 @@ export class PortalAuthService {
         'EX',
         PENDING_LOGIN_TTL_S,
       );
-      await OTPService.generateOTP(user.email);
+      await OTPService.generateOTP(user.email, 'PORTAL_LOGIN');
       return {
         otp_required: true,
         email: user.email,
@@ -272,7 +284,7 @@ export class PortalAuthService {
       throw new Error('Login session expired or invalid. Please sign in again.');
     }
 
-    const isValid = await OTPService.verifyOTP(normalizedEmail, code);
+    const isValid = await OTPService.verifyOTP(normalizedEmail, code, 'PORTAL_LOGIN');
     if (!isValid) {
       await redis.del(pendingKey);
       throw new Error('Invalid or expired verification code');
@@ -297,20 +309,39 @@ export class PortalAuthService {
   }
 
   static async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string; portals: PortalInfo[]; portal: PortalInfo }> {
-    const data = await redis.get(`portal_refresh:${refreshToken}`);
+    const data = await redis.get(refreshKey(refreshToken));
     if (!data) throw new Error('Invalid or expired refresh token');
 
     const parsed = JSON.parse(data);
 
     const userRes = await pool.query(
-      `SELECT id, email, is_active, role FROM users
+      `SELECT id, email, is_active, role, password_changed_at FROM users
        WHERE id = $1 AND role IN ('SPONSOR','PARTNER','FLEET')`,
       [parsed.userId],
     );
     const user = userRes.rows[0];
     if (!user || !user.is_active) {
-      await redis.del(`portal_refresh:${refreshToken}`);
+      await redis.del(refreshKey(refreshToken));
       throw new Error('Account is disabled');
+    }
+
+    // A refresh token issued before the last password change belongs to a
+    // session established with the old credential and must not be renewed.
+    if (user.password_changed_at) {
+      let issuedAt = Number(parsed.issuedAt);
+      if (!Number.isFinite(issuedAt) || issuedAt <= 0) {
+        // Legacy payload without issuedAt: derive it from the remaining TTL.
+        const ttl = await redis.ttl(refreshKey(refreshToken)).catch(() => -2);
+        if (ttl > 0) issuedAt = Date.now() - (REFRESH_TTL_SECONDS - ttl) * 1000;
+      }
+      if (
+        Number.isFinite(issuedAt) &&
+        issuedAt > 0 &&
+        new Date(user.password_changed_at).getTime() > issuedAt
+      ) {
+        await redis.del(refreshKey(refreshToken));
+        throw new Error('Session expired. Please sign in again.');
+      }
     }
 
     const states = await resolvePortalStates(user.id, user.email);
@@ -324,7 +355,7 @@ export class PortalAuthService {
         mustChangePassword: s.mustChangePassword,
       }));
     if (portals.length === 0) {
-      await redis.del(`portal_refresh:${refreshToken}`);
+      await redis.del(refreshKey(refreshToken));
       throw new Error('Portal access is not enabled for this account.');
     }
 
@@ -334,14 +365,21 @@ export class PortalAuthService {
       { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256' },
     );
 
+    // Rotation: the presented token is single-use and is replaced by a new
+    // one (bound to the same user index).
     const newRefreshToken = crypto.randomUUID();
-    await redis.del(`portal_refresh:${refreshToken}`);
+    await redis.del(refreshKey(refreshToken));
+    await redis.srem(refreshIndexKey(user.id), refreshToken).catch(() => undefined);
     await redis.set(
-      `portal_refresh:${newRefreshToken}`,
-      JSON.stringify({ userId: user.id, email: user.email }),
+      refreshKey(newRefreshToken),
+      JSON.stringify({ userId: user.id, email: user.email, issuedAt: Date.now() }),
       'EX',
-      REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60,
+      REFRESH_TTL_SECONDS,
     );
+    await redis
+      .sadd(refreshIndexKey(user.id), newRefreshToken)
+      .then(() => redis.expire(refreshIndexKey(user.id), REFRESH_INDEX_TTL_SECONDS))
+      .catch(() => undefined);
 
     return {
       token: newToken,
@@ -352,7 +390,35 @@ export class PortalAuthService {
   }
 
   static async invalidateRefreshToken(refreshToken: string): Promise<void> {
-    await redis.del(`portal_refresh:${refreshToken}`);
+    const data = await redis.get(refreshKey(refreshToken)).catch(() => null);
+    await redis.del(refreshKey(refreshToken));
+    if (data) {
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed?.userId) {
+          await redis.srem(refreshIndexKey(String(parsed.userId)), refreshToken);
+        }
+      } catch {
+        // ignore malformed payloads
+      }
+    }
+  }
+
+  /**
+   * Revokes every outstanding portal refresh token for the user. Called
+   * whenever the credential changes (forced change / reset / admin action)
+   * so sessions established with the old password cannot be renewed.
+   */
+  static async revokeAllRefreshTokens(userId: string): Promise<void> {
+    try {
+      const tokens = await redis.smembers(refreshIndexKey(userId));
+      if (tokens.length > 0) {
+        await redis.del(...tokens.map((t) => refreshKey(t)));
+      }
+      await redis.del(refreshIndexKey(userId));
+    } catch (err: any) {
+      console.warn(`[PORTAL] refresh-token revocation failed: ${err.message}`);
+    }
   }
 
   /** First-login / forced password change. Clears the flag on ALL of the user's portal accounts. */
@@ -387,6 +453,8 @@ export class PortalAuthService {
     } finally {
       client.release();
     }
+    // Credential change ⇒ every existing portal session is revoked.
+    await this.revokeAllRefreshTokens(userId);
     AuditEventsService.record({
       actorId: userId,
       actorRole: 'PORTAL',

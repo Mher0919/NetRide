@@ -36,6 +36,7 @@
 
 import crypto from 'crypto';
 import { pool } from '../../config/database';
+import { redis } from '../../config/redis';
 import { getIo } from '../../gateway/io-handle';
 import { env } from '../../config/env';
 import { centsValue } from '../../services/financial-ledger.service';
@@ -167,6 +168,13 @@ export function normalizeRedemption(r: any): RedemptionRow {
     updated_at: r.updated_at,
   };
 }
+
+/**
+ * Per-sponsor brute-force budget for the 6-digit validation code. Shared via
+ * Redis across instances; a failure window is 15 minutes.
+ */
+const MAX_VALIDATION_FAILURES = 10;
+const VALIDATION_FAILURE_WINDOW_S = 15 * 60;
 
 /** Validation code: 6 digits, cryptographically random, hash-only storage. */
 function generateValidationCode(): string {
@@ -541,14 +549,35 @@ export class SpecialRedemptionService {
     const normalized = String(code ?? '').trim();
     if (!/^\d{6}$/.test(normalized)) throw new Error("Enter the 6-digit code from the rider's app");
 
+    // Brute-force throttle: a per-sponsor failure budget shared across
+    // instances (Redis). Without it, every guess is tested against ALL of
+    // the sponsor's pending codes and the old per-row increment throttled
+    // nothing. Fails open on Redis outages — the endpoint-level rate limit
+    // (10/min) still bounds attempts.
+    const failKey = `sponsor_code_fail:${sponsorId}`;
+    let failures = 0;
+    try {
+      const raw = await redis.get(failKey);
+      failures = raw ? Number(raw) : 0;
+    } catch {
+      failures = 0;
+    }
+    if (failures >= MAX_VALIDATION_FAILURES) {
+      throw new Error('Too many failed attempts — try again later');
+    }
+
     // The stored hash binds code + redemption id (HMAC), so we enumerate the
     // sponsor's pending codes and compare each candidate hash server-side.
-    // Plaintext codes are never stored anywhere (spec §99).
+    // Plaintext codes are never stored anywhere (spec §99). Exhausted rows
+    // are excluded so a burned code can never be matched or "unlocked".
     const candidates = await pool.query(
       `SELECT id, validation_code_hash, validation_expires_at,
               validation_attempts, max_validation_attempts
        FROM special_redemptions
-       WHERE sponsor_id = $1 AND status = 'WAITING_FOR_SPONSOR' AND validation_code_hash IS NOT NULL`,
+       WHERE sponsor_id = $1 AND status = 'WAITING_FOR_SPONSOR'
+         AND validation_code_hash IS NOT NULL
+         AND validation_attempts < max_validation_attempts
+       ORDER BY created_at DESC`,
       [sponsorId],
     );
     let target: string | null = null;
@@ -559,14 +588,17 @@ export class SpecialRedemptionService {
       }
     }
     if (!target) {
-      // Burn one attempt on the most recent candidate to throttle brute force.
-      if (candidates.rows.length > 0) {
-        await pool.query(
-          `UPDATE special_redemptions
-           SET validation_attempts = validation_attempts + 1, updated_at = NOW()
-           WHERE id = $1 AND status = 'WAITING_FOR_SPONSOR'`,
-          [candidates.rows[0].id],
-        );
+      // Count the failure once, globally per sponsor, with a rolling window.
+      try {
+        const next = await redis.incr(failKey);
+        if (next === 1) await redis.expire(failKey, VALIDATION_FAILURE_WINDOW_S);
+        if (next >= MAX_VALIDATION_FAILURES) {
+          throw new Error('Too many failed attempts — try again later');
+        }
+      } catch (redisErr: any) {
+        if (redisErr?.message?.includes('Too many failed attempts')) throw redisErr;
+        // Redis unavailable: fall through to the generic message (the HTTP
+        // rate limit still applies).
       }
       throw new Error('No pending validation matches this code');
     }
@@ -580,6 +612,9 @@ export class SpecialRedemptionService {
     if (redemption.validation_attempts >= redemption.max_validation_attempts) {
       throw new Error('Too many failed attempts — ask the rider for a fresh code');
     }
+
+    // Successful validation clears the sponsor's failure budget.
+    await redis.del(`sponsor_code_fail:${sponsorId}`).catch(() => undefined);
 
     // Atomically transition — repeated/duplicate attempts are no-ops.
     const res = await pool.query(
@@ -658,7 +693,25 @@ export class SpecialRedemptionService {
       throw new Error('This validation can no longer be cancelled');
     }
 
-    await this.releaseReservedBudget(res.rows[0].id, 'REVERSAL', `Sponsor cancellation: ${reasonCode}`);
+    const cancelled = res.rows[0];
+    await this.releaseReservedBudget(cancelled.id, 'REVERSAL', `Sponsor cancellation: ${reasonCode}`);
+
+    // No-show parity with expiry: cancelling an UNVALIDATED post-ride
+    // redemption (WAITING_FOR_SPONSOR) must not silently hand the rider a
+    // free discounted fare. The sponsor pays nothing and the rider becomes
+    // responsible for the remaining fare, exactly as if the code expired.
+    if (!cancelled.sponsor_validated_at && cancelled.ride_id) {
+      try {
+        await RideSettlementService.onSpecialExpired({
+          redemptionId: cancelled.id,
+          rideId: cancelled.ride_id,
+          riderId: cancelled.rider_id,
+        });
+      } catch (err: any) {
+        console.error(`[SPECIAL] ⚠️ additional charge failed for sponsor-cancelled ${cancelled.id}: ${err.message}`);
+      }
+    }
+
     AuditEventsService.record({
       actorId: sponsorId,
       actorRole: 'SPONSOR',

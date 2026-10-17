@@ -18,11 +18,13 @@ export const CoordinateSchema = z.object({
 export const LocationSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
-  address: z.string().optional(),
+  // Bounded: addresses are persisted and broadcast; unbounded strings are a
+  // memory/DoS vector.
+  address: z.string().max(500).optional(),
 });
 
 export const LocationWithAddressSchema = LocationSchema.extend({
-  address: z.string().min(1),
+  address: z.string().min(1).max(500),
 });
 
 // ============================================
@@ -115,7 +117,7 @@ export const RiderDestinationChangedSchema = z.object({
   tripId: z.string().uuid(),
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
-  address: z.string().min(1),
+  address: z.string().min(1).max(500),
 });
 
 // ============================================
@@ -153,9 +155,16 @@ export function validate<T>(
 // ============================================
 
 const RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
-  'updateLocation': { max: 60, windowMs: 60_000 }, // 60/min
-  'sendMessage': { max: 30, windowMs: 60_000 },    // 30/min
-  'requestReroute': { max: 10, windowMs: 60_000 }, // 10/min
+  'updateLocation': { max: 60, windowMs: 60_000 },  // 60/min
+  'sendMessage': { max: 30, windowMs: 60_000 },     // 30/min
+  'requestReroute': { max: 10, windowMs: 60_000 },  // 10/min
+  // Expensive / abuse-sensitive events (each performs DB/Redis work and
+  // can amplify dispatch-queue load).
+  'requestRide': { max: 5, windowMs: 60_000 },      // 5/min
+  'goOnline': { max: 10, windowMs: 60_000 },        // 10/min
+  'riderDestinationChanged': { max: 10, windowMs: 60_000 }, // 10/min
+  'subscribeToNearbyDrivers': { max: 30, windowMs: 60_000 }, // 30/min
+  'reportActivity': { max: 10, windowMs: 60_000 },  // 10/min
 };
 
 export async function checkRateLimit(socket: any, eventName: string): Promise<boolean> {

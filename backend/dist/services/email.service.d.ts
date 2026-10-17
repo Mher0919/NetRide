@@ -1,3 +1,5 @@
+import { escapeHtml, encodeUrlPart } from '../utils/html-escape';
+export { escapeHtml, encodeUrlPart };
 export declare class EmailService {
     private static oauth2Client;
     private static DOC_TYPE_LABELS;

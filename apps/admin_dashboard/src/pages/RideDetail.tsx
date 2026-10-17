@@ -84,7 +84,7 @@ const RideDetail: React.FC = () => {
           setTrajectory(typeof data.trajectory === 'string' ? JSON.parse(data.trajectory) : data.trajectory);
         }
       } catch (error) {
-        console.error('Failed to fetch ride:', error);
+        console.error('Failed to fetch ride:', error instanceof Error ? error.message : 'request failed');
       } finally {
         setLoading(false);
       }
@@ -102,7 +102,7 @@ const RideDetail: React.FC = () => {
           setActualAvailable(true);
         }
       } catch (error) {
-        console.error('Failed to fetch ride routes:', error);
+        console.error('Failed to fetch ride routes:', error instanceof Error ? error.message : 'request failed');
       }
     };
 
@@ -111,7 +111,7 @@ const RideDetail: React.FC = () => {
         const data = await getRideLedger(id!);
         setLedger(data);
       } catch (error) {
-        console.error('Failed to fetch ride ledger:', error);
+        console.error('Failed to fetch ride ledger:', error instanceof Error ? error.message : 'request failed');
       }
     };
 

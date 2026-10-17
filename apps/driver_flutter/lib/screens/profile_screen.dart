@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
+import '../services/secure_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 import 'dart:math' as math;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -91,8 +91,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _fetchProfile() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token');
+      final token = SecureTokenStore.token;
       if (token == null) {
         setState(() => _state = ViewState.success);
         return;
@@ -103,7 +102,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       Map<String, dynamic>? profile;
 
       // Try to get the cached driver ID from SharedPreferences
-      final userId = prefs.getString('user_id');
+      final userId = SecureTokenStore.userId;
       if (userId != null && userId.isNotEmpty) {
         final cached = cache.get(CacheKeys.driverProfile(userId));
         if (cached != null) {

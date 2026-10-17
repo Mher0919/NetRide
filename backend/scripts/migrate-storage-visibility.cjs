@@ -94,7 +94,7 @@ async function deletePublicObject(path) {
 
   console.log(`[migrate-storage] ${rows.length} private object(s) still in the public bucket.`);
   if (DRY_RUN) {
-    for (const row of rows) console.log(`  would copy ${row.id} ${row.path}`);
+    for (const row of rows) console.log(`  would copy ${row.id}`); // object paths are sensitive metadata — never printed
     await client.end();
     return;
   }
@@ -123,6 +123,6 @@ async function deletePublicObject(path) {
   await client.end();
   if (failed > 0) process.exit(2);
 })().catch((err) => {
-  console.error('[migrate-storage] fatal:', err.message);
+  console.error('[migrate-storage] fatal:', String(err.message ?? '').slice(0, 200));
   process.exit(1);
 });

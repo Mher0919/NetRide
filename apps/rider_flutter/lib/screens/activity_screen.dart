@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import '../services/secure_token_store.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
 import 'report_sheet.dart';
@@ -32,8 +32,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
   Future<void> _load({bool showLoading = false}) async {
     if (showLoading) setState(() => _state = ViewState.loading);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      if (!prefs.containsKey('jwt_token')) {
+      if (!SecureTokenStore.hasToken) {
         setState(() {
           _state = ViewState.success;
           _history = [];

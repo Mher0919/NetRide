@@ -17,7 +17,7 @@ async function main() {
   let created = 0;
 
   for (let i = 0; i < total; i++) {
-    const email = `loadtest.rider.${i}@test.com`;
+    const email = `loadtest.rider.${i}@netride.test`;
     try {
       await pool.query(
         `INSERT INTO users (email, full_name, password_hash, role, is_verified, verification_status, is_active, password_changed_at)

@@ -110,7 +110,14 @@ export class UserController {
         </div>
       `);
     } catch (error: any) {
-      res.status(400).send(`<h1>Error verifying email: ${error.message}</h1>`);
+      // Static, escaped copy only: the error text can derive from the
+      // URL-supplied token and must never be reflected into HTML.
+      res.status(400).contentType('html').send(
+        '<div style="font-family: Arial; text-align: center; padding: 50px;">' +
+        '<h1 style="color: #b00;">This verification link is invalid or has expired.</h1>' +
+        '<p>Please request a new email change link from the app.</p>' +
+        '</div>',
+      );
     }
   }
 }

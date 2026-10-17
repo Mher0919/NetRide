@@ -18,7 +18,58 @@ const otp_service_1 = require("./otp.service");
 const types_1 = require("../../types");
 const role_resolution_1 = require("./role-resolution");
 const user_sanitize_1 = require("../../security/user-sanitize");
+const crypto_1 = __importDefault(require("crypto"));
 class AuthService {
+    /**
+     * Server-side markers proving that a password/gate has been completed
+     * before an emailed code may be exchanged for a session. A public
+     * `/auth/request-otp` call never sets one, so an intercepted code alone
+     * cannot authenticate a password-protected account.
+     */
+    static loginChallengeKey(email) {
+        return `login_otp_challenge:${String(email).trim().toLowerCase()}`;
+    }
+    static adminChallengeKey(email) {
+        return `admin_login_challenge:${String(email).trim().toLowerCase()}`;
+    }
+    /** SHA-256 digest of an opaque one-time token (tokens are never stored raw). */
+    static hashToken(token) {
+        return crypto_1.default.createHash('sha256').update(String(token), 'utf8').digest('hex');
+    }
+    static async setChallenge(key, ttlSeconds) {
+        try {
+            await redis_1.redis.set(key, '1', 'EX', ttlSeconds);
+        }
+        catch (err) {
+            // Fail closed: without a durable challenge marker the code must not be
+            // redeemable. Throwing here aborts the login instead of weakening it.
+            console.error(`[AUTH] challenge write failed: ${err.message}`);
+            throw new Error('Unable to start verification. Please try again.');
+        }
+    }
+    /**
+     * True while a challenge marker is pending. The marker is only cleared
+     * after a SUCCESSFUL verification, so a typo does not force the user
+     * through the password step again (the code itself still has a 5-attempt
+     * cap and the endpoint is rate-limited).
+     */
+    static async hasChallenge(key) {
+        try {
+            return (await redis_1.redis.get(key)) != null;
+        }
+        catch (err) {
+            console.error(`[AUTH] challenge read failed: ${err.message}`);
+            return false;
+        }
+    }
+    static async clearChallenge(key) {
+        try {
+            await redis_1.redis.del(key);
+        }
+        catch {
+            // best-effort; the marker expires with the code TTL
+        }
+    }
     static async requestPhoneOTP(userId, phoneNumber, role) {
         // 1. Check if this phone is already verified for the SAME user
         //    (either on their rider profile via users table, or driver profile via drivers table)
@@ -76,9 +127,21 @@ class AuthService {
         // Consumer signup checks only the CONSUMER identity namespace. A colab
         // (sponsor/partner/fleet) account may hold the same email — the two are
         // independent identities (migration 058).
-        const existingRes = await database_1.pool.query(`SELECT id FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`, [data.email]);
+        const existingRes = await database_1.pool.query(`SELECT id, full_name FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`, [data.email]);
         if (existingRes.rows.length > 0) {
-            throw new Error('User already exists');
+            // Enumeration-safe: the caller receives the exact same response as a
+            // brand-new signup. The real account owner is emailed a password-reset
+            // link so a legitimate returning user is never stranded.
+            const existing = existingRes.rows[0];
+            try {
+                const token = (0, uuid_1.v4)();
+                await redis_1.redis.set(`reset_token:${this.hashToken(token)}`, existing.id, 'EX', 3600);
+                await email_service_1.EmailService.sendPasswordResetLink(data.email, existing.full_name, token);
+            }
+            catch (err) {
+                console.error(`[AUTH] existing-account signup notice failed: ${err.message}`);
+            }
+            return { otp_required: true, phone_number_required: true, message: 'Verification code sent to email' };
         }
         const passwordHash = await bcryptjs_1.default.hash(data.password, 10);
         const createRes = await database_1.pool.query(`INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
@@ -88,7 +151,10 @@ class AuthService {
         if (role === types_1.UserRole.DRIVER) {
             await database_1.pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
         }
-        await otp_service_1.OTPService.generateOTP(data.email);
+        // Bind the code to a completed signup: verifyOTP only redeems a LOGIN
+        // code when a password-verified signup/login challenge is pending.
+        await otp_service_1.OTPService.generateOTP(data.email, 'LOGIN');
+        await this.setChallenge(this.loginChallengeKey(data.email), Math.floor(otp_service_1.OTPService.CODE_TTL_MS / 1000));
         return { otp_required: true, phone_number_required: true, message: 'Verification code sent to email' };
     }
     static async loginWithPassword(data) {
@@ -138,10 +204,15 @@ class AuthService {
                 }
             }
             if (!isTrusted) {
-                // Route the 2FA code through the configured admin notification
-                // inbox (ADMIN_NOTIFY_EMAIL, e.g. an ops Gmail the admin actually
-                // reads). Falls back to the admin's own email when unset.
-                await otp_service_1.OTPService.generateOTP(env_1.env.ADMIN_NOTIFY_EMAIL || user.email);
+                // Bind the pending 2FA challenge to THIS administrator's identity
+                // BEFORE the code is generated. The code itself is bound to the
+                // admin's address (purpose ADMIN_2FA) and only delivered to the
+                // shared notification inbox — one admin's code can never be used to
+                // complete another admin's login.
+                await this.setChallenge(this.adminChallengeKey(user.email), Math.floor(otp_service_1.OTPService.CODE_TTL_MS / 1000));
+                await otp_service_1.OTPService.generateOTP(user.email, 'ADMIN_2FA', {
+                    deliverTo: env_1.env.ADMIN_NOTIFY_EMAIL || user.email,
+                });
                 return {
                     otp_required: true,
                     email: env_1.env.ADMIN_NOTIFY_EMAIL || user.email,
@@ -153,7 +224,10 @@ class AuthService {
         // code is sent to the user's email; the app exchanges it via
         // /auth/verify-otp, which then issues the session token.
         if (user.role !== types_1.UserRole.ADMIN) {
-            await otp_service_1.OTPService.generateOTP(user.email);
+            // Bind the pending login to a successful password check. /auth/request-otp
+            // never sets this marker, so an obtained code alone cannot authenticate.
+            await this.setChallenge(this.loginChallengeKey(user.email), Math.floor(otp_service_1.OTPService.CODE_TTL_MS / 1000));
+            await otp_service_1.OTPService.generateOTP(user.email, 'LOGIN');
             return {
                 otp_required: true,
                 message: 'Verification code sent to email',
@@ -169,8 +243,8 @@ class AuthService {
         const onboarding = await this.getOnboardingStatus(user.id);
         return { user: (0, user_sanitize_1.sanitizeUser)(user), token, phone_number_required: phoneNumberRequired, password_expired: passwordExpired, onboarding };
     }
-    static async changePassword(userId, data) {
-        const userRes = await database_1.pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    static async changePassword(userId, data, activeRole) {
+        const userRes = await database_1.pool.query('SELECT id, email, role, password_hash, password_changed_at FROM users WHERE id = $1', [userId]);
         const user = userRes.rows[0];
         if (!user)
             throw new Error('User not found');
@@ -181,9 +255,26 @@ class AuthService {
             if (!isValid)
                 throw new Error('Current password incorrect');
         }
+        else {
+            // No current password supplied is only legitimate for the forced
+            // rotation of an EXPIRED administrative password: the admin has just
+            // completed password + 2FA login and the UI intentionally cannot ask
+            // for the old password again. Every other caller must prove knowledge
+            // of the current password.
+            const changedAt = user.password_changed_at ? new Date(user.password_changed_at) : new Date(0);
+            const expired = Date.now() - changedAt.getTime() > 90 * 24 * 60 * 60 * 1000;
+            if (!(user.role === types_1.UserRole.ADMIN && expired)) {
+                throw new Error('Current password is required');
+            }
+        }
         const newHash = await bcryptjs_1.default.hash(data.newPassword, 10);
         await database_1.pool.query('UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2', [newHash, userId]);
-        return { message: 'Password updated successfully' };
+        // Issue a fresh session token: every token issued before the change is
+        // now rejected by assertTokenStillValid, and the caller (e.g. the admin
+        // app finishing a forced rotation) needs a usable session.
+        const role = activeRole ?? user.role;
+        const token = this.generateToken(user, role);
+        return { message: 'Password updated successfully', token };
     }
     static async forgotPassword(email) {
         // Consumer app password reset: only consumer identities. The colab portal
@@ -194,17 +285,26 @@ class AuthService {
         if (!user)
             throw new Error('If an account exists with this email, you will receive a reset link');
         const token = (0, uuid_1.v4)();
-        await redis_1.redis.set(`reset_token:${token}`, user.id, 'EX', 3600); // 1 hour
+        // Only the digest is stored: a Redis dump can never be replayed against
+        // the reset endpoint. The raw token exists only inside the emailed link.
+        await redis_1.redis.set(`reset_token:${this.hashToken(token)}`, user.id, 'EX', 3600); // 1 hour
         await email_service_1.EmailService.sendPasswordResetLink(email, user.full_name, token);
         return { message: 'Password reset link sent to email' };
     }
     static async resetPassword(token, newPassword) {
-        const userId = await redis_1.redis.get(`reset_token:${token}`);
+        const hashed = this.hashToken(token);
+        const resetKey = `reset_token:${hashed}`;
+        const changeKey = `pwd_change_token:${hashed}`;
+        // Accept both the "forgot password" token and the token issued by the
+        // in-session "request password change" flow (which already proved the
+        // current password + email ownership) — both are single-use.
+        const userId = (await redis_1.redis.get(resetKey)) ?? (await redis_1.redis.get(changeKey));
         if (!userId)
             throw new Error('Invalid or expired reset token');
         const newHash = await bcryptjs_1.default.hash(newPassword, 10);
         await database_1.pool.query('UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2', [newHash, userId]);
-        await redis_1.redis.del(`reset_token:${token}`);
+        await redis_1.redis.del(resetKey);
+        await redis_1.redis.del(changeKey);
         return { message: 'Password reset successfully' };
     }
     static async getOnboardingStatus(userId) {
@@ -267,17 +367,18 @@ class AuthService {
             throw new Error('User not found');
         const token = (0, uuid_1.v4)();
         const data = JSON.stringify({ userId, newEmail });
-        await redis_1.redis.set(`email_change:${token}`, data, 'EX', 3600);
+        await redis_1.redis.set(`email_change:${this.hashToken(token)}`, data, 'EX', 3600);
         await email_service_1.EmailService.sendEmailChangeLink(newEmail, userRes.rows[0].full_name, token);
         return { message: 'Verification link sent to your new email' };
     }
     static async verifyEmailChange(token) {
-        const dataStr = await redis_1.redis.get(`email_change:${token}`);
+        const key = `email_change:${this.hashToken(token)}`;
+        const dataStr = await redis_1.redis.get(key);
         if (!dataStr)
             throw new Error('Invalid or expired verification link');
         const { userId, newEmail } = JSON.parse(dataStr);
         await database_1.pool.query('UPDATE users SET email = $1 WHERE id = $2', [newEmail, userId]);
-        await redis_1.redis.del(`email_change:${token}`);
+        await redis_1.redis.del(key);
         return { message: 'Email updated successfully' };
     }
     static async handleOAuth(data) {
@@ -352,17 +453,42 @@ class AuthService {
         return { user: (0, user_sanitize_1.sanitizeUser)(user), token, phone_number_required: phoneNumberRequired, onboarding };
     }
     static async requestOTP(email) {
-        await otp_service_1.OTPService.generateOTP(email);
+        // Public endpoint: sends a LOGIN-purpose code but deliberately does NOT
+        // create a login challenge — see verifyOTP below.
+        await otp_service_1.OTPService.generateOTP(email, 'LOGIN');
         return { message: 'Verification code sent to email' };
     }
     static async verifyOTP(data) {
-        const isValid = await otp_service_1.OTPService.verifyOTP(data.email, data.code);
+        const normalizedEmail = String(data.email ?? '').trim().toLowerCase();
+        // Enforce the login-flow binding BEFORE the OTP is checked or consumed:
+        // a code obtained through the public request-otp endpoint must never be
+        // sufficient on its own to authenticate an existing password-protected
+        // account. Administrators authenticate exclusively through the
+        // password + admin 2FA flow.
+        const preRes = await database_1.pool.query(`SELECT role, password_hash FROM users WHERE lower(email) = $1 AND role IN ('RIDER','DRIVER','ADMIN')`, [normalizedEmail]);
+        const pre = preRes.rows[0];
+        if (pre) {
+            if (pre.role === types_1.UserRole.ADMIN) {
+                throw new Error('Invalid or expired verification code');
+            }
+            if (pre.password_hash) {
+                const challenge = await this.hasChallenge(this.loginChallengeKey(normalizedEmail));
+                if (!challenge) {
+                    throw new Error('Invalid or expired verification code');
+                }
+            }
+        }
+        const isValid = await otp_service_1.OTPService.verifyOTP(normalizedEmail, data.code, 'LOGIN');
         if (!isValid) {
             throw new Error('Invalid or expired verification code');
         }
+        // Single-use: the challenge is consumed with the code.
+        await this.clearChallenge(this.loginChallengeKey(normalizedEmail));
         // Find the CONSUMER identity for this email (colab accounts with the same
         // email are separate identities — never touched by consumer OTP flows).
-        const existingRes = await database_1.pool.query(`SELECT * FROM users WHERE email = $1 AND role IN ('RIDER','DRIVER','ADMIN')`, [data.email]);
+        // Case-insensitive so a mixed-case stored address still resolves to the
+        // same identity the normalized OTP was issued for.
+        const existingRes = await database_1.pool.query(`SELECT * FROM users WHERE lower(email) = $1 AND role IN ('RIDER','DRIVER','ADMIN')`, [normalizedEmail]);
         let user = existingRes.rows[0];
         // Self-registration may only create RIDER/DRIVER accounts. For existing
         // accounts the role hint may only add a driver profile — it can never
@@ -412,12 +538,12 @@ class AuthService {
         if (!isValid)
             throw new Error('Current password incorrect');
         const token = (0, uuid_1.v4)();
-        await redis_1.redis.set(`pwd_change_token:${token}`, userId, 'EX', 1800); // 30 mins
+        await redis_1.redis.set(`pwd_change_token:${this.hashToken(token)}`, userId, 'EX', 1800); // 30 mins
         await email_service_1.EmailService.sendPasswordChangeVerification(user.email, user.full_name, token);
         return { message: 'Verification email sent' };
     }
     static async verifyPasswordChangeToken(token) {
-        const userId = await redis_1.redis.get(`pwd_change_token:${token}`);
+        const userId = await redis_1.redis.get(`pwd_change_token:${this.hashToken(token)}`);
         if (!userId)
             throw new Error('Invalid or expired verification link');
         return { userId };
@@ -431,20 +557,40 @@ class AuthService {
         return { message: 'Account deactivated successfully' };
     }
     static async requestAdmin2FA(email) {
-        const userRes = await database_1.pool.query(`SELECT role FROM users WHERE email = $1 AND role = 'ADMIN'`, [email]);
+        const normalized = String(email ?? '').trim().toLowerCase();
+        const userRes = await database_1.pool.query(`SELECT role FROM users WHERE email = $1 AND role = 'ADMIN'`, [normalized]);
         const user = userRes.rows[0];
         if (!user || user.role !== types_1.UserRole.ADMIN) {
-            throw new Error('Unauthorized');
+            // Generic response — never reveal whether an admin account exists.
+            return { message: 'Verification code sent' };
         }
-        await otp_service_1.OTPService.generateOTP(env_1.env.ADMIN_NOTIFY_EMAIL || email);
+        // The endpoint is public; a code is only (re)sent while a password-verified
+        // admin login is actually pending. Without a pending challenge this call
+        // is a no-op so it can never be used to spam the admin inbox.
+        const pending = await this.hasChallenge(this.adminChallengeKey(normalized));
+        if (!pending) {
+            return { message: 'Verification code sent' };
+        }
+        await otp_service_1.OTPService.generateOTP(normalized, 'ADMIN_2FA', {
+            deliverTo: env_1.env.ADMIN_NOTIFY_EMAIL || normalized,
+        });
         return { message: 'Verification code sent' };
     }
     static async verifyAdmin2FA(email, code) {
-        const isValid = await otp_service_1.OTPService.verifyOTP(env_1.env.ADMIN_NOTIFY_EMAIL || email, code);
+        const normalized = String(email ?? '').trim().toLowerCase();
+        // Only a pending, password-verified admin login may exchange a code for
+        // a session.
+        const pending = await this.hasChallenge(this.adminChallengeKey(normalized));
+        if (!pending) {
+            throw new Error('Invalid or expired verification code');
+        }
+        // The code is bound to THIS admin's identity (never a shared inbox key).
+        const isValid = await otp_service_1.OTPService.verifyOTP(normalized, code, 'ADMIN_2FA');
         if (!isValid) {
             throw new Error('Invalid or expired verification code');
         }
-        const userRes = await database_1.pool.query(`SELECT * FROM users WHERE email = $1 AND role = 'ADMIN'`, [email]);
+        await this.clearChallenge(this.adminChallengeKey(normalized));
+        const userRes = await database_1.pool.query(`SELECT * FROM users WHERE email = $1 AND role = 'ADMIN'`, [normalized]);
         const user = userRes.rows[0];
         if (!user || user.role !== types_1.UserRole.ADMIN) {
             throw new Error('Unauthorized');
@@ -506,6 +652,44 @@ class AuthService {
     }
     static verifyToken(token) {
         return jsonwebtoken_1.default.verify(token, env_1.env.JWT_SECRET, { algorithms: ['HS256'] });
+    }
+    /**
+     * Server-side revocation check for an already signature-verified access
+     * token. A JWT is valid for up to 30 days, so the claims alone must not be
+     * trusted: the subject is re-read from the database on every authenticated
+     * request.
+     *
+     *  - the user must still exist and be active (deactivation);
+     *  - a token carrying the ADMIN role must still belong to a user whose
+     *    stored role is ADMIN (demotion);
+     *  - a token issued before the account's last password change is rejected
+     *    (password change/reset invalidates every older session).
+     *
+     * Throws on any failure; resolves with no value when the token is current.
+     */
+    static async assertTokenStillValid(decoded) {
+        if (!decoded || typeof decoded.id !== 'string' || !decoded.id) {
+            throw new Error('Invalid token subject');
+        }
+        const res = await database_1.pool.query('SELECT role, is_active, password_changed_at FROM users WHERE id = $1', [decoded.id]);
+        const row = res.rows[0];
+        if (!row)
+            throw new Error('Token subject no longer exists');
+        if (row.is_active === false)
+            throw new Error('Account is deactivated');
+        if (decoded.role === types_1.UserRole.ADMIN && row.role !== types_1.UserRole.ADMIN) {
+            throw new Error('Administrator role revoked');
+        }
+        if (row.password_changed_at) {
+            const changedAtSec = Math.floor(new Date(row.password_changed_at).getTime() / 1000);
+            const iat = Number(decoded.iat);
+            // One second of tolerance absorbs sub-second skew between the DB clock
+            // (password_changed_at) and JWT issue time for a session created in the
+            // same instant as a password change.
+            if (!Number.isFinite(iat) || iat + 1 < changedAtSec) {
+                throw new Error('Token issued before last password change');
+            }
+        }
     }
 }
 exports.AuthService = AuthService;

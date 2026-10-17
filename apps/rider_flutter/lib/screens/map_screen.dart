@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../services/secure_token_store.dart';
 import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -350,8 +351,7 @@ class _MapScreenState extends State<MapScreen>
 
   Future<void> _fetchProfile() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      if (!prefs.containsKey('jwt_token')) return;
+      if (!SecureTokenStore.hasToken) return;
 
       final profile = await UserService.getProfile();
       if (mounted) {

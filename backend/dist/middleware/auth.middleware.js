@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.partnerMiddleware = exports.driverMiddleware = exports.riderMiddleware = exports.sponsorMiddleware = exports.adminMiddleware = exports.authMiddleware = void 0;
 const auth_service_1 = require("../modules/auth/auth.service");
 const database_1 = require("../config/database");
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader?.split(' ')[1];
     // If no token, return unauthorized
@@ -11,15 +11,27 @@ const authMiddleware = (req, res, next) => {
         console.warn(`[AUTH] ❌ No token provided for ${req.originalUrl}`);
         return res.status(401).json({ error: 'Unauthorized: No token provided' });
     }
+    let decoded;
     try {
-        const decoded = auth_service_1.AuthService.verifyToken(token);
-        req.user = decoded;
-        next();
+        decoded = auth_service_1.AuthService.verifyToken(token);
     }
     catch (err) {
         console.error(`[AUTH] ❌ Verification failed for ${req.originalUrl}: ${err.message}`);
         return res.status(401).json({ error: 'Unauthorized: Invalid token' });
     }
+    // Re-check the token subject against current database state so that
+    // deactivated users, demoted administrators and tokens predating a
+    // password change are rejected immediately instead of at JWT expiry.
+    try {
+        await auth_service_1.AuthService.assertTokenStillValid(decoded);
+    }
+    catch (err) {
+        // Fail closed: a lookup failure must never grant access.
+        console.error(`[AUTH] ❌ Token no longer valid for ${req.originalUrl}: ${err.message}`);
+        return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    }
+    req.user = decoded;
+    next();
 };
 exports.authMiddleware = authMiddleware;
 const adminMiddleware = (req, res, next) => {

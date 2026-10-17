@@ -341,7 +341,7 @@ async function request(port, method, path, { token, body, headers } = {}) {
     ok('portal-only email gets a colab identity', r.status === 201, r.data?.error);
 
     r = await request(port, 'POST', '/auth/signup-password', {
-      body: { email: portalOnlyEmail, full_name: 'Colab E2E Consumer', password: 'ConsumerPass-123!', role: 'RIDER' },
+      body: { email: portalOnlyEmail, full_name: 'Colab E2E Consumer', password: 'ConsumerPass-' + suffix + '!', role: 'RIDER' },
     });
     ok('consumer signup succeeds on a portal-only email', r.status === 200 && r.data?.otp_required === true, r.data?.error);
     const dual = await pool.query(

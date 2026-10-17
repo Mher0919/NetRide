@@ -529,13 +529,25 @@ class RideService {
         let declined = false;
         if (offerId) {
             const offer = await DriverOfferService.getOffer(offerId);
-            // Only the driver the offer actually belongs to may decline it.
-            if (offer && offer.driverId === driverId && offer.rideId === tripId) {
-                declined = await DriverOfferService.declineOffer(offerId);
-                await DriverOfferService.releaseDriver(driverId);
+            // Only the driver the offer actually belongs to may decline it. A
+            // mismatched/unknown offer is rejected outright — otherwise a forged
+            // body could record rejections and trigger re-matching at will.
+            if (!offer || offer.driverId !== driverId || offer.rideId !== tripId) {
+                return { declined: false };
             }
+            declined = await DriverOfferService.declineOffer(offerId);
+            await DriverOfferService.releaseDriver(driverId);
         }
         else {
+            // Notification-action path without an offer id: only a driver that
+            // actually holds the ACTIVE offer for THIS ride may decline it. A
+            // forged tripId must never record a rejection or trigger a re-match
+            // for a ride the driver was never offered.
+            const active = await DriverOfferService.getOfferForDriver(driverId).catch(() => null);
+            if (!active || active.rideId !== tripId) {
+                return { declined: false };
+            }
+            declined = await DriverOfferService.declineOffer(active.offerId);
             await DriverOfferService.releaseDriver(driverId);
         }
         const { RideRejectionService } = await Promise.resolve().then(() => __importStar(require('../../services/ride-rejection.service')));

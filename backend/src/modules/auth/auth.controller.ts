@@ -107,13 +107,15 @@ export class AuthController {
       if (!userId) return res.status(401).json({ error: 'Session expired. Please login again.' });
 
       const validatedData = ChangePasswordSchema.parse(req.body);
-      const result = await AuthService.changePassword(userId, validatedData);
+      const result = await AuthService.changePassword(userId, validatedData, req.user?.role);
       res.json(result);
     } catch (error: any) {
       console.error(`[AUTH] ❌ Change password error:`, error.message);
       const message = error.message.includes('incorrect')
         ? 'The current password you entered is incorrect.'
-        : 'Failed to update password. Please try again.';
+        : error.message.includes('required') || error.message.includes('expired')
+          ? 'Your current password is required.'
+          : 'Failed to update password. Please try again.';
       res.status(400).json({ error: message });
     }
   }
@@ -124,9 +126,8 @@ export class AuthController {
       const result = await AuthService.forgotPassword(email);
       res.json(result);
     } catch (error: any) {
-      // For security, we always return success even if user not found, 
-      // but we'll log it for admin awareness
-      console.log(`[AUTH] ℹ️ Forgot password attempt for: ${req.body.email}`);
+      // For security, we always return the same response even if the user is
+      // not found. The attempted address is deliberately NOT logged (PII).
       res.json({ message: 'If an account exists with this email, you will receive a reset link.' });
     }
   }

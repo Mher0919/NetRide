@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backup / device-transfer policy for this app.
+
+     allowBackup=false already disables cloud backups on every supported
+     API level; this file additionally disables device-to-device transfer
+     on Android 12+ (API 31+), which otherwise can still move app data
+     despite allowBackup=false on some devices. Session credentials live in
+     Keystore-backed secure storage and must never leave the device. -->
+<data-extraction-rules>
+    <cloud-backup disabled="true" />
+    <device-transfer disabled="true" />
+</data-extraction-rules>

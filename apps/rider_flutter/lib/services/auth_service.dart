@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 import 'user_service.dart';
 import 'notification_service.dart';
+import 'secure_token_store.dart';
 
 /// Seconds the app waits for the backend push registry before continuing —
 /// zero: registration is fire-and-forget on login paths (the server also
@@ -20,6 +20,16 @@ Future<void> _registerDeviceForCurrentUser() async {
 
 class AuthService {
   static final ValueNotifier<bool> isAuthenticatedNotifier = ValueNotifier<bool>(false);
+
+  /// Persists the backend session into platform secure storage. Credentials
+  /// are never written to SharedPreferences (see SecureTokenStore).
+  static Future<void> _persistSession(Map<String, dynamic> data) async {
+    await SecureTokenStore.save(
+      token: data['token'].toString(),
+      userId: data['user']['id'].toString(),
+      userRole: data['user']['role'].toString(),
+    );
+  }
 
   static Future<Map<String, dynamic>> loginWithOAuth({
     required String email,
@@ -42,13 +52,14 @@ class AuthService {
         final token = data['token'];
         debugPrint('[AUTH DEBUG] 📥 Token received from backend (length: ${token?.length})');
         
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('jwt_token', token);
-        await prefs.setString('user_id', data['user']['id']);
-        await prefs.setString('user_role', data['user']['role']);
-        
-        final verifyToken = prefs.getString('jwt_token');
-        debugPrint('[AUTH DEBUG] 💾 Token saved to storage. Read-back check: ${verifyToken != null ? "SUCCESS" : "FAILED"}');
+        await SecureTokenStore.save(
+          token: token,
+          userId: data['user']['id'].toString(),
+          userRole: data['user']['role'].toString(),
+        );
+
+        final verifyToken = SecureTokenStore.token;
+        debugPrint('[AUTH DEBUG] 💾 Token saved to secure storage. Read-back check: ${verifyToken != null ? "SUCCESS" : "FAILED"}');
         
         await _registerDeviceForCurrentUser();
         
@@ -120,10 +131,7 @@ class AuthService {
 
       if (response.statusCode == 200) {
         final data = response.data;
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('jwt_token', data['token']);
-        await prefs.setString('user_id', data['user']['id']);
-        await prefs.setString('user_role', data['user']['role']);
+        await _persistSession(data);
         // A fresh session must initialize the app-wide socket (otherwise a
         // password login left the rider with no socket at all).
         isAuthenticatedNotifier.value = true;
@@ -156,10 +164,7 @@ class AuthService {
           return data;
         }
 
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('jwt_token', data['token']);
-        await prefs.setString('user_id', data['user']['id']);
-        await prefs.setString('user_role', data['user']['role']);
+        await _persistSession(data);
         isAuthenticatedNotifier.value = true;
         await _registerDeviceForCurrentUser();
         return data;
@@ -188,10 +193,7 @@ class AuthService {
           return data;
         }
         
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('jwt_token', data['token']);
-        await prefs.setString('user_id', data['user']['id']);
-        await prefs.setString('user_role', data['user']['role']);
+        await _persistSession(data);
         isAuthenticatedNotifier.value = true;
         await _registerDeviceForCurrentUser();
         return data;
@@ -305,10 +307,7 @@ class AuthService {
     } catch (e) {
       debugPrint('Supabase signout error: $e');
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('jwt_token');
-    await prefs.remove('user_id');
-    await prefs.remove('user_role');
+    await SecureTokenStore.clear();
     isAuthenticatedNotifier.value = false;
   }
 
@@ -377,8 +376,7 @@ class AuthService {
   }
 
   static Future<bool> isAuthenticated() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token');
+    final token = SecureTokenStore.token;
     if (token == null) return false;
     return !isJwtExpired(token);
   }

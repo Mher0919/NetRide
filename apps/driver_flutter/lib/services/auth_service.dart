@@ -1,8 +1,8 @@
 import 'dart:io';
+import 'secure_token_store.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 import '../providers/driver_provider.dart';
@@ -59,12 +59,13 @@ class AuthService {
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = response.data;
-        final prefs = await SharedPreferences.getInstance();
         final jwtToken = data['token'];
         if (jwtToken != null) {
-          await prefs.setString('jwt_token', jwtToken);
-          await prefs.setString('user_id', data['user']['id']);
-          await prefs.setString('user_role', data['user']['role']);
+          await SecureTokenStore.save(
+            token: jwtToken,
+            userId: data['user']['id'].toString(),
+            userRole: data['user']['role'].toString(),
+          );
           rememberJwt(jwtToken);
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
@@ -137,12 +138,13 @@ class AuthService {
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = response.data;
-        final prefs = await SharedPreferences.getInstance();
         final jwtToken = data['token'];
         if (jwtToken != null) {
-          await prefs.setString('jwt_token', jwtToken);
-          await prefs.setString('user_id', data['user']['id']);
-          await prefs.setString('user_role', data['user']['role']);
+          await SecureTokenStore.save(
+            token: jwtToken,
+            userId: data['user']['id'].toString(),
+            userRole: data['user']['role'].toString(),
+          );
           rememberJwt(jwtToken);
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
@@ -175,12 +177,13 @@ class AuthService {
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = response.data;
-        final prefs = await SharedPreferences.getInstance();
         final jwtToken = data['token'];
         if (jwtToken != null) {
-          await prefs.setString('jwt_token', jwtToken);
-          await prefs.setString('user_id', data['user']['id']);
-          await prefs.setString('user_role', data['user']['role']);
+          await SecureTokenStore.save(
+            token: jwtToken,
+            userId: data['user']['id'].toString(),
+            userRole: data['user']['role'].toString(),
+          );
           rememberJwt(jwtToken);
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
@@ -215,12 +218,13 @@ class AuthService {
           return data;
         }
 
-        final prefs = await SharedPreferences.getInstance();
         final jwtToken = data['token'];
         if (jwtToken != null) {
-          await prefs.setString('jwt_token', jwtToken);
-          await prefs.setString('user_id', data['user']['id']);
-          await prefs.setString('user_role', data['user']['role']);
+          await SecureTokenStore.save(
+            token: jwtToken,
+            userId: data['user']['id'].toString(),
+            userRole: data['user']['role'].toString(),
+          );
           rememberJwt(jwtToken);
           debugPrint('[AuthService] Token saved successfully');
           _updateProvider(jwtToken);
@@ -438,10 +442,7 @@ class AuthService {
     } catch (e) {
       debugPrint('Supabase signout error: $e');
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('jwt_token');
-    await prefs.remove('user_id');
-    await prefs.remove('user_role');
+    await SecureTokenStore.clear();
     rememberJwt(null);
     isAuthenticatedNotifier.value = false;
   }
@@ -511,8 +512,7 @@ class AuthService {
   }
 
   static Future<bool> isAuthenticated() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token');
+    final token = SecureTokenStore.token;
     if (token == null) return false;
     return !isJwtExpired(token);
   }

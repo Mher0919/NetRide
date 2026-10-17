@@ -1,4 +1,5 @@
 // lib/services/notification_service.dart
+import 'secure_token_store.dart';
 //
 // Real phone push notifications for the driver app.
 //
@@ -64,7 +65,7 @@ Future<void> runOfferActionFromNotification(
   String? baseUrl;
   try {
     final prefs = await SharedPreferences.getInstance();
-    token = prefs.getString('jwt_token');
+    token = SecureTokenStore.token;
     baseUrl = prefs.getString(_kApiBaseKey) ?? 'https://netride.onride.com/api/';
   } catch (_) {
     return;

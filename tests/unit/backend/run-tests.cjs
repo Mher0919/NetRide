@@ -72,6 +72,8 @@ const SUITES = [
   './security/safe-path.unit.test.ts',
   './security/security-headers.unit.test.ts',
   './security/migration-file-guard.unit.test.cjs',
+  './security/auth-hardening.unit.test.ts',
+  './security/ride-transition-guards.unit.test.ts',
 ];
 
 const filter = process.argv[2];

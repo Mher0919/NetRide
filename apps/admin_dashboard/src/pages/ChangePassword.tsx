@@ -23,7 +23,7 @@ const ChangePassword: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, user } = useAuth();
 
   const isExpired = location.state?.expired;
   const tempToken = location.state?.token;
@@ -42,15 +42,24 @@ const ChangePassword: React.FC = () => {
 
     try {
       const headers = tempToken ? { Authorization: `Bearer ${tempToken}` } : {};
-      await api.post('/auth/change-password', 
+      const response = await api.post('/auth/change-password', 
         { currentPassword, newPassword },
         { headers }
       );
+      // Changing the password invalidates every previously issued token;
+      // the server returns a fresh one so the current session can continue.
+      const freshToken: string | undefined = response.data?.token;
       
       setSuccess('Your security credentials have been updated.');
       
       setTimeout(() => {
-        if (isExpired && tempUser && tempToken) {
+        const currentUser = user ?? tempUser;
+        if (freshToken && currentUser) {
+          // The old token predates the password change and is now rejected
+          // by the server — persist the fresh session before navigating.
+          login(currentUser, freshToken);
+          navigate('/');
+        } else if (isExpired && tempUser && tempToken) {
           login(tempUser, tempToken);
           navigate('/');
         } else if (isAuthenticated) {

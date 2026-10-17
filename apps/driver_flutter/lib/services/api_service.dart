@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
+import 'secure_token_store.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -66,8 +66,7 @@ class ApiService {
 
     client.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final prefs = await SharedPreferences.getInstance();
-        final token = prefs.getString('jwt_token');
+        final token = SecureTokenStore.token;
 
         debugPrint('[API DEBUG] 🛰️ ${options.method} ${options.uri}');
 
@@ -118,8 +117,7 @@ class ApiService {
             final success = await AuthService.syncWithBackend();
             if (success) {
               debugPrint('[API] 🔄 Sync successful. Retrying original request...');
-              final prefs = await SharedPreferences.getInstance();
-              final newToken = prefs.getString('jwt_token');
+              final newToken = SecureTokenStore.token;
               e.requestOptions.headers['Authorization'] = 'Bearer $newToken';
 
               // Single-flight guard: prevent recursive interceptor triggering

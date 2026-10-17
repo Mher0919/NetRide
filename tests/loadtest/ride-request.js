@@ -31,7 +31,7 @@ const tokens = {};
 
 function riderForVU(vu) {
   return {
-    email: `loadtest.rider.${vu}@test.com`,
+    email: `loadtest.rider.${vu}@netride.test`,
     lat: 34.05 + (vu % 100) * 0.0005,
     lng: -118.24 + (vu % 100) * 0.0005,
   };

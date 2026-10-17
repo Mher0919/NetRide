@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import '../services/secure_token_store.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/ride_provider.dart';
 import '../providers/specials_provider.dart';
 import 'map_screen.dart';
@@ -33,8 +33,7 @@ class _MainWrapperState extends State<MainWrapper> {
   }
 
   Future<void> _checkAuth() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token');
+    final token = SecureTokenStore.token;
     if (token == null) {
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);

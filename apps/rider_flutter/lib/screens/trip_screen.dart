@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../services/secure_token_store.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +7,6 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/ride_provider.dart';
 import '../providers/specials_provider.dart';
@@ -107,8 +107,7 @@ class _TripScreenState extends State<TripScreen> {
   Future<void> _handleRideCancelled(models.Trip? trip) async {
     if (!mounted) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final ownId = prefs.getString('user_id');
+    final ownId = SecureTokenStore.userId;
     final isOwnCancel = trip?.cancelledBy != null && trip!.cancelledBy == ownId;
 
     // Stop ride-specific tracking (driver location listener is socket-side;
@@ -981,8 +980,7 @@ class _ChatCallButtons extends StatelessWidget {
   }
 
   Future<String?> _readUserId() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('user_id');
+    return SecureTokenStore.userId;
   }
 
   @override

@@ -10,6 +10,8 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false">
         <!-- Default notification channel for FCM display messages. Tapping a
              system notification with a payload others than the default channel

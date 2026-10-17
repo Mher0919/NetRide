@@ -11,6 +11,29 @@ const router = Router();
 router.use(authMiddleware);
 router.use(adminMiddleware);
 
+// Resource identifiers in this API are UUIDs. Reject malformed ids before
+// any handler/query runs (keeps malformed input away from SQL and returns a
+// clean 400 instead of a raw driver error).
+const UUID_PARAM_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+router.param('id', (_req, res, next, value) => {
+  if (!UUID_PARAM_RE.test(String(value))) {
+    return res.status(400).json({ error: 'Invalid resource id.' });
+  }
+  next();
+});
+router.param('commissionId', (_req, res, next, value) => {
+  if (!UUID_PARAM_RE.test(String(value))) {
+    return res.status(400).json({ error: 'Invalid commission id.' });
+  }
+  next();
+});
+router.param('status', (_req, res, next, value) => {
+  if (!/^[A-Za-z_]{2,32}$/.test(String(value))) {
+    return res.status(400).json({ error: 'Invalid status.' });
+  }
+  next();
+});
+
 // ---- Partners ----------------------------------------------------------
 router.get('/partners', AdminRewardsController.listPartners);
 router.post('/partners', AdminRewardsController.createPartner);

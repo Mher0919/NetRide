@@ -162,7 +162,9 @@ async function relayChatMessage(io, socket, counterpartRole, payload, self) {
         socket.emit('error', 'Missing trip id.');
         return;
     }
-    if (!(await consumeRateBudget(`${self.id}:${payload.tripId}`))) {
+    // Rate-limit per SENDER, never per client-supplied tripId: keying the
+    // budget by tripId let a client rotate fake ids for unlimited messages.
+    if (!(await consumeRateBudget(`chat:${self.id}`))) {
         socket.emit('error', 'You are sending messages too quickly. Please slow down.');
         return;
     }
@@ -308,6 +310,8 @@ function setupSocketGateway(io) {
          */
         if (role === types_1.UserRole.DRIVER) {
             socket.on('goOnline', async (loc) => {
+                if (!(await (0, socket_validation_1.checkRateLimit)(socket, 'goOnline')))
+                    return;
                 const validated = (0, socket_validation_1.validate)(socket_validation_1.GoOnlineSchema, loc, socket, 'goOnline');
                 if (!validated.success || !validated.data)
                     return;
@@ -675,6 +679,10 @@ function setupSocketGateway(io) {
                     await DriverOfferService.releaseDriver(id);
                     await ride_service_1.RideService.cancelTrip(tripId, id, cancelOpts);
                     clearCachedCurrentRide(id, types_1.UserRole.DRIVER);
+                    // Release the in-memory arrival bookkeeping (previously only
+                    // deleted on a successful pickup/complete, so repeatedly
+                    // accepting-then-cancelling trips grew the map forever).
+                    driverArrivalTimes.delete(tripId);
                 }
                 catch (err) {
                     console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
@@ -950,7 +958,9 @@ function setupSocketGateway(io) {
                 riderAutoCancelTimers.delete(id);
                 console.log(`[SOCKET] ✅ Cleared auto-cancel timer for reconnecting rider ${id}`);
             }
-            socket.on('subscribeToNearbyDrivers', (loc) => {
+            socket.on('subscribeToNearbyDrivers', async (loc) => {
+                if (!(await (0, socket_validation_1.checkRateLimit)(socket, 'subscribeToNearbyDrivers')))
+                    return;
                 const validated = (0, socket_validation_1.validate)(socket_validation_1.SubscribeNearbyDriversSchema, loc, socket, 'subscribeToNearbyDrivers');
                 if (!validated.success || !validated.data)
                     return;
@@ -985,7 +995,9 @@ function setupSocketGateway(io) {
                 lat: zod_1.z.number().min(-90).max(90),
                 lng: zod_1.z.number().min(-180).max(180),
             });
-            socket.on('reportActivity', (payload) => {
+            socket.on('reportActivity', async (payload) => {
+                if (!(await (0, socket_validation_1.checkRateLimit)(socket, 'reportActivity')))
+                    return;
                 const parsed = (0, zod_parse_1.safeParseBounded)(reportActivitySchema, payload);
                 if (!parsed.success)
                     return;
@@ -1009,8 +1021,9 @@ function setupSocketGateway(io) {
                     // Broadcast to specific driver if rider is on a trip
                     const currentTrip = await getCachedCurrentRide(id, types_1.UserRole.RIDER);
                     if (currentTrip && currentTrip.driver_id && currentTrip.status !== types_1.TripStatus.COMPLETED) {
-                        console.log(`[SOCKET] 📡 Broadcasting rider loc to driver:${currentTrip.driver_id}`);
-                        io.to(`driver:${currentTrip.driver_id}`).emit('riderLocationUpdate', loc);
+                        // Forward ONLY the validated fields — never the raw client
+                        // payload (unknown keys could otherwise be relayed verbatim).
+                        io.to(`driver:${currentTrip.driver_id}`).emit('riderLocationUpdate', validated.data);
                         // Demand heatmap signal: a rider actively on a trip near here.
                         (0, demand_service_1.recordRiderActivity)({
                             riderId: id,
@@ -1044,12 +1057,16 @@ function setupSocketGateway(io) {
                 }
             });
             socket.on('requestRide', async (data) => {
+                if (!(await (0, socket_validation_1.checkRateLimit)(socket, 'requestRide')))
+                    return;
                 const validated = (0, socket_validation_1.validate)(socket_validation_1.RequestRideSchema, data, socket, 'requestRide');
                 if (!validated.success || !validated.data)
                     return;
-                console.log(`[SOCKET] 🚕 Ride request from rider ${id}: From ${validated.data.pickup.address} to ${validated.data.destination.address} favorite=${!!validated.data.favoritePriority} special=${validated.data.specialRedemptionId ?? 'none'}`);
+                const parsed = validated.data;
+                // Addresses are PII — log the request without them.
+                console.log(`[SOCKET] 🚕 Ride request from rider ${id}: favorite=${!!parsed.favoritePriority} special=${parsed.specialRedemptionId ?? 'none'}`);
                 try {
-                    const trip = await ride_service_1.RideService.requestRide(id, data.pickup, data.destination, undefined, false, data.idempotencyKey, { promoCode: data.promoCode, applyCredits: data.applyCredits, creditUseCents: data.creditUseCents, specialRedemptionId: data.specialRedemptionId, specialTermsAccepted: data.specialTermsAccepted }, validated.data.favoritePriority);
+                    const trip = await ride_service_1.RideService.requestRide(id, parsed.pickup, parsed.destination, undefined, false, parsed.idempotencyKey, { promoCode: parsed.promoCode, applyCredits: parsed.applyCredits, creditUseCents: parsed.creditUseCents, specialRedemptionId: parsed.specialRedemptionId, specialTermsAccepted: parsed.specialTermsAccepted }, parsed.favoritePriority);
                     setCachedCurrentRide(id, types_1.UserRole.RIDER, trip);
                     socket.emit('tripUpdate', trip);
                     // Demand heatmap signal: a REAL ride request — the strongest
@@ -1057,8 +1074,8 @@ function setupSocketGateway(io) {
                     (0, demand_service_1.recordRiderActivity)({
                         riderId: id,
                         type: 'RIDE_REQUESTED',
-                        lat: data.pickup.lat,
-                        lng: data.pickup.lng,
+                        lat: parsed.pickup.lat,
+                        lng: parsed.pickup.lng,
                         tripId: trip.id,
                     }).catch(() => undefined);
                 }
@@ -1092,6 +1109,7 @@ function setupSocketGateway(io) {
                     }
                     await ride_service_1.RideService.cancelTrip(tripId, id, cancelOpts);
                     clearCachedCurrentRide(id, types_1.UserRole.RIDER);
+                    driverArrivalTimes.delete(tripId);
                 }
                 catch (err) {
                     console.error(`[SOCKET] Cancel trip failed: ${err.message}`);
@@ -1115,38 +1133,41 @@ function setupSocketGateway(io) {
              * is being told to recalculate".
              */
             socket.on('riderDestinationChanged', async (data) => {
+                if (!(await (0, socket_validation_1.checkRateLimit)(socket, 'riderDestinationChanged')))
+                    return;
                 const validated = (0, socket_validation_1.validate)(socket_validation_1.RiderDestinationChangedSchema, data, socket, 'riderDestinationChanged');
                 if (!validated.success || !validated.data)
                     return;
-                console.log(`[SOCKET] 🎯 Rider ${id} changed destination for trip ${validated.data.tripId} → ${validated.data.address}`);
+                const dest = validated.data;
+                console.log(`[SOCKET] 🎯 Rider ${id} changed destination for trip ${dest.tripId}`);
                 try {
                     const trip = await ride_service_1.RideService.getCurrentRide(id, types_1.UserRole.RIDER);
                     setCachedCurrentRide(id, types_1.UserRole.RIDER, trip);
-                    if (!trip || trip.id !== data.tripId || !trip.driver_id) {
+                    if (!trip || trip.id !== dest.tripId || !trip.driver_id) {
                         socket.emit('error', 'No active trip to update.');
                         return;
                     }
                     // Persist new destination on the ride (trajectory kept).
-                    await database_1.pool.query(`UPDATE rides SET destination_lat = $1, destination_lng = $2, destination_address = $3 WHERE id = $4`, [data.lat, data.lng, data.address, data.tripId]);
+                    await database_1.pool.query(`UPDATE rides SET destination_lat = $1, destination_lng = $2, destination_address = $3 WHERE id = $4`, [dest.lat, dest.lng, dest.address, dest.tripId]);
                     // Re-route the destination leg from where the driver is now.
                     const driverLoc = await locations_service_1.LocationsService.getDriverLocation(trip.driver_id);
                     const start = driverLoc
                         ? [driverLoc.lat, driverLoc.lng]
                         : [trip.pickup.lat, trip.pickup.lng];
-                    const route = await navigation_service_1.NavigationService.cacheRouteLeg(data.tripId, 'destination', start, [data.lat, data.lng]);
-                    await database_1.pool.query(`UPDATE rides SET route_metadata = route_metadata || $1::jsonb WHERE id = $2`, [JSON.stringify({ destination: route }), data.tripId]);
+                    const route = await navigation_service_1.NavigationService.cacheRouteLeg(dest.tripId, 'destination', start, [dest.lat, dest.lng]);
+                    await database_1.pool.query(`UPDATE rides SET route_metadata = route_metadata || $1::jsonb WHERE id = $2`, [JSON.stringify({ destination: route }), dest.tripId]);
                     // Tell the driver to swap their route. The driver app will
                     // re-fetch via `navigationStarted` payload, then rehydrate its
                     // local NavigationRoute.
                     io.to(`driver:${trip.driver_id}`).emit('navigationRerouteRequested', {
-                        tripId: data.tripId,
+                        tripId: dest.tripId,
                         leg: 'destination',
                         reason: 'rider_destination_changed',
                         route,
                     });
                     // Notify the rider the driver has been told.
                     socket.emit('navigationRerouteRequested', {
-                        tripId: data.tripId,
+                        tripId: dest.tripId,
                         leg: 'destination',
                         reason: 'rider_destination_changed',
                     });

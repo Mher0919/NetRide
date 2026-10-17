@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import '../services/secure_token_store.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/driver_provider.dart';
 import '../services/api_service.dart';
 import '../components/state_container.dart';
@@ -30,8 +30,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
   Future<void> _fetchHistory() async {
     setState(() => _state = ViewState.loading);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token');
+      final token = SecureTokenStore.token;
       if (token == null) {
         setState(() {
           _history = [];
@@ -57,8 +56,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
   /// profile/document requirements) without flipping to the loading state.
   Future<void> _refreshHistory() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token');
+      final token = SecureTokenStore.token;
       if (token != null) {
         final response = await ApiService.dio.get('/ride/history');
         if (mounted) setState(() => _history = response.data);

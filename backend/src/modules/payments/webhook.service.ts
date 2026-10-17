@@ -108,6 +108,32 @@ export class StripeWebhookService {
         const metadata = object.metadata ?? {};
         const stripePaymentId = metadata.stripe_payment_id;
         if (stripePaymentId) {
+          // Bind the event to the authoritative local row BEFORE fulfilling:
+          // the PaymentIntent id and the received amount must match the
+          // server-created record. A signed event whose metadata points at a
+          // row it does not actually belong to (wrong intent / underpayment)
+          // must never settle that row.
+          const localRes = await pool.query(
+            `SELECT id, purpose, amount_cents, currency, stripe_payment_intent_id
+             FROM stripe_payments WHERE id = $1`,
+            [stripePaymentId],
+          );
+          const local = localRes.rows[0];
+          if (!local) {
+            throw new Error(`Webhook references unknown stripe_payment ${stripePaymentId}`);
+          }
+          if (local.stripe_payment_intent_id && local.stripe_payment_intent_id !== object.id) {
+            throw new Error(
+              `PaymentIntent ${object.id} does not match stripe_payment ${stripePaymentId} (${local.stripe_payment_intent_id})`,
+            );
+          }
+          const received = Number(object.amount_received ?? object.amount ?? 0);
+          if (!Number.isFinite(received) || received < Number(local.amount_cents)) {
+            throw new Error(
+              `PaymentIntent ${object.id} underpaid stripe_payment ${stripePaymentId}: ${received} < ${local.amount_cents}`,
+            );
+          }
+
           await pool.query(
             `UPDATE stripe_payments
              SET status = 'SUCCEEDED', stripe_charge_id = COALESCE(stripe_charge_id, $2),
@@ -115,8 +141,7 @@ export class StripeWebhookService {
              WHERE id = $1 AND status NOT IN ('SUCCEEDED','REFUNDED')`,
             [stripePaymentId, object.latest_charge ?? null],
           );
-          const row = await pool.query(`SELECT purpose FROM stripe_payments WHERE id = $1`, [stripePaymentId]);
-          const purpose = row.rows[0]?.purpose as string | undefined;
+          const purpose = local.purpose as string | undefined;
           if (purpose === 'RIDER_WALLET_TOPUP') {
             await PaymentsService.applyRiderWalletTopup({ stripePaymentId, paymentIntentId: object.id });
           } else if (purpose === 'SPONSOR_BUDGET_TOPUP') {

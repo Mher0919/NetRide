@@ -12,11 +12,15 @@ const MINUTE = 60 * 1000;
 const HOUR = 3600 * 1000;
 
 export const RATE_LIMITS: Record<string, RateLimitEntry> = {
-  // Authentication endpoints — strict limits
-  'POST /api/auth/signup': {
+  // Authentication endpoints — strict limits. Keys MUST match the mounted
+  // route paths (authRoutes mounted at /api/auth) or they never apply.
+  'POST /api/auth/signup-password': {
     ip: { max: 10, windowMs: HOUR },
   },
-  'POST /api/auth/login': {
+  'POST /api/auth/login-password': {
+    ip: { max: 20, windowMs: MINUTE },
+  },
+  'POST /api/auth/oauth': {
     ip: { max: 20, windowMs: MINUTE },
   },
   'POST /api/auth/verify-otp': {
@@ -30,6 +34,26 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
   },
   'POST /api/auth/reset-password': {
     ip: { max: 5, windowMs: MINUTE },
+  },
+  // Credential-change endpoints: strict, per-user (they regroup sensitive
+  // material and must never be a password-guessing oracle).
+  'POST /api/auth/change-password': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 20, windowMs: HOUR },
+  },
+  'POST /api/auth/request-password-change': {
+    user: { max: 5, windowMs: HOUR },
+    ip: { max: 10, windowMs: HOUR },
+  },
+  // Phone verification: protects the Twilio/SMS quota and the phone
+  // verification oracle.
+  'POST /api/auth/request-phone-otp': {
+    user: { max: 5, windowMs: HOUR },
+    ip: { max: 10, windowMs: HOUR },
+  },
+  'POST /api/auth/verify-phone-otp': {
+    user: { max: 10, windowMs: MINUTE },
+    ip: { max: 20, windowMs: MINUTE },
   },
 
   // Admin 2FA — strict limits (6-digit code = 900k possibilities; an
@@ -57,6 +81,13 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
   'POST /api/portal/auth/reset-password': {
     ip: { max: 3, windowMs: MINUTE },
   },
+  'POST /api/portal/auth/refresh': {
+    ip: { max: 60, windowMs: MINUTE },
+  },
+  'POST /api/portal/auth/change-password': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 20, windowMs: HOUR },
+  },
 
   // Ride endpoints — moderate limits
   'POST /api/ride/request': {
@@ -67,9 +98,27 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     user: { max: 60, windowMs: MINUTE },
     ip: { max: 100, windowMs: MINUTE },
   },
-  'POST /api/ride/:id/cancel': {
+  'POST /api/ride/cancel': {
     user: { max: 30, windowMs: MINUTE },
     ip: { max: 100, windowMs: MINUTE },
+  },
+  'POST /api/ride/accept': {
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 120, windowMs: MINUTE },
+  },
+  'POST /api/ride/decline': {
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 120, windowMs: MINUTE },
+  },
+  // Ride features (tip / test completion) — strict; they must never be a
+  // spam or state-machine abuse vector.
+  'POST /api/ride/:rideId/tip': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 20, windowMs: HOUR },
+  },
+  'POST /api/ride/:rideId/complete-test': {
+    user: { max: 10, windowMs: HOUR },
+    ip: { max: 20, windowMs: HOUR },
   },
   'GET /api/ride/history': {
     user: { max: 60, windowMs: MINUTE },

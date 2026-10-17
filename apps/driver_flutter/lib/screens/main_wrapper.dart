@@ -1,8 +1,8 @@
 import 'dart:async';
+import '../services/secure_token_store.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'availability_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
@@ -34,8 +34,7 @@ class _MainWrapperState extends State<MainWrapper> {
   }
 
   Future<void> _checkAuth() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token');
+    final token = SecureTokenStore.token;
     if (token == null) {
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
