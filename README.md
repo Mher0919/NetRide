@@ -14,8 +14,6 @@ web dashboards.
 | `backend/` | REST + Socket.IO API (Node 24, TypeScript, Prisma/Postgres, Redis, Stripe) |
 | `tests/` | All testing infrastructure — see [tests/README.md](tests/README.md) |
 | `docs/` | Product/operations documentation |
-| `infra/` | nginx, pgbouncer, and scale compose configs |
-| `osrm/`, `osrm-data/` | Self-hosted OSRM routing service |
 
 ## Quick start
 
