@@ -496,5 +496,16 @@
   "494": ".requestOnDemandPayout",
   "495": ".submitProfileChange",
   "496": ".getCurrentProfileChange",
-  "497": ".getPendingVehicleSubmissions"
+  "497": ".getPendingVehicleSubmissions",
+  "498": "PartnerAuthService",
+  "499": "import-pois.ts",
+  "500": "twilioService",
+  "501": "AppDelegate",
+  "502": ".message",
+  "503": ".message",
+  "504": "PhoneUtils",
+  "505": "SponsorAuthService",
+  "506": "RewardEngine",
+  "507": ".refreshAll",
+  "508": "double?"
 }

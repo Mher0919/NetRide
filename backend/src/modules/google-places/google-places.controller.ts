@@ -53,7 +53,9 @@ export class GooglePlacesController {
       const q = String(req.query.q ?? '');
       const lat = req.query.lat != null ? Number(req.query.lat) : undefined;
       const lng = req.query.lng != null ? Number(req.query.lng) : undefined;
-      const businesses = await GooglePlacesService.searchText(q, lat, lng);
+      // Optional free-text location (business name + typed address search).
+      const locationText = req.query.location != null ? String(req.query.location) : undefined;
+      const businesses = await GooglePlacesService.searchText(q, lat, lng, { locationText });
       res.json({ businesses, googleAvailable: true });
     } catch (err) {
       if (err instanceof GooglePlacesError) {

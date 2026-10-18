@@ -17,8 +17,11 @@ export const unblockUser = async (id: string) => {
   return response.data;
 };
 
-export const getRides = async (params: { status?: string, page?: number, limit?: number }) => {
-  const response = await api.get('/admin/rides', { params });
+export const getRides = async (
+  params: { status?: string, page?: number, limit?: number },
+  signal?: AbortSignal,
+) => {
+  const response = await api.get('/admin/rides', { params, signal });
   return response.data;
 };
 
@@ -451,8 +454,8 @@ export const updatePricingProfile = async (code: string, data: Record<string, un
   return response.data as { profile: any };
 };
 
-export const getRevenueOverview = async () => {
-  const response = await api.get('/admin/revenue');
+export const getRevenueOverview = async (params: { scope?: 'production' | 'test' } = {}) => {
+  const response = await api.get('/admin/revenue', { params });
   return response.data;
 };
 
@@ -563,6 +566,22 @@ export const enableSponsorPortalAccount = async (id: string) => {
   return response.data;
 };
 
+// ----- Sponsor business images (manual-entry workflow) ----------------------
+
+export const uploadSponsorBusinessImage = async (payload: {
+  image: string;
+  mimetype: string;
+  kind: 'logo' | 'photo';
+}) => {
+  const response = await api.post('/admin/sponsors/uploads/image', payload);
+  return response.data as { fileId: string; url: string };
+};
+
+export const deleteSponsorBusinessImage = async (url: string) => {
+  const response = await api.delete('/admin/sponsors/uploads/image', { data: { url } });
+  return response.data as { deleted: boolean };
+};
+
 // ----- Google business association (Places API via backend proxy) -----------
 
 export interface GoogleBusinessSuggestion {
@@ -598,7 +617,7 @@ export const getNearbyGoogleBusinesses = async (params: {
   return response.data as GoogleBusinessResponse;
 };
 
-export const searchGoogleBusinesses = async (params: { q: string; lat?: number; lng?: number }) => {
+export const searchGoogleBusinesses = async (params: { q: string; lat?: number; lng?: number; location?: string }) => {
   const response = await api.get('/places/text-search', { params });
   return response.data as GoogleBusinessResponse;
 };

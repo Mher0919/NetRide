@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildTextQuery,
   formatCategory,
   isValidPlaceId,
   photoSignature,
@@ -189,3 +190,29 @@ test('shapeDetails: missing fields degrade gracefully, never throw', () => {
   const noId = shapeDetails({}, 'basic');
   assert.equal(noId.placeId, '');
 });
+
+test('buildTextQuery: name-only searches stay untouched', () => {
+  assert.equal(buildTextQuery('Starbucks'), 'Starbucks');
+  assert.equal(buildTextQuery('  Starbucks  '), 'Starbucks');
+});
+
+test('buildTextQuery: a typed location is appended when no coordinates exist', () => {
+  assert.equal(
+    buildTextQuery('Starbucks', undefined, undefined, '123 Main St, Los Angeles, CA'),
+    'Starbucks, 123 Main St, Los Angeles, CA',
+  );
+  assert.equal(buildTextQuery('Starbucks', NaN, NaN, 'Los Angeles'), 'Starbucks, Los Angeles');
+});
+
+test('buildTextQuery: coordinates win — the location is used as bias, not folded', () => {
+  // With coordinates the backend sets locationBias separately; the query
+  // must remain the business name so Google ranks by proximity.
+  assert.equal(buildTextQuery('Starbucks', 34.05, -118.24, 'Los Angeles'), 'Starbucks');
+});
+
+test('buildTextQuery: the location is bounded (never unbounded user input)', () => {
+  const long = 'x'.repeat(400);
+  const q = buildTextQuery('Cafe', undefined, undefined, long);
+  assert.ok(q.length <= 'Cafe, '.length + 160);
+});
+

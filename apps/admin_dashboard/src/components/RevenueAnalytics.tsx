@@ -5,6 +5,7 @@ import {
   Paper,
   Card,
   Button,
+  Chip,
   CircularProgress,
   TextField,
   Dialog,
@@ -49,7 +50,7 @@ const BUCKETS = [
   { value: 'month', label: 'Monthly' },
 ] as const;
 
-const RevenueAnalytics: React.FC = () => {
+const RevenueAnalytics: React.FC<{ testMode?: boolean }> = ({ testMode = false }) => {
   const [range, setRange] = useState<'7d' | '30d' | '90d' | 'all'>('30d');
   const [bucket, setBucket] = useState<'day' | 'week' | 'month'>('day');
   const [region, setRegion] = useState('');
@@ -57,6 +58,7 @@ const RevenueAnalytics: React.FC = () => {
   const [regions, setRegions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestSeq = React.useRef(0);
   const [regionOpen, setRegionOpen] = useState(false);
   const [regionForm, setRegionForm] = useState({
     code: '', name: '', country_code: 'US',
@@ -67,28 +69,40 @@ const RevenueAnalytics: React.FC = () => {
     open: false, message: '', severity: 'success',
   });
 
+  const scope = testMode ? 'test' : 'production';
+
   const fetchData = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
       const [analytics, regionList] = await Promise.all([
-        getRevenueAnalytics({ range, bucket, ...(region ? { region } : {}) }),
+        getRevenueAnalytics({ range, bucket, scope, ...(region ? { region } : {}) }),
         getRegions(),
       ]);
+      // Ignore responses belonging to a previous scope/range selection (the
+      // admin may toggled Test rides while a request was in flight).
+      if (seq !== requestSeq.current) return;
       setData(analytics);
       setRegions(regionList.regions ?? []);
     } catch (err: any) {
+      if (seq !== requestSeq.current) return;
       const msg = err?.response?.data?.error || err?.message || 'Failed to load analytics';
       setError(msg);
       console.error('Failed to load analytics:', err);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
-  }, [range, bucket, region]);
+  }, [range, bucket, region, scope]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // The API echoes the scope it computed; only data for the currently
+  // selected mode may render (a production series must never appear under
+  // the TEST DATA indicator while the test response is in flight).
+  const currentData = data && data.scope === scope ? data : null;
 
   const saveRegion = async () => {
     setSavingRegion(true);
@@ -112,7 +126,7 @@ const RevenueAnalytics: React.FC = () => {
     }
   };
 
-  const chartData = (data?.series ?? []).map((s: any) => ({
+  const chartData = (currentData?.series ?? []).map((s: any) => ({
     label:
       bucket === 'day'
         ? format(new Date(s.bucket), 'MMM d')
@@ -123,7 +137,7 @@ const RevenueAnalytics: React.FC = () => {
     driver: Number(s.driverCents ?? 0) / 100,
   }));
 
-  const totals = data?.totals;
+  const totals = currentData?.totals;
 
   return (
     <Paper sx={{ mt: 3, p: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
@@ -132,11 +146,20 @@ const RevenueAnalytics: React.FC = () => {
           <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
             Revenue analytics <Typography component="span" variant="caption" color="text.secondary">— settled rides from the financial ledger</Typography>
           </Typography>
-          {data && (
-            <Typography variant="caption" color="text.secondary">
-              Buckets are UTC · {data.dataSource}
-            </Typography>
-          )}
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.25 }}>
+            {currentData && (
+              <Typography variant="caption" color="text.secondary">
+                Buckets are UTC · {currentData.dataSource} · {currentData.scope === 'test' ? 'test rides only' : 'production rides only'}
+              </Typography>
+            )}
+            {testMode && (
+              <Chip
+                size="small"
+                label="TEST DATA"
+                sx={{ height: 20, fontSize: 10, fontWeight: 800, bgcolor: '#FFF4E5', color: '#B26A00' }}
+              />
+            )}
+          </Stack>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
           <TextField
@@ -181,7 +204,7 @@ const RevenueAnalytics: React.FC = () => {
         </Box>
       </Box>
 
-      {loading && !data ? (
+      {loading && !currentData ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
           <CircularProgress />
         </Box>
@@ -191,7 +214,7 @@ const RevenueAnalytics: React.FC = () => {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{error}</Typography>
           <Button variant="outlined" size="small" onClick={fetchData}>Retry</Button>
         </Box>
-      ) : data ? (
+      ) : currentData ? (
         <>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mt: 3 }}>
             <Card sx={{ flex: 1, minWidth: 150, p: 2.5, borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
@@ -220,7 +243,7 @@ const RevenueAnalytics: React.FC = () => {
             </Card>
           </Box>
 
-          {chartData.length > 0 && (
+          {chartData.length > 0 ? (
             <Box sx={{ height: 260, mt: 3 }}>
               {/* Explicit numeric height: avoids Recharts' first-paint
                   “width(-1) and height(-1)” measurement warning. */}
@@ -235,6 +258,10 @@ const RevenueAnalytics: React.FC = () => {
                 </BarChart>
               </ResponsiveContainer>
             </Box>
+          ) : (
+            <Typography variant="body2" color="text.disabled" sx={{ mt: 3, textAlign: 'center', py: 3 }}>
+              No settled {testMode ? 'test' : 'production'} rides in this range.
+            </Typography>
           )}
 
           <Box sx={{ mt: 3 }}>

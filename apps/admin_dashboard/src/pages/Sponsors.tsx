@@ -45,6 +45,9 @@ import GoogleBusinessSelector, {
   suggestionFromSponsor,
   type GoogleBusinessSelection,
 } from '../components/GoogleBusinessSelector';
+import BusinessImageUpload from '../components/BusinessImageUpload';
+import StarRatingInput from '../components/StarRatingInput';
+import { resolveApiUrl } from '../api';
 import {
   listSponsors,
   createSponsor,
@@ -57,6 +60,7 @@ import {
   resetSponsorPortalPassword,
   disableSponsorPortalAccount,
   enableSponsorPortalAccount,
+  deleteSponsorBusinessImage,
   type PortalUserOption,
 } from '../api/admin';
 import UserPicker from '../components/UserPicker';
@@ -104,6 +108,31 @@ const emptyForm = {
   specialsEnabled: true,
   latitude: '',
   longitude: '',
+  // Manual business-profile fields (admin-entered; distinct from Google).
+  adminRating: '' as string,
+  adminRatingCount: '' as string,
+  priceLevel: '' as '' | '$' | '$$' | '$$$' | '$$$$',
+};
+
+const PRICE_LEVELS = [
+  { value: '', label: 'Not set' },
+  { value: '$', label: '$ — Inexpensive' },
+  { value: '$$', label: '$$ — Moderate' },
+  { value: '$$$', label: '$$$ — Expensive' },
+  { value: '$$$$', label: '$$$$ — Very expensive' },
+] as const;
+
+/** Client-side mirror of the server validation for the profile fields. */
+const validateProfileFields = (form: typeof emptyForm): string | null => {
+  if (form.adminRating !== '') {
+    const r = Number(form.adminRating);
+    if (!Number.isFinite(r) || r < 0 || r > 5) return 'Rating must be between 0 and 5.';
+  }
+  if (form.adminRatingCount !== '') {
+    const c = Number(form.adminRatingCount);
+    if (!Number.isInteger(c) || c < 0) return 'Rating count must be a non-negative integer.';
+  }
+  return null;
 };
 
 interface SnackState {
@@ -125,9 +154,13 @@ const Sponsors: React.FC = () => {
   const [showTest, setShowTest] = React.useState(false);
 
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [createManual, setCreateManual] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [form, setForm] = React.useState(emptyForm);
   const [createGoogle, setCreateGoogle] = React.useState<GoogleBusinessSelection | null>(null);
+  const [createLogo, setCreateLogo] = React.useState<string | null>(null);
+  const [createPhotos, setCreatePhotos] = React.useState<string[]>([]);
+  const listSeq = React.useRef(0);
 
   const [selected, setSelected] = React.useState<Record<string, unknown> | null>(null);
   const [detail, setDetail] = React.useState<Record<string, unknown> | null>(null);
@@ -150,6 +183,8 @@ const Sponsors: React.FC = () => {
   const [editForm, setEditForm] = React.useState(emptyForm);
   const [editGoogle, setEditGoogle] = React.useState<GoogleBusinessSelection | null>(null);
   const [editGoogleDirty, setEditGoogleDirty] = React.useState(false);
+  const [editLogo, setEditLogo] = React.useState<string | null>(null);
+  const [editPhotos, setEditPhotos] = React.useState<string[]>([]);
 
   const [deleteTarget, setDeleteTarget] = React.useState<Record<string, unknown> | null>(null);
   const [deleteLoading, setDeleteLoading] = React.useState(false);
@@ -164,17 +199,22 @@ const Sponsors: React.FC = () => {
     setSnack({ open: true, message, severity });
 
   const fetchData = React.useCallback(async () => {
+    const seq = ++listSeq.current;
     setLoading(true);
     try {
       const data = await listSponsors({ search, status: statusFilter, limit: 200, includeTest: showTest });
+      // Stale responses (search/filter/toggle changes while a request was in
+      // flight) must never overwrite the current selection.
+      if (seq !== listSeq.current) return;
       setSponsors(data?.sponsors ?? []);
       setTotal(data?.total ?? 0);
       setLoadError(null);
     } catch (err) {
+      if (seq !== listSeq.current) return;
       console.error('Failed to fetch sponsors', err);
       setLoadError('We could not load sponsors. Check your connection and try again.');
     } finally {
-      setLoading(false);
+      if (seq === listSeq.current) setLoading(false);
     }
   }, [search, statusFilter, showTest]);
 
@@ -216,13 +256,31 @@ const Sponsors: React.FC = () => {
     };
   }, [selected]);
 
-  const openCreate = () => {
+  const openCreate = (manual = false) => {
     setForm(emptyForm);
     setCreateGoogle(null);
+    setCreateLogo(null);
+    setCreatePhotos([]);
+    setCreateManual(manual);
     setCreatePortalMode('NONE');
     setCreatePortalEmail('');
     setCreatePortalUser(null);
     setCreateOpen(true);
+  };
+
+  /**
+   * Close the create dialog, cleaning up any uploaded-but-unreferenced
+   * images so a cancelled form never leaves orphaned storage objects.
+   */
+  const closeCreate = () => {
+    if (saving) return;
+    const pending = [createLogo, ...createPhotos].filter((u): u is string => !!u);
+    setCreateOpen(false);
+    for (const url of pending) {
+      void deleteSponsorBusinessImage(url).catch(() => undefined);
+    }
+    setCreateLogo(null);
+    setCreatePhotos([]);
   };
 
   const handleCreate = async () => {
@@ -232,6 +290,11 @@ const Sponsors: React.FC = () => {
     }
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       notify('Invalid email format', 'error');
+      return;
+    }
+    const profileError = validateProfileFields(form);
+    if (profileError) {
+      notify(profileError, 'error');
       return;
     }
     if (form.discountType === 'PERCENTAGE') {
@@ -287,8 +350,13 @@ const Sponsors: React.FC = () => {
         specialsEnabled: true,
         latitude: lat,
         longitude: lng,
-        googlePlaceId: createGoogle?.placeId ?? null,
-        googleSelectionToken: createGoogle?.selectionToken || undefined,
+        googlePlaceId: createManual ? undefined : createGoogle?.placeId ?? null,
+        googleSelectionToken: createManual ? undefined : createGoogle?.selectionToken || undefined,
+        logoUrl: createLogo,
+        photoUrls: createPhotos,
+        adminRating: form.adminRating === '' ? null : Number(form.adminRating),
+        adminRatingCount: form.adminRatingCount === '' ? null : Number(form.adminRatingCount),
+        priceLevel: form.priceLevel || null,
       });
       const sponsorId = String(created?.sponsor?.id ?? '');
 
@@ -456,9 +524,14 @@ const Sponsors: React.FC = () => {
       specialsEnabled: sponsor.specials_enabled ?? true,
       latitude: sponsor.latitude != null ? String(sponsor.latitude) : '',
       longitude: sponsor.longitude != null ? String(sponsor.longitude) : '',
+      adminRating: sponsor.admin_rating != null ? String(sponsor.admin_rating) : '',
+      adminRatingCount: sponsor.admin_rating_count != null ? String(sponsor.admin_rating_count) : '',
+      priceLevel: (sponsor.price_level as '' | '$' | '$$' | '$$$' | '$$$$' | undefined) ?? '',
     });
     setEditGoogle(suggestionFromSponsor(sponsor));
     setEditGoogleDirty(false);
+    setEditLogo((sponsor.logo_url as string) ?? null);
+    setEditPhotos(Array.isArray(sponsor.photo_urls) ? (sponsor.photo_urls as string[]) : []);
     setEditOpen(true);
   };
 
@@ -466,6 +539,11 @@ const Sponsors: React.FC = () => {
     if (!selected) return;
     if (!editForm.businessName.trim()) {
       notify('Business name is required', 'error');
+      return;
+    }
+    const profileError = validateProfileFields(editForm);
+    if (profileError) {
+      notify(profileError, 'error');
       return;
     }
     if (editForm.discountType === 'PERCENTAGE') {
@@ -520,6 +598,11 @@ const Sponsors: React.FC = () => {
         discountFixedAmountCents: editForm.discountType === 'FIXED_AMOUNT' ? Math.round(Number(editForm.discountFixedAmountCents)) : undefined,
         latitude: lat,
         longitude: lng,
+        logoUrl: editLogo,
+        photoUrls: editPhotos,
+        adminRating: editForm.adminRating === '' ? null : Number(editForm.adminRating),
+        adminRatingCount: editForm.adminRatingCount === '' ? null : Number(editForm.adminRatingCount),
+        priceLevel: editForm.priceLevel || null,
         ...(editGoogleDirty
           ? {
               googlePlaceId: editGoogle?.placeId ?? null,
@@ -561,9 +644,14 @@ const Sponsors: React.FC = () => {
             {total} business that fund rider SPECIALS. Budgets reserve → settle → deplete.
           </Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate} sx={{ flexShrink: 0 }}>
-          New Sponsor
-        </Button>
+        <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+          <Button variant="outlined" startIcon={<StorefrontIcon />} onClick={() => openCreate(true)}>
+            Add Manually
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreate(false)} sx={{ flexShrink: 0 }}>
+            New Sponsor
+          </Button>
+        </Stack>
       </Box>
 
       <Paper sx={{ p: 2, mb: 3, borderRadius: 3 }}>
@@ -589,7 +677,15 @@ const Sponsors: React.FC = () => {
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             sx={{ width: { xs: '100%', sm: 180 } }}
-            slotProps={{ select: { native: true } }}
+            slotProps={{
+              select: { native: true },
+              // The control always displays a selected option ("All" when no
+              // filter is set), so the label must float in EVERY state —
+              // focused or blurred. Without an explicit shrink the outlined
+              // label dropped back into the field on blur and overlapped the
+              // selected text/placeholder.
+              inputLabel: { shrink: true },
+            }}
           >
             <option value="">All</option>
             <option value="ACTIVE">Active</option>
@@ -651,8 +747,24 @@ const Sponsors: React.FC = () => {
                   <TableRow key={s.id} hover sx={{ cursor: 'pointer' }} onClick={() => setSelected(s)}>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                        <Box sx={{ width: 36, height: 36, borderRadius: 2, bgcolor: 'primary.light', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-                          <StorefrontIcon sx={{ fontSize: 20 }} />
+                        <Box
+                          sx={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 2,
+                            bgcolor: 'primary.light',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'white',
+                            overflow: 'hidden',
+                            backgroundImage: resolveApiUrl(s.logo_url as string) ? `url(${resolveApiUrl(s.logo_url as string)})` : 'none',
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {!resolveApiUrl(s.logo_url as string) && <StorefrontIcon sx={{ fontSize: 20 }} />}
                         </Box>
                         <Box>
                           <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
@@ -712,10 +824,18 @@ const Sponsors: React.FC = () => {
       </TableContainer>
 
       {/* Create dialog */}
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>New Sponsor</DialogTitle>
+      <Dialog open={createOpen} onClose={closeCreate} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800 }}>
+          {createManual ? 'Add Business Manually' : 'New Sponsor'}
+        </DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {createManual && (
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                Manual business entry — details, logo, photos, rating and price level are entered by
+                you. The sponsor will not be linked to Google Maps.
+              </Alert>
+            )}
             <TextField label="Business name *" value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} fullWidth />
             <TextField
               label="Business type"
@@ -748,15 +868,58 @@ const Sponsors: React.FC = () => {
               }
               address={[form.address, form.city, form.state, form.country].filter(Boolean).join(', ')}
             />
-            <GoogleBusinessSelector
-              location={{
-                latitude: form.latitude === '' ? null : Number(form.latitude),
-                longitude: form.longitude === '' ? null : Number(form.longitude),
-              }}
-              value={createGoogle}
-              onChange={setCreateGoogle}
+            {!createManual && (
+              <GoogleBusinessSelector
+                location={{
+                  latitude: form.latitude === '' ? null : Number(form.latitude),
+                  longitude: form.longitude === '' ? null : Number(form.longitude),
+                }}
+                locationText={[form.address, form.city, form.state, form.country].filter(Boolean).join(', ')}
+                value={createGoogle}
+                onChange={setCreateGoogle}
+                disabled={saving}
+              />
+            )}
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Business profile</Typography>
+            <BusinessImageUpload
+              logoUrl={createLogo}
+              photoUrls={createPhotos}
+              onLogoChange={setCreateLogo}
+              onPhotosChange={setCreatePhotos}
               disabled={saving}
             />
+            <StarRatingInput
+              value={form.adminRating === '' ? null : Number(form.adminRating)}
+              onChange={(v) => setForm({ ...form, adminRating: v == null ? '' : String(v) })}
+              disabled={saving}
+            />
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  label="Rating count (optional)"
+                  type="number"
+                  value={form.adminRatingCount}
+                  onChange={(e) => setForm({ ...form, adminRatingCount: e.target.value })}
+                  fullWidth
+                  helperText="How many ratings the value above summarizes."
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  label="Price level"
+                  select
+                  value={form.priceLevel}
+                  onChange={(e) => setForm({ ...form, priceLevel: e.target.value as typeof form.priceLevel })}
+                  fullWidth
+                  slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
+                >
+                  {PRICE_LEVELS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </TextField>
+              </Grid>
+            </Grid>
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Discount</Typography>
             <TextField
@@ -853,9 +1016,9 @@ const Sponsors: React.FC = () => {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
+          <Button onClick={closeCreate} disabled={saving}>Cancel</Button>
           <Button variant="contained" disabled={saving} onClick={handleCreate}>
-            {saving ? 'Creating…' : 'Create Sponsor'}
+            {saving ? 'Creating…' : createManual ? 'Create Business' : 'Create Sponsor'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -866,8 +1029,24 @@ const Sponsors: React.FC = () => {
           <Box sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <Box sx={{ width: 44, height: 44, borderRadius: '12px', bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-                  <StorefrontIcon />
+                <Box
+                  sx={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '12px',
+                    bgcolor: 'primary.main',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    overflow: 'hidden',
+                    backgroundImage: resolveApiUrl(sponsor?.logo_url as string) ? `url(${resolveApiUrl(sponsor?.logo_url as string)})` : 'none',
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  {!resolveApiUrl(sponsor?.logo_url as string) && <StorefrontIcon />}
                 </Box>
                 <Box>
                   <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.business_name}</Typography>
@@ -936,6 +1115,42 @@ const Sponsors: React.FC = () => {
                           Adjust Budget
                         </Button>
                       </Stack>
+                    </Paper>
+
+                    <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Business profile</Typography>
+                      <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                        <Typography variant="body2">
+                          Rating (admin-entered):{' '}
+                          <b>{sponsor.admin_rating != null ? `★ ${sponsor.admin_rating}` : '—'}</b>
+                          {sponsor.admin_rating_count != null ? ` (${sponsor.admin_rating_count} ratings)` : ''}
+                        </Typography>
+                        <Typography variant="body2">
+                          Price level: <b>{sponsor.price_level ?? '—'}</b>
+                        </Typography>
+                      </Stack>
+                      {Array.isArray(sponsor.photo_urls) && sponsor.photo_urls.length > 0 && (
+                        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
+                          {(sponsor.photo_urls as string[]).map((url) => (
+                            <Box
+                              key={url}
+                              sx={{
+                                width: 72,
+                                height: 72,
+                                borderRadius: 2,
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                backgroundImage: `url(${resolveApiUrl(url)})`,
+                                backgroundSize: 'cover',
+                                backgroundPosition: 'center',
+                              }}
+                            />
+                          ))}
+                        </Stack>
+                      )}
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                        Administrator-entered values — not Google ratings.
+                      </Typography>
                     </Paper>
 
                     <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
@@ -1282,6 +1497,7 @@ const Sponsors: React.FC = () => {
                 latitude: editForm.latitude === '' ? null : Number(editForm.latitude),
                 longitude: editForm.longitude === '' ? null : Number(editForm.longitude),
               }}
+              locationText={[editForm.address, editForm.city, editForm.state, editForm.country].filter(Boolean).join(', ')}
               value={editGoogle}
               onChange={(v) => {
                 setEditGoogle(v);
@@ -1289,6 +1505,45 @@ const Sponsors: React.FC = () => {
               }}
               disabled={editSaving}
             />
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Business profile</Typography>
+            <BusinessImageUpload
+              logoUrl={editLogo}
+              photoUrls={editPhotos}
+              onLogoChange={setEditLogo}
+              onPhotosChange={setEditPhotos}
+              disabled={editSaving}
+            />
+            <StarRatingInput
+              value={editForm.adminRating === '' ? null : Number(editForm.adminRating)}
+              onChange={(v) => setEditForm({ ...editForm, adminRating: v == null ? '' : String(v) })}
+              disabled={editSaving}
+            />
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  label="Rating count (optional)"
+                  type="number"
+                  value={editForm.adminRatingCount}
+                  onChange={(e) => setEditForm({ ...editForm, adminRatingCount: e.target.value })}
+                  fullWidth
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  label="Price level"
+                  select
+                  value={editForm.priceLevel}
+                  onChange={(e) => setEditForm({ ...editForm, priceLevel: e.target.value as typeof editForm.priceLevel })}
+                  fullWidth
+                  slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
+                >
+                  {PRICE_LEVELS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </TextField>
+              </Grid>
+            </Grid>
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Discount</Typography>
             <TextField

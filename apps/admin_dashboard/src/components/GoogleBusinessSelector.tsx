@@ -43,6 +43,8 @@ export interface GoogleBusinessSelection {
 
 interface Props {
   location: { latitude: number | null; longitude: number | null };
+  /** Free-text location (address/city/region) used when no map pin is set. */
+  locationText?: string;
   value: GoogleBusinessSelection | null;
   onChange: (value: GoogleBusinessSelection | null) => void;
   disabled?: boolean;
@@ -121,7 +123,7 @@ const BusinessThumb: React.FC<{ photoUrl: string | null; size: number }> = ({ ph
  * to a manual (non-Google) business. Selecting a business stores the Google
  * Place ID via a backend-signed selection token — never a raw client value.
  */
-const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, disabled = false }) => {
+const GoogleBusinessSelector: React.FC<Props> = ({ location, locationText = '', value, onChange, disabled = false }) => {
   const [query, setQuery] = React.useState('');
   const [debouncedQuery, setDebouncedQuery] = React.useState('');
   const [nearby, setNearby] = React.useState<GoogleBusinessSuggestion[]>([]);
@@ -205,6 +207,9 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
       q: debouncedQuery,
       lat: location.latitude ?? undefined,
       lng: location.longitude ?? undefined,
+      // A typed location (no map pin) is sent as free text and folded into
+      // the text query server-side — never silently dropped.
+      ...(!hasLocation && locationText.trim() ? { location: locationText.trim() } : {}),
     })
       .then((res) => {
         if (cancelled) return;
@@ -224,7 +229,7 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, location.latitude, location.longitude]);
+  }, [debouncedQuery, location.latitude, location.longitude, hasLocation, locationText]);
 
   const mismatch = React.useMemo(() => {
     if (!value || value.latitude == null || value.longitude == null || !hasLocation) return false;
@@ -286,7 +291,7 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
 
       {!hasLocation && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          Set the Special&apos;s location on the map above to see nearby Google businesses.
+          Type a business name{locationText.trim() ? ' — results are ranked around the address you entered' : ' to search Google Maps'}. Set a map pin to also see nearby businesses.
         </Typography>
       )}
 
@@ -390,24 +395,22 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
         </Paper>
       ) : (
         <>
-          {hasLocation && (
-            <TextField
-              size="small"
-              fullWidth
-              placeholder="Search Google Maps"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              disabled={disabled}
-              slotProps={{
-                htmlInput: { 'aria-label': 'Search Google Maps for a business' },
-                input: {
-                  startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />,
-                  endAdornment: searching ? <CircularProgress size={16} /> : null,
-                },
-              }}
-              sx={{ mb: 1.5 }}
-            />
-          )}
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Search Google Maps"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            disabled={disabled}
+            slotProps={{
+              htmlInput: { 'aria-label': 'Search Google Maps for a business' },
+              input: {
+                startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />,
+                endAdornment: searching ? <CircularProgress size={16} /> : null,
+              },
+            }}
+            sx={{ mb: 1.5 }}
+          />
 
           {error && (
             <Alert severity={googleDown ? 'warning' : 'error'} sx={{ mb: 1.5, borderRadius: 2 }}>
@@ -415,11 +418,13 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
             </Alert>
           )}
 
-          {hasLocation && (
-            <Typography variant="caption" sx={{ display: 'block', mb: 0.75, fontWeight: 700, color: 'text.secondary' }}>
-              {showingSearch ? 'Google Maps results' : 'Businesses near this location'}
-            </Typography>
-          )}
+          <Typography variant="caption" sx={{ display: 'block', mb: 0.75, fontWeight: 700, color: 'text.secondary' }}>
+            {showingSearch
+              ? 'Google Maps results'
+              : hasLocation
+                ? 'Businesses near this location'
+                : 'Search a business name above'}
+          </Typography>
 
           {loadingResults ? (
             <Stack spacing={1}>
@@ -427,7 +432,7 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
                 <Skeleton key={i} variant="rounded" height={72} sx={{ borderRadius: 2 }} />
               ))}
             </Stack>
-          ) : hasLocation && results.length > 0 ? (
+          ) : results.length > 0 ? (
             <Box role="list" aria-label="Google business suggestions">
               <Stack spacing={1}>
                 {results.map((b) => (
@@ -500,10 +505,10 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, value, onChange, di
                 Powered by Google
               </Typography>
             </Box>
-          ) : hasLocation && !loadingResults && !error ? (
+          ) : (showingSearch || hasLocation) && !loadingResults && !error ? (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', py: 1 }}>
               {showingSearch ? 'No businesses matched that search.' : 'No businesses found near this location.'}{' '}
-              Try searching Google Maps or enter the business manually.
+              Try a different search or enter the business manually.
             </Typography>
           ) : null}
 

@@ -131,8 +131,8 @@ async function seedSponsor(budgetCents) {
        id, business_name, business_type, discount_type, max_discount_percent,
        discount_fixed_amount_cents, initial_budget_cents, remaining_budget_cents,
        reserved_budget_cents, used_budget_cents, status,
-       latitude, longitude
-     ) VALUES ($1, 'PayTest Sponsor', 'TEST', 'FIXED_AMOUNT', 90, $2, $3, $3, 0, 0, 'ACTIVE', 34.05, -118.24)`,
+       latitude, longitude, is_test
+     ) VALUES ($1, 'PayTest Sponsor', 'TEST', 'FIXED_AMOUNT', 90, $2, $3, $3, 0, 0, 'ACTIVE', 34.05, -118.24, TRUE)`,
     [id, budgetCents, budgetCents],
   );
   await pool.query(

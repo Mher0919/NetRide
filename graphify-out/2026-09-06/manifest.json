@@ -320,8 +320,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/availability_screen.dart": {
-    "mtime": 1786687351.4575486,
-    "ast_hash": "e91723d513e2010b09636a9650d98b82",
+    "mtime": 1788747764.8529222,
+    "ast_hash": "b680c43d8143c65aee80b5b2f5aae2f8",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/call_overlay.dart": {
@@ -350,8 +350,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/navigation_screen.dart": {
-    "mtime": 1786261869.6882343,
-    "ast_hash": "8b2946c58959cb4d3a565fc18cbf5316",
+    "mtime": 1788747788.0466385,
+    "ast_hash": "88ce31affa8268b474adc8842fabefeb",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/onboarding_screen.dart": {
@@ -660,8 +660,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/smooth_driver_marker.dart": {
-    "mtime": 1778726947.1303754,
-    "ast_hash": "3086532d4fd4dff439ffe0895bd25f7d",
+    "mtime": 1788747694.3983436,
+    "ast_hash": "a906395cbcf2972f3ad1f933df78333e",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/state_container.dart": {
@@ -695,8 +695,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/trip_models.dart": {
-    "mtime": 1786669017.1186035,
-    "ast_hash": "f5400d66652d203271dff4d991568881",
+    "mtime": 1788747667.946232,
+    "ast_hash": "f95b87f78f79a6bce6cf16d89a5c0adc",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/providers/ride_provider.dart": {
@@ -740,8 +740,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/map_screen.dart": {
-    "mtime": 1786923570.6580484,
-    "ast_hash": "48b45004b5f463425670266e1fe135dd",
+    "mtime": 1788747726.7786586,
+    "ast_hash": "8107fa7059440d4d6bf4ff7d269a57f1",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/onboarding_screen.dart": {
@@ -780,8 +780,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/trip_screen.dart": {
-    "mtime": 1786926991.8211074,
-    "ast_hash": "609f91d6e50967259aecd420d8b9d8dc",
+    "mtime": 1788747723.1997056,
+    "ast_hash": "ab65ba08caeb70cc6b9e24da31ec966b",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/verification_screen.dart": {
@@ -1250,8 +1250,8 @@
     "semantic_hash": ""
   },
   "backend/src/gateway/socket.gateway.ts": {
-    "mtime": 1786917060.0179386,
-    "ast_hash": "d02a26cea43175bc9c00c33b28c29f21",
+    "mtime": 1788747944.836194,
+    "ast_hash": "ab7a08ff7d46e3e2b0d65d3eb02489e5",
     "semantic_hash": ""
   },
   "backend/src/gateway/socket.middleware.ts": {
@@ -1775,8 +1775,8 @@
     "semantic_hash": ""
   },
   "backend/src/utils/socket-validation.ts": {
-    "mtime": 1786861094.0767138,
-    "ast_hash": "4b3319a66fff20380f55b594e2189293",
+    "mtime": 1788747533.5337436,
+    "ast_hash": "6c56090167ef8d25ed951dcdca9d0417",
     "semantic_hash": ""
   },
   "backend/src/utils/testUser.ts": {
@@ -3642,6 +3642,21 @@
   "backend/src/modules/portal/portal.routes.ts": {
     "mtime": 1788232021.8095765,
     "ast_hash": "7bbaadbebc55794fa6835f5f7a2c23c9",
+    "semantic_hash": ""
+  },
+  "apps/driver_flutter/lib/components/smooth_rider_marker.dart": {
+    "mtime": 1788747773.7565067,
+    "ast_hash": "2d054b555920f13bb4be4febe16eb554",
+    "semantic_hash": ""
+  },
+  "apps/driver_flutter/lib/services/location_reporter.dart": {
+    "mtime": 1788747938.5711813,
+    "ast_hash": "83dbd26d1a5b1c0bd3e789f794b07d3a",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/services/location_reporter.dart": {
+    "mtime": 1788747880.4039435,
+    "ast_hash": "83dbd26d1a5b1c0bd3e789f794b07d3a",
     "semantic_hash": ""
   }
 }

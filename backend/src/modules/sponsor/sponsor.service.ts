@@ -24,7 +24,7 @@ import { centsValue } from '../../services/financial-ledger.service';
 import { AuditEventsService } from '../../services/audit-events.service';
 import { env } from '../../config/env';
 import { findPortalIdentityByEmail, isPortalIdentity } from '../portal/portal-identities';
-import { TEST_EMAIL_SQL, isTestEmail } from '../../utils/testUser';
+import { TEST_EMAIL_SQL } from '../../utils/testUser';
 
 export type SponsorshipDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
 export type SponsorStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'DEPLETED';
@@ -47,6 +47,16 @@ export interface SponsorRow {
   longitude: number | null;
   logo_url: string | null;
   cover_image_url: string | null;
+  /** Administrator-entered rating (0–5). NEVER a Google-sourced rating. */
+  admin_rating: number | null;
+  /** Administrator-entered rating count; informational only. */
+  admin_rating_count: number | null;
+  /** Administrator-entered price level ('$'..'$$$$'). */
+  price_level: string | null;
+  /** Ordered gallery of uploaded business photos (`/api/files/:id`). */
+  photo_urls: string[];
+  /** Persistent fixture/test marker (see utils/testUser.ts). */
+  is_test: boolean;
   google_place_id: string | null;
   google_business_name: string | null;
   google_business_category: string | null;
@@ -117,6 +127,13 @@ export function normalizeSponsor(r: any): SponsorRow {
     longitude: r.longitude != null ? Number(r.longitude) : null,
     logo_url: r.logo_url,
     cover_image_url: r.cover_image_url,
+    admin_rating: r.admin_rating != null ? Number(r.admin_rating) : null,
+    admin_rating_count: r.admin_rating_count != null ? Number(r.admin_rating_count) : null,
+    price_level: r.price_level ?? null,
+    photo_urls: Array.isArray(r.photo_urls)
+      ? r.photo_urls.filter((u: unknown) => typeof u === 'string')
+      : [],
+    is_test: r.is_test === true || r.is_test === 't',
     google_place_id: r.google_place_id ?? null,
     google_business_name: r.google_business_name ?? null,
     google_business_category: r.google_business_category ?? null,
@@ -144,6 +161,7 @@ const SPONSOR_COLUMNS = `
   SELECT id, business_name, business_type, business_description, manager_name,
          phone, email, other_contact_info, address, city, state, postal_code,
          country, latitude, longitude, logo_url, cover_image_url,
+         admin_rating, admin_rating_count, price_level, photo_urls, is_test,
          google_place_id, google_business_name, google_business_category,
          google_business_latitude, google_business_longitude,
          google_business_address, google_places_synced_at,
@@ -171,6 +189,10 @@ export interface SponsorCreateInput {
   longitude?: number | null;
   logoUrl?: string | null;
   coverImageUrl?: string | null;
+  adminRating?: number | null;
+  adminRatingCount?: number | null;
+  priceLevel?: string | null;
+  photoUrls?: string[];
   googlePlaceId?: string | null;
   googleBusinessName?: string | null;
   googleBusinessCategory?: string | null;
@@ -214,6 +236,7 @@ export class SponsorService {
            business_name, business_type, business_description, manager_name,
            phone, email, other_contact_info, address, city, state, postal_code,
            country, latitude, longitude, logo_url, cover_image_url,
+           admin_rating, admin_rating_count, price_level, photo_urls,
            google_place_id, google_business_name, google_business_category,
            google_business_latitude, google_business_longitude,
            google_business_address, google_places_synced_at,
@@ -222,8 +245,9 @@ export class SponsorService {
            remaining_budget_cents, reserved_budget_cents, used_budget_cents,
            status
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-                   $17,$18,$19,$20,$21,$22,$23,
-                   $24,$25,$26,$27,$28,$29,0,0,'INACTIVE')
+                   $17,$18,$19,$20::jsonb,
+                   $21,$22,$23,$24,$25,$26,$27,
+                   $28,$29,$30,$31,$32,$33,0,0,'INACTIVE')
          RETURNING *`,
         [
           input.businessName.trim(),
@@ -242,6 +266,10 @@ export class SponsorService {
           input.longitude ?? null,
           input.logoUrl ?? null,
           input.coverImageUrl ?? null,
+          input.adminRating ?? null,
+          input.adminRatingCount ?? null,
+          input.priceLevel ?? null,
+          JSON.stringify(input.photoUrls ?? []),
           input.googlePlaceId ?? null,
           input.googleBusinessName ?? null,
           input.googleBusinessCategory ?? null,
@@ -303,7 +331,8 @@ export class SponsorService {
       'business_name', 'business_type', 'business_description', 'manager_name',
       'phone', 'email', 'other_contact_info', 'address', 'city', 'state',
       'postal_code', 'country', 'latitude', 'longitude', 'logo_url',
-      'cover_image_url', 'discount_type', 'discount_percent',
+      'cover_image_url', 'admin_rating', 'admin_rating_count', 'price_level',
+      'photo_urls', 'discount_type', 'discount_percent',
       'max_discount_percent', 'discount_fixed_amount_cents',
       'google_place_id', 'google_business_name', 'google_business_category',
       'google_business_latitude', 'google_business_longitude',
@@ -314,6 +343,11 @@ export class SponsorService {
     const values: unknown[] = [];
     for (const [key, value] of Object.entries(patch)) {
       if (!allowed.includes(key)) continue;
+      if (key === 'photo_urls') {
+        sets.push(`photo_urls = $${values.length + 1}::jsonb`);
+        values.push(JSON.stringify(Array.isArray(value) ? value : []));
+        continue;
+      }
       sets.push(`${key} = $${values.length + 1}`);
       values.push(value ?? null);
     }
@@ -679,6 +713,39 @@ export class SponsorService {
 
   // --------------------------------------------------------------- Analytics
 
+  /**
+   * Canonical test-sponsor predicate. A sponsor is test data when ANY of:
+   *   1. the persistent fixture marker `is_test` is set (non-attacker
+   *      reachable — the admin API never writes it; only fixtures do);
+   *   2. its own contact email matches the platform test-email rule;
+   *   3. its linked portal account belongs to a test user (a test sponsor
+   *      created through the API may carry no contact email at all).
+   *
+   * Kept as one function so list, detail and counts can never drift.
+   */
+  private static testSponsorSql(alias = 's'): string {
+    const emailTest = TEST_EMAIL_SQL(`COALESCE(${alias}.email, '')`);
+    return `(
+      ${alias}.is_test
+      OR ${emailTest}
+      OR EXISTS (
+        SELECT 1 FROM sponsor_portal_accounts spa
+        JOIN users u ON u.id = spa.user_id
+        WHERE spa.sponsor_id = ${alias}.id
+          AND ${TEST_EMAIL_SQL('u.email')}
+      )
+    )`;
+  }
+
+  /** Same classification as the list query, for a single sponsor. */
+  static async isTestSponsor(id: string): Promise<boolean> {
+    const res = await pool.query(
+      `SELECT (${SponsorService.testSponsorSql('s')}) AS is_test FROM sponsors s WHERE s.id = $1`,
+      [id],
+    );
+    return res.rows[0]?.is_test === true;
+  }
+
   static async listSponsors(opts: { search?: string; status?: string; limit?: number; offset?: number; includeTest?: boolean } = {}) {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
     const offset = Math.max(opts.offset ?? 0, 0);
@@ -686,27 +753,29 @@ export class SponsorService {
     const where: string[] = [];
     if (opts.search) {
       params.push(`%${opts.search}%`);
-      where.push(`(business_name ILIKE $${params.length} OR email ILIKE $${params.length} OR phone ILIKE $${params.length})`);
+      where.push(`(s.business_name ILIKE $${params.length} OR s.email ILIKE $${params.length} OR s.phone ILIKE $${params.length})`);
     }
     if (opts.status) {
       params.push(opts.status.toUpperCase());
-      where.push(`status = $${params.length}`);
+      where.push(`s.status = $${params.length}`);
     }
     // Test accounts (E2E/sandbox seeds) are hidden by default so they never
-    // bury real sponsors; admins opt in with includeTest.
-    const testSql = TEST_EMAIL_SQL(`COALESCE(email, '')`);
+    // bury real sponsors; admins opt in with includeTest. The predicate is
+    // shared with detail/count paths (see testSponsorSql).
+    const testSql = SponsorService.testSponsorSql('s');
     if (!opts.includeTest) where.push(`NOT ${testSql}`);
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const res = await pool.query(
-      `SELECT *, ${testSql} AS is_test
-       FROM sponsors
-       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY created_at DESC
+      `${SPONSOR_COLUMNS}, (${testSql}) AS is_test_flag
+       FROM sponsors s
+       ${whereSql}
+       ORDER BY s.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, limit, offset],
     );
-    const total = await pool.query(`SELECT COUNT(*)::int AS n FROM sponsors${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`, params);
+    const total = await pool.query(`SELECT COUNT(*)::int AS n FROM sponsors s${whereSql ? ` ${whereSql}` : ''}`, params);
     return {
-      rows: res.rows.map((r: any) => ({ ...normalizeSponsor(r), is_test: !!r.is_test })),
+      rows: res.rows.map((r: any) => ({ ...normalizeSponsor(r), is_test: !!r.is_test_flag })),
       total: total.rows[0]?.n ?? 0,
     };
   }

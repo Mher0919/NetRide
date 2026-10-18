@@ -360,8 +360,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/profile_screen.dart": {
-    "mtime": 1786602519.095969,
-    "ast_hash": "2a09c0204b4d668b90378da660a1b466",
+    "mtime": 1786695636.6047103,
+    "ast_hash": "3294a9daa52aae561e13a102561941ad",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/replace_vehicle_screen.dart": {
@@ -715,8 +715,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/blocked_account_screen.dart": {
-    "mtime": 1784433611.6328678,
-    "ast_hash": "5efa4071294e2fee09d63bf6c00e66a7",
+    "mtime": 1786695651.756313,
+    "ast_hash": "82cbdbf9725a267b0793ef4b5c8e3b94",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/call_overlay.dart": {
@@ -750,8 +750,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/profile_screen.dart": {
-    "mtime": 1786501905.4321163,
-    "ast_hash": "ea659350e3f3522abc016aafa0e98c8d",
+    "mtime": 1786695632.3642416,
+    "ast_hash": "e232e5d05c275327ee56e830124d74cc",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/rating_screen.dart": {

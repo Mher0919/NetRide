@@ -18,7 +18,7 @@ export declare class AdminController {
     static listPricingProfiles(req: AuthRequest, res: Response): Promise<void>;
     /** Update a profile's rates; the 60s engine cache is busted immediately. */
     static updatePricingProfile(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
-    static getRevenueOverview(req: AuthRequest, res: Response): Promise<void>;
+    static getRevenueOverview(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static getUsers(req: AuthRequest, res: Response): Promise<void>;
     /**
      * Admin view of a driver's ride eligibility. NetRide operates a single
@@ -33,7 +33,7 @@ export declare class AdminController {
     static unblockUser(req: AuthRequest, res: Response): Promise<void>;
     static getFlaggedRatings(req: AuthRequest, res: Response): Promise<void>;
     static getLogs(req: AuthRequest, res: Response): Promise<void>;
-    static getRides(req: AuthRequest, res: Response): Promise<void>;
+    static getRides(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static getRideById(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     /**
      * Operator escape hatch: dissolve a stuck ride (e.g. a driver killed the
@@ -96,7 +96,7 @@ export declare class AdminController {
      * region: optional region code — filters by pickup-point geofence
      *         (region_contains on the region center/radius).
      */
-    static getRevenueAnalytics(req: AuthRequest, res: Response): Promise<void>;
+    static getRevenueAnalytics(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     /** List active regions (used for the analytics region filter). */
     static listRegions(req: AuthRequest, res: Response): Promise<void>;
     /** Create / update a region (admin-only). Validated server-side. */

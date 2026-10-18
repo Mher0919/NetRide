@@ -19,19 +19,17 @@ import { ReportService } from '../reporting/report.service';
 import { reportReasonLabel, PartyRole } from '../reporting/report.reasons';
 import { FinancialLedgerService } from '../../services/financial-ledger.service';
 import { AuditEventsService } from '../../services/audit-events.service';
-import { isTestEmail, TEST_EMAIL_SQL } from '../../utils/testUser';
+import { isTestEmail, TEST_EMAIL_SQL, rideScopeCondition } from '../../utils/testUser';
 import { isPortalIdentity } from '../portal/portal-identities';
+import { jsonSafe } from '../../utils/json-safe';
 
 export class AdminController {
   private static toJSON(value: any): any {
-    if (typeof value === 'bigint') return Number(value);
-    if (Array.isArray(value)) return value.map((v) => AdminController.toJSON(v));
-    if (value !== null && typeof value === 'object') {
-      const out: Record<string, any> = {};
-      for (const [key, val] of Object.entries(value)) out[key] = AdminController.toJSON(val);
-      return out;
-    }
-    return value;
+    // BigInt/Decimal/Date-aware deep clone (see utils/json-safe.ts). The
+    // previous hand-rolled recursion turned every Date into `{}` and every
+    // Prisma Decimal into its internal {s,e,d} representation, which broke
+    // the ride/user tables; BigInt columns threw a 500 at res.json time.
+    return jsonSafe(value);
   }
 
   static async getStats(req: AuthRequest, res: Response) {
@@ -319,8 +317,21 @@ export class AdminController {
   }
 
   static async getRevenueOverview(req: AuthRequest, res: Response) {
+    // `scope` selects production-only (default) or test-only data. The two
+    // datasets are never mixed: production and test totals must not share a
+    // sum.
+    const rawScope = String(req.query.scope ?? 'production').toLowerCase();
+    if (rawScope !== 'production' && rawScope !== 'test') {
+      return res.status(400).json({
+        error: "Invalid scope. Allowed values: production, test.",
+        code: 'INVALID_SCOPE',
+      });
+    }
     try {
-      const [config, summary] = await Promise.all([getRevenueConfig(), getRevenueSummary()]);
+      const [config, summary] = await Promise.all([
+        getRevenueConfig(),
+        getRevenueSummary(rawScope),
+      ]);
       res.json({ revenue_config: config, ...summary });
     } catch (error: any) {
       console.error(`[ADMIN] ❌ Revenue overview error: ${error.message}`);
@@ -934,18 +945,41 @@ export class AdminController {
   }
 
   static async getRides(req: AuthRequest, res: Response) {
-    const { status, page = 1, limit = 10 } = req.query;
-    const skip = (Number(page) - 1) * Number(limit);
+    const { status } = req.query;
+
+    // ---------------------------------------------------------------- input
+    // Validate query parameters before they reach Prisma. An unvalidated
+    // status previously reached `prisma.ride.count()` as an invalid enum
+    // value and threw "Invalid value for argument `status`. Expected
+    // TripStatus" → HTTP 500. Malformed input is a client error (400), not a
+    // server failure.
+    const RIDE_STATUS_FILTERS = ['ACTIVE', 'COMPLETED'] as const;
+    let statusFilter: (typeof RIDE_STATUS_FILTERS)[number] | null = null;
+    if (status !== undefined && status !== '') {
+      if (typeof status !== 'string' || !RIDE_STATUS_FILTERS.includes(status as any)) {
+        return res.status(400).json({
+          error: `Invalid status filter. Allowed values: ${RIDE_STATUS_FILTERS.join(', ')}.`,
+          code: 'INVALID_STATUS',
+        });
+      }
+      statusFilter = status as (typeof RIDE_STATUS_FILTERS)[number];
+    }
+
+    const page = Number(req.query.page ?? 1);
+    const limit = Number(req.query.limit ?? 10);
+    if (!Number.isInteger(page) || page < 1) {
+      return res.status(400).json({ error: 'page must be a positive integer.', code: 'INVALID_PAGE' });
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      return res.status(400).json({ error: 'limit must be an integer between 1 and 100.', code: 'INVALID_LIMIT' });
+    }
+    const skip = (page - 1) * limit;
 
     const where: any = {};
-    if (status) {
-      if (status === 'ACTIVE') {
-        where.status = { notIn: ['COMPLETED', 'CANCELLED'] };
-      } else if (status === 'COMPLETED') {
-        where.status = 'COMPLETED';
-      } else {
-        where.status = status;
-      }
+    if (statusFilter === 'ACTIVE') {
+      where.status = { notIn: ['COMPLETED', 'CANCELLED'] };
+    } else if (statusFilter === 'COMPLETED') {
+      where.status = 'COMPLETED';
     }
 
     try {
@@ -953,7 +987,7 @@ export class AdminController {
         prisma.ride.findMany({
           where,
           skip,
-          take: Number(limit),
+          take: limit,
           orderBy: { created_at: 'desc' },
           include: {
             rider: { select: { full_name: true, email: true, phone_number: true } },
@@ -967,18 +1001,27 @@ export class AdminController {
       // the backend may decide these numbers — they come from the
       // settlement ledger, never from the client. Live/active rides have
       // no settlement yet, so no summary is attached.
+      //
+      // The summary is an enhancement, never a dependency: a ledger/query
+      // failure must not turn the whole list request into a 500 (the old
+      // behaviour made Completed Rides completely unusable whenever the
+      // summary query failed).
       let summary: any = undefined;
-      if (status === 'COMPLETED' && rides.length > 0) {
-        summary = await FinancialLedgerService.summarizeRides(
-          rides.map((r: any) => r.id)
-        );
+      if (statusFilter === 'COMPLETED' && rides.length > 0) {
+        try {
+          summary = await FinancialLedgerService.summarizeRides(
+            rides.map((r: any) => r.id)
+          );
+        } catch (summaryError: any) {
+          console.error(`[ADMIN] ⚠️ Ride summary unavailable: ${summaryError.message}`);
+        }
       }
 
       res.json(AdminController.toJSON({
         rides,
         total,
-        page: Number(page),
-        totalPages: Math.ceil(total / Number(limit)),
+        page,
+        totalPages: Math.ceil(total / limit),
         ...(summary ? { summary } : {}),
       }));
     } catch (error: any) {
@@ -1531,17 +1574,34 @@ export class AdminController {
     const bucket = String(req.query.bucket ?? 'day');
     const region = String(req.query.region ?? '').trim();
 
+    // Scope: production-only (default) or test-only. Applied at the SQL
+    // layer so summaries, totals and the time series all describe the same
+    // dataset — never a mixed total.
+    const rawScope = String(req.query.scope ?? 'production').toLowerCase();
+    if (rawScope !== 'production' && rawScope !== 'test') {
+      return res.status(400).json({
+        error: 'Invalid scope. Allowed values: production, test.',
+        code: 'INVALID_SCOPE',
+      });
+    }
+    const scope: 'production' | 'test' = rawScope;
+
     const rangeDays =
       range === '7d' ? 7 : range === '90d' ? 90 : range === '30d' ? 30 : null;
     const bucketCol =
       bucket === 'week' ? 'week' : bucket === 'month' ? 'month' : 'day';
 
     try {
-      const joins = ['FROM financial_transactions t JOIN rides r ON r.id = t.ride_id'];
+      const joins = [
+        'FROM financial_transactions t JOIN rides r ON r.id = t.ride_id',
+        'LEFT JOIN users ru ON ru.id = r.rider_id',
+        'LEFT JOIN users du ON du.id = r.driver_id',
+      ];
       const where = [
         "t.status = 'SETTLED'",
         "t.type = 'RIDE_COMPLETION'",
       ];
+      where.push(rideScopeCondition(scope, 'r', 'ru', 'du'));
       const params: any[] = [];
       if (rangeDays) {
         params.push(String(rangeDays));
@@ -1557,7 +1617,6 @@ export class AdminController {
       }
 
       const whereSql = `WHERE ${where.join(' AND ')}`;
-      const paramMarkers = params.map((_, i) => `$${i + 1}`);
 
       const [totalsRes, seriesRes] = await Promise.all([
         pool.query(
@@ -1594,6 +1653,7 @@ export class AdminController {
         range,
         bucket: bucketCol,
         region: region || null,
+        scope,
         timezone: 'UTC (buckets are UTC; display formatting is client-side)',
         dataSource: 'financial_transactions (SETTLED)',
         totals: {

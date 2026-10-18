@@ -9,7 +9,9 @@ import { pool } from '../../config/database';
 import { centsValue } from '../../services/financial-ledger.service';
 import { SponsorService, discountLabelFor, SponsorStatus } from './sponsor.service';
 import { SpecialRedemptionService } from './special-redemption.service';
-import { isTestEmail } from '../../utils/testUser';
+import { StorageService } from '../../services/storage.service';
+import { validateUploadMime } from '../../security/file-policy';
+import { detectImageMime, imageMimeMatches } from '../../security/image-content';
 import {
   GooglePlacesService,
   isValidPlaceId,
@@ -22,6 +24,160 @@ interface AdminReq extends Request {
 const VALID_BUSINESS_TYPES = [
   'RESTAURANT', 'CAFE', 'RETAIL', 'BAR', 'SERVICES', 'MEDICAL', 'AUTO', 'OTHER',
 ];
+
+/** Price levels the manual-entry form may store. */
+export const SPONSOR_PRICE_LEVELS = ['$', '$$', '$$$', '$$$$'] as const;
+
+/** Max gallery photos per sponsor (logo is separate). */
+export const SPONSOR_MAX_PHOTOS = 8;
+
+/**
+ * Parse an uploaded business-profile image reference. Only references to
+ * NetRide's own storage route (`/api/files/<uuid>`, relative or absolute) are
+ * accepted — the dashboard must never be able to point a business image at
+ * arbitrary external content.
+ */
+export function parseStoredImageUrl(raw: unknown): { fileId: string; url: string } | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  let pathname = trimmed;
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      pathname = new URL(trimmed).pathname;
+    } catch {
+      return null;
+    }
+  }
+  const match = /^\/api\/files\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(pathname);
+  if (!match) return null;
+  return { fileId: match[1].toLowerCase(), url: `/api/files/${match[1].toLowerCase()}` };
+}
+
+/** Validate an uploaded image reference AND that the stored file exists public. */
+async function verifyStoredImage(raw: unknown): Promise<{ url: string } | { error: string }> {
+  const parsed = parseStoredImageUrl(raw);
+  if (!parsed) return { error: 'Image must be an uploaded NetRide file.' };
+  const record = await StorageService.getFileRecord(parsed.fileId);
+  if (!record) return { error: 'Uploaded image was not found.' };
+  if (record.visibility !== 'public') {
+    return { error: 'Uploaded image is not a public business image.' };
+  }
+  const mime = validateUploadMime(record.mimetype);
+  if (!mime) return { error: 'Uploaded image has an unsupported format.' };
+  return { url: parsed.url };
+}
+
+/**
+ * Normalise the optional manual business-profile fields shared by create and
+ * update. Returns a validated patch fragment or a client error.
+ */
+async function parseBusinessProfile(body: any): Promise<
+  | {
+      adminRating: number | null;
+      adminRatingCount: number | null;
+      priceLevel: string | null;
+      photoUrls: string[];
+      logoUrl: string | null | undefined;
+    }
+  | { error: string }
+> {
+  let adminRating: number | null = null;
+  if (body.adminRating !== undefined && body.adminRating !== null && body.adminRating !== '') {
+    const n = Number(body.adminRating);
+    if (!Number.isFinite(n) || n < 0 || n > 5) {
+      return { error: 'Rating must be a number between 0 and 5.' };
+    }
+    adminRating = Math.round(n * 10) / 10;
+  }
+
+  let adminRatingCount: number | null = null;
+  if (body.adminRatingCount !== undefined && body.adminRatingCount !== null && body.adminRatingCount !== '') {
+    const n = Number(body.adminRatingCount);
+    if (!Number.isInteger(n) || n < 0 || n > 100_000_000) {
+      return { error: 'Rating count must be a non-negative integer.' };
+    }
+    adminRatingCount = n;
+  }
+
+  let priceLevel: string | null = null;
+  if (body.priceLevel !== undefined && body.priceLevel !== null && body.priceLevel !== '') {
+    if (!(SPONSOR_PRICE_LEVELS as readonly string[]).includes(String(body.priceLevel))) {
+      return { error: `Price level must be one of ${SPONSOR_PRICE_LEVELS.join(', ')}.` };
+    }
+    priceLevel = String(body.priceLevel);
+  }
+
+  const photoUrls: string[] = [];
+  if (body.photoUrls !== undefined) {
+    if (!Array.isArray(body.photoUrls)) return { error: 'photoUrls must be an array.' };
+    if (body.photoUrls.length > SPONSOR_MAX_PHOTOS) {
+      return { error: `At most ${SPONSOR_MAX_PHOTOS} photos are allowed.` };
+    }
+    for (const raw of body.photoUrls) {
+      const verified = await verifyStoredImage(raw);
+      if ('error' in verified) return verified;
+      if (!photoUrls.includes(verified.url)) photoUrls.push(verified.url);
+    }
+  }
+
+  let logoUrl: string | null | undefined;
+  if (body.logoUrl !== undefined) {
+    if (body.logoUrl === null || body.logoUrl === '') {
+      logoUrl = null;
+    } else {
+      const verified = await verifyStoredImage(body.logoUrl);
+      if ('error' in verified) return verified;
+      logoUrl = verified.url;
+    }
+  }
+
+  return { adminRating, adminRatingCount, priceLevel, photoUrls, logoUrl };
+}
+
+/** Normalised (`/api/files/:id`) image reference, or null. */
+function normalizedRef(raw: unknown): string | null {
+  const parsed = parseStoredImageUrl(raw);
+  return parsed ? parsed.url : null;
+}
+
+/**
+ * Delete public business images that were replaced by an update and are no
+ * longer referenced by ANY sponsor. Runs after the database update; every
+ * failure is logged and swallowed — a cleanup problem must never make the
+ * admin's save look failed.
+ */
+async function cleanupReplacedImages(before: { logo_url: string | null; cover_image_url: string | null; photo_urls: string[] }, after: { logo_url: string | null; cover_image_url: string | null; photo_urls: string[] }): Promise<void> {
+  const refsOf = (s: { logo_url: string | null; cover_image_url: string | null; photo_urls: string[] }) =>
+    new Set(
+      [normalizedRef(s.logo_url), normalizedRef(s.cover_image_url), ...s.photo_urls.map(normalizedRef)]
+        .filter((u): u is string => !!u),
+    );
+  const afterRefs = refsOf(after);
+  const removed = [...refsOf(before)].filter((u) => !afterRefs.has(u));
+
+  for (const url of removed) {
+    try {
+      const parsed = parseStoredImageUrl(url);
+      if (!parsed) continue;
+      const inUse = await pool.query(
+        `SELECT 1 FROM sponsors
+          WHERE logo_url = $1 OR logo_url = $2
+             OR cover_image_url = $1 OR cover_image_url = $2
+             OR photo_urls @> $3::jsonb OR photo_urls @> $4::jsonb
+          LIMIT 1`,
+        [parsed.url, url, JSON.stringify([parsed.url]), JSON.stringify([url])],
+      );
+      if (inUse.rowCount) continue;
+      const record = await StorageService.getFileRecord(parsed.fileId);
+      if (record && record.visibility === 'public') {
+        await StorageService.delete(parsed.fileId);
+      }
+    } catch (err: any) {
+      console.warn(`[ADMIN] ⚠️ Sponsor image cleanup failed for ${url}: ${err.message}`);
+    }
+  }
+}
 
 export interface GoogleAssociation {
   googlePlaceId: string | null;
@@ -120,7 +276,8 @@ export class AdminSponsorController {
           ...sponsor,
           discountLabel: discountLabelFor(sponsor),
           spendableCents: sponsor.remaining_budget_cents - sponsor.reserved_budget_cents,
-          is_test: isTestEmail(sponsor.email),
+          // Same classification the list uses (marker + email + portal user).
+          is_test: await SponsorService.isTestSponsor(sponsor.id),
         },
         portalAccount: portal ? {
           email: portal.email,
@@ -174,6 +331,9 @@ export class AdminSponsorController {
       }
       const google = 'value' in googleAssociation ? googleAssociation.value : null;
 
+      const profile = await parseBusinessProfile(b);
+      if ('error' in profile) return res.status(400).json({ error: profile.error });
+
       const sponsor = await SponsorService.create({
         businessName: b.businessName,
         businessType: b.businessType,
@@ -189,8 +349,12 @@ export class AdminSponsorController {
         country: b.country,
         latitude: lat,
         longitude: lng,
-        logoUrl: b.logoUrl ?? null,
+        logoUrl: profile.logoUrl ?? null,
         coverImageUrl: b.coverImageUrl ?? null,
+        adminRating: profile.adminRating,
+        adminRatingCount: profile.adminRatingCount,
+        priceLevel: profile.priceLevel,
+        photoUrls: profile.photoUrls,
         googlePlaceId: google?.googlePlaceId ?? null,
         googleBusinessName: google?.googleBusinessName ?? null,
         googleBusinessCategory: google?.googleBusinessCategory ?? null,
@@ -214,6 +378,8 @@ export class AdminSponsorController {
   static async update(req: AdminReq, res: Response) {
     try {
       const b = req.body ?? {};
+      const before = await SponsorService.findById(req.params.id);
+      if (!before) return res.status(404).json({ error: 'Sponsor not found' });
       const patch: Record<string, unknown> = {};
       const map: Record<string, string> = {
         businessName: 'business_name',
@@ -229,7 +395,6 @@ export class AdminSponsorController {
         country: 'country',
         latitude: 'latitude',
         longitude: 'longitude',
-        logoUrl: 'logo_url',
         coverImageUrl: 'cover_image_url',
         specialsEnabled: 'specials_enabled',
         mapListingEnabled: 'map_listing_enabled',
@@ -237,6 +402,15 @@ export class AdminSponsorController {
       for (const [k, col] of Object.entries(map)) {
         if (b[k] !== undefined) patch[col] = b[k];
       }
+      // logoUrl is validated through parseBusinessProfile (it must reference
+      // an uploaded public NetRide file), never passed through raw.
+      const profile = await parseBusinessProfile(b);
+      if ('error' in profile) return res.status(400).json({ error: profile.error });
+      if (b.logoUrl !== undefined) patch.logo_url = profile.logoUrl;
+      if (b.adminRating !== undefined) patch.admin_rating = profile.adminRating;
+      if (b.adminRatingCount !== undefined) patch.admin_rating_count = profile.adminRatingCount;
+      if (b.priceLevel !== undefined) patch.price_level = profile.priceLevel;
+      if (b.photoUrls !== undefined) patch.photo_urls = profile.photoUrls;
       if (b.discountType) patch.discount_type = b.discountType;
       if (b.discountPercent !== undefined) patch.discount_percent = b.discountPercent;
       if (b.maxDiscountPercent !== undefined) patch.max_discount_percent = b.maxDiscountPercent;
@@ -275,6 +449,12 @@ export class AdminSponsorController {
 
       const sponsor = await SponsorService.update(req.params.id, patch);
       if (!sponsor) return res.status(404).json({ error: 'Sponsor not found' });
+
+      // Clean up replaced business images ONLY after the new references were
+      // persisted (best-effort; failures are logged, never surfaced as a
+      // failed save).
+      await cleanupReplacedImages(before, sponsor);
+
       res.json({ sponsor });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -407,6 +587,103 @@ export class AdminSponsorController {
       res.json({ message: 'Portal account enabled' });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
+    }
+  }
+
+  // ------------------------------------------------------- business images
+
+  /**
+   * Upload a sponsor business image (logo or gallery photo) as base64.
+   *
+   * Security: the declared MIME is verified against the actual bytes
+   * (magic-number sniffing), size and count limits apply, and the stored
+   * file is public business branding (it is rendered on the rider map).
+   * The returned URL is the portable `/api/files/:id` reference that the
+   * create/update payloads accept.
+   */
+  static async uploadBusinessImage(req: AdminReq, res: Response) {
+    try {
+      const { image, mimetype, kind } = req.body ?? {};
+      const imageKind: 'logo' | 'photo' = kind === 'logo' ? 'logo' : 'photo';
+      if (typeof image !== 'string' || !image.trim()) {
+        return res.status(400).json({ error: 'image (base64) is required.' });
+      }
+      if (typeof mimetype !== 'string') {
+        return res.status(400).json({ error: 'mimetype is required.' });
+      }
+      const declared = validateUploadMime(mimetype);
+      if (!declared) {
+        return res.status(415).json({
+          error: 'Unsupported file type. Only JPEG, PNG, WebP and HEIC images are accepted.',
+        });
+      }
+
+      const buffer = Buffer.from(image, 'base64');
+      const maxBytes = imageKind === 'logo' ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
+      if (buffer.length === 0) {
+        return res.status(400).json({ error: 'image is empty.' });
+      }
+      if (buffer.length > maxBytes) {
+        return res.status(413).json({
+          error: `File too large. Max ${imageKind === 'logo' ? '2MB for a logo' : '5MB per photo'}.`,
+        });
+      }
+
+      const detected = detectImageMime(buffer);
+      if (!detected || !imageMimeMatches(declared, detected)) {
+        return res.status(415).json({
+          error: 'The uploaded file is not a valid image in a supported format.',
+        });
+      }
+
+      const { id, url } = await StorageService.upload(buffer, {
+        userId: req.user!.id,
+        fileType: imageKind === 'logo' ? 'sponsor_logo' : 'sponsor_photo',
+        originalName: `sponsor-${imageKind}`,
+        mimetype: detected,
+        visibility: 'public',
+      });
+
+      res.status(201).json({ fileId: id, url });
+    } catch (err: any) {
+      console.error(`[ADMIN] ❌ Sponsor image upload error: ${err.message}`);
+      res.status(500).json({ error: 'Failed to upload the image.' });
+    }
+  }
+
+  /**
+   * Delete an uploaded business image that is not yet referenced by any
+   * sponsor (the create dialog's "remove" action, or a failed save). Images
+   * that a sponsor still references are refused — replacing an image goes
+   * through update, which cleans up the replaced file only after the new
+   * record is persisted.
+   */
+  static async deleteBusinessImage(req: AdminReq, res: Response) {
+    try {
+      const parsed = parseStoredImageUrl(req.body?.url);
+      if (!parsed) return res.status(400).json({ error: 'A valid uploaded image URL is required.' });
+
+      const inUse = await pool.query(
+        `SELECT 1 FROM sponsors
+          WHERE logo_url = $1 OR cover_image_url = $1 OR photo_urls @> $2::jsonb
+          LIMIT 1`,
+        [parsed.url, JSON.stringify([parsed.url])],
+      );
+      if (inUse.rowCount) {
+        return res.status(409).json({ error: 'This image is in use by a sponsor and cannot be deleted.' });
+      }
+
+      const record = await StorageService.getFileRecord(parsed.fileId);
+      if (record) {
+        if (record.visibility !== 'public') {
+          return res.status(400).json({ error: 'Only public business images can be deleted here.' });
+        }
+        await StorageService.delete(parsed.fileId);
+      }
+      res.json({ deleted: true });
+    } catch (err: any) {
+      console.error(`[ADMIN] ❌ Sponsor image delete error: ${err.message}`);
+      res.status(500).json({ error: 'Failed to delete the image.' });
     }
   }
 

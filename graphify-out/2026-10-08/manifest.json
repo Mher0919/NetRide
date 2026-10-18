@@ -20,13 +20,13 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/api/admin.ts": {
-    "mtime": 1788232299.212238,
-    "ast_hash": "9bee3ed4a7be8f7f0e855f1e62a1a02e",
+    "mtime": 1791507965.6506565,
+    "ast_hash": "8f20e9e4048e8fb4e46cc5391bba9d9f",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/api/index.ts": {
-    "mtime": 1789348512.2429824,
-    "ast_hash": "9fc1471e8cd2943909f88548fd854e6e",
+    "mtime": 1791427848.6841843,
+    "ast_hash": "460df5c5dd372447d56160584f3c2728",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/components/ErrorBoundary.tsx": {
@@ -680,8 +680,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/main.dart": {
-    "mtime": 1790127890.472855,
-    "ast_hash": "47daa52890472189b7cab2b8a6d1841f",
+    "mtime": 1791428061.2802646,
+    "ast_hash": "c4fc4816304cccc9b95c941da90f2855",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/search_result.dart": {
@@ -735,8 +735,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/map_screen.dart": {
-    "mtime": 1791265736.510086,
-    "ast_hash": "18199f3b7a6d8ffa32c4d49af67deaf6",
+    "mtime": 1791428317.9820163,
+    "ast_hash": "509da4cb8ff7a615a6d9147fb226869a",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/onboarding_screen.dart": {
@@ -850,8 +850,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/utils/file_url.dart": {
-    "mtime": 1784355490.9348686,
-    "ast_hash": "6f0b52c557f40057e4ed930090a7d3f8",
+    "mtime": 1791427950.8405054,
+    "ast_hash": "cc9e412ec8e016ac8d104c396fedd65f",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/utils/phone_utils.dart": {
@@ -1175,8 +1175,8 @@
     "semantic_hash": ""
   },
   "backend/run-tests.cjs": {
-    "mtime": 1789859890.5879464,
-    "ast_hash": "ef6a7c32b59a4cc0089cf048f0970502",
+    "mtime": 1791428178.568346,
+    "ast_hash": "865452606adbb148a3d215724d77fd43",
     "semantic_hash": ""
   },
   "backend/scripts/build-osrm.sh": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "backend/src/app.ts": {
-    "mtime": 1789859890.5889466,
-    "ast_hash": "01232e4aea019456b6020587455723bc",
+    "mtime": 1791427724.4385219,
+    "ast_hash": "7df9b2ccf4c13d29df8ad1cc11c2946f",
     "semantic_hash": ""
   },
   "backend/src/benchmark_routing.ts": {
@@ -1225,8 +1225,8 @@
     "semantic_hash": ""
   },
   "backend/src/config/env.ts": {
-    "mtime": 1791263150.391186,
-    "ast_hash": "4b520d4bd0e270e0f03a5a56ad149f78",
+    "mtime": 1791427723.8855095,
+    "ast_hash": "f943feb5eb1b562ec77ba51355fa8d61",
     "semantic_hash": ""
   },
   "backend/src/config/redis.ts": {
@@ -1295,13 +1295,13 @@
     "semantic_hash": ""
   },
   "backend/src/modules/admin/admin.controller.ts": {
-    "mtime": 1786914892.0608432,
-    "ast_hash": "7abe698814baa508e6b6b6fe9255af97",
+    "mtime": 1791507958.7831695,
+    "ast_hash": "59accda68021a2d026e4529b84b73b33",
     "semantic_hash": ""
   },
   "backend/src/modules/admin/admin.routes.ts": {
-    "mtime": 1786910328.5196967,
-    "ast_hash": "546c037bdfdecf7cbaeca944139b699b",
+    "mtime": 1791507959.0737875,
+    "ast_hash": "1c1b80db425d0ffe30c651b964818ec0",
     "semantic_hash": ""
   },
   "backend/src/modules/auth/auth.controller.ts": {
@@ -2760,13 +2760,13 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Partners.tsx": {
-    "mtime": 1789337576.6859977,
-    "ast_hash": "8b513fd9ce15ebd38f08edaf761d87c6",
+    "mtime": 1791508073.8138654,
+    "ast_hash": "f05f9c37134b4d033e1e27c41ea47ad7",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Promos.tsx": {
-    "mtime": 1788143305.2726169,
-    "ast_hash": "853e0cdecebde4cb34a7aec9dfe37b7a",
+    "mtime": 1791508032.1094606,
+    "ast_hash": "947c307172b6a7e969260b9c67c2cfca",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Referrals.tsx": {
@@ -2815,13 +2815,13 @@
     "semantic_hash": ""
   },
   "backend/src/modules/admin/admin-rewards.controller.ts": {
-    "mtime": 1788142713.477533,
-    "ast_hash": "2f3b581d56921a190eb7576f0904bffd",
+    "mtime": 1791507939.096745,
+    "ast_hash": "d05fa34c5b3f49b6c11f3c6b5964e0d3",
     "semantic_hash": ""
   },
   "backend/src/modules/admin/admin-rewards.routes.ts": {
-    "mtime": 1785886889.3863444,
-    "ast_hash": "476a38e37b3a0454f395fc24c8f35e51",
+    "mtime": 1791507939.475892,
+    "ast_hash": "9079022c1d64311f6908480a40191557",
     "semantic_hash": ""
   },
   "backend/src/modules/credits/credits.controller.ts": {
@@ -2840,8 +2840,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/partner/partner.service.ts": {
-    "mtime": 1788238281.2412825,
-    "ast_hash": "a9f74b9d020c67472e525d138026a4d6",
+    "mtime": 1791507933.9269724,
+    "ast_hash": "61b6fe9b35ccfef4d8dcf6b3eecd8e72",
     "semantic_hash": ""
   },
   "backend/src/modules/promo/promo.controller.ts": {
@@ -3120,8 +3120,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/FleetPartners.tsx": {
-    "mtime": 1789337593.9364052,
-    "ast_hash": "c8b9ac6a90d67b711f146aaddf833f46",
+    "mtime": 1791508075.0628867,
+    "ast_hash": "0fd1757f699fb0b6f60febae80990144",
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Pricing.tsx": {
@@ -3230,8 +3230,8 @@
     "semantic_hash": ""
   },
   "apps/admin_dashboard/src/pages/Sponsors.tsx": {
-    "mtime": 1790029178.7368588,
-    "ast_hash": "c43fae0949ad12bf39b744450f673c45",
+    "mtime": 1791508008.2457757,
+    "ast_hash": "85616218d79a3c0beb7d18acb2bada36",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/components/driver_cancelled_dialog.dart": {
@@ -3240,18 +3240,13 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/special_models.dart": {
-    "mtime": 1790127747.6285112,
-    "ast_hash": "2c8173a065ade9c975fe38542d68586b",
+    "mtime": 1791427957.4678907,
+    "ast_hash": "db0ca0e9cba1a3881ea8b175196da946",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/providers/specials_provider.dart": {
-    "mtime": 1790215425.4618423,
-    "ast_hash": "6e57ce4881fd9524baa212f0549e96a1",
-    "semantic_hash": ""
-  },
-  "apps/rider_flutter/lib/screens/special_detail_screen.dart": {
-    "mtime": 1790125690.461722,
-    "ast_hash": "825d708b0ee13a18996b0b7df625384e",
+    "mtime": 1791428242.99887,
+    "ast_hash": "15fd1777b1e3510435ad74d5fff58f71",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/special_redemption_screen.dart": {
@@ -3375,13 +3370,13 @@
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/admin-sponsor.controller.ts": {
-    "mtime": 1790029198.981151,
-    "ast_hash": "42ec8ae20e5e2108090bf3dbb619baf1",
+    "mtime": 1791507949.5319762,
+    "ast_hash": "8907a66c8cf1095512cd48ce0916ac36",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/admin-sponsor.routes.ts": {
-    "mtime": 1788232141.8467023,
-    "ast_hash": "a5f66111d110a39b4b26ad25462db80c",
+    "mtime": 1791507949.9011111,
+    "ast_hash": "932b21d0a2b05d9db4b0075e9fff447f",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/special-notifications.ts": {
@@ -3395,13 +3390,13 @@
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/specials.controller.ts": {
-    "mtime": 1790127720.4599545,
-    "ast_hash": "fbd5aadc0871243e099f4d2b149a5f30",
+    "mtime": 1791427763.26838,
+    "ast_hash": "c31fb1042d332fe8c421eba485017e58",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/specials.routes.ts": {
-    "mtime": 1790127720.9505029,
-    "ast_hash": "5baf8d0ab52a2d5291f06362009095a9",
+    "mtime": 1791427764.0122237,
+    "ast_hash": "ea77cad99ac94fed74428257baa3b174",
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor-auth.service.ts": {
@@ -3420,8 +3415,8 @@
     "semantic_hash": ""
   },
   "backend/src/modules/sponsor/sponsor.service.ts": {
-    "mtime": 1790032395.0492883,
-    "ast_hash": "df3d0f19f306f8e4f7ea4286ece5b3d6",
+    "mtime": 1791507945.0312686,
+    "ast_hash": "adaeab57d6f3faceacf702df93b48b24",
     "semantic_hash": ""
   },
   "apps/sponsor_portal/index.html": {
@@ -3440,8 +3435,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/widgets/explore_specials_section.dart": {
-    "mtime": 1790035082.5437322,
-    "ast_hash": "23764618ef96dd9c14383ae0990d68b1",
+    "mtime": 1791428117.211865,
+    "ast_hash": "ec3c11aeee3d7dcefc5a887828ec95e0",
     "semantic_hash": ""
   },
   "backend/migrations/20260816_add_ride_driver_rejections.sql": {
@@ -4427,6 +4422,71 @@
   "apps/admin_dashboard/src/utils/date.ts": {
     "mtime": 1791265847.381064,
     "ast_hash": "d2b79975a47fa5df6bad735ad2a324c8",
+    "semantic_hash": ""
+  },
+  "apps/admin_dashboard/src/components/GoogleBusinessSelector.tsx": {
+    "mtime": 1791428383.1235685,
+    "ast_hash": "b033a4c512259652ede2aeafe14caf65",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/models/google_business.dart": {
+    "mtime": 1791427944.6536362,
+    "ast_hash": "e27ca39f6653c1c3e54162b86d07220b",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/services/business_place_service.dart": {
+    "mtime": 1791428116.7999766,
+    "ast_hash": "cfa590f516433e45032466ba1f52ce88",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/widgets/special_business_sheet.dart": {
+    "mtime": 1791428298.8771145,
+    "ast_hash": "63b28b1fb6b7e8a263bbe25e833599da",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/lib/widgets/special_card.dart": {
+    "mtime": 1791428170.7561986,
+    "ast_hash": "0b222e7221fcb5c875f1766567ee9dc7",
+    "semantic_hash": ""
+  },
+  "apps/rider_flutter/test/special_business_test.dart": {
+    "mtime": 1791428334.7547605,
+    "ast_hash": "66bf69fb0e5384fff17e0445ebc2fca9",
+    "semantic_hash": ""
+  },
+  "backend/migrations/050_special_google_business.sql": {
+    "mtime": 1791427732.8382888,
+    "ast_hash": "0680827cd2658ebb41aecf46feb6369e",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/google-places/__tests__/google-places.unit.test.ts": {
+    "mtime": 1791427819.4160535,
+    "ast_hash": "2509edb4f26a54ba7840593879a0862a",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/google-places/google-places.controller.ts": {
+    "mtime": 1791428164.2912235,
+    "ast_hash": "dff451dc5ec191bb0ab0e8fdbd5740d4",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/google-places/google-places.routes.ts": {
+    "mtime": 1791427719.4887197,
+    "ast_hash": "27c39d5795b601531b9c2d1fc8ced8df",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/google-places/google-places.service.ts": {
+    "mtime": 1791427809.5523136,
+    "ast_hash": "2dff68ec1acbb47fd599ae7b45db64ac",
+    "semantic_hash": ""
+  },
+  "backend/src/modules/sponsor/__tests__/google-association.unit.test.ts": {
+    "mtime": 1791428178.2139027,
+    "ast_hash": "7547ac48d03664ee00b72ba1b0122924",
+    "semantic_hash": ""
+  },
+  "docs/google-business-specials.md": {
+    "mtime": 1791428228.0663817,
+    "ast_hash": "a4d8a0570c46d5ea379ac84c93245d3a",
     "semantic_hash": ""
   }
 }

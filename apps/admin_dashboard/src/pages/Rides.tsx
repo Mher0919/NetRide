@@ -39,6 +39,12 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
   // Socket liveness: the table must say "reconnecting" instead of silently
   // serving frozen data when the realtime channel drops.
   const [connected, setConnected] = useState(false);
+  // In-flight request cancellation: a page/status/tab change (or unmount)
+  // aborts the previous list request so a slow response can never overwrite
+  // a newer one. The sequence ref additionally guards against responses that
+  // had already resolved when the abort fired.
+  const abortRef = React.useRef<AbortController | null>(null);
+  const reqSeq = React.useRef(0);
 
   const fmtUSD = (cents: any) => '$' + (Number(cents ?? 0) / 100).toFixed(2);
 
@@ -57,22 +63,38 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
   const finalCents = (ride: any) =>
     ride.final_payment_cents ?? ride.fare_amount_cents ?? null;
 
-  const fetchRides = async () => {
-    setLoading(true);
-    setError(null);
+  const fetchRides = React.useCallback(async (opts?: { silent?: boolean }) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const seq = ++reqSeq.current;
+
+    if (!opts?.silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
-      const data = await getRides({ status, page: page + 1, limit: rowsPerPage });
+      const data = await getRides(
+        { status, page: page + 1, limit: rowsPerPage },
+        controller.signal,
+      );
+      if (seq !== reqSeq.current) return;
       setRides(data.rides ?? []);
       setTotal(data.total ?? 0);
       setSummary(data.summary ?? null);
+      setError(null);
     } catch (err: any) {
+      // Aborted requests are expected (navigation / filter change) and must
+      // not surface as errors.
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') return;
+      if (seq !== reqSeq.current) return;
       const msg = err?.response?.data?.error || err?.message || 'Failed to fetch rides';
       setError(msg);
       console.error('Failed to fetch rides:', err);
     } finally {
-      setLoading(false);
+      if (seq === reqSeq.current) setLoading(false);
     }
-  };
+  }, [status, page, rowsPerPage]);
 
   useEffect(() => {
     fetchRides();
@@ -81,18 +103,11 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
     // every second — poll fast; completed rides settle slowly — poll slower.
     // Mirrors the socket tripUpdate merge below and guarantees the table
     // converges even if a socket broadcast is missed (or the browser
-    // previously served a cached 304 ride list).
+    // previously served a cached 304 ride list). Polls are silent so the
+    // table never flashes a spinner over data already on screen.
     const pollMs = status === 'ACTIVE' ? 10_000 : 30_000;
-    const pollTimer = setInterval(() => {
-      getRides({ status, page: page + 1, limit: rowsPerPage })
-        .then((data) => {
-          setRides(data.rides ?? []);
-          setTotal(data.total ?? 0);
-          setSummary(data.summary ?? null);
-        })
-        .catch(() => undefined);
-    }, pollMs);
-    
+    const pollTimer = setInterval(() => fetchRides({ silent: true }), pollMs);
+
     const socket = io(API_URL, {
       auth: { token: localStorage.getItem('admin_token') }
     });
@@ -136,9 +151,10 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
 
     return () => {
       clearInterval(pollTimer);
+      abortRef.current?.abort();
       socket.disconnect();
     };
-  }, [status, page, rowsPerPage]);
+  }, [fetchRides, status, page, rowsPerPage]);
 
   const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);

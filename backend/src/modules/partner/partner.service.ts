@@ -62,8 +62,12 @@ function normalizePartner(r: any) {
 export class PartnerService {
   static async list(search: string, status: string, limit = 50, offset = 0, includeTest = false) {
     // Test accounts (E2E/sandbox seeds) are hidden by default so they never
-    // bury real partners; admins opt in with includeTest.
-    const testSql = TEST_EMAIL_SQL(`COALESCE(u.email, p.contact_email, '')`);
+    // bury real partners; admins opt in with includeTest. Classification is
+    // the persistent fixture marker OR the canonical email rule on the
+    // partner's linked login (or contact) email — the same predicate drives
+    // the list, the is_test badge and the total.
+    const emailTestSql = TEST_EMAIL_SQL(`COALESCE(u.email, p.contact_email, '')`);
+    const testSql = `(p.is_test OR ${emailTestSql})`;
     const res = await pool.query(
       `SELECT p.*,
               COALESCE(u.email, p.contact_email) AS login_email,

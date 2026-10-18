@@ -8,7 +8,9 @@ import {
   CardContent,
   Chip,
   Alert,
-  Button
+  Button,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PeopleIcon from '@mui/icons-material/People';
@@ -29,6 +31,8 @@ interface Stats {
 }
 
 const Dashboard: React.FC = () => {
+  const theme = useTheme();
+  const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +83,12 @@ const Dashboard: React.FC = () => {
     { name: 'Rejected', count: stats?.rejectedUsers },
     { name: 'Docs Pending', count: stats?.pendingDocumentReviews },
   ];
+
+  // Numeric height (not "100%"): Recharts' ResponsiveContainer only measures
+  // a percentage height from a laid-out parent, which produced the
+  // "width(-1) and height(-1)" warning on first paint. A concrete number per
+  // breakpoint keeps the chart responsive without depending on measurement.
+  const chartHeight = isMdUp ? 500 : 320;
 
   return (
     <Box sx={{ maxWidth: '100%', mx: 'auto' }}>
@@ -149,10 +159,10 @@ const Dashboard: React.FC = () => {
           </Typography>
           <Chip label="Live Data" size="small" sx={{ fontWeight: 700, bgcolor: 'secondary.main', color: 'white' }} />
         </Box>
-        <Box sx={{ height: { xs: 320, md: 500 }, width: '100%', minWidth: 0 }}>
+        <Box sx={{ height: chartHeight, width: '100%', minWidth: 0 }}>
           {/* Explicit numeric height: avoids Recharts' first-paint
               “width(-1) and height(-1)” measurement warning. */}
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <BarChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
               <XAxis 

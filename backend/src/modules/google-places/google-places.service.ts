@@ -157,6 +157,25 @@ export function isValidPlaceId(placeId: unknown): placeId is string {
   return typeof placeId === 'string' && PLACE_ID_RE.test(placeId.trim());
 }
 
+/**
+ * Compose the Google Text Search query from a business name and an optional
+ * location. A location supplied as TEXT is folded into the query (Google
+ * resolves "business, city, state" natively) when no coordinates exist.
+ * Coordinates are handled separately as a location BIAS — a valid location
+ * is never silently dropped.
+ */
+export function buildTextQuery(
+  query: string,
+  lat?: number,
+  lng?: number,
+  locationText?: string,
+): string {
+  const q = (query || '').trim();
+  const loc = (locationText || '').trim().slice(0, 160);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  return !hasCoords && loc ? `${q}, ${loc}` : q;
+}
+
 function secretKey(): string {
   return env.JWT_SECRET;
 }
@@ -398,6 +417,7 @@ interface PhotoCacheEntry {
 export class GooglePlacesService {
   private static inFlight = new Map<string, Promise<unknown>>();
   private static photoCache = new Map<string, PhotoCacheEntry>();
+  private static warnedFallbackKey = false;
 
   static get configured(): boolean {
     return Boolean(env.GOOGLE_PLACES_API_KEY || env.GOOGLE_MAPS_API_KEY || env.GOOGLE_ROUTES_API_KEY);
@@ -405,6 +425,24 @@ export class GooglePlacesService {
 
   private static get apiKey(): string | undefined {
     return env.GOOGLE_PLACES_API_KEY || env.GOOGLE_MAPS_API_KEY || env.GOOGLE_ROUTES_API_KEY;
+  }
+
+  /**
+   * Warn (once) when Places falls back to a key that is not dedicated to
+   * Places API (New). The most common production misconfiguration is a
+   * routing/maps key being reused here; Google then answers 403
+   * PERMISSION_DENIED and business search appears broken. The key value is
+   * never logged.
+   */
+  private static warnIfFallbackKey(): void {
+    if (this.warnedFallbackKey) return;
+    if (!env.GOOGLE_PLACES_API_KEY && (env.GOOGLE_MAPS_API_KEY || env.GOOGLE_ROUTES_API_KEY)) {
+      this.warnedFallbackKey = true;
+      logger.warn(
+        {},
+        'google_places_key_fallback: GOOGLE_PLACES_API_KEY is not set — using GOOGLE_MAPS_API_KEY/GOOGLE_ROUTES_API_KEY. Ensure that key has "Places API (New)" enabled and no application restrictions that block server calls.',
+      );
+    }
   }
 
   private static requireConfigured(): string {
@@ -416,21 +454,40 @@ export class GooglePlacesService {
         'Google business information is not configured on this server.',
       );
     }
+    this.warnIfFallbackKey();
     return key;
   }
 
   private static mapError(err: any, fallbackCode: string): GooglePlacesError {
     if (err instanceof GooglePlacesError) return err;
     const status = err?.response?.status;
+    const googleStatus = err?.response?.data?.error?.status;
+    const googleMessage = String(err?.response?.data?.error?.message ?? '');
     if (err?.code === 'ECONNABORTED' || err?.code === 'ETIMEDOUT') {
       logger.error({ code: err?.code }, 'google_places_timeout');
       return new GooglePlacesError('GOOGLE_PLACES_TIMEOUT', 504, 'Google Places timed out.');
     }
     if (status === 400) {
+      logger.error({ googleStatus, googleMessage }, 'google_places_bad_request');
       return new GooglePlacesError('INVALID_REQUEST', 400, 'Google Places rejected the request.');
     }
     if (status === 403 || status === 429) {
-      logger.error({ status, googleStatus: err?.response?.data?.error?.status }, 'google_places_forbidden');
+      logger.error({ status, googleStatus, googleMessage }, 'google_places_forbidden');
+      // 403 PERMISSION_DENIED almost always means the Places API (New) is
+      // not enabled for the key's project or the key carries application
+      // restrictions that block server-side calls. Surface an actionable
+      // (but secret-free) message so the admin UI can explain the fix.
+      if (
+        status === 403 &&
+        (googleStatus === 'PERMISSION_DENIED' ||
+          /has not been used|is disabled|referer|restriction|not authorized/i.test(googleMessage))
+      ) {
+        return new GooglePlacesError(
+          'GOOGLE_PLACES_NOT_AUTHORIZED',
+          503,
+          'Google business search is not authorized: enable "Places API (New)" for the configured Google API key and remove application restrictions from it (server-side key).',
+        );
+      }
       return new GooglePlacesError(
         'GOOGLE_PLACES_UNAVAILABLE',
         503,
@@ -524,16 +581,26 @@ export class GooglePlacesService {
     query: string,
     lat?: number,
     lng?: number,
-    opts: { limit?: number } = {},
+    opts: { limit?: number; locationText?: string } = {},
   ): Promise<GoogleBusinessSuggestion[]> {
     const q = (query || '').trim();
     if (q.length < 2 || q.length > 160) {
       throw new GooglePlacesError('INVALID_REQUEST', 400, 'Enter at least 2 characters to search.');
     }
     const limit = Math.min(Math.max(Math.round(opts.limit ?? 7), 1), 20);
-    const latKey = Number.isFinite(lat) ? lat!.toFixed(3) : '0';
-    const lngKey = Number.isFinite(lng) ? lng!.toFixed(3) : '0';
-    const key = `gplaces:text:${q.toLowerCase()}:${latKey}:${lngKey}:${limit}`;
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    // Location supplied as TEXT (the admin typed an address instead of
+    // dropping a map pin): folded into the text query — Places Text Search
+    // resolves "business, city, state" natively. When coordinates exist they
+    // are used as a location BIAS (not a restriction) so ranking prefers the
+    // chosen area while still allowing valid matches elsewhere.
+    const locationText = (opts.locationText ?? '').trim().slice(0, 160);
+    const textQuery = buildTextQuery(q, lat, lng, opts.locationText);
+
+    const latKey = hasCoords ? lat!.toFixed(3) : '0';
+    const lngKey = hasCoords ? lng!.toFixed(3) : '0';
+    const locationKey = !hasCoords ? locationText.toLowerCase() : '';
+    const key = `gplaces:text:${q.toLowerCase()}:${latKey}:${lngKey}:${locationKey}:${limit}`;
     const cached = await this.cacheGet<GoogleBusinessSuggestion[]>(key);
     if (cached) return cached;
 
@@ -541,11 +608,11 @@ export class GooglePlacesService {
       const apiKey = this.requireConfigured();
       try {
         const body: Record<string, unknown> = {
-          textQuery: q,
+          textQuery,
           languageCode: 'en',
           maxResultCount: limit,
         };
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        if (hasCoords) {
           body.locationBias = {
             circle: { center: { latitude: lat, longitude: lng }, radius: 30000 },
           };
@@ -557,7 +624,7 @@ export class GooglePlacesService {
           },
           timeout: 6000,
         });
-        const origin = Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat!, lon: lng! } : null;
+        const origin = hasCoords ? { lat: lat!, lon: lng! } : null;
         const rows = (resp.data?.places ?? [])
           .map((r: any) => shapeSuggestion(r, origin))
           .filter((r: GoogleBusinessSuggestion | null): r is GoogleBusinessSuggestion => r !== null);

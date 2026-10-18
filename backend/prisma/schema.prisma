@@ -676,6 +676,8 @@ model Partner {
   contact_email           String?
   commission_rate         Decimal  @default(0.10) @db.Decimal(5, 4)
   status                  String   @default("ACTIVE")
+  // Persistent test/fixture marker (see utils/testUser.ts).
+  is_test                 Boolean  @default(false)
   user_id                 String?  @unique @db.Uuid
   must_change_password    Boolean  @default(true)
   lifetime_earnings_cents BigInt   @default(0)
@@ -930,6 +932,16 @@ model Sponsor {
   longitude                Float?
   logo_url                 String?
   cover_image_url          String?
+
+  // Manual business profile (admin-entered; never presented as Google data).
+  admin_rating             Decimal? @db.Decimal(2, 1)
+  admin_rating_count       Int?
+  price_level              String?
+  photo_urls               Json     @default("[]")
+
+  // Persistent test/fixture marker (see utils/testUser.ts alongside the
+  // canonical email rule). Never writable from the admin API.
+  is_test                  Boolean  @default(false)
 
   discount_type            String   @default("PERCENTAGE")
   discount_percent         Float?

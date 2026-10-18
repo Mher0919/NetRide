@@ -37,6 +37,7 @@
 //   finalFare = driverShare + fleetShare + netrideShare (cent-exact).
 
 import { pool } from '../config/database';
+import { rideScopeCondition } from '../utils/testUser';
 import { redis, DRIVER_LOCATIONS_KEY } from '../config/redis';
 
 // ---------------------------------------------------------------------------
@@ -807,16 +808,33 @@ export async function getRevenueAllocationForRide(rideId: string): Promise<Reven
 }
 
 /** Admin financial visibility: global + per-fleet aggregates (cents). */
-export async function getRevenueSummary(): Promise<any> {
+export type RevenueScope = 'production' | 'test';
+
+/**
+ * Global + per-fleet revenue aggregates (cents), scoped to production or
+ * test rides. The scope is applied at the SQL layer so summary cards and
+ * analytics always describe the same dataset; production and test data can
+ * never be mixed into one total.
+ *
+ * A "test ride" is a ride whose rider is a test account and whose driver is
+ * either absent or also a test account (`TEST_RIDE_SQL`, the canonical
+ * platform-wide rule in utils/testUser.ts).
+ */
+export async function getRevenueSummary(scope: RevenueScope = 'production'): Promise<any> {
+  const scopeSql = rideScopeCondition(scope, 'r', 'ru', 'du');
   const globalRes = await pool.query(
     `SELECT
-       COALESCE(SUM(final_fare * 100), 0)::bigint AS total_fare_cents,
-       COALESCE(SUM(driver_share_cents), 0)::bigint AS total_driver_share_cents,
-       COALESCE(SUM(platform_share_cents), 0)::bigint AS total_platform_share_cents,
-       COALESCE(SUM(netride_share_cents), 0)::bigint AS total_netride_share_cents,
+       COALESCE(SUM(s.final_fare * 100), 0)::bigint AS total_fare_cents,
+       COALESCE(SUM(s.driver_share_cents), 0)::bigint AS total_driver_share_cents,
+       COALESCE(SUM(s.platform_share_cents), 0)::bigint AS total_platform_share_cents,
+       COALESCE(SUM(s.netride_share_cents), 0)::bigint AS total_netride_share_cents,
        COUNT(*)::int AS rides_with_allocation
-     FROM ride_price_snapshots
-     WHERE driver_share_cents IS NOT NULL`,
+     FROM ride_price_snapshots s
+     JOIN rides r ON r.id = s.ride_id
+     LEFT JOIN users ru ON ru.id = r.rider_id
+     LEFT JOIN users du ON du.id = r.driver_id
+     WHERE s.driver_share_cents IS NOT NULL
+       AND (${scopeSql})`,
   );
   const fleetRes = await pool.query(
     `SELECT s.driver_fleet_id AS fleet_id,
@@ -824,12 +842,16 @@ export async function getRevenueSummary(): Promise<any> {
             COUNT(*)::int AS rides,
             COALESCE(SUM((s.fleet_allocations->0->>'cents')::bigint), 0)::bigint AS fleet_earnings_cents
      FROM ride_price_snapshots s
+     JOIN rides r ON r.id = s.ride_id
+     LEFT JOIN users ru ON ru.id = r.rider_id
+     LEFT JOIN users du ON du.id = r.driver_id
      LEFT JOIN fleet_partners f ON f.id = s.driver_fleet_id
      WHERE s.driver_fleet_id IS NOT NULL
+       AND (${scopeSql})
      GROUP BY s.driver_fleet_id, f.name
      ORDER BY fleet_earnings_cents DESC`,
   );
-  return { global: globalRes.rows[0] ?? null, per_fleet: fleetRes.rows };
+  return { scope, global: globalRes.rows[0] ?? null, per_fleet: fleetRes.rows };
 }
 
 export const pricingService = {

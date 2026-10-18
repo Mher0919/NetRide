@@ -3865,8 +3865,8 @@
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Core/SupabaseManager.swift": {
-    "mtime": 1790487147.1861143,
-    "ast_hash": "4b88175e3e4a85ab0d5448766be1f039",
+    "mtime": 1790494433.0355148,
+    "ast_hash": "20d21819fb1ef6fabca360ef275eccbe",
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Models/DemandZone.swift": {
@@ -3875,13 +3875,13 @@
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Models/RouteModels.swift": {
-    "mtime": 1790487183.998431,
-    "ast_hash": "8ab41c2dc0fb45a1c5a415618fbfe574",
+    "mtime": 1790494444.6198049,
+    "ast_hash": "259db0718c192a8bbd498ebdf419cc05",
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Models/TripModels.swift": {
-    "mtime": 1790487836.014034,
-    "ast_hash": "29bd6c44a1871d8ccb159a1bb66c7e7d",
+    "mtime": 1790494470.1127317,
+    "ast_hash": "7e1f901afde05e11657f62673018ddb4",
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Providers/DriverProvider.swift": {
@@ -3915,8 +3915,8 @@
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Services/NavigationService.swift": {
-    "mtime": 1790487314.4987082,
-    "ast_hash": "95c1f42b27d70564dea9d4537be345fe",
+    "mtime": 1790494475.5472448,
+    "ast_hash": "0c9f4b684486bc8e3f5973b2649fbd0d",
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Services/NotificationService.swift": {
@@ -3950,8 +3950,8 @@
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Views/AuthViews.swift": {
-    "mtime": 1790487728.014751,
-    "ast_hash": "43b03d6c26bbfff072ae254a7be597db",
+    "mtime": 1790494532.335535,
+    "ast_hash": "916b4643227eeb547d06959ad5d0ce2a",
     "semantic_hash": ""
   },
   "apps/driver_ios/NetRideDriver/Views/AvailabilityView.swift": {
@@ -4075,8 +4075,8 @@
     "semantic_hash": ""
   },
   "apps/rider_ios/NetRideRider/Core/SupabaseManager.swift": {
-    "mtime": 1790486542.2478123,
-    "ast_hash": "a3dbf74bcf78a1b4c3776061a9a9b8b1",
+    "mtime": 1790494440.231773,
+    "ast_hash": "18657931aef231ced392b704d7703dec",
     "semantic_hash": ""
   },
   "apps/rider_ios/NetRideRider/Models/NotificationModels.swift": {
@@ -4225,8 +4225,8 @@
     "semantic_hash": ""
   },
   "apps/rider_ios/NetRideRider/Views/LoginView.swift": {
-    "mtime": 1790488051.263215,
-    "ast_hash": "422248eff99b8f10ad86c675dafbd7f4",
+    "mtime": 1790494547.6775181,
+    "ast_hash": "a6e65511a90d0b6b8780812fb0a27eeb",
     "semantic_hash": ""
   },
   "apps/rider_ios/NetRideRider/Views/MainTabView.swift": {

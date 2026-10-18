@@ -68,8 +68,8 @@ async function main() {
        business_name, business_type, discount_type, max_discount_percent,
        discount_fixed_amount_cents,
        initial_budget_cents, remaining_budget_cents, reserved_budget_cents, used_budget_cents,
-       status, latitude, longitude
-     ) VALUES ('Payment Test Coffee', 'CAFE', 'FIXED_AMOUNT', 90, 500, 200000, 200000, 0, 0, 'ACTIVE', 34.0522, -118.2437)
+       status, latitude, longitude, is_test
+     ) VALUES ('Payment Test Coffee', 'CAFE', 'FIXED_AMOUNT', 90, 500, 200000, 200000, 0, 0, 'ACTIVE', 34.0522, -118.2437, TRUE)
      ON CONFLICT DO NOTHING RETURNING id, business_name`,
   );
   if (sponsorRes.rows.length > 0) {

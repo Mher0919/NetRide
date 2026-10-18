@@ -103,6 +103,46 @@ export function TEST_EMAIL_SQL(column: string): string {
 }
 
 /**
+ * Canonical SQL predicate for a TEST RIDE. A ride is test data when the
+ * rider is a test account and no production driver is attached (a driverless
+ * ride — e.g. an auto-closed REQUESTED ride — is still test data when its
+ * rider is a test account). This is the single ride-level rule used by every
+ * revenue/analytics query so production and test totals can never mix.
+ *
+ * Aliases must be trusted SQL fragments (table aliases), never user input.
+ */
+export function TEST_RIDE_SQL(
+  rideAlias = 'r',
+  riderAlias = 'ru',
+  driverAlias = 'du',
+): string {
+  const rider = TEST_EMAIL_SQL(`COALESCE(${riderAlias}.email, '')`);
+  const driver = TEST_EMAIL_SQL(`COALESCE(${driverAlias}.email, '')`);
+  return `(
+    ${rider}
+    AND (
+      ${rideAlias}.driver_id IS NULL
+      OR ${driver}
+    )
+  )`;
+}
+
+/**
+ * SQL boolean condition selecting test OR production rides for a scope.
+ * The single decision point used by revenue summaries and analytics so the
+ * two can never disagree about what "production only" means.
+ */
+export function rideScopeCondition(
+  scope: 'production' | 'test',
+  rideAlias = 'r',
+  riderAlias = 'ru',
+  driverAlias = 'du',
+): string {
+  const testRide = TEST_RIDE_SQL(rideAlias, riderAlias, driverAlias);
+  return scope === 'test' ? testRide : `NOT ${testRide}`;
+}
+
+/**
  * True when BOTH the rider and the driver of a trip are test users.
  * Single round-trip — fetches both emails in one query and ANDs the
  * result.

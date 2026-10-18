@@ -185,8 +185,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/ios/Runner/AppDelegate.swift": {
-    "mtime": 1776583482.5025268,
-    "ast_hash": "9e1de9c329a3fe4931876063de95132b",
+    "mtime": 1791945193.1058426,
+    "ast_hash": "150f7e28596d8d1612209f5bdde012f7",
     "semantic_hash": ""
   },
   "apps/driver_flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json": {
@@ -325,8 +325,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/login_screen.dart": {
-    "mtime": 1790033767.0283554,
-    "ast_hash": "eecb44c2899c9984327a604087881bf7",
+    "mtime": 1791945121.6603303,
+    "ast_hash": "6507205530feed13664674a8773b9b73",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/main_wrapper.dart": {
@@ -510,8 +510,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/macos/Flutter/GeneratedPluginRegistrant.swift": {
-    "mtime": 1791613091.8114545,
-    "ast_hash": "598ca1dcb6f275784ea208550df7326f",
+    "mtime": 1791945215.6484013,
+    "ast_hash": "d7a2cffd142e2fd7b4b0a4964c411b87",
     "semantic_hash": ""
   },
   "apps/driver_flutter/macos/RunnerTests/RunnerTests.swift": {
@@ -540,8 +540,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/windows/flutter/generated_plugin_registrant.cc": {
-    "mtime": 1786502249.0365171,
-    "ast_hash": "4d681c65ceb5118207618d68b3304132",
+    "mtime": 1791945215.6444013,
+    "ast_hash": "39ab031188d8521e445be63afb882df0",
     "semantic_hash": ""
   },
   "apps/driver_flutter/windows/flutter/generated_plugin_registrant.h": {
@@ -615,8 +615,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/ios/Runner/AppDelegate.swift": {
-    "mtime": 1776583482.5025268,
-    "ast_hash": "9e1de9c329a3fe4931876063de95132b",
+    "mtime": 1791945191.4989517,
+    "ast_hash": "150f7e28596d8d1612209f5bdde012f7",
     "semantic_hash": ""
   },
   "apps/rider_flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json": {
@@ -885,8 +885,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/macos/Flutter/GeneratedPluginRegistrant.swift": {
-    "mtime": 1786501914.8087018,
-    "ast_hash": "03e7e14d6a2418b1e4ab5576eae0436d",
+    "mtime": 1791945215.3468287,
+    "ast_hash": "5149b78ad0bfa5b38bc9ce61ac405f1b",
     "semantic_hash": ""
   },
   "apps/rider_flutter/macos/RunnerTests/RunnerTests.swift": {
@@ -1875,8 +1875,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/pubspec.yaml": {
-    "mtime": 1791612885.2020977,
-    "ast_hash": "a5a4a21667fa7d58c9fba594e9587b4f",
+    "mtime": 1791945114.4626887,
+    "ast_hash": "0feb304e701c8b7ca58f9f4a5ab9a00d",
     "semantic_hash": ""
   },
   "apps/driver_flutter/web/index.html": {
@@ -1940,8 +1940,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/pubspec.yaml": {
-    "mtime": 1791612885.207098,
-    "ast_hash": "3466cd2788f68d6f06894cdb2f1cd540",
+    "mtime": 1791945105.3297527,
+    "ast_hash": "ead13803bd7a81e0dbf2fef483ade6a2",
     "semantic_hash": ""
   },
   "apps/rider_flutter/web/index.html": {
@@ -1975,8 +1975,8 @@
     "semantic_hash": ""
   },
   "codemagic.yaml": {
-    "mtime": 1790014260.8920305,
-    "ast_hash": "cfaa8218da70f7b7f8c8a71ec52b501e",
+    "mtime": 1791945201.3919945,
+    "ast_hash": "9b8eb0f42873aabc60d85741aa079fbf",
     "semantic_hash": ""
   },
   "docker-compose.override.yml": {

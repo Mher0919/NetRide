@@ -300,8 +300,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/main.dart": {
-    "mtime": 1786502121.6227896,
-    "ast_hash": "2fb35c9ab3ad7b302a038d9388b04a48",
+    "mtime": 1786583311.976784,
+    "ast_hash": "2de2badcee6e6dfcb40bd20e9bec4047",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/models/trip_models.dart": {
@@ -310,8 +310,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/providers/driver_provider.dart": {
-    "mtime": 1786264514.4157827,
-    "ast_hash": "cde4d2b67bd1f5e4dd84970f1a294bb8",
+    "mtime": 1786582733.0121481,
+    "ast_hash": "a63226869d1b17bb86118c1aec072e9d",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/activity_screen.dart": {
@@ -395,8 +395,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/trip_screen.dart": {
-    "mtime": 1786261869.6933784,
-    "ast_hash": "f0ab4d72fd0bca2e43a5a255be8da33b",
+    "mtime": 1786598513.8593864,
+    "ast_hash": "e8855ed3c17287d12eb7b8c783d8314b",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/screens/vehicle_inspection_screen.dart": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/services/navigation_service.dart": {
-    "mtime": 1785609319.983672,
-    "ast_hash": "e7a1e3475f3a34a673e52c862437a745",
+    "mtime": 1786583053.5233717,
+    "ast_hash": "1f8db2f2b4d14291fb395299fe5787ba",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/services/navigation_voice_service.dart": {
@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/services/routing_service.dart": {
-    "mtime": 1785609319.9847674,
-    "ast_hash": "2796e86b134cb35ab297d23ce86b74a3",
+    "mtime": 1786592086.8653407,
+    "ast_hash": "d04d65ce3184de60214fb77a769925d5",
     "semantic_hash": ""
   },
   "apps/driver_flutter/lib/services/sound_service.dart": {
@@ -685,13 +685,13 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/main.dart": {
-    "mtime": 1786501950.7284427,
-    "ast_hash": "32bd13b5001dc82ffed7ea62735782ad",
+    "mtime": 1786583271.8254082,
+    "ast_hash": "9a33e62bb3c363a4dc98d0d1d4b8b74a",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/search_result.dart": {
-    "mtime": 1785397128.1002705,
-    "ast_hash": "3057818703e7a580956bd46397c41e40",
+    "mtime": 1786583156.2250254,
+    "ast_hash": "265d84ba3c3ccbbe355aaf4fc46b8c46",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/models/trip_models.dart": {
@@ -700,8 +700,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/providers/ride_provider.dart": {
-    "mtime": 1786501830.174241,
-    "ast_hash": "0f11001fb06cd4dedb836a74f3b74280",
+    "mtime": 1786592332.4283793,
+    "ast_hash": "902a4df49bae0489f7544a7691f0b346",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/activity_screen.dart": {
@@ -710,8 +710,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/address_search_delegate.dart": {
-    "mtime": 1786154482.2619705,
-    "ast_hash": "660a243328666514c604206234e54a8c",
+    "mtime": 1786582577.3772037,
+    "ast_hash": "8cfb4b43ed748d88372cf51d96f4e0b3",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/blocked_account_screen.dart": {
@@ -740,8 +740,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/map_screen.dart": {
-    "mtime": 1786501841.4301932,
-    "ast_hash": "dc4e6ae6fd58260ba91bc135c3f4e460",
+    "mtime": 1786583207.4385896,
+    "ast_hash": "a3599782803dce8775b7b7fc4d510c54",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/onboarding_screen.dart": {
@@ -780,8 +780,8 @@
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/trip_screen.dart": {
-    "mtime": 1786256890.4326584,
-    "ast_hash": "056a9bb91b2a3a3f5aa4906c9717bb16",
+    "mtime": 1786582793.1691055,
+    "ast_hash": "4a9053b8322704f0b106d89b289c4c64",
     "semantic_hash": ""
   },
   "apps/rider_flutter/lib/screens/verification_screen.dart": {
@@ -1250,8 +1250,8 @@
     "semantic_hash": ""
   },
   "backend/src/gateway/socket.gateway.ts": {
-    "mtime": 1786500573.9235795,
-    "ast_hash": "ff9420402b50fcda65b60869f4fcfdd8",
+    "mtime": 1786598551.7939458,
+    "ast_hash": "f6eb79ba2bf7340cf7a4c71e5c4aa612",
     "semantic_hash": ""
   },
   "backend/src/gateway/socket.middleware.ts": {
@@ -1775,8 +1775,8 @@
     "semantic_hash": ""
   },
   "backend/src/utils/socket-validation.ts": {
-    "mtime": 1786260094.2501726,
-    "ast_hash": "7c3f0eb7938b873ba6f2f908fdd4eee9",
+    "mtime": 1786599143.25482,
+    "ast_hash": "c92735b04bf4007db68fb643827abe8b",
     "semantic_hash": ""
   },
   "backend/src/utils/testUser.ts": {
@@ -3095,8 +3095,8 @@
     "semantic_hash": ""
   },
   "backend/src/services/demand.model.ts": {
-    "mtime": 1786500418.2297962,
-    "ast_hash": "e7847bc9c7bdd57d58ba396463906f95",
+    "mtime": 1786592626.6405287,
+    "ast_hash": "3f58ba86618985fff10cfd6afee20acf",
     "semantic_hash": ""
   },
   "backend/src/services/demand.service.ts": {
@@ -3122,6 +3122,11 @@
   "backend/src/services/notification.service.ts": {
     "mtime": 1786501032.070778,
     "ast_hash": "b66a5ac0ff4568258cc430ff96ee3b72",
+    "semantic_hash": ""
+  },
+  "apps/driver_flutter/lib/services/route_errors.dart": {
+    "mtime": 1786582630.3455086,
+    "ast_hash": "fc175cd3c769187fa624377001bb8023",
     "semantic_hash": ""
   }
 }

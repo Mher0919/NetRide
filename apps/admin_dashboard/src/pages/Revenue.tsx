@@ -16,6 +16,9 @@ import {
   Button,
   LinearProgress,
   Card,
+  Chip,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import { getRevenueOverview } from '../api/admin';
 import RevenueAnalytics from '../components/RevenueAnalytics';
@@ -27,6 +30,11 @@ const Revenue: React.FC = () => {
   const [overview, setOverview] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState('');
+  // Test rides are EXCLUDED by default: the Revenue section represents real
+  // operational activity. The switch flips to test-only data — production
+  // and test records are never combined into one total.
+  const [testMode, setTestMode] = React.useState(false);
+  const requestSeq = React.useRef(0);
   const [snack, setSnack] = React.useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
     message: '',
@@ -34,27 +42,39 @@ const Revenue: React.FC = () => {
   });
 
   const fetchData = React.useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       setLoadError('');
-      const data = await getRevenueOverview();
+      const data = await getRevenueOverview({ scope: testMode ? 'test' : 'production' });
+      // Out-of-order guard: a response for a previous mode must never
+      // overwrite the currently selected one.
+      if (seq !== requestSeq.current) return;
       setOverview(data);
     } catch (err: any) {
+      if (seq !== requestSeq.current) return;
       console.error('Failed to fetch revenue overview', err);
       setLoadError('Failed to load revenue overview');
       setSnack({ open: true, message: err?.response?.data?.error || 'Failed to load revenue overview', severity: 'error' });
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
-  }, []);
+  }, [testMode]);
 
   React.useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  const config = overview?.revenue_config;
-  const global = overview?.global;
-  const perFleet = overview?.per_fleet ?? [];
+  // Never display values belonging to the other mode: the API echoes the
+  // scope it computed, so a response for "production" can never render under
+  // the TEST DATA indicator while the test-only response is still in flight.
+  const scope = testMode ? 'test' : 'production';
+  const showing = overview && overview.scope === scope ? overview : null;
+  const config = showing?.revenue_config;
+  const global = showing?.global;
+  const perFleet = showing?.per_fleet ?? [];
+  const scopeLabel = testMode ? 'Test rides only' : 'Production rides only';
+  const awaitingScope = !showing;
 
   const statCard = (title: string, value: string, color: string, sub?: string) => (
     <Card sx={{ p: 2.5, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
@@ -71,12 +91,39 @@ const Revenue: React.FC = () => {
   return (
     <Box>
       <Box>
-        <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
-          Revenue Overview
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Every completed ride records a cent-exact split: final fare = driver share + fleet shares + NetRide share.
-        </Typography>
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 1.5 }}>
+          <Box>
+            <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
+              Revenue Overview
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Every completed ride records a cent-exact split: final fare = driver share + fleet shares + NetRide share.
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                Showing: <b>{scopeLabel}</b>
+              </Typography>
+              {testMode && (
+                <Chip
+                  size="small"
+                  label="TEST DATA"
+                  sx={{ height: 20, fontSize: 10, fontWeight: 800, bgcolor: '#FFF4E5', color: '#B26A00' }}
+                />
+              )}
+            </Stack>
+          </Box>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={testMode}
+                onChange={(e) => setTestMode(e.target.checked)}
+              />
+            }
+            label="Test rides"
+            sx={{ '& .MuiFormControlLabel-label': { fontSize: 13, fontWeight: 700 } }}
+          />
+        </Stack>
       </Box>
 
       {loadError && (
@@ -89,13 +136,13 @@ const Revenue: React.FC = () => {
         </Alert>
       )}
 
-      {loading && !overview && (
+      {loading && awaitingScope && !loadError && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
           <CircularProgress />
         </Box>
       )}
 
-      {overview && (
+      {showing && (
         <>
           {/* Global split */}
           <Paper sx={{ mt: 3, p: 3, borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none' }}>
@@ -137,6 +184,11 @@ const Revenue: React.FC = () => {
             {statCard('NetRide share', fmtUSD(global?.total_netride_share_cents), '#2F3A32')}
             {statCard('Rides with allocation', String(global?.rides_with_allocation ?? 0), '#5B7760')}
           </Stack>
+          {Number(global?.rides_with_allocation ?? 0) === 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              No {testMode ? 'test' : 'production'} rides with a recorded allocation{testMode ? '' : ' — enable “Test rides” to inspect sandbox data'}.
+            </Typography>
+          )}
 
           {/* Per-fleet breakdown */}
           <Paper sx={{ mt: 3, borderRadius: '16px', border: '1px solid rgba(0,0,0,0.06)', boxShadow: 'none', overflow: 'hidden' }}>
@@ -176,7 +228,7 @@ const Revenue: React.FC = () => {
         </>
       )}
 
-      <RevenueAnalytics />
+      <RevenueAnalytics testMode={testMode} />
 
       <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack({ ...snack, open: false })}>
         <Alert severity={snack.severity} variant="filled" onClose={() => setSnack({ ...snack, open: false })}>

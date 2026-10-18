@@ -85,8 +85,8 @@ const ok = (name, cond, extra = '') => {
   const sponsorRes = await client.query(
     `INSERT INTO sponsors (business_name, business_type, discount_type, discount_percent,
                            max_discount_percent, initial_budget_cents, remaining_budget_cents,
-                           reserved_budget_cents, used_budget_cents, status)
-     VALUES ($1, 'RESTAURANT', 'PERCENTAGE', 10, 90, 0, 0, 0, 0, 'ACTIVE')
+                           reserved_budget_cents, used_budget_cents, status, is_test)
+     VALUES ($1, 'RESTAURANT', 'PERCENTAGE', 10, 90, 0, 0, 0, 0, 'ACTIVE', TRUE)
      RETURNING id`,
     [`Stripe E2E Sponsor ${suffix}`],
   );

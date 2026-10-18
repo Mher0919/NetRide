@@ -13,6 +13,11 @@ router.use(adminMiddleware);
 
 router.get('/sponsors', AdminSponsorController.list);
 router.post('/sponsors', AdminSponsorController.create);
+// Business-image uploads (logo / gallery photos) for the manual-entry
+// workflow. Registered before `/sponsors/:id` so "uploads" is never parsed
+// as a sponsor id.
+router.post('/sponsors/uploads/image', AdminSponsorController.uploadBusinessImage);
+router.delete('/sponsors/uploads/image', AdminSponsorController.deleteBusinessImage);
 router.get('/sponsors/redemptions', AdminSponsorController.listRedemptions);
 router.get('/sponsors/:id', AdminSponsorController.getOne);
 router.patch('/sponsors/:id', AdminSponsorController.update);

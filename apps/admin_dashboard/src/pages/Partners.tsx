@@ -121,18 +121,23 @@ const Partners: React.FC = () => {
     severity: 'success',
   });
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const listSeq = React.useRef(0);
 
   const fetchData = React.useCallback(async () => {
+    const seq = ++listSeq.current;
     setLoading(true);
     setLoadError(null);
     try {
       const data = await listPartners({ search, status: statusFilter, includeTest: showTest });
+      // Stale responses must never overwrite the current switch/filter state.
+      if (seq !== listSeq.current) return;
       setPartners(data?.partners ?? []);
     } catch (err) {
+      if (seq !== listSeq.current) return;
       console.error('Failed to fetch partners', err);
       setLoadError('We could not load partners. Check your connection and try again.');
     } finally {
-      setLoading(false);
+      if (seq === listSeq.current) setLoading(false);
     }
   }, [search, statusFilter, showTest]);
 
@@ -383,7 +388,13 @@ const Partners: React.FC = () => {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           sx={{ width: { xs: '100%', sm: 160 } }}
-          slotProps={{ select: { native: true } }}
+          slotProps={{
+            select: { native: true },
+            // Always-floating label: the control always shows a selected
+            // option ("All" included), so the label must never drop back
+            // into the field on blur and overlap the value.
+            inputLabel: { shrink: true },
+          }}
         >
           <option value="">All</option>
           <option value="ACTIVE">Active</option>

@@ -330,16 +330,10 @@
   "328": "screens/verification_screen.dart",
   "329": "SearchResult?",
   "330": "resolveFileUrls.middleware.ts",
-  "331": "T",
-  "332": ".signupPassword",
-  "333": ".requestOTP",
   "334": ".submitProfileChange",
   "336": "_ReplaceVehicleScreenState",
   "338": "DriverStatus",
   "339": "RiderInfo?",
-  "340": ".forgotPassword",
   "342": ".requestEmailChange",
-  "343": "OTPService",
-  "344": ".requestOnDemandPayout",
-  "345": ".submitProfileChange"
+  "343": "OTPService"
 }

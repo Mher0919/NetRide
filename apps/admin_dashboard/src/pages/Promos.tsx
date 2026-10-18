@@ -380,7 +380,7 @@ const Promos: React.FC = () => {
               label="Partner"
               value={form.partner_id}
               onChange={(e) => setForm({ ...form, partner_id: e.target.value })}
-              slotProps={{ select: { native: true } }}
+              slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
             >
               <option value="">— No partner (NetRide promo) —</option>
               {partners.map((p) => (
