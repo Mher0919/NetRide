@@ -4,6 +4,7 @@ node_modules/
 backend/.env
 **/.env
 osrm-data/
+graphify-out/
 
 GoogleService-Info.plist
 **/ios/Runner/GoogleService-Info.plist
