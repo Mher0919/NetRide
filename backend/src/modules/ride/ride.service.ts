@@ -202,10 +202,13 @@ export class RideService {
       const traceId = getCurrentTraceId();
       console.log(`[RIDE] New request from rider ${riderId}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
 
-      // Booking gate: a saved payment card is required before any ride can
-      // be requested (server-authoritative — the client only redirects).
-      // Seeded test accounts keep the legacy wallet rail for the sandbox.
-      await PaymentsService.assertRiderPaymentMethod(riderId);
+      // Booking gate: a saved payment card is required for any ride that
+      // still leaves an amount owed AFTER promo/credits/special discounts
+      // (server-authoritative — the client only redirects). The check runs
+      // below, once final_payment_cents is known, so a ride fully covered
+      // by ride credits needs no card. Seeded test accounts and legacy
+      // Stripe-unconfigured environments keep the wallet rail.
+      // (See the assertRiderPaymentMethod call after the discount block.)
 
       // Idempotency: if key provided, check for existing ride
       if (idempotencyKey) {
@@ -299,6 +302,19 @@ export class RideService {
             specialRedemptionId: rewards.specialRedemptionId,
             specialTermsAccepted: rewards.specialTermsAccepted === true,
           });
+        }
+
+        // Deferred booking gate: only a ride that still OWES something after
+        // every discount requires a saved card. A ride fully covered by ride
+        // credits (or a 100% promo/special) proceeds without one. Throwing
+        // here rolls back the whole request (402 PAYMENT_METHOD_REQUIRED).
+        const dueRes = await client.query(
+          `SELECT final_payment_cents FROM rides WHERE id = $1`,
+          [tripId],
+        );
+        const dueCents = centsValue(dueRes.rows[0]?.final_payment_cents);
+        if (dueCents > 0) {
+          await PaymentsService.assertRiderPaymentMethod(riderId);
         }
 
         await client.query('COMMIT');

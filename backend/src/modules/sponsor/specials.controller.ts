@@ -20,6 +20,7 @@ function publicSponsor(sponsor: any) {
   const { id, business_name, business_type, business_description, address, city,
           state, latitude, longitude, logo_url, cover_image_url,
           google_place_id, google_business_name, google_business_category,
+          admin_rating, admin_rating_count, price_level,
           discount_type, discount_percent, max_discount_percent,
           discount_fixed_amount_cents, status } = sponsor;
   const kmAway = sponsor.km_away != null ? Number(sponsor.km_away) : null;
@@ -30,6 +31,9 @@ function publicSponsor(sponsor: any) {
     googlePlaceId: google_place_id ?? null,
     googleBusinessName: google_business_name ?? null,
     googleBusinessCategory: google_business_category ?? null,
+    adminRating: admin_rating != null ? Number(admin_rating) : null,
+    adminRatingCount: admin_rating_count != null ? Number(admin_rating_count) : null,
+    priceLevel: price_level ?? null,
     discount: {
       type: discount_type,
       percent: discount_percent,

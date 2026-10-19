@@ -165,8 +165,15 @@ function socketConnect(token, role) {
 
   // Validation settles the special immediately: the sponsor's $5 is debited
   // from the funded budget and NO money is sent back to the rider.
-  const curAfter = await http('GET', '/api/specials/redemptions/current', null, riderToken);
-  const settled = curAfter.body?.redemption;
+  // Settlement is SYNCHRONOUS with validation, so the settled row comes from
+  // the validation response (GET /current is intentionally active-only —
+  // a terminal REWARD_COMPLETED row is no longer "current"). If the backend
+  // ever settles asynchronously, fall back to the socket event.
+  const settled = validate.body?.redemption?.status === 'REWARD_COMPLETED'
+    ? validate.body.redemption
+    : validatedEvt?.d?.status === 'REWARD_COMPLETED'
+      ? validatedEvt.d
+      : null;
   ok('validation settles automatically → REWARD_COMPLETED', settled?.status === 'REWARD_COMPLETED', `status=${settled?.status}`);
   ok('no reward choice recorded', settled?.reward_choice == null, `choice=${settled?.reward_choice}`);
   ok('sponsor portion recorded ($5 funded)', settled?.sponsor_funded_cents === 500, `funded=${settled?.sponsor_funded_cents}`);

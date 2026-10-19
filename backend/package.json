@@ -30,6 +30,7 @@
     "fixtures:seed-payment": "node ../tests/fixtures/seed-payment-fixtures.cjs",
     "fixtures:reset-payment": "node ../tests/fixtures/reset-payment-fixtures.cjs",
     "fixtures:seed-test-driver2": "node ../tests/fixtures/seed-test-driver2.cjs",
+    "fixtures:seed-specials-e2e": "node ../tests/fixtures/seed-specials-e2e-sponsor.cjs",
     "bench:routing": "node ../tests/helpers/run-ts.cjs unit/backend/modules/routing/benchmark.routing.ts",
     "bench:astar": "node ../tests/helpers/run-ts.cjs unit/backend/routing/astar-benchmark.ts",
     "preprocess": "ts-node src/scripts/preprocess-map.ts",

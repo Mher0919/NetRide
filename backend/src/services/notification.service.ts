@@ -401,13 +401,13 @@ export async function notifyReferralRewardGranted(
 ): Promise<NotifyResult> {
   const body =
     side === 'referrer'
-      ? `A friend completed their first ride — you earned $${fmtMoney(amountCents)} in ride credits!`
-      : `Welcome to NetRide! You earned $${fmtMoney(amountCents)} in ride credits for your first ride.`;
+      ? `A friend completed their first ride - you earned $${fmtMoney(amountCents)} in ride credits!`
+      : `Welcome to NetRide! Your $${fmtMoney(amountCents)} signup ride credit is in your balance.`;
   return notifyUser({
     userId,
     role: 'rider',
     type: 'referral_reward',
-    title: 'Referral reward earned',
+    title: side === 'referrer' ? 'Referral reward earned' : 'Signup bonus received',
     body,
     data: { amountCents: String(amountCents), side, relationshipId },
     eventId: `referral:reward:${relationshipId}:${side}`,

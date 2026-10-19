@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:google_fonts/google_fonts.dart';
@@ -319,14 +320,16 @@ class _LoginScreenState extends State<LoginScreen> {
                               hasBorder: true,
                             ),
                             const SizedBox(height: 12),
-                            _OAuthButton(
-                              icon: Icons.apple_rounded,
-                              label: 'Continue with Apple',
-                              onPressed: () => _handleOAuth('apple'),
-                              backgroundColor: theme.colorScheme.onSurface,
-                              textColor: Colors.white,
-                            ),
-                            const SizedBox(height: 12),
+                            if (defaultTargetPlatform == TargetPlatform.iOS) ...[
+                              _OAuthButton(
+                                icon: Icons.apple_rounded,
+                                label: 'Continue with Apple',
+                                onPressed: () => _handleOAuth('apple'),
+                                backgroundColor: theme.colorScheme.onSurface,
+                                textColor: Colors.white,
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             _OAuthButton(
                               icon: Icons.email_rounded,
                               label: 'Continue with Email',

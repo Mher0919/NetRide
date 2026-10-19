@@ -337,7 +337,7 @@ export class WalletService {
       `SELECT id, amount_cents, type, reference_type, reference_id, ride_id,
               description, balance_after_cents, created_at
        FROM wallet_transactions
-       WHERE user_id = $1
+       WHERE user_id = $1 AND hidden_at IS NULL
        ORDER BY created_at DESC
        LIMIT $2 OFFSET $3`,
       [userId, Math.min(Math.max(limit, 1), 200), Math.max(offset, 0)],
@@ -347,5 +347,30 @@ export class WalletService {
       amount_cents: Number(r.amount_cents),
       balance_after_cents: Number(r.balance_after_cents),
     }));
+  }
+
+  /**
+   * Hides ONE transaction from the rider's own history view. The financial
+   * ledger is append-only truth and is never deleted — this is a visibility
+   * flag (`hidden_at`) only, scoped to the owning rider.
+   * Returns false when the row is not the rider's or is already hidden.
+   */
+  static async hideTransaction(userId: string, transactionId: string): Promise<boolean> {
+    const res = await pool.query(
+      `UPDATE wallet_transactions SET hidden_at = NOW()
+       WHERE id = $1 AND user_id = $2 AND hidden_at IS NULL`,
+      [transactionId, userId],
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  /** Hides ALL of the rider's currently visible history entries. */
+  static async hideAllTransactions(userId: string): Promise<number> {
+    const res = await pool.query(
+      `UPDATE wallet_transactions SET hidden_at = NOW()
+       WHERE user_id = $1 AND hidden_at IS NULL`,
+      [userId],
+    );
+    return res.rowCount ?? 0;
   }
 }

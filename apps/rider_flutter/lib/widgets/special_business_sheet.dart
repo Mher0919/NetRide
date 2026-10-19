@@ -22,6 +22,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/google_business.dart';
 import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
+import '../services/app_nav.dart';
 import '../services/ride_intent.dart';
 import '../utils/file_url.dart';
 import 'special_card.dart';
@@ -111,6 +112,10 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
           discountLabel: specialDiscountLabel(s),
         ),
       );
+      // Take the rider to Explore, where the intent opens the normal ride
+      // planning flow (route + ride options + confirm) with the special
+      // attached — regardless of which tab this sheet was opened from.
+      AppNav.instance.goToTab(AppNav.explore);
       Navigator.of(context).pop();
     } catch (_) {
       if (!mounted) return;
@@ -216,19 +221,19 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
     return Semantics(
       label: 'Business details. Swipe up for more information.',
       container: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onVerticalDragEnd: (details) {
-          // Swiping down on the handle dismisses the sheet (the content drag
-          // handles collapse/expand between the snap points).
-          if ((details.primaryVelocity ?? 0) > 260) {
-            Navigator.of(context).maybePop();
-          }
-        },
-        child: Stack(
-          alignment: Alignment.topCenter,
-          children: [
-            Padding(
+      child: Stack(
+        alignment: Alignment.topCenter,
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragEnd: (details) {
+              // Swiping down on the handle dismisses the sheet (the content
+              // drag handles collapse/expand between the snap points).
+              if ((details.primaryVelocity ?? 0) > 260) {
+                Navigator.of(context).maybePop();
+              }
+            },
+            child: Padding(
               padding: const EdgeInsets.only(top: 10, bottom: 12),
               child: Container(
                 width: 44,
@@ -239,17 +244,51 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                 ),
               ),
             ),
-            Positioned(
-              right: 12,
-              top: 4,
-              child: IconButton(
-                icon: const Icon(Icons.close_rounded, size: 20),
-                tooltip: 'Close',
-                onPressed: () => Navigator.of(context).maybePop(),
+          ),
+          Positioned(
+            right: 12,
+            top: 6,
+            child: Material(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(30),
+              elevation: 1,
+              shadowColor: Colors.black.withValues(alpha: 0.15),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(30),
+                onTap: () => Navigator.of(context).maybePop(),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(color: const Color(0xFFD8D2CA)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.close_rounded,
+                        size: 15,
+                        color: Color(0xFF2F3A32),
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        'Close',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF2F3A32),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -511,7 +550,9 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                     )
                   : const Icon(Icons.directions_car_filled_rounded, size: 19),
               label: Text(
-                _booking ? 'Getting your ride ready…' : 'Book a ride to this place',
+                _booking
+                    ? 'Getting your ride ready…'
+                    : 'Request a ride to this place',
                 style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
               ),
             ),

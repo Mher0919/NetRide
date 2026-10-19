@@ -109,17 +109,20 @@ function sleepCollect(socket, event, ms, predicate = () => true) {
 function raceOffer(sockA, sockB, tripId, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     let settled = false;
-    const finish = (src, data) => {
+    // The resolved `sock` is the EXACT socket that received the offer —
+    // callers must accept from that socket (labelling by argument order made
+    // them accept from the wrong, already-excluded driver).
+    const finish = (sock, data) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       sockA.off('newTripRequest', ha);
       sockB.off('newTripRequest', hb);
-      if (data) resolve({ d: data, src });
+      if (data) resolve({ d: data, sock });
       else reject(new Error('no offer arrived'));
     };
-    const ha = (data) => { if (data && data.id === tripId) finish('A', data); };
-    const hb = (data) => { if (data && data.id === tripId) finish('B', data); };
+    const ha = (data) => { if (data && data.id === tripId) finish(sockA, data); };
+    const hb = (data) => { if (data && data.id === tripId) finish(sockB, data); };
     sockA.on('newTripRequest', ha);
     sockB.on('newTripRequest', hb);
     const timer = setTimeout(() => finish(null, null), timeoutMs);
@@ -247,11 +250,11 @@ async function main() {
     const first = await offerTo(tripId);
     check('an offer reached a driver', !!first);
     if (first) {
-      console.log(`    [debug] first offer src=${first.src} offerId=${first.d.offerId}`);
+      console.log(`    [debug] first offer sock=${first.sock === driverASock ? 'A' : 'B'} offerId=${first.d.offerId}`);
     }
     if (!first) throw new Error('no offer in test A');
-    const declSock = first.src === 'A' ? driverASock : driverBSock;
-    const otherSock = first.src === 'A' ? driverBSock : driverASock;
+    const declSock = first.sock;
+    const otherSock = first.sock === driverASock ? driverBSock : driverASock;
     declSock.emit('declineTrip', { tripId, offerId: first.d.offerId });
     await sleep(1200);
 
@@ -266,12 +269,12 @@ async function main() {
     check('declining driver never re-offered (Test G)', stale.length === 0, `(seen ${stale.length})`);
 
     if (reOffer !== null) {
-      const accSock = reOffer.src === 'A' ? driverASock : driverBSock;
+      const accSock = reOffer.sock;
       accSock.emit('acceptTrip', { tripId, offerId: reOffer.d.offerId });
       await waitRiderStatus(tripId, 'ACCEPTED').catch(() => null);
     }
     const { rows: rideA2 } = await db.query(`SELECT driver_id, status FROM rides WHERE id = $1`, [tripId]);
-    const declDriverId = first.src === 'A' ? driverAId : driverBId;
+    const declDriverId = first.sock === driverASock ? driverAId : driverBId;
     check(
       'ride resolved (ACCEPTED by non-decliner, or matcher drained without assignment)',
       rideA2.length === 1 && (
@@ -283,7 +286,7 @@ async function main() {
 
     const { rows: histA } = await db.query(
       `SELECT interaction_type FROM ride_driver_rejections WHERE ride_id = $1 AND driver_id = $2`,
-      [tripId, first.src === 'A' ? driverAId : driverBId]);
+      [tripId, first.sock === driverASock ? driverAId : driverBId]);
     const { rows: rideA } = await db.query(`SELECT status FROM rides WHERE id = $1`, [tripId]);
     check('exclusion recorded as REJECTED', histA.length === 1 && histA[0].interaction_type === 'REJECTED', JSON.stringify(histA));
     check('single rides row (no duplicate ride)', rideA.length === 1);
@@ -300,10 +303,10 @@ async function main() {
     const first = await offerTo(tripId);
     check('offer reached a driver', !!first);
     if (!first) throw new Error('no offer in test B');
-    console.log(`    [debug] first offer src=${first.src} offerId=${first.d.offerId}`);
+    console.log(`    [debug] first offer sock=${first.sock === driverASock ? 'A' : 'B'} offerId=${first.d.offerId}`);
 
-    const accSock = first.src === 'A' ? driverASock : driverBSock;
-    const otherSock = first.src === 'A' ? driverBSock : driverASock;
+    const accSock = first.sock;
+    const otherSock = first.sock === driverASock ? driverBSock : driverASock;
     accSock.emit('acceptTrip', { tripId, offerId: first.d.offerId });
     const acc = await waitRiderStatus(tripId, 'ACCEPTED');
     check('driver accepted (rider ACCEPTED)', !!acc);
@@ -327,7 +330,7 @@ async function main() {
     // driver it likes on the next iteration as long as it is a non-banned
     // driver — the rigour check is at the DB level (the eventual assigned
     // driver is NOT the cancelled one).
-    const reAccSock = reOffer !== null ? (reOffer.src === 'A' ? driverASock : driverBSock) : null;
+    const reAccSock = reOffer !== null ? reOffer.sock : null;
     if (reOffer !== null) {
       reAccSock.emit('acceptTrip', { tripId, offerId: reOffer.d.offerId });
       await waitRiderStatus(tripId, 'ACCEPTED').catch(() => null);
@@ -369,8 +372,8 @@ async function main() {
     const tripId = await askRide(randomUUID());
     const first = await offerTo(tripId);
     check('offer reached a driver', !!first);
-    const accSock = first.src === 'A' ? driverASock : driverBSock;
-    const otherSock = first.src === 'A' ? driverBSock : driverASock;
+    const accSock = first.sock;
+    const otherSock = first.sock === driverASock ? driverBSock : driverASock;
     accSock.emit('acceptTrip', { tripId, offerId: first.d.offerId });
     await waitRiderStatus(tripId, 'ACCEPTED');
 
@@ -438,8 +441,8 @@ async function main() {
     const tripId = await askRide(randomUUID());
     const first = await offerTo(tripId);
     check('offer reached a driver', !!first);
-    const accSock = first.src === 'A' ? driverASock : driverBSock;
-    const otherSock = first.src === 'A' ? driverBSock : driverASock;
+    const accSock = first.sock;
+    const otherSock = first.sock === driverASock ? driverBSock : driverASock;
     accSock.emit('acceptTrip', { tripId, offerId: first.d.offerId });
     await waitRiderStatus(tripId, 'ACCEPTED');
 

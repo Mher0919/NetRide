@@ -22,6 +22,8 @@ class WalletScreen extends StatefulWidget {
 }
 
 class _WalletScreenState extends State<WalletScreen> {
+  static const int _historyPreviewCount = 10;
+
   ViewState _state = ViewState.loading;
   String? _errorMessage;
   WalletAccount? _account;
@@ -29,6 +31,7 @@ class _WalletScreenState extends State<WalletScreen> {
   List<SavedPaymentMethod> _methods = [];
   bool _stripeConfigured = false;
   bool _addingCard = false;
+  int _visibleHistory = _historyPreviewCount;
 
   @override
   void initState() {
@@ -36,11 +39,13 @@ class _WalletScreenState extends State<WalletScreen> {
     _fetch();
   }
 
-  Future<void> _fetch() async {
-    setState(() {
-      _state = ViewState.loading;
-      _errorMessage = null;
-    });
+  Future<void> _fetch({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _state = ViewState.loading;
+        _errorMessage = null;
+      });
+    }
     try {
       final results = await Future.wait([
         RewardsService.getWallet(),
@@ -51,6 +56,7 @@ class _WalletScreenState extends State<WalletScreen> {
       setState(() {
         _account = results[0] as WalletAccount;
         _transactions = results[1] as List<WalletTransaction>;
+        _visibleHistory = _historyPreviewCount;
         final profile = results[2] as PaymentProfile;
         _stripeConfigured = profile.configured;
         _state = ViewState.success;
@@ -58,6 +64,7 @@ class _WalletScreenState extends State<WalletScreen> {
       await _loadMethods();
     } catch (e) {
       if (!mounted) return;
+      if (!showLoading) return; // a pull-to-refresh failure keeps the data
       setState(() {
         _errorMessage = e.toString();
         _state = ViewState.failure;
@@ -65,15 +72,18 @@ class _WalletScreenState extends State<WalletScreen> {
     }
   }
 
+  /// Pull-to-refresh: re-reads everything without blanking the page.
+  Future<void> _refresh() => _fetch(showLoading: false);
+
   Future<void> _loadMethods() async {
     try {
       final methods = await PaymentsService.listMethods();
       if (!mounted) return;
       setState(() => _methods = methods);
     } catch (_) {
-      // Stripe not configured or offline — the payment-method card shows an
-      // empty state; nothing financial is ever faked.
-      if (mounted) setState(() => _methods = []);
+      // Stripe not configured or offline — keep whatever was already shown;
+      // nothing financial is ever faked.
+      if (mounted && _methods.isEmpty) setState(() => _methods = []);
     }
   }
 
@@ -108,13 +118,18 @@ class _WalletScreenState extends State<WalletScreen> {
       );
 
       await Stripe.instance.presentPaymentSheet();
-      // No exception = the sheet completed successfully.
-      await PaymentsService.confirmSetupIntent(session.setupIntentId);
+      // No exception = the sheet completed successfully. The card may still
+      // be persisted by the Stripe webhook even if the confirm round-trip
+      // fails, so a confirm error must never skip the reload below.
+      try {
+        await PaymentsService.confirmSetupIntent(session.setupIntentId);
+      } catch (e) {
+        debugPrint('[WALLET] confirmSetupIntent failed (will reload anyway): $e');
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Payment card saved.')),
       );
-      await _loadMethods();
     } on StripeException catch (e) {
       if (!mounted) return;
       final code = e.error.code;
@@ -133,6 +148,9 @@ class _WalletScreenState extends State<WalletScreen> {
         SnackBar(content: Text('Could not open secure card entry: $e')),
       );
     } finally {
+      // Auto-reload the page after the card flow (success OR failure — a
+      // webhook-saved card must appear immediately). No-op first load.
+      await _refresh();
       if (mounted) setState(() => _addingCard = false);
     }
   }
@@ -213,9 +231,16 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Widget _buildContent() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
-      child: Column(
+    final defaultMethod = _methods.where((m) => m.isDefault).firstOrNull;
+    return RefreshIndicator(
+      color: const Color(0xFF5B7760),
+      onRefresh: _refresh,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
@@ -253,9 +278,9 @@ class _WalletScreenState extends State<WalletScreen> {
                         style: TextStyle(color: Colors.white70, fontSize: 13),
                       ),
                       const SizedBox(height: 4),
-                      const Text(
-                        'Saved payment method',
-                        style: TextStyle(
+                      Text(
+                        defaultMethod?.label ?? 'No payment method chosen',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
@@ -278,15 +303,32 @@ class _WalletScreenState extends State<WalletScreen> {
           const SizedBox(height: 24),
           _buildStripeSection(),
           const SizedBox(height: 24),
-          Text(
-            'Payment history',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: const Color(0xFF2F3A32),
-            ),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Payment history',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2F3A32),
+                  ),
+                ),
+              ),
+              if (_transactions.isNotEmpty)
+                TextButton.icon(
+                  onPressed: _confirmClearAll,
+                  icon: const Icon(Icons.delete_sweep_rounded, size: 17),
+                  label: const Text('Clear all', style: TextStyle(fontSize: 12.5)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFC65A5A),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 34),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
           if (_transactions.isEmpty)
             Container(
               padding: const EdgeInsets.all(20),
@@ -299,11 +341,175 @@ class _WalletScreenState extends State<WalletScreen> {
                 style: TextStyle(fontSize: 14, color: Color(0xFF2F3A32)),
               ),
             )
-          else
-            ..._transactions.map((t) => _txTile(t)),
+          else ...[
+            for (final t in _transactions.take(_visibleHistory))
+              Dismissible(
+                key: ValueKey(t.id),
+                direction: DismissDirection.endToStart,
+                confirmDismiss: (_) => _confirmHide(t),
+                onDismissed: (_) => _hideTransaction(t),
+                background: Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  alignment: Alignment.centerRight,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFC65A5A),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.delete_outline_rounded,
+                          color: Colors.white, size: 20),
+                      SizedBox(width: 6),
+                      Text(
+                        'Remove',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                child: _txTile(t),
+              ),
+            if (_transactions.length > _visibleHistory)
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => setState(
+                    () => _visibleHistory = _transactions.length,
+                  ),
+                  icon: const Icon(Icons.expand_more_rounded, size: 18),
+                  label: Text(
+                    'Show more (${_transactions.length - _visibleHistory})',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF5B7760),
+                  ),
+                ),
+              )
+            else if (_transactions.length > _historyPreviewCount)
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => setState(
+                    () => _visibleHistory = _historyPreviewCount,
+                  ),
+                  icon: const Icon(Icons.expand_less_rounded, size: 18),
+                  label: const Text(
+                    'Show less',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF5B7760),
+                  ),
+                ),
+              ),
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(
+                'Swipe a row left to remove it from your view. '
+                'Your underlying payment records are always kept.',
+                style: TextStyle(fontSize: 11, color: Color(0xFF2F3A32)),
+              ),
+            ),
+          ],
+        ],
+        ),
+      ),
+    );
+  }
+
+  /// Confirmation before hiding one history row.
+  Future<bool> _confirmHide(WalletTransaction t) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Remove from history?'),
+        content: const Text(
+          'This only hides the entry from your payment history view — your '
+          'payment records are kept for accounting.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFC65A5A)),
+            child: const Text('Remove'),
+          ),
         ],
       ),
     );
+    return confirmed == true;
+  }
+
+  Future<void> _hideTransaction(WalletTransaction t) async {
+    setState(() {
+      _transactions = _transactions.where((x) => x.id != t.id).toList();
+    });
+    try {
+      await RewardsService.hideWalletTransaction(t.id);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update your history.')),
+      );
+      await _refresh();
+    }
+  }
+
+  Future<void> _confirmClearAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Clear payment history?'),
+        content: const Text(
+          'This hides every entry from your payment history view. Your '
+          'payment records are kept for accounting and support.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFC65A5A)),
+            child: const Text('Clear all'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await RewardsService.hideAllWalletTransactions();
+      if (!mounted) return;
+      setState(() {
+        _transactions = [];
+        _visibleHistory = _historyPreviewCount;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment history cleared.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not clear your history.')),
+      );
+    }
   }
 
   Widget _txTile(WalletTransaction t) {

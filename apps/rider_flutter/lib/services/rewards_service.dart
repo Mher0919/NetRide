@@ -132,6 +132,17 @@ class RewardsService {
         .toList();
   }
 
+  /// Hides ONE wallet-history entry from the rider's view. The financial
+  /// ledger is never deleted server-side — this is a visibility change only.
+  static Future<void> hideWalletTransaction(String id) async {
+    await ApiService.dio.post('wallet/transactions/$id/hide');
+  }
+
+  /// Hides the rider's entire wallet-history view.
+  static Future<void> hideAllWalletTransactions() async {
+    await ApiService.dio.post('wallet/transactions/hide-all');
+  }
+
   static Future<List<CreditTransaction>> getCreditTransactions({
     int limit = 50,
     int offset = 0,

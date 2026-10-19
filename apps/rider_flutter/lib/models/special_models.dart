@@ -45,6 +45,9 @@ class SponsorSpecial {
   final String? googlePlaceId;
   final String? googleBusinessName;
   final String? googleBusinessCategory;
+  final double? adminRating;
+  final int? adminRatingCount;
+  final String? priceLevel;
   final SponsorDiscount discount;
   final double? kmAway;
   final String status;
@@ -64,6 +67,9 @@ class SponsorSpecial {
     this.googlePlaceId,
     this.googleBusinessName,
     this.googleBusinessCategory,
+    this.adminRating,
+    this.adminRatingCount,
+    this.priceLevel,
     required this.discount,
     this.kmAway,
     required this.status,
@@ -88,6 +94,9 @@ class SponsorSpecial {
         googlePlaceId: json['googlePlaceId'] as String?,
         googleBusinessName: json['googleBusinessName'] as String?,
         googleBusinessCategory: json['googleBusinessCategory'] as String?,
+        adminRating: (json['adminRating'] as num?)?.toDouble(),
+        adminRatingCount: json['adminRatingCount'] as int?,
+        priceLevel: json['priceLevel'] as String?,
         discount: SponsorDiscount.fromJson(
             (json['discount'] as Map<String, dynamic>?) ?? const {}),
         kmAway: (json['kmAway'] as num?)?.toDouble(),

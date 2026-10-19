@@ -5,9 +5,9 @@
 // State machine (status column on referral_relationships):
 //
 //   NOT_LINKED
-//     │  scan of a signed QR payload (or referral URL)
+//     │  scan of a signed QR payload (or referral URL / manual code)
 //     ▼
-//   QR_SCANNED ──▶ LINKED                    (permanent, same transaction)
+//   QR_SCANNED ──▶ LINKED   ($5 signup bonus posted to the INVITED rider)
 //     │              │
 //     │              ▼  referred rider requests their first ride
 //     │            FIRST_RIDE_PENDING
@@ -15,7 +15,7 @@
 //     │              ▼  first ride COMPLETED with finalized payment
 //     │            FIRST_RIDE_COMPLETED
 //     │              │
-//     │              ▼  both $5 grants posted (single transaction)
+//     │              ▼  $5 referral reward posted to the REFERRER
 //     └──▶ REWARD_GRANTED                    (terminal — never re-granted)
 //
 // Hard invariants enforced by schema + code:
@@ -23,7 +23,9 @@
 //   - Self-referral and loops are rejected before any row is created and
 //     are structurally impossible afterwards (a user can only ever be the
 //     "referred" side of one relationship).
-//   - referral_rewards.relationship_id is UNIQUE ⇒ exactly one reward.
+//   - referral_rewards.relationship_id is UNIQUE ⇒ exactly one referrer reward.
+//   - The invited rider's signup bonus is idempotent per relationship
+//     (`referral:<id>:referred_signup`).
 //   - Rewards require a COMPLETED ride with a finalized payment and no
 //     prior completed ride for that rider (anti-farming).
 //   - QR payloads are HMAC-signed with expiry + ownership binding.
@@ -378,11 +380,50 @@ export class ReferralService {
         [scannerId],
       );
 
+      // Referee signup bonus: the INVITED rider gets their $5 INSTANTLY when
+      // the code is linked (one-time, idempotent). The referrer's $5 is
+      // granted only after the invited rider completes their first ride
+      // (processFirstRideCompleted). Test accounts never mint credits.
+      const rewardCents = Math.round(Number(env.REFERRAL_REWARD_CENTS));
+      let signupTx: { balance_cents: number; transaction_id: string } | null = null;
+      if (rewardCents > 0) {
+        const emailRes = await client.query(
+          `SELECT email FROM users WHERE id = $1`,
+          [scannerId],
+        );
+        if (!isTestEmail(emailRes.rows[0]?.email)) {
+          signupTx = await CreditsService.post(scannerId, rewardCents, 'REFERRAL_REWARD', {
+            idempotencyKey: `referral:${relationshipId}:referred_signup`,
+            description: 'Welcome bonus — you used a referral code',
+            referenceType: 'referral_relationship',
+            referenceId: relationshipId,
+            client,
+            emitSocket: false,
+          });
+        }
+      }
+
       await client.query('COMMIT');
 
       // ---- 7. Notify + audit (post-commit, best-effort) -----------------
       if (input.device?.deviceId) {
         await DeviceRiskService.registerDevice(scannerId, input.device).catch(() => undefined);
+      }
+      // Announce the committed signup-bonus balance change + notification.
+      if (signupTx && signupTx.transaction_id) {
+        try {
+          getIo().to(`rider:${scannerId}`).emit('creditBalanceChanged', {
+            balance_cents: signupTx.balance_cents,
+            delta_cents: rewardCents,
+            type: 'REFERRAL_REWARD',
+            timestamp: new Date().toISOString(),
+          });
+        } catch (err: any) {
+          console.warn(`[REFERRAL] ⚠️ signup bonus socket emit failed: ${err.message}`);
+        }
+        notifyReferralRewardGranted(scannerId, rewardCents, 'referred', relationshipId).catch(
+          (err: any) => console.warn(`[REFERRAL] ⚠️ signup bonus notification failed: ${err.message}`),
+        );
       }
       emitReferralEvent(scannerId, 'referralStatusChanged', {
         relationship_id: relationshipId,
@@ -541,9 +582,10 @@ export class ReferralService {
 
   /**
    * The heart of the reward pipeline. Called when a ride COMPLETED.
-   * Grants $5 to the referrer AND $5 to the referred rider — exactly once —
-   * in a single transaction guarded by referral_rewards.relationship_id
-   * uniqueness + row locking.
+   * NEW MODEL: the referred rider already received their $5 INSTANTLY at
+   * code-link time (scanReferral). This grants the REFERRER $5 — exactly
+   * once — guarded by referral_rewards.relationship_id uniqueness + row
+   * locking.
    */
   static async processFirstRideCompleted(
     ride: { id: string; rider_id: string; driver_id: string | null; fare_amount: string | number | null },
@@ -651,15 +693,13 @@ export class ReferralService {
         client,
         emitSocket: false,
       });
-      const redTx = await CreditsService.post(ride.rider_id, rewardCents, 'REFERRAL_REWARD', {
-        idempotencyKey: `referral:${rel.id}:referred`,
-        description: `You completed your first ride — welcome bonus`,
-        referenceType: 'referral_relationship',
-        referenceId: rel.id,
-        rideId: ride.id,
-        client,
-        emitSocket: false,
-      });
+      // The referred rider's $5 was already posted at code-link time — keep
+      // its transaction id on the reward row for a complete audit trail.
+      const signupTx = await client.query(
+        `SELECT id FROM credit_transactions WHERE idempotency_key = $1`,
+        [`referral:${rel.id}:referred_signup`],
+      );
+      const referredTxId: string | null = signupTx.rows[0]?.id ?? null;
 
       await client.query(
         `UPDATE referral_relationships
@@ -674,13 +714,14 @@ export class ReferralService {
         `UPDATE referral_rewards
          SET referrer_tx_id = $1, referred_tx_id = $2
          WHERE id = $3`,
-        [refTx.transaction_id, redTx.transaction_id, rewardId],
+        [refTx.transaction_id, referredTxId, rewardId],
       );
 
       await client.query('COMMIT');
       granted = true;
 
-      // Post-commit notifications (best-effort).
+      // Post-commit notifications (best-effort). Only the referrer receives
+      // money here; the referred rider's signup bonus was already announced.
       emitReferralEvent(rel.referrer_id, 'referralStatusChanged', {
         relationship_id: rel.id,
         status: 'REWARD_GRANTED',
@@ -691,17 +732,11 @@ export class ReferralService {
         status: 'REWARD_GRANTED',
         role: 'referred',
       });
-      // Announce the balance changes that actually committed.
+      // Announce the balance change that actually committed.
       try {
         getIo().to(`rider:${rel.referrer_id}`).emit('creditBalanceChanged', {
           balance_cents: refTx.balance_cents,
           delta_cents: refTx.delta_cents,
-          type: 'REFERRAL_REWARD',
-          timestamp: new Date().toISOString(),
-        });
-        getIo().to(`rider:${ride.rider_id}`).emit('creditBalanceChanged', {
-          balance_cents: redTx.balance_cents,
-          delta_cents: redTx.delta_cents,
           type: 'REFERRAL_REWARD',
           timestamp: new Date().toISOString(),
         });
@@ -711,11 +746,6 @@ export class ReferralService {
       // Persisted + deduplicated notification (records history, fans out to
       // every device, and emits the live socket feed). One per event.
       notifyReferralRewardGranted(rel.referrer_id, rewardCents, 'referrer', rel.id).catch(() => undefined);
-      notifyReferralRewardGranted(ride.rider_id, rewardCents, 'referred', rel.id).catch(() => undefined);
-      // Persisted + deduplicated notification history (the push above is the
-      // legacy one-shot; this is the record that powers the in-app feed).
-      notifyReferralRewardGranted(rel.referrer_id, rewardCents, 'referrer', rel.id).catch(() => undefined);
-      notifyReferralRewardGranted(ride.rider_id, rewardCents, 'referred', rel.id).catch(() => undefined);
       await AuditEventsService.record({
         action: 'REFERRAL_REWARD_GRANTED',
         entityType: 'REFERRAL_REWARD',

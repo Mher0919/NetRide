@@ -72,10 +72,22 @@ class _AnimatedPriceReductionState extends State<AnimatedPriceReduction>
       builder: (context, _) {
         final delta = widget.originalCents - widget.finalCents;
         final current = widget.originalCents - (delta * _countdown.value).round();
-        return Row(
+        // Struck-through original price stays ABOVE the final price (never to
+        // its side) so narrow layouts can never overflow horizontally.
+        return Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            if (widget.savedCents > 0)
+              Text(
+                _fmt(widget.originalCents),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  decoration: TextDecoration.lineThrough,
+                  decorationColor: Colors.grey.shade500,
+                  color: Colors.grey.shade500,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             Text(
               _fmt(current),
               style: widget.priceStyle ??
@@ -85,18 +97,6 @@ class _AnimatedPriceReductionState extends State<AnimatedPriceReduction>
                     letterSpacing: -0.5,
                   ),
             ),
-            if (widget.savedCents > 0) ...[
-              const SizedBox(width: 10),
-              Text(
-                _fmt(widget.originalCents),
-                style: theme.textTheme.titleMedium?.copyWith(
-                  decoration: TextDecoration.lineThrough,
-                  decorationColor: Colors.grey.shade500,
-                  color: Colors.grey.shade500,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
           ],
         );
       },

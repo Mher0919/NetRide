@@ -97,8 +97,8 @@ class _ReferralScreenState extends State<ReferralScreen> {
     await _showMessage(
       title: 'Referral linked!',
       message: referrerName != null
-          ? 'You\'re now connected to $referrerName. You both earn \$5 in ride credits after your first completed ride.'
-          : 'You\'re now linked. You both earn \$5 in ride credits after your first completed ride.',
+          ? 'You\'re now connected to $referrerName. Your \$5 welcome credit is already in your balance!'
+          : 'You\'re now linked. Your \$5 welcome credit is already in your balance!',
     );
     if (!mounted) return;
     _fetch();
@@ -191,7 +191,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Use a friend\'s code once — you both earn \$5 in ride credits after your first completed ride.',
+          'Use a friend\'s code once — you get \$5 in ride credits instantly.',
           style: TextStyle(fontSize: 12.5, color: const Color(0xFF2F3A32).withOpacity(0.6)),
         ),
         const SizedBox(height: 12),
@@ -290,7 +290,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
                           ),
                           SizedBox(height: 3),
                           Text(
-                            'Share your code with friends. When they complete their first ride, you both earn \$5.',
+                            'Your friend gets \$5 instantly when they use your code. You get \$5 as soon as they complete a ride.',
                             style: TextStyle(fontSize: 12.5, color: Color(0xFF2F3A32)),
                           ),
                         ],
@@ -408,7 +408,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Text(
-                'No referrals yet. Share your code and earn \$5 when a friend completes their first ride.',
+                'No referrals yet. Share your code — your friend gets \$5 instantly, and you get \$5 when they complete a ride.',
                 style: TextStyle(fontSize: 14, color: Color(0xFF2F3A32)),
               ),
             )
@@ -487,39 +487,36 @@ class _ReferralScreenState extends State<ReferralScreen> {
     final date = h.scannedAt;
     final dateStr = date != null ? DateFormat('MMM d, y').format(date) : '';
     switch (h.status) {
-      case 'QR_SCANNED':
-        return 'Invited $dateStr';
-      case 'LINKED':
-        return 'Joined $dateStr — waiting on first ride';
-      case 'FIRST_RIDE_PENDING':
-        return 'First ride in progress';
       case 'FIRST_RIDE_COMPLETED':
-        return 'First ride completed — reward coming';
       case 'REWARD_GRANTED':
-        return '\$5 earned ${date != null && h.rewardGrantedAt != null ? DateFormat('MMM d, y').format(h.rewardGrantedAt!) : ''}'.trim();
+        return 'Completed — \$5 credited to you'
+            '${h.rewardGrantedAt != null ? ' ${DateFormat('MMM d, y').format(h.rewardGrantedAt!)}' : ''}';
       default:
-        return dateStr;
+        // LINKED / QR_SCANNED / FIRST_RIDE_PENDING — the friend used your
+        // code; you earn once they complete a ride.
+        return 'Joined $dateStr — complete a ride to earn your \$5';
     }
   }
 
   Widget _statusChip(String status) {
-    final (label, color) = switch (status) {
-      'REWARD_GRANTED' => ('\$5 earned', const Color(0xFF6E8B74)),
-      'FIRST_RIDE_COMPLETED' => ('Completed', const Color(0xFF6E8B74)),
-      'FIRST_RIDE_PENDING' => ('First ride pending', const Color(0xFFC79A4A)),
-      'LINKED' => ('Joined', const Color(0xFF5B7760)),
-      'QR_SCANNED' => ('Invited', const Color(0xFF5B7760)),
-      _ => ('Invited', const Color(0xFF5B7760)),
-    };
+    final complete = status == 'FIRST_RIDE_COMPLETED' ||
+        status == 'REWARD_GRANTED';
+    final label = complete ? 'Complete' : 'Pending';
+    final color = complete ? const Color(0xFF2E7D32) : const Color(0xFFC79A4A);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withOpacity(0.14),
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.45)),
       ),
       child: Text(
         label,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
       ),
     );
   }

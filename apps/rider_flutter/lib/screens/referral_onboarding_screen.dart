@@ -63,8 +63,8 @@ Future<void> _enterCode() async {
     await _showMessage(
       title: 'Referral linked!',
       message: referrerName != null
-          ? 'You\'re now connected to $referrerName. You both earn \$5 in ride credits after your first completed ride.'
-          : 'You\'re now linked. You both earn \$5 in ride credits after your first completed ride.',
+          ? 'You\'re now connected to $referrerName — your \$5 welcome credit is already in your balance!'
+          : 'You\'re now linked — your \$5 welcome credit is already in your balance!',
     );
     if (!mounted) return;
     Navigator.pushReplacementNamed(context, '/');
@@ -237,7 +237,7 @@ Future<void> _showMessage({
                     ),
                     SizedBox(height: 8),
                     Text(
-                      'Enter a friend\'s referral code and you both earn \$5 in ride credits after your first completed ride.',
+                      'Enter a friend\'s referral code and \$5 lands in your balance instantly. Your friend gets \$5 too, once you complete a ride.',
                       style: TextStyle(fontSize: 14, color: Color(0xFFD8D2CA)),
                     ),
                   ],

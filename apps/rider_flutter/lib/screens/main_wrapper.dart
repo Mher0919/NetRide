@@ -3,7 +3,9 @@ import '../services/secure_token_store.dart';
 import 'package:provider/provider.dart';
 import '../providers/ride_provider.dart';
 import '../providers/specials_provider.dart';
+import '../services/app_nav.dart';
 import 'map_screen.dart';
+import 'specials_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
 
@@ -18,10 +20,11 @@ class _MainWrapperState extends State<MainWrapper> {
   int _selectedIndex = 0;
   bool _isChecking = true;
 
-  // SPECI-489: SPECIALS is no longer a top-level destination — it lives
-  // INSIDE Explore. Navigation stays exactly: Explore / Activity / Account.
+  // Navigation stays: Explore / Specials / Activity / Account. Specials is
+  // the dedicated discovery page; Explore keeps its inline SPECIALS section.
   final List<Widget> _screens = [
     const MapScreen(),
+    const SpecialsScreen(),
     const ActivityScreen(),
     const ProfileScreen(),
   ];
@@ -29,7 +32,23 @@ class _MainWrapperState extends State<MainWrapper> {
   @override
   void initState() {
     super.initState();
+    AppNav.instance.request.addListener(_onNavRequest);
     _checkAuth();
+  }
+
+  @override
+  void dispose() {
+    AppNav.instance.request.removeListener(_onNavRequest);
+    super.dispose();
+  }
+
+  /// Surfaces elsewhere in the app (Explore SPECIALS header, the Special
+  /// business sheet) ask to switch tabs through AppNav.
+  void _onNavRequest() {
+    final tab = AppNav.instance.request.value;
+    if (tab == null || !mounted) return;
+    AppNav.instance.consume();
+    _onItemTapped(tab);
   }
 
   Future<void> _checkAuth() async {
@@ -47,14 +66,16 @@ class _MainWrapperState extends State<MainWrapper> {
   }
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-    // Returning to Explore re-queries the backend for currently active
-    // specials (SPECIALS section + sponsor markers). During a session the
-    // admin may deactivate/reactivate sponsors — Explore must reflect the
-    // backend's decision each time the rider looks at it.
-    if (index == 0) {
+    if (mounted) {
+      setState(() {
+        _selectedIndex = index;
+      });
+    }
+    // Returning to Explore or opening Specials re-queries the backend for
+    // currently active specials. During a session the admin may deactivate/
+    // reactivate sponsors — both surfaces must reflect the backend's
+    // decision each time the rider looks at them.
+    if (index == 0 || index == 1) {
       context.read<SpecialsProvider>().refresh();
     }
   }
@@ -106,6 +127,11 @@ class _MainWrapperState extends State<MainWrapper> {
                   icon: Icon(Icons.explore_outlined, size: 24),
                   activeIcon: Icon(Icons.explore, size: 24),
                   label: 'Explore',
+                ),
+                const BottomNavigationBarItem(
+                  icon: Icon(Icons.local_offer_outlined, size: 24),
+                  activeIcon: Icon(Icons.local_offer, size: 24),
+                  label: 'Specials',
                 ),
                 const BottomNavigationBarItem(
                   icon: Icon(Icons.receipt_long_outlined, size: 24),

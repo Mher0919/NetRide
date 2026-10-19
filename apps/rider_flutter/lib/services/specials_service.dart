@@ -25,17 +25,20 @@ class SpecialsService {
   /// a server-computed `kmAway`).
   static Future<List<SponsorSpecial>> list({
     int limit = 50,
+    int offset = 0,
     double? lat,
     double? lng,
   }) async {
     final res = await ApiService.dio.get('specials', queryParameters: {
       'limit': limit,
+      'offset': offset,
       if (lat != null) 'lat': lat,
       if (lng != null) 'lng': lng,
     });
     final raw = (res.data as Map<String, dynamic>)['sponsors'] as List? ?? [];
     return raw
         .map((e) => SponsorSpecial.fromJson(e as Map<String, dynamic>))
+        .where((s) => s.businessType?.toUpperCase() != 'TEST')
         .toList();
   }
 

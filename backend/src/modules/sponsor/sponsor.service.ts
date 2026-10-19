@@ -672,6 +672,7 @@ export class SponsorService {
       `latitude IS NOT NULL`,
       `longitude IS NOT NULL`,
       `remaining_budget_cents - reserved_budget_cents > 0`,
+      `NOT ${SponsorService.testSponsorSql('sponsors')}`,
     ];
     if (opts.businessType) {
       params.push(opts.businessType.toUpperCase());
@@ -706,7 +707,8 @@ export class SponsorService {
        WHERE status = 'ACTIVE' AND specials_enabled = TRUE
          AND map_listing_enabled = TRUE AND latitude IS NOT NULL
          AND longitude IS NOT NULL
-         AND remaining_budget_cents - reserved_budget_cents > 0`,
+         AND remaining_budget_cents - reserved_budget_cents > 0
+         AND NOT ${SponsorService.testSponsorSql('sponsors')}`,
     );
     return res.rows[0]?.n ?? 0;
   }
@@ -717,8 +719,10 @@ export class SponsorService {
    * Canonical test-sponsor predicate. A sponsor is test data when ANY of:
    *   1. the persistent fixture marker `is_test` is set (non-attacker
    *      reachable — the admin API never writes it; only fixtures do);
-   *   2. its own contact email matches the platform test-email rule;
-   *   3. its linked portal account belongs to a test user (a test sponsor
+   *   2. its `business_type` is the reserved `TEST` value (the admin API
+   *      validates and rejects it, so only fixtures can carry it);
+   *   3. its own contact email matches the platform test-email rule;
+   *   4. its linked portal account belongs to a test user (a test sponsor
    *      created through the API may carry no contact email at all).
    *
    * Kept as one function so list, detail and counts can never drift.
@@ -727,6 +731,7 @@ export class SponsorService {
     const emailTest = TEST_EMAIL_SQL(`COALESCE(${alias}.email, '')`);
     return `(
       ${alias}.is_test
+      OR ${alias}.business_type = 'TEST'
       OR ${emailTest}
       OR EXISTS (
         SELECT 1 FROM sponsor_portal_accounts spa

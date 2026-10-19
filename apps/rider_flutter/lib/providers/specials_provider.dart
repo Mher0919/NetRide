@@ -115,6 +115,11 @@ class SpecialsProvider extends ChangeNotifier {
   double? _geoLat;
   double? _geoLng;
 
+  /// Last known geo origin (used by the Specials page pagination so its
+  /// distance ordering matches Explore).
+  double? get geoLat => _geoLat;
+  double? get geoLng => _geoLng;
+
   /// Full refresh: count + discovery + intro state + resumable redemption.
   /// When [lat]/[lng] are provided they become the persistent geo origin.
   ///

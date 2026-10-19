@@ -762,11 +762,24 @@ async function runMigrations() {
       "SELECT 1 FROM information_schema.columns WHERE table_name = 'verification_codes' AND column_name = 'purpose'"
     );
     if (hasOtpPurpose.rowCount === 0) {
-      console.log('⚡ Applying OTP purpose binding schema (060)...');
+      console.log('🩹 Applying OTP purpose binding schema (060)...');
       const schemaPath = path.join(__dirname, '../migrations/060_otp_purpose.sql');
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ OTP purpose binding schema (060) applied');
+    }
+
+    // Hideable wallet history entries (061). Guarded on the
+    // wallet_transactions.hidden_at column this migration introduces.
+    const hasWalletTxHidden = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'wallet_transactions' AND column_name = 'hidden_at'"
+    );
+    if (hasWalletTxHidden.rowCount === 0) {
+      console.log('🩹 Applying wallet transaction visibility schema (061)...');
+      const schemaPath = path.join(__dirname, '../migrations/061_wallet_transactions_hidden.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('✅ Wallet transaction visibility schema (061) applied');
     }
 
     console.log('🚀 All migrations completed');

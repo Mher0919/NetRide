@@ -113,7 +113,16 @@ export class CreditsService {
       }
     }
 
-    await useClient.query('BEGIN');
+    // When the caller supplies its own client it OWNS the transaction: use a
+    // SAVEPOINT so a failure here never commits/aborts the caller's wider
+    // unit of work early (ride request + promo + credits must commit
+    // together — or not at all).
+    const externalTx = opts.client != null;
+    if (externalTx) {
+      await useClient.query('SAVEPOINT credits_post');
+    } else {
+      await useClient.query('BEGIN');
+    }
     let began = true;
     try {
       await useClient.query(
@@ -121,7 +130,6 @@ export class CreditsService {
          ON CONFLICT (user_id) DO NOTHING`,
         [userId],
       );
-
       // Claim the ledger row FIRST (idempotency gate) — mirrors
       // WalletService.post. Concurrent retries with the same key serialize
       // on the unique index; the loser rolls back without mutating balance.
@@ -145,7 +153,12 @@ export class CreditsService {
       );
 
       if (opts.idempotencyKey && (tx.rowCount ?? 0) === 0) {
-        await useClient.query('ROLLBACK');
+        if (externalTx) {
+          await useClient.query('ROLLBACK TO SAVEPOINT credits_post');
+          await useClient.query('RELEASE SAVEPOINT credits_post');
+        } else {
+          await useClient.query('ROLLBACK');
+        }
         began = false;
         const existing = await pool.query(
           `SELECT id, balance_after_cents FROM credit_transactions WHERE idempotency_key = $1 LIMIT 1`,
@@ -196,7 +209,11 @@ export class CreditsService {
         );
       }
 
-      await useClient.query('COMMIT');
+      if (externalTx) {
+        await useClient.query('RELEASE SAVEPOINT credits_post');
+      } else {
+        await useClient.query('COMMIT');
+      }
       began = false;
 
       if (opts.emitSocket !== false) {
@@ -211,7 +228,14 @@ export class CreditsService {
       };
     } catch (err) {
       if (began) {
-        try { await useClient.query('ROLLBACK'); } catch { /* already rolled back */ }
+        try {
+          if (externalTx) {
+            await useClient.query('ROLLBACK TO SAVEPOINT credits_post');
+            await useClient.query('RELEASE SAVEPOINT credits_post');
+          } else {
+            await useClient.query('ROLLBACK');
+          }
+        } catch { /* already rolled back */ }
       }
       throw err;
     }

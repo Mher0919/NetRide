@@ -19,7 +19,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
+import '../services/app_nav.dart';
 import 'special_business_sheet.dart';
 import 'special_card.dart';
 
@@ -80,33 +82,52 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.storefront_rounded,
-                    size: 18,
-                    color: Color(0xFF5B7760),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'SPECIALS',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.2,
-                      color: const Color(0xFF2F3A32),
+              // The whole header is one button: tapping it (or its copy)
+              // opens the dedicated Specials page.
+              Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => AppNav.instance.goToTab(AppNav.specials),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.storefront_rounded,
+                          size: 18,
+                          color: Color(0xFF5B7760),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'SPECIALS',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                            color: const Color(0xFF2F3A32),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${active.length} active deal${active.length == 1 ? '' : 's'}',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF5B7760),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 15,
+                          color: Color(0xFF5B7760),
+                        ),
+                      ],
                     ),
                   ),
-                  const Spacer(),
-                  Text(
-                    '${active.length} active deal${active.length == 1 ? '' : 's'}',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF5B7760),
-                    ),
-                  ),
-                ],
+                ),
               ),
               const SizedBox(height: 3),
               Text(
@@ -180,13 +201,10 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
                     separatorBuilder: (_, _) => const SizedBox(width: 12),
                     itemBuilder: (context, i) {
                       final s = shown[i];
-                      final selectedNow = context.select<SpecialsProvider, bool>(
-                        (p) => p.selectedSpecialId == s.id,
-                      );
-                      return SpecialCard(
+                      return _SelectableSpecialCard(
                         sponsor: s,
-                        selected: selectedNow,
-                        onTap: () => SpecialBusinessSheet.show(context, sponsor: s),
+                        onTap: () =>
+                            SpecialBusinessSheet.show(context, sponsor: s),
                       );
                     },
                   ),
@@ -196,6 +214,26 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
         );
       },
     );
+  }
+}
+
+/// One special card that tracks its own selection from the provider.
+///
+/// `context.select` must not be called inside a ListView itemBuilder (provider
+/// asserts against rebuilding a whole sliver for one item), so the selection
+/// subscription lives in this small widget's own `build`.
+class _SelectableSpecialCard extends StatelessWidget {
+  const _SelectableSpecialCard({required this.sponsor, required this.onTap});
+
+  final SponsorSpecial sponsor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = context.select<SpecialsProvider, bool>(
+      (p) => p.selectedSpecialId == sponsor.id,
+    );
+    return SpecialCard(sponsor: sponsor, selected: selected, onTap: onTap);
   }
 }
 

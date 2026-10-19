@@ -25,6 +25,26 @@ export class WalletController {
     }
   }
 
+  /** POST /api/wallet/transactions/:id/hide — hide one history entry. */
+  static async hideTransaction(req: any, res: Response) {
+    try {
+      const hidden = await WalletService.hideTransaction(req.user.id, req.params.id);
+      res.json({ hidden });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Unable to update payment history' });
+    }
+  }
+
+  /** POST /api/wallet/transactions/hide-all — hide the whole history view. */
+  static async hideAllTransactions(req: any, res: Response) {
+    try {
+      const hidden = await WalletService.hideAllTransactions(req.user.id);
+      res.json({ hidden });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Unable to clear payment history' });
+    }
+  }
+
   /** POST /api/wallet/grant — admin grant (or negative adjustment). */
   static async adminGrant(req: any, res: Response) {
     try {

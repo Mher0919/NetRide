@@ -88,6 +88,11 @@ class _MapScreenState extends State<MapScreen>
   bool _promoChecking = false;
   bool _promoApplied = false;
 
+  // Chosen payment method (saved default card). Null = nothing chosen yet;
+  // a ride that still owes money cannot be requested without one.
+  String? _paymentMethodLabel;
+  bool _stripeConfigured = false;
+
   // Part 3 — credits amount selector. The rider can apply a validated
   // manual amount instead of the whole balance; the backend caps the debit
   // at min(balance, remaining fare, requested) so the server stays truth.
@@ -252,6 +257,7 @@ class _MapScreenState extends State<MapScreen>
     _startGeohashUpdates();
     _loadRecentSearches();
     _loadRewardsOptions();
+    _loadPaymentMethod();
     // Explore asks the backend for the currently active specials the moment
     // it opens — the section and the sponsor markers render from that
     // response, so a zero-active specials backend shows ZERO SPECIALS UI.
@@ -290,9 +296,10 @@ class _MapScreenState extends State<MapScreen>
     _updateRoute();
   }
 
-  /// A special's "Book a ride to this place" handed us a destination: pre-fill
-  /// it, attach the active redemption, and start the NORMAL ride planning
-  /// flow (route + ride options + confirm → searching).
+  /// A special's "Request a ride to this place" handed us a destination:
+  /// pre-fill it, attach the active redemption, and drop the rider straight
+  /// into the NORMAL ride-request flow (route + ride options + confirm →
+  /// searching) with the panel already expanded.
   void _onRideIntent() {
     final intent = RideIntent.instance.notifier.value;
     if (intent == null || !mounted) return;
@@ -318,6 +325,9 @@ class _MapScreenState extends State<MapScreen>
       _shouldFollowUser = false;
     });
     _updateRoute();
+    // Land on the request page directly: expand the ride-options sheet
+    // (it opens via _updateRoute once the route resolves).
+    _sheetController.value = 1;
     // Demand signal for the heatmap (same as a manual destination pick).
     context.read<RideProvider>().reportActivity(
       'REQUEST_FLOW',
@@ -857,25 +867,74 @@ class _MapScreenState extends State<MapScreen>
 
   int get _fareCents => (_estimateFare * 100).round();
 
-  int get _promoDiscountCents =>
-      _promoApplied ? (_promoPreview?.discountCents ?? 0) : 0;
+  /// Promo codes are disabled while a special is attached — the sponsor
+  /// deal is the only discount on the ride (matches the server, which
+  /// receives no promo code for special rides).
+  int get _promoDiscountCents => (_specialAttached || !_promoApplied)
+      ? 0
+      : (_promoPreview?.discountCents ?? 0);
+
+  /// Estimated sponsor discount for THIS fare, mirroring the backend's
+  /// `computeSponsorDiscount` math (display-only — the server recomputes
+  /// and remains authoritative at request time).
+  int get _specialDiscountCents {
+    if (!_specialAttached) return 0;
+    final fare = _fareCents;
+    if (fare <= 0) return 0;
+    final specials = context.read<SpecialsProvider>();
+    final redemption = specials.current;
+    if (redemption == null) return 0;
+    SponsorSpecial? sponsor;
+    for (final s in specials.sponsors) {
+      if (s.id == redemption.sponsorId) {
+        sponsor = s;
+        break;
+      }
+    }
+    final d = sponsor?.discount;
+    if (d == null) return 0;
+    if (d.type == 'PERCENTAGE' || d.type == 'PERCENT') {
+      final pct = (d.percent ?? 0).clamp(0, 100);
+      var discount = (fare * pct / 100).round();
+      final capPct = (d.maxPercent ?? 0).clamp(0, 100);
+      if (capPct > 0) {
+        discount = math.min(discount, (fare * capPct / 100).round());
+      }
+      final capCents = d.fixedAmountCents;
+      if (capCents != null && capCents > 0) {
+        discount = math.min(discount, capCents);
+      }
+      return math.min(discount, fare);
+    }
+    final fixed = math.max(0, d.fixedAmountCents ?? 0);
+    return math.min(fixed, fare);
+  }
 
   /// Credits that will actually be applied: min(balance, requested,
-  /// remaining fare after promo). Mirrors the backend cap.
+  /// remaining fare after promo + special). Mirrors the backend cap.
   int get _creditsToUseCents {
     if (!_applyCredits) return 0;
     final balance = math.max(0, _creditBalanceCents ?? 0);
-    final afterPromo = math.max(0, _fareCents - _promoDiscountCents);
+    final afterDiscounts = math.max(
+      0,
+      _fareCents - _promoDiscountCents - _specialDiscountCents,
+    );
     final requested = math.max(0, _creditUseCents ?? 0);
     if (requested == 0) return 0;
-    return math.min(balance, math.min(afterPromo, requested));
+    return math.min(balance, math.min(afterDiscounts, requested));
   }
 
-  /// What the rider owes: fare − promo − credits.
-  int get _finalCents =>
-      math.max(0, _fareCents - _promoDiscountCents - _creditsToUseCents);
+  /// What the rider owes: fare − promo − special − credits.
+  int get _finalCents => math.max(
+    0,
+    _fareCents -
+        _promoDiscountCents -
+        _specialDiscountCents -
+        _creditsToUseCents,
+  );
 
-  int get _totalSavedCents => _promoDiscountCents + _creditsToUseCents;
+  int get _totalSavedCents =>
+      _promoDiscountCents + _specialDiscountCents + _creditsToUseCents;
 
   /// A special (sponsor deal) is attached to this ride: the redemption was
   /// created from the business bottom sheet and this map attaches it to the
@@ -924,27 +983,30 @@ class _MapScreenState extends State<MapScreen>
       );
       return;
     }
-    // Booking gate preflight: a saved card is required to request rides (the
-    // server enforces this too — this only improves the UX). Direct the
-    // rider to the Payment Method page instead of failing silently.
-    if (_specialRedemptionId == null) {
-      try {
-        final profile = await PaymentsService.getProfile();
-        if (profile.configured && !profile.hasCard) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Add a payment card before requesting a ride. Your rides will '
-                'be charged to the card on file.',
-              ),
+    // Payment gate: any amount still owed after promo / special / ride
+    // credits needs a chosen payment method. A fully-covered ride (final
+    // fare $0.00) skips the requirement — matching the server, which
+    // defers the booking gate until the amount due is known.
+    if (_finalCents > 0 && _stripeConfigured && _paymentMethodLabel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose a payment method to request this ride.'),
+        ),
+      );
+      await _openWalletScreen();
+      if (!mounted) return;
+      if (_finalCents > 0 &&
+          _stripeConfigured &&
+          _paymentMethodLabel == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'A payment method is required to cover the amount due. '
+              'Add a card or fully cover the fare with ride credits.',
             ),
-          );
-          _openWalletScreen();
-          return;
-        }
-      } catch (_) {
-        // Stripe unconfigured or offline — the server remains authoritative.
+          ),
+        );
+        return;
       }
     }
     setState(() => _requesting = true);
@@ -1072,13 +1134,16 @@ class _MapScreenState extends State<MapScreen>
     });
   }
 
-  void _openWalletScreen() {
-    Navigator.of(context).push(
+  Future<void> _openWalletScreen() async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (_) => const WalletScreen(),
       ),
     );
+    // The rider may have added/changed the card: re-read the chosen method
+    // so the checkout row and the request gate use the fresh state.
+    if (mounted) await _loadPaymentMethod();
   }
 
   // ---------------------------------------------------------------------
@@ -1451,7 +1516,7 @@ class _MapScreenState extends State<MapScreen>
                                                     initialCenter:
                                                         _smoothedPosition!,
                                                     initialZoom: 15.0,
-                                                    minZoom: 12,
+                                                    minZoom: 10,
                                                     maxZoom: 18,
                                                     interactionOptions:
                                                         InteractionOptions(
@@ -1974,18 +2039,23 @@ class _MapScreenState extends State<MapScreen>
     final cancelling = Provider.of<RideProvider>(context).cancelling;
     final requestFailure = Provider.of<RideProvider>(context).requestFailure;
 
-    return Column(
-      children: [
-        const SizedBox(height: 10),
-        Container(
-          width: 38,
-          height: 5,
-          decoration: BoxDecoration(
-            color: Colors.grey.shade300,
-            borderRadius: BorderRadius.circular(999),
+    // ONE scroll container for the whole body: the sheet is drag-resized
+    // between the pill and full height, and fixed header/footer rows would
+    // otherwise overflow by a few pixels mid-drag. Everything scrolls.
+    return SingleChildScrollView(
+      physics: const ClampingScrollPhysics(),
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            width: 38,
+            height: 5,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(999),
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
+          const SizedBox(height: 6),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 6, 12, 0),
           child: Row(
@@ -2037,10 +2107,9 @@ class _MapScreenState extends State<MapScreen>
             child: CircularProgressIndicator(color: Color(0xFF5B7760)),
           )
         else if (searching)
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: requestFailure != null
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: requestFailure != null
                   ? Column(
                       children: [
                         const Icon(
@@ -2199,13 +2268,11 @@ class _MapScreenState extends State<MapScreen>
                           ),
                       ],
                     ),
-            ),
           )
         else
-          Expanded(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: Column(
+          Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Column(
                 children: [
                   _buildRideCard(theme),
                   const SizedBox(height: 10),
@@ -2213,7 +2280,6 @@ class _MapScreenState extends State<MapScreen>
                   SizedBox(height: 14 + bottomInset),
                 ],
               ),
-            ),
           ),
         if (!_loadingEstimates && !searching) ...[
           // SPECIALS: when the rider has a CREATED redemption, the checkout
@@ -2294,7 +2360,8 @@ class _MapScreenState extends State<MapScreen>
             ),
           ),
         ],
-      ],
+        ],
+      ),
     );
   }
 
@@ -2315,6 +2382,31 @@ class _MapScreenState extends State<MapScreen>
       setState(() {
         _creditBalanceLoaded = true;
       });
+    }
+  }
+
+  /// Loads the rider's chosen (default) payment method so the checkout can
+  /// display it and gate requests that still owe money. Never throws.
+  Future<void> _loadPaymentMethod() async {
+    try {
+      final profile = await PaymentsService.getProfile();
+      if (!mounted) return;
+      setState(() => _stripeConfigured = profile.configured);
+    } catch (_) {}
+    try {
+      final methods = await PaymentsService.listMethods();
+      if (!mounted) return;
+      SavedPaymentMethod? defaultMethod;
+      for (final m in methods) {
+        if (m.isDefault) {
+          defaultMethod = m;
+          break;
+        }
+      }
+      setState(() => _paymentMethodLabel = defaultMethod?.label);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _paymentMethodLabel = null);
     }
   }
 
@@ -2589,25 +2681,47 @@ class _MapScreenState extends State<MapScreen>
             ),
           ),
           const Divider(height: 1, indent: 14, endIndent: 14),
-          // --- Payment Method (no dollar balance) ---
+          // --- Payment Method (chosen card shown; none → explicit copy) ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [
-                const Icon(
-                  Icons.credit_card_rounded,
+                Icon(
+                  _paymentMethodLabel != null
+                      ? Icons.credit_card_rounded
+                      : Icons.credit_card_off_rounded,
                   size: 18,
-                  color: Color(0xFF5B7760),
+                  color: _paymentMethodLabel != null
+                      ? const Color(0xFF5B7760)
+                      : const Color(0xFFC65A5A),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    'Payment Method',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF2F3A32),
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Payment Method',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF2F3A32),
+                        ),
+                      ),
+                      Text(
+                        _paymentMethodLabel ?? 'No payment method chosen',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _paymentMethodLabel != null
+                              ? const Color(0xFF5B7760).withOpacity(0.85)
+                              : const Color(0xFFC65A5A),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 TextButton(
@@ -2684,7 +2798,26 @@ class _MapScreenState extends State<MapScreen>
                                 ? (v) {
                                     setState(() {
                                       _applyCredits = v;
-                                      if (!v) {
+                                      if (v) {
+                                        // Default to the FULL applicable
+                                        // amount: choosing credits means
+                                        // paying with credits. Fully
+                                        // covering the fare can make the
+                                        // request card-free.
+                                        final cap = math.min(
+                                          balanceCents,
+                                          math.max(
+                                            0,
+                                            _fareCents -
+                                                _promoDiscountCents -
+                                                _specialDiscountCents,
+                                          ),
+                                        );
+                                        _creditUseCents = cap;
+                                        _creditAmountError = null;
+                                        _customCreditController.text =
+                                            (cap / 100).toStringAsFixed(2);
+                                      } else {
                                         _creditUseCents = null;
                                         _creditAmountError = null;
                                         _customCreditController.clear();
@@ -2857,6 +2990,12 @@ class _MapScreenState extends State<MapScreen>
                               amount: -_promoDiscountCents,
                               positive: false,
                             ),
+                          if (_specialDiscountCents > 0)
+                            _creditBreakdownRow(
+                              label: 'Special discount',
+                              amount: -_specialDiscountCents,
+                              positive: false,
+                            ),
                           _creditBreakdownRow(
                             label: 'Ride Credit',
                             amount: -_creditsToUseCents,
@@ -2925,7 +3064,10 @@ class _MapScreenState extends State<MapScreen>
 
   void _onCreditAmountChanged(String raw) {
     final balance = _creditBalanceCents ?? 0;
-    final afterPromo = math.max(0, _fareCents - _promoDiscountCents);
+    final afterPromo = math.max(
+      0,
+      _fareCents - _promoDiscountCents - _specialDiscountCents,
+    );
 
     if (raw.isEmpty || raw == '.') {
       setState(() {
@@ -3094,20 +3236,30 @@ class _MapScreenState extends State<MapScreen>
           ],
           // Price breakdown: discounts then final total. Only shown when
           // something is applied so the card stays quiet for a plain ride.
+          // The TOP price (AnimatedPriceReduction) shows ONE unified discount
+          // (fare → you pay); this bottom list itemizes each component.
           if (savedCents > 0) ...[
             const SizedBox(height: 10),
-            _priceBreakdownRow(
-              label: _promoDiscountCents > 0
-                  ? 'Promo ${_promoCodeController.text.trim().toUpperCase()}'
-                  : 'Promo',
-              amount: -_promoDiscountCents,
-              color: const Color(0xFF5B7760),
-            ),
-            _priceBreakdownRow(
-              label: 'Ride credits',
-              amount: -_creditsToUseCents,
-              color: const Color(0xFF5B7760),
-            ),
+            if (_promoDiscountCents > 0)
+              _priceBreakdownRow(
+                label: _promoCodeController.text.trim().isNotEmpty
+                    ? 'Promo ${_promoCodeController.text.trim().toUpperCase()}'
+                    : 'Promo',
+                amount: -_promoDiscountCents,
+                color: const Color(0xFF5B7760),
+              ),
+            if (_specialDiscountCents > 0)
+              _priceBreakdownRow(
+                label: 'Special discount',
+                amount: -_specialDiscountCents,
+                color: const Color(0xFF5B7760),
+              ),
+            if (_creditsToUseCents > 0)
+              _priceBreakdownRow(
+                label: 'Ride credits',
+                amount: -_creditsToUseCents,
+                color: const Color(0xFF5B7760),
+              ),
             const SizedBox(height: 8),
             const Divider(height: 1),
             const SizedBox(height: 8),
