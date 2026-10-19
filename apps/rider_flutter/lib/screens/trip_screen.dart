@@ -153,6 +153,72 @@ class _TripScreenState extends State<TripScreen> {
     _returnToExplore();
   }
 
+  /// Fallback for a stale /trip entry (deep link or notification tapped
+  /// after the trip already settled) so the screen never hangs on the
+  /// "Securing your driver..." loader forever.
+  Widget _buildEndedTripScreen(ThemeData theme) {
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5B7760).withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check_circle_outline_rounded,
+                  size: 42,
+                  color: Color(0xFF5B7760),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'This trip has ended',
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'There is no active ride on this device right now.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  color: const Color(0xFF2F3A32).withOpacity(0.6),
+                ),
+              ),
+              const SizedBox(height: 22),
+              FilledButton(
+                onPressed: _returnToExplore,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2F3A32),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 28,
+                    vertical: 14,
+                  ),
+                ),
+                child: const Text(
+                  'Back to Explore',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Exactly one way back to Explore (the tab wrapper holding the map's
   /// normal search UI). Pops when the wrapper is still underneath
   /// (notification/deep-link entry); otherwise the trip screen replaced
@@ -287,6 +353,13 @@ class _TripScreenState extends State<TripScreen> {
     }
 
     if (driver == null) {
+      // Stale deep link / notification tap into an already-finished trip:
+      // without this the screen hung on "Securing your driver..." forever
+      // (the provider is IDLE and no driver will ever arrive).
+      if (rideProvider.status == models.TripStatus.IDLE ||
+          rideProvider.currentTrip == null) {
+        return _buildEndedTripScreen(theme);
+      }
       return Scaffold(
         body: StateContainer(
           state: ViewState.loading,
@@ -419,6 +492,46 @@ class _TripScreenState extends State<TripScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Driver-connectivity watchdog (heartbeat lost mid-ride):
+                    // an explicit "we're monitoring" state instead of a
+                    // silently frozen marker. Clears automatically when the
+                    // driver's app reports again.
+                    if (rideProvider.driverOffline) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF4E5),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE8A33D)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.wifi_off_rounded,
+                              size: 16,
+                              color: Color(0xFFB26A00),
+                            ),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                "We lost your driver's connection — we're monitoring your ride. You can cancel if you need to.",
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF8A5A00),
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     Row(
                       children: [
                         // Assigned driver's public profile photo. Keyed by

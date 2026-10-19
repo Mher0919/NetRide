@@ -4,8 +4,67 @@ import { TripStatus } from '../../types';
 import { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } from '../../config/redis';
 import { LocationsService } from '../../modules/location/locations.service';
 import { sweepExpiredActivity } from '../../services/demand.service';
+import { notifyDriverConnectionLost } from '../../services/notification.service';
 import { env } from '../../config/env';
 import { lifecycleEventsTotal } from '../../observability/metrics';
+
+/**
+ * Driver-connectivity watchdog for ACTIVE rides.
+ *
+ * A driver whose app dies mid-ride stops refreshing the location heartbeat,
+ * but the ride stays legitimately open. Previously nothing told the rider —
+ * their map marker simply froze until the 8-hour max-duration sweep. This
+ * sweep detects the lost heartbeat, flags the ride in Redis (once), tells
+ * the rider over the socket and pushes a notification. When the driver's
+ * app reports again, the gateway clears the flag and emits a recovery event
+ * (see socket.gateway `updateLocation`).
+ *
+ * Idempotent: the Redis flag prevents notification spam; a reconnect +
+ * re-loss cycle re-arms it. Returns the number of state transitions.
+ */
+export async function sweepDriverConnectivity(io: Server | null): Promise<number> {
+  if (!io) return 0;
+  let transitions = 0;
+  try {
+    const activeRides = await prisma.ride.findMany({
+      where: {
+        status: {
+          in: [TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVING, TripStatus.IN_PROGRESS],
+        },
+        driver_id: { not: null },
+      },
+      select: { id: true, driver_id: true, rider_id: true },
+      take: env.RIDE_STALL_SWEEP_BATCH,
+    });
+
+    for (const ride of activeRides) {
+      if (!ride.driver_id || !ride.rider_id) continue;
+      const flagKey = `ride:${ride.id}:driver_offline`;
+      try {
+        const heartbeat = await redis.get(`${DRIVER_HEARTBEAT_PREFIX}${ride.driver_id}`);
+        if (!heartbeat) {
+          // First detection only — the flag survives until the driver
+          // reports a fresh fix (gateway deletes it) or the ride settles.
+          const claimed = await redis.set(flagKey, '1', 'EX', 6 * 60 * 60, 'NX');
+          if (claimed) {
+            transitions++;
+            lifecycleEventsTotal.inc({ event: 'driver_offline_detected' });
+            io.to(`rider:${ride.rider_id}`).emit('driverConnectivity', {
+              tripId: ride.id,
+              connected: false,
+            });
+            notifyDriverConnectionLost(ride.rider_id, ride.id).catch(() => undefined);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[CLEANUP] Driver connectivity check failed for ride ${ride.id}: ${err.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error('[CLEANUP] Driver connectivity sweep failed:', err.message);
+  }
+  return transitions;
+}
 
 /**
  * Candidate predicates for the stale-ride watchdog. Exported as pure
@@ -172,6 +231,7 @@ export async function handleCleanupStaleRides(io?: Server) {
       await sweepExpiredActivity();
 
       const resolvedCount = await sweepStaleActiveRides(io ?? null);
+      const connectivityChanges = await sweepDriverConnectivity(io ?? null);
 
       const driverIds = await redis.zrange(DRIVER_LOCATIONS_KEY, 0, -1);
       let ghostCount = 0;
@@ -189,8 +249,11 @@ export async function handleCleanupStaleRides(io?: Server) {
         lifecycleEventsTotal.inc({ event: 'ghost_driver_removed' });
       }
 
-      if (resolvedCount > 0 || ghostCount > 0) {
-        console.log(`[CLEANUP] Resolved ${resolvedCount} stale rides, removed ${ghostCount} ghost drivers`);
+      if (resolvedCount > 0 || ghostCount > 0 || connectivityChanges > 0) {
+        console.log(
+          `[CLEANUP] Resolved ${resolvedCount} stale rides, ${connectivityChanges} driver-connectivity ` +
+          `transitions, removed ${ghostCount} ghost drivers`,
+        );
       }
     } catch (err: any) {
       console.error('[CLEANUP] Maintenance failed:', err.message);

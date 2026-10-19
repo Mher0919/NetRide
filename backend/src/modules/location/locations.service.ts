@@ -14,6 +14,7 @@ import {
   DRIVER_HEARTBEAT_PREFIX,
   DRIVER_LOCATION_RECORD_PREFIX,
   DRIVER_ONLINE_PREFIX,
+  DRIVER_ACTIVE_TRIP_TTL_S,
   DRIVER_H3_CELL_PREFIX,
   DRIVER_H3_INDEX_PREFIX,
 } from '../../config/redis';
@@ -243,6 +244,14 @@ export class LocationsService {
     // Check if driver has an active trip (Cached in Redis ideally, but let's use a key for now)
     const tripId = await redis.get(`driver:${driverId}:active_trip`);
     if (!tripId) return;
+
+    // Keep the active-trip lock alive for the WHOLE journey: the key TTL is
+    // shorter than the maximum ride duration, and without renewal a long (or
+    // disrupted) trip could make the driver dispatchable again while still
+    // assigned. Fire-and-forget — a renewal failure must never drop the fix.
+    redis
+      .expire(`driver:${driverId}:active_trip`, DRIVER_ACTIVE_TRIP_TTL_S)
+      .catch(() => undefined);
 
     // Route-data validation: reject garbage coordinates before they ever
     // reach the trajectory (a bad point would corrupt the polyline, the

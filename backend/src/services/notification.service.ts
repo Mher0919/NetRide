@@ -43,7 +43,8 @@ export type NotificationType =
   | 'referral_linked'
   | 'referral_reward'
   | 'special_reward_ready'
-  | 'special_settled';
+  | 'special_settled'
+  | 'driver_connectivity';
 
 /** Money formatting used in every notification copy ($X.YZ). */
 export function fmtMoney(cents: number): string {
@@ -70,6 +71,7 @@ export const NOTIFICATION_META: Record<NotificationType, { channel: string; rout
   referral_reward: { channel: 'referral', route: '/credits' },
   special_reward_ready: { channel: 'special', route: '/trip' },
   special_settled: { channel: 'special', route: '/trip' },
+  driver_connectivity: { channel: 'ride', route: '/trip' },
 };
 
 export interface NotifyArgs {
@@ -274,6 +276,21 @@ export async function notifyRideCompleted(
  * code is included in `data` so the in-app cancelled dialog can render
  * the same copy as the push.
  */
+/**
+ * Idempotency key for ride-cancellation notifications.
+ *
+ * The `notifications.event_id` unique index is GLOBAL, so the key MUST be
+ * scoped by recipient role — a shared `ride:cancelled:{tripId}` key deduped
+ * the second recipient's row away and silently dropped their push (the bug
+ * that left system-cancels unnotified on one side). Exported for unit tests.
+ */
+export function rideCancelledEventId(
+  tripId: string,
+  role: NotificationRole,
+): string {
+  return `ride:cancelled:${tripId}:${role}`;
+}
+
 export async function notifyRideCancelled(
   recipientId: string,
   role: NotificationRole,
@@ -285,7 +302,7 @@ export async function notifyRideCancelled(
   const isRider = role === 'rider';
   const reasonLabel = reasonCode ?? reasonText ?? null;
   // System-driven cancellations (stale-ride watchdog / admin ops) must
-  // never pretend a human cancelled — the copy stays neutral and carries
+  // never pretend a human cancelled - the copy stays neutral and carries
   // the resolution reason instead.
   const body = actorRole === 'system'
     ? reasonLabel
@@ -305,8 +322,33 @@ export async function notifyRideCancelled(
     title: actorRole === 'system' ? 'Ride cancelled' : isRider ? 'Your driver cancelled' : 'Ride cancelled',
     body,
     data: { tripId, actorRole, reasonCode: reasonCode ?? '', reasonText: reasonText ?? '' },
-    eventId: `ride:cancelled:${tripId}`,
+    // Scoped by RECIPIENT role: the notifications.event_id unique index is
+    // GLOBAL, so a shared key would dedupe the second recipient's row away
+    // and silently drop their push (see rideCancelledEventId).
+    eventId: rideCancelledEventId(tripId, role),
     sound: 'order_cancelled.wav',
+  });
+}
+
+/**
+ * The rider's assigned driver lost connectivity mid-ride (heartbeat expired
+ * while the ride is ACCEPTED / DRIVER_ARRIVING / IN_PROGRESS). Recorded and
+ * pushed exactly once per ride until the link recovers; re-armed by
+ * `sweepDriverConnectivity` after a reconnect + re-loss cycle.
+ */
+export async function notifyDriverConnectionLost(
+  riderId: string,
+  tripId: string
+): Promise<NotifyResult> {
+  return notifyUser({
+    userId: riderId,
+    role: 'rider',
+    type: 'driver_connectivity',
+    title: 'Driver connection lost',
+    body: `We lost your driver's connection. We're monitoring your ride — you can cancel if you need to.`,
+    data: { tripId, connected: 'false' },
+    eventId: `ride:driver_offline:${tripId}`,
+    route: '/trip',
   });
 }
 

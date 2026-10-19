@@ -13,7 +13,7 @@ import { PartyRole } from '../reporting/report.reasons';
 import { env } from '../../config/env';
 import { getIo } from '../../gateway/io-handle';
 import { pool } from '../../config/database';
-import { redis } from '../../config/redis';
+import { redis, DRIVER_ACTIVE_TRIP_TTL_S } from '../../config/redis';
 import { createPriceSnapshot, computeEstimate, getSnapshotForRide, persistRevenueAllocation, getRevenueAllocationForRide } from '../../services/pricing.service';
 import { RideSettlementService } from '../payments/ride-settlement.service';
 import { getFareBreakdown } from '../payments/fare-breakdown.service';
@@ -44,6 +44,40 @@ import {
 } from './ride-state.rules';
 
 export { TerminalCancelGuard, buildTerminalCancelGuardSql } from './ride-state.rules';
+
+/**
+ * A rider may only have ONE non-terminal ride at a time. This error is
+ * raised when a second request arrives while the first is still live —
+ * clients use `tripId` to re-hydrate the existing ride instead of creating
+ * a duplicate (a killed app that reopens before the first tripUpdate used
+ * to be able to double-book).
+ */
+export class ActiveRideExistsError extends Error {
+  readonly code = 'ACTIVE_RIDE_EXISTS';
+  constructor(readonly tripId: string, readonly tripStatus: string) {
+    super('You already have an active ride.');
+  }
+}
+
+/**
+ * Pure recipient resolution for ride-cancellation notifications. Every
+ * party is told EXCEPT the actor; system-driven cancels notify both (when a
+ * driver is assigned) with their own role key. Exported for unit tests.
+ */
+export function resolveCancelNotificationTargets(args: {
+  riderId: string;
+  driverId: string | null;
+  actorRole: 'rider' | 'driver' | 'system';
+}): Array<{ recipientId: string; role: 'rider' | 'driver' }> {
+  const targets: Array<{ recipientId: string; role: 'rider' | 'driver' }> = [];
+  if (args.actorRole !== 'rider') {
+    targets.push({ recipientId: args.riderId, role: 'rider' });
+  }
+  if (args.actorRole !== 'driver' && args.driverId) {
+    targets.push({ recipientId: args.driverId, role: 'driver' });
+  }
+  return targets;
+}
 
 /** Display name of a platform user (used in notification copy). */
 async function fetchDisplayName(userId: string): Promise<string> {
@@ -248,6 +282,27 @@ export class RideService {
       let tripId: string;
       try {
         await client.query('BEGIN');
+
+        // Single-active-ride invariant. Locking the rider row serializes
+        // concurrent requests from the same account, so two devices (or a
+        // rapid retry using a NEW idempotency key) can never create two
+        // non-terminal rides. Future scheduled rides do not block an
+        // on-demand request.
+        await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [riderId]);
+        const activeRes = await client.query(
+          `SELECT id, status FROM rides
+            WHERE rider_id = $1
+              AND status NOT IN ('COMPLETED', 'CANCELLED')
+              AND NOT (is_scheduled = TRUE AND scheduled_at > NOW())
+            ORDER BY created_at DESC
+            LIMIT 1`,
+          [riderId],
+        );
+        if (activeRes.rows.length > 0) {
+          const active = activeRes.rows[0];
+          throw new ActiveRideExistsError(active.id, active.status);
+        }
+
         const res = await client.query(
           `INSERT INTO rides (
             rider_id, status, pickup_lat, pickup_lng, pickup_address,
@@ -531,7 +586,7 @@ export class RideService {
       .catch((err: any) => console.error(`[RIDE] ⚠️ Fare breakdown snapshot failed: ${err.message}`));
 
     // Cache active trip for trajectory buffering
-    await redis.set(`driver:${driverId}:active_trip`, tripId, 'EX', 14400); // 4h safety TTL
+    await redis.set(`driver:${driverId}:active_trip`, tripId, 'EX', DRIVER_ACTIVE_TRIP_TTL_S); // renewed by location fixes while the trip runs
 
     // Step 4: Parallel fan-out — record winner and cancel other offers
     await redis.set(`dispatch:winners:${tripId}`, driverId, 'EX', 300);
@@ -1381,33 +1436,33 @@ export class RideService {
     }
     getIo().to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
 
-    // Real phone notification carrying WHO cancelled and WHY. A null actor
-    // (system watchdog) still notifies the rider so they are not stranded
-    // wondering what happened to their pickup.
+    // Real phone notification carrying WHO cancelled and WHY. EVERY party
+    // is told except the actor — and each with their OWN role key. The
+    // previous version derived a single "opposite of the actor" recipient,
+    // which for system watchdogs addressed the rider with the DRIVER role
+    // key (no token → silently dropped) and a REQUIRED search timeout with
+    // no assigned driver notified nobody at all.
     const actorRole: 'rider' | 'driver' | 'system' =
       cancelledBy === null
         ? 'system'
         : cancelledBy === trip.driver_id
           ? 'driver'
           : 'rider';
-    const notified = trip.driver_id
-      ? actorRole === 'driver'
-        ? trip.rider_id
-        : actorRole === 'rider'
-          ? trip.driver_id
-          : trip.rider_id
-      : null;
-    if (notified) {
-      const recipientRole: 'rider' | 'driver' = actorRole === 'driver' ? 'rider' : 'driver';
-      const cancellerRole: PartyRole = actorRole === 'driver' ? 'DRIVER' : 'RIDER';
-      // Push copy uses a human label (never the raw code); the code + free
-      // text ride along in `data` for the in-app dialog.
+    const cancellerRole: PartyRole = actorRole === 'driver' ? 'DRIVER' : 'RIDER';
+    const reasonLabel = reasonCode
+      ? cancellationReasonLabel(cancellerRole, reasonCode)
+      : undefined;
+    for (const target of resolveCancelNotificationTargets({
+      riderId: trip.rider_id,
+      driverId: trip.driver_id ?? null,
+      actorRole,
+    })) {
       notifyRideCancelled(
-        notified,
-        recipientRole,
+        target.recipientId,
+        target.role,
         tripId,
         actorRole,
-        reasonCode ? cancellationReasonLabel(cancellerRole, reasonCode) : undefined,
+        reasonLabel,
         reasonText ?? undefined,
       ).catch(() => undefined);
     }

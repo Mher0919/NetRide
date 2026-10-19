@@ -202,6 +202,9 @@ void main() async {
               final provider = RideProvider();
               if (token != null) {
                 provider.initSocket(token);
+                // Socket-independent recovery: adopt an authoritative active
+                // ride over REST even if the WebSocket never connects.
+                provider.hydrateFromServer();
               }
               return provider;
             }),
@@ -264,6 +267,8 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
       if (token == null || token.isEmpty) return;
       final provider = context.read<RideProvider>();
       provider.updateToken(token);
+      // Same recovery guarantee as cold start: adopt an active ride at once.
+      provider.hydrateFromServer();
       await NotificationService.instance.registerDevice();
       await _initStripe();
     } catch (e) {

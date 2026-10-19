@@ -92,7 +92,14 @@ export class RideController {
       console.error(`[RIDE] ❌ Request error: ${error.message}`);
       const body: Record<string, string> = { error: error.message || 'Unable to process your ride request.' };
       if (error?.code) body.code = error.code;
-      res.status(error?.code === 'PAYMENT_METHOD_REQUIRED' ? 402 : 400).json(body);
+      // A second request while a ride is live: hand the client the existing
+      // trip id so it re-hydrates that ride instead of showing an error.
+      if (error?.code === 'ACTIVE_RIDE_EXISTS' && error?.tripId) {
+        body.tripId = String(error.tripId);
+      }
+      if (error?.code === 'PAYMENT_METHOD_REQUIRED') return res.status(402).json(body);
+      if (error?.code === 'ACTIVE_RIDE_EXISTS') return res.status(409).json(body);
+      res.status(400).json(body);
     }
   }
 
@@ -156,6 +163,37 @@ export class RideController {
    * no-op success, and the per-driver exclusion guarantees the ride is
    * never re-offered to this driver.
    */
+  /**
+   * REST driver cancellation — the reliable fallback when the driver app's
+   * socket died mid-trip (the socket emit is the fast path; before this the
+   * app faked a local cancel after 12 s and could diverge from the server).
+   * Ownership + state rules are identical to the socket path because both
+   * call RideService.cancelTrip.
+   */
+  static async driverCancel(req: any, res: Response) {
+    try {
+      const driverId = req.user?.id;
+      const { tripId, reasonCode, reasonText } = req.body ?? {};
+      if (!driverId) return res.status(401).json({ error: 'Unauthorized' });
+      if (!tripId) return res.status(400).json({ error: 'tripId is required' });
+
+      const trip = await RideService.cancelTrip(tripId, driverId, {
+        reasonCode: typeof reasonCode === 'string' ? reasonCode : undefined,
+        reasonText: typeof reasonText === 'string' ? reasonText : undefined,
+      });
+      res.json({ cancelled: true, trip });
+    } catch (error: any) {
+      console.error(`[RIDE] ❌ Driver cancel error: ${error.message}`);
+      const msg = String(error.message || '');
+      const conflict =
+        /already completed|unauthorized|not found|cannot be cancelled/i.test(msg);
+      res.status(conflict ? 409 : 400).json({
+        error: msg || 'Failed to cancel the trip.',
+        code: conflict ? 'CANCEL_REJECTED' : 'CANCEL_FAILED',
+      });
+    }
+  }
+
   static async declineTrip(req: any, res: Response) {
     try {
       const driverId = req.user?.id;

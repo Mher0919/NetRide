@@ -13,6 +13,8 @@ router.post('/request', authMiddleware, riderMiddleware, RideController.requestR
 router.post('/estimate', authMiddleware, riderMiddleware, RideController.estimateRide);
 router.post('/accept', authMiddleware, driverMiddleware, RideController.acceptTrip);
 router.post('/decline', authMiddleware, driverMiddleware, RideController.declineTrip);
+// REST cancellation fallback for drivers whose socket died mid-trip.
+router.post('/driver-cancel', authMiddleware, driverMiddleware, RideController.driverCancel);
 router.post('/rate', authMiddleware, RideController.rateRide);
 router.post('/cancel', authMiddleware, riderMiddleware, RideController.cancelCurrentRide);
 

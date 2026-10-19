@@ -43,6 +43,7 @@ const SUITES = [
   './modules/rewards/rewards.unit.test.ts',
   './modules/ride/ride-cancellation.unit.test.ts',
   './modules/ride/ride-state-guards.unit.test.ts',
+  './modules/ride/ride-recovery.unit.test.ts',
   './modules/location/location-freshness.unit.test.ts',
   './queue/cleanup-stale-rides.unit.test.ts',
   './modules/referral/referral-onboarding.unit.test.ts',

@@ -894,12 +894,22 @@ export function startServer(): void {
   // relaunching mid-stale-ride would re-attach to a ride that no longer
   // exists, and the admin dashboard would keep listing a ghost "active"
   // ride. Compliments the periodic watchdog in cleanupStaleRides.ts.
-  import('./queue/jobs/cleanupStaleRides').then(({ sweepStaleActiveRides }) => {
+  import('./queue/jobs/cleanupStaleRides').then(({ sweepStaleActiveRides, sweepDriverConnectivity }) => {
     sweepStaleActiveRides(io)
       .then((n) => {
-        if (n > 0) console.log(`[BOOT] ✅ Reconciled ${n} stale rides left over from previous runtime`);
+        if (n > 0) console.log(`[BOOT] 🧹 Reconciled ${n} stale rides left over from previous runtime`);
       })
       .catch((err: any) => console.error(`[BOOT] ⚠️ Stale ride reconciliation failed: ${err.message}`));
+
+    // Driver-connectivity watchdog: detects an accepted/in-progress ride
+    // whose driver's app stopped reporting and notifies the rider. Runs in
+    // the API process too (not only the cron worker) so single-process
+    // deployments keep the guarantee.
+    setInterval(() => {
+      sweepDriverConnectivity(io).catch((err: any) =>
+        console.error(`[CRON] Driver connectivity sweep failed: ${err.message}`),
+      );
+    }, 2 * 60 * 1000);
   });
 
   // Special redemption hygiene (Every 5 minutes): expire stale validation

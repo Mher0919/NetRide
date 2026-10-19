@@ -108,4 +108,31 @@ void main() {
       expect(p.lastCancelledTrip, isNull);
     });
   });
+
+  group('cold-start REST hydration (socket-independent recovery)', () {
+    test('an idle driver adopts the authoritative trip via the shared reducer',
+        () {
+      final p = DriverProvider();
+      expect(p.currentTrip, isNull);
+      expect(p.status, models.DriverStatus.offline);
+
+      // hydrateFromServer() funnels REST payloads through this exact reducer
+      // path — the app may have been killed before the first tripUpdate, so
+      // recovery must work from a completely idle provider.
+      p.applyTripUpdate(trip(id: 't1', status: models.TripStatus.IN_PROGRESS));
+      expect(p.currentTrip!.id, 't1');
+      expect(p.status, models.DriverStatus.onTrip);
+    });
+
+    test('a settled trip is never resurrected by hydration', () {
+      final p = DriverProvider();
+      p.applyTripUpdate(trip(id: 't1', status: models.TripStatus.COMPLETED));
+      expect(p.currentTrip, isNull);
+
+      // A late REST hydration of the same settled ride (e.g. a stale read)
+      // must not put the driver back on trip.
+      p.applyTripUpdate(trip(id: 't1', status: models.TripStatus.IN_PROGRESS));
+      expect(p.currentTrip, isNull);
+    });
+  });
 }

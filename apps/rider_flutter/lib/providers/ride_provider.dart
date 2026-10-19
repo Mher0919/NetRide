@@ -91,6 +91,13 @@ class RideProvider with ChangeNotifier {
   double? _driverEtaSeconds;
   int? _driverRemainingMeters;
 
+  /// True when the backend detects the assigned driver's app stopped
+  /// reporting while the ride is active (heartbeat expired). The trip screen
+  /// renders a "we're monitoring" banner; it is cleared automatically when
+  /// the driver reports again. Defaults to connected.
+  bool _driverOffline = false;
+  bool get driverOffline => _driverOffline;
+
   TripStatus get status => _status;
   String? get tripId => _tripId;
   DriverInfo? get driver => _driver;
@@ -228,6 +235,10 @@ class RideProvider with ChangeNotifier {
       // the persisted trip so rider and driver sides stay in agreement
       // instead of the rider silently dropping out of an active journey.
       _restoreActiveTripAfterRestart();
+      // REST hydration is the socket-independent recovery path: it also
+      // covers a killed app that never received a first tripUpdate (no
+      // persisted id yet) and re-reads the authoritative ride over HTTP.
+      hydrateFromServer();
     });
 
     _socket!.on('currentTripNone', (data) {
@@ -333,6 +344,15 @@ class RideProvider with ChangeNotifier {
       notifyListeners();
     });
 
+    // Driver-connectivity watchdog: the backend flags an active ride whose
+    // driver's app stopped reporting (and clears the flag on recovery).
+    // Surfaced as a monitoring banner so the rider is never left staring at
+    // a silently frozen marker.
+    _socket!.on('driverConnectivity', (data) {
+      if (data is! Map) return;
+      applyDriverConnectivity(Map<String, dynamic>.from(data));
+    });
+
     _socket!.on('navigationEnded', (data) {
       _navigationRoute = null;
       _navigationEtaSeconds = null;
@@ -373,6 +393,19 @@ class RideProvider with ChangeNotifier {
     // tells the rider what happened.
     _socket!.on('error', (data) {
       debugPrint('[RIDE] Socket error: $data');
+      // Single-active-ride guard: the server refused a duplicate request
+      // and pointed at the existing ride. Re-hydrate it instead of showing
+      // a failure — the app may have been killed before the first
+      // tripUpdate and have no local trip id.
+      if (data is Map && data['code'] == 'ACTIVE_RIDE_EXISTS') {
+        debugPrint('[RIDE] Active ride exists — hydrating the existing ride');
+        _requestAckTimer?.cancel();
+        _requestAckTimer = null;
+        _awaitingServerAck = false;
+        notifyListeners();
+        hydrateFromServer();
+        return;
+      }
       final msg = data is String
           ? data
           : (data is Map && data['message'] is String)
@@ -411,14 +444,15 @@ class RideProvider with ChangeNotifier {
   }
 
   /// Applies an authoritative trip payload exactly once, in order. Shared by
-  /// the socket broadcast path and the REST request fallback so both funnel
-  /// through the same guards:
+  /// the socket broadcast path, the REST request fallback and cold-start
+  /// hydration so both funnel through the same guards:
   ///   1. settled trip ids are ignored (late terminal duplicates),
-  ///   2. IDLE resets reject every stale resurrection,
+  ///   2. IDLE resets reject every stale resurrection (except authoritative
+  ///      hydration, which is exactly the payload that ends IDLE),
   ///   3. a different ride id never replaces the tracked ride,
   ///   4. an older server version (`updated_at`) never overwrites a newer one.
   @visibleForTesting
-  void applyTripUpdate(Trip trip, [Map<String, dynamic>? raw]) {
+  void applyTripUpdate(Trip trip, [Map<String, dynamic>? raw, bool fromHydration = false]) {
     final oldStatus = _status;
     final data = raw ?? const <String, dynamic>{};
 
@@ -426,7 +460,7 @@ class RideProvider with ChangeNotifier {
       debugPrint('[RIDE] Ignoring tripUpdate for settled trip ${trip.id}');
       return;
     }
-    if (_status == TripStatus.IDLE) {
+    if (_status == TripStatus.IDLE && !fromHydration) {
       debugPrint(
         '[RIDE] Ignoring stale ${trip.status} tripUpdate while IDLE (trip ${trip.id})',
       );
@@ -460,6 +494,13 @@ class RideProvider with ChangeNotifier {
     _currentTripUpdatedAt = incomingVersion;
     _status = trip.status;
     _tripId = trip.id;
+
+    // Connectivity state belongs to the CURRENT assigned driver only.
+    if (trip.status == TripStatus.REQUESTED ||
+        trip.status == TripStatus.CANCELLED ||
+        trip.status == TripStatus.COMPLETED) {
+      _driverOffline = false;
+    }
 
     // Back to searching (driver released / rider's request still being
     // matched): the departing driver's identity and route context are
@@ -534,6 +575,15 @@ class RideProvider with ChangeNotifier {
           location: initialLoc ?? _driver!.location,
         );
       }
+    }
+    // Cold-start recovery must also restore the route the driver is
+    // following (the socket-only navigation events are never replayed).
+    if (fromHydration &&
+        _navigationRoute == null &&
+        (trip.status == TripStatus.ACCEPTED ||
+            trip.status == TripStatus.DRIVER_ARRIVING ||
+            trip.status == TripStatus.IN_PROGRESS)) {
+      _replayNavigationRoute(trip);
     }
     notifyListeners();
   }
@@ -696,6 +746,16 @@ class RideProvider with ChangeNotifier {
       final serverMsg = e.response?.data is Map
           ? (e.response!.data as Map)['error']?.toString()
           : null;
+      final serverCode = e.response?.data is Map
+          ? (e.response!.data as Map)['code']?.toString()
+          : null;
+      if (e.response?.statusCode == 409 && serverCode == 'ACTIVE_RIDE_EXISTS') {
+        // A ride is already live for this rider: adopt it instead of
+        // surfacing a failure (single-active-ride invariant).
+        await hydrateFromServer();
+        notifyListeners();
+        return;
+      }
       if (e.response?.statusCode == 402) {
         // Payment method required — the map screen owns the navigation to
         // the wallet; this is a definitive rejection, not a retry.
@@ -841,6 +901,7 @@ class RideProvider with ChangeNotifier {
     _driverEtaSeconds = null;
     _driverRemainingMeters = null;
     _driverCancelledNotice = null;
+    _driverOffline = false;
     _cancelling = false;
     _requestKey = null;
     _lastRequestPayload = null;
@@ -886,6 +947,85 @@ class RideProvider with ChangeNotifier {
         .catchError((e) {
           debugPrint('[RIDE] active_trip_id persistence failed: $e');
         });
+  }
+
+  /// REST hydration of the authoritative active ride.
+  ///
+  /// Recovery must NOT depend on the socket ever connecting: proxies that
+  /// block WebSocket upgrades, DNS hiccups or a dead socket would otherwise
+  /// leave a rider with a live ride staring at an idle Explore screen. This
+  /// is called at cold start, on every foreground, on socket connect, and
+  /// when the server reports an existing ride (single-active-ride guard).
+  ///
+  /// Returns true when an active ride was adopted.
+  Future<bool> hydrateFromServer() async {
+    if (SecureTokenStore.token == null) return false;
+    try {
+      final response = await ApiService.dio.get('/ride/current');
+      final data = response.data;
+      if (data is! Map) return false;
+      final rawTrip = data['trip'];
+      if (rawTrip is Map) {
+        final raw = Map<String, dynamic>.from(rawTrip);
+        debugPrint('[RIDE] Hydrated active trip from REST: ${raw['id']} (${raw['status']})');
+        applyTripUpdate(Trip.fromJson(raw), raw, true);
+        return true;
+      }
+      // Authoritative "no active ride": settle any stale local belief.
+      if (_status != TripStatus.IDLE && _tripId != null) {
+        debugPrint('[RIDE] REST reports no active trip — clearing local state');
+        _settleTripId(_tripId!);
+        reset();
+      }
+      return false;
+    } catch (e) {
+      debugPrint('[RIDE] hydrateFromServer failed (kept local state): $e');
+      return false;
+    }
+  }
+
+  /// Replays the cached navigation leg after a cold start. The rider map is
+  /// driven by server-pushed routes (`navigationStarted` etc.) which are
+  /// never replayed on reconnect, so fetch the authoritative cached leg over
+  /// REST (party-scoped on the backend) instead of re-planning it locally.
+  Future<void> _replayNavigationRoute(Trip trip) async {
+    final leg = trip.status == TripStatus.IN_PROGRESS ? 'destination' : 'pickup';
+    try {
+      final response = await ApiService.dio.get(
+        '/navigation/cached',
+        queryParameters: {'tripId': trip.id, 'leg': leg},
+      );
+      final data = response.data;
+      final route = data is Map ? data['route'] : null;
+      if (route is Map) {
+        _setNavigationRoute({
+          'tripId': trip.id,
+          'route': Map<String, dynamic>.from(route),
+        });
+      }
+    } catch (e) {
+      debugPrint('[RIDE] Navigation replay failed (non-fatal): $e');
+    }
+  }
+
+  /// Driver-connectivity state pushed by the backend watchdog. Exposed for
+  /// tests so the exact trip-scoping rule is asserted on the real path.
+  @visibleForTesting
+  void applyDriverConnectivity(Map<String, dynamic> data) {
+    final eventTripId = data['tripId']?.toString();
+    if (eventTripId != null &&
+        eventTripId.isNotEmpty &&
+        _tripId != null &&
+        eventTripId != _tripId) {
+      return;
+    }
+    final connected = data['connected'] == true;
+    if (_driverOffline == !connected) return;
+    _driverOffline = !connected;
+    debugPrint(
+      '[RIDE] Driver connectivity changed → ${connected ? 'online' : 'offline'}',
+    );
+    notifyListeners();
   }
 
   void updateLocation(double lat, double lng) {
@@ -1043,6 +1183,9 @@ class RideProvider with ChangeNotifier {
       debugPrint('[RIDE] Foreground resync for status=$_status');
       _socket!.emit('getCurrentTrip');
     }
+    // REST resync on EVERY foreground: recovery must not depend on the
+    // socket connecting (blocked ws, doze, proxy, DNS).
+    await hydrateFromServer();
     // Signal "rider actively using the app" with their last known position
     // (privacy-safe: backendside cooldowns cap the rate).
     reportActivity('APP_ACTIVE');

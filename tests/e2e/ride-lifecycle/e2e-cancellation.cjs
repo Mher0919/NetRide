@@ -138,12 +138,27 @@ async function dbClient() {
 }
 
 /**
- * Between-test hygiene: wait out in-flight offer windows, then clear the
- * offer/lock residue of the just-finished ride (real apps rely on the same
- * TTL self-healing; under test these windows would starve the next ride).
+ * Between-test hygiene: terminally cancel any ride this rider still has
+ * open, wait out in-flight offer windows, then clear the offer/lock residue
+ * of the just-finished ride (real apps rely on the same TTL self-healing;
+ * under test these windows would starve the next ride).
+ *
+ * The DB cancel is REQUIRED since the backend enforces ONE non-terminal
+ * ride per rider: tests A/B intentionally end with an ACCEPTED ride, which
+ * would legitimately reject the next test's request (ACTIVE_RIDE_EXISTS).
  */
 async function settle() {
   await sleep(2600);
+  try {
+    const open = await http('GET', '/api/ride/current', null, riderToken);
+    const trip = open.body?.trip;
+    if (trip && trip.id) {
+      await http('POST', '/api/ride/cancel', { tripId: trip.id }, riderToken);
+      await sleep(600);
+    }
+  } catch (_) {
+    // Nothing open / already terminal — hygiene only.
+  }
   const r = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379');
   const keys = await r.keys('driver:offer:*');
   const rideKeys = await r.keys('ride:offer:*');

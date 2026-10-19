@@ -278,16 +278,13 @@ class DriverProvider with ChangeNotifier {
   // ── Foreground revalidation (called from main.dart lifecycle) ────
 
   /// Called when the app returns to foreground.
-  /// Revalidates critical Class B data but respects throttle.
+  /// Recovery (socket re-init + authoritative trip resync) is NEVER
+  /// throttled — it is the difference between a driver seeing their live
+  /// trip and a blank dashboard after a quick background/foreground around
+  /// a dead socket. Only the expensive profile/document revalidation is
+  /// throttled.
   Future<void> onAppForegrounded() async {
-    // Throttle: don't revalidate more than once every 30 seconds
-    final now = DateTime.now();
-    if (now.difference(_lastForegroundRevalidation).inSeconds < 30) {
-      debugPrint('[CACHE] Foreground revalidation throttled');
-      return;
-    }
-    _lastForegroundRevalidation = now;
-    debugPrint('[CACHE] App foregrounded — revalidating critical state');
+    debugPrint('[CACHE] App foregrounded — resyncing ride state');
 
     // If the socket is disconnected (e.g. transient DNS failure),
     // re-initialize it so the built-in reconnector gets a fresh start.
@@ -306,6 +303,19 @@ class DriverProvider with ChangeNotifier {
       _socket?.emit('getPendingOffer');
     }
 
+    // REST resync on EVERY foreground: recovery must not depend on the
+    // socket (a blocked WebSocket upgrade left mid-trip drivers stuck on
+    // the dashboard before this).
+    await hydrateFromServer();
+
+    // Expensive compliance revalidation only: throttled to once / 30 s.
+    final now = DateTime.now();
+    if (now.difference(_lastForegroundRevalidation).inSeconds < 30) {
+      debugPrint('[CACHE] Foreground revalidation throttled');
+      return;
+    }
+    _lastForegroundRevalidation = now;
+
     try {
       // Revalidate compliance-critical data in parallel
       await Future.wait([
@@ -314,6 +324,44 @@ class DriverProvider with ChangeNotifier {
       ]);
     } catch (e) {
       debugPrint('[CACHE] Foreground revalidation error: $e');
+    }
+  }
+
+  /// REST hydration of the authoritative active trip — the socket-independent
+  /// recovery path, called at cold start, on foreground and on connect.
+  /// Returns true when an active trip was adopted.
+  Future<bool> hydrateFromServer() async {
+    if (SecureTokenStore.token == null) return false;
+    try {
+      final response = await ApiService.dio.get('/ride/current');
+      final data = response.data;
+      if (data is! Map) return false;
+      final rawTrip = data['trip'];
+      if (rawTrip is Map) {
+        final raw = Map<String, dynamic>.from(rawTrip);
+        debugPrint('[RIDE] Hydrated active trip from REST: ${raw['id']} (${raw['status']})');
+        applyTripUpdate(models.Trip.fromJson(raw), raw);
+        return true;
+      }
+      // Authoritative "no active trip": settle any stale local belief so a
+      // driver whose ride was resolved while offline returns to idle.
+      final hadTrip =
+          _currentTrip != null || _status == models.DriverStatus.onTrip;
+      if (hadTrip) {
+        debugPrint('[RIDE] REST reports no active trip — clearing stale local state');
+        _currentTrip = null;
+        _incomingRequest = null;
+        _currentTripUpdatedAt = null;
+        _status = _serverOnline
+            ? models.DriverStatus.online
+            : models.DriverStatus.offline;
+        _clearOfferNotification();
+        notifyListeners();
+      }
+      return false;
+    } catch (e) {
+      debugPrint('[RIDE] hydrateFromServer failed (kept local state): $e');
+      return false;
     }
   }
 
@@ -519,6 +567,10 @@ class DriverProvider with ChangeNotifier {
       // it was sent), the server re-emits it so returning through the app
       // icon is not a dead end.
       _socket?.emit('getPendingOffer');
+      // Socket-independent recovery: adopt an authoritative active trip
+      // over REST even if this socket just connected but the historical
+      // events were long lost.
+      hydrateFromServer();
       notifyListeners();
     });
 
@@ -1162,20 +1214,53 @@ class DriverProvider with ChangeNotifier {
       if (reasonText != null) 'reasonText': reasonText,
     });
 
-    // Offline fallback: if no authoritative CANCELLED tripUpdate arrives
-    // (socket dead / server unreachable), settle locally after a bounded
-    // window and flag the confirmation as failed — the UI shows the
-    // distinction instead of hanging forever.
+    // Offline fallback ladder: if no authoritative CANCELLED tripUpdate
+    // arrives (socket dead / server unreachable), the REST endpoint is
+    // retried with identical ownership/state rules. Only when BOTH paths
+    // fail does the UI show "could not confirm" — the trip is KEPT, never
+    // faked away locally (a local-only cancel could diverge from a server
+    // ride that is still assigned).
     _cancelConfirmTimer?.cancel();
     _cancelConfirmTimer = Timer(const Duration(seconds: 12), () {
+      _confirmCancelViaRest(tripId);
+    });
+  }
+
+  /// REST fallback for the driver cancellation (see [cancelTrip]). Applies
+  /// the authoritative cancelled trip on success; keeps the trip active and
+  /// flags the failure on error so the driver can retry.
+  Future<void> _confirmCancelViaRest(String tripId) async {
+    if (!_cancelling) return;
+    debugPrint('[RIDE] Cancel confirmation not received — retrying over REST');
+    try {
+      final response = await ApiService.dio.post(
+        '/ride/driver-cancel',
+        data: {'tripId': tripId},
+      );
+      final data = response.data;
+      final trip = data is Map ? data['trip'] : null;
+      _cancelling = false;
+      _cancelConfirmFailed = false;
+      _lastCancelError = null;
+      _cancelConfirmTimer?.cancel();
+      _cancelConfirmTimer = null;
+      if (trip is Map) {
+        final raw = Map<String, dynamic>.from(trip);
+        applyTripUpdate(models.Trip.fromJson(raw), raw);
+      } else {
+        notifyListeners();
+      }
+    } catch (e) {
       if (!_cancelling) return;
-      debugPrint('[RIDE] Cancel confirmation not received within window — settling as failed');
+      debugPrint('[RIDE] Cancel REST fallback failed: $e');
       _cancelling = false;
       _cancelConfirmFailed = true;
-      _lastCancelError = 'Connection lost — cancellation could not be confirmed.';
-      _settleCancelledLocally(_currentTrip);
+      _lastCancelError =
+          'We couldn\'t confirm the cancellation. Check your connection and try again.';
+      _cancelConfirmTimer?.cancel();
+      _cancelConfirmTimer = null;
       notifyListeners();
-    });
+    }
   }
 
   /// Server-confirmed cancellation (from tripUpdate CANCELLED). Clears
@@ -1186,23 +1271,6 @@ class DriverProvider with ChangeNotifier {
     _cancelConfirmFailed = false;
     _cancelConfirmTimer?.cancel();
     _cancelConfirmTimer = null;
-  }
-
-  void _settleCancelledLocally(models.Trip? activeTrip) {
-    // Only used on the failure path: keep a minimal cancelled record so
-    // the UI still has a first-class state (never a null exit), marked by
-    // _cancelConfirmFailed so the dialog can warn the driver.
-    if (_lastCancelledTrip != null) return;
-    if (activeTrip != null) {
-      _lastCancelledTrip = activeTrip;
-    } else {
-      _lastCancelledTrip = null;
-    }
-    _currentTrip = null;
-    _incomingRequest = null;
-    _riderLocation = null;
-    _messages = [];
-    _status = models.DriverStatus.online;
   }
 
   /// The UI has shown the cancelled state; clear it so the driver returns

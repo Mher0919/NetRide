@@ -172,6 +172,9 @@ void main() async {
                   () => provider.incomingRequest != null;
               if (token != null) {
                 provider.initSocket(token);
+                // Socket-independent recovery: adopt an authoritative active
+                // trip over REST even if the WebSocket never connects.
+                provider.hydrateFromServer();
               }
               return provider;
             }),

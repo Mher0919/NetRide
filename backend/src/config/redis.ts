@@ -48,6 +48,11 @@ export const DRIVER_LOCATION_RECORD_PREFIX = 'driver:loc:';
 // state) without being treated as absent.
 export const DRIVER_ONLINE_PREFIX = 'driver:online:';
 
+// How long the "driver is on a trip" lock lives. RENEWED on every accepted
+// location fix while the key exists, so a legitimately long trip never
+// expires it; it only acts as a safety TTL for a driver whose app vanished.
+export const DRIVER_ACTIVE_TRIP_TTL_S = 4 * 60 * 60;
+
 // H3 hexagonal cell index for scalable rider↔driver matching. Each online
 // driver is a member of the set for their current H3 cell; `findNearbyDrivers`
 // queries only the small ring of cells around the pickup (gridDisk) instead of
