@@ -224,83 +224,18 @@ export interface PushPayload {
 
 /**
  * Send a push notification to a specific user/driver.
- * If the token is missing or FCM is not configured, logs the notification.
+ *
+ * Delegates to {@link sendPushAll} so a user signed in on multiple phones
+ * receives the notification on every one of them. If no token is on record
+ * or FCM is not configured, the notification is logged instead of sent.
  */
 export async function sendPush(
   userId: string,
   role: 'rider' | 'driver',
   payload: PushPayload
 ): Promise<boolean> {
-  const token = await getFcmToken(userId, role);
-  if (!token) {
-    logger.debug({ userId, role, title: payload.title }, '[FCM] No token on record — skipping push');
-    pushDeliveryTotal.inc({ outcome: 'no_tokens' });
-    return false;
-  }
-
-  if (!fcmEnabled || !firebaseApp) {
-    logger.info({
-      userId,
-      role,
-      title: payload.title,
-      body: payload.body,
-      data: payload.data,
-    }, '[FCM] (stub) Push notification not sent — FCM not configured');
-    // Stub mode is NOT delivery: reporting success here previously made
-    // telemetry claim pushes were sent when nothing left the process.
-    pushDeliveryTotal.inc({ outcome: 'stub' });
-    return false;
-  }
-
-  try {
-    const message: Message = {
-      token,
-      notification: {
-        title: payload.title,
-        body: payload.body,
-      },
-      data: payload.data || {},
-      android: {
-        priority: payload.priority || 'high',
-        notification: {
-          channelId: payload.channelId || 'default',
-          sound: payload.sound || 'default',
-          priority: 'high' as any,
-          defaultSound: true,
-          defaultVibrateTimings: true,
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            badge: payload.badge,
-            sound: payload.sound || 'default',
-            'content-available': 1,
-          },
-        },
-      },
-    };
-
-    const messaging = getMessaging(firebaseApp);
-    const messageId = await messaging.send(message);
-    logger.info({ userId, role, messageId, title: payload.title }, '[FCM] Push sent');
-    pushDeliveryTotal.inc({ outcome: 'delivered' });
-    return true;
-  } catch (err: any) {
-    if (err?.code === 'messaging/invalid-registration-token' ||
-        err?.code === 'messaging/registration-token-not-registered') {
-      // Clear ONLY the offending token. The previous blanket
-      // `clearFcmToken(userId, role)` wiped every device the user owned
-      // because one stale install failed, silently disabling all pushes.
-      logger.warn({ userId, role, errCode: err.code }, '[FCM] Token invalid — pruning device');
-      pushDeliveryTotal.inc({ outcome: 'invalid_token' });
-      await clearFcmToken(userId, role, token);
-    } else {
-      logger.error({ err, userId, role }, '[FCM] Failed to send push');
-      pushDeliveryTotal.inc({ outcome: 'failed' });
-    }
-    return false;
-  }
+  const delivered = await sendPushAll(userId, role, payload);
+  return delivered > 0;
 }
 
 /**
@@ -389,6 +324,13 @@ export async function sendPushAll(
 
 /**
  * Send a "new chat message" push notification.
+ *
+ * Fans out to every registered device (a user may be signed in on more than
+ * one phone) and is sent even when a socket is connected: a live socket does
+ * not mean the app is visible (Android background, iOS suspension), so the
+ * OS-level notification is the only reliable delivery path outside the app.
+ * Foreground clients do not render notification-block FCM messages, so this
+ * does not produce a duplicate tray entry while the user is actively in-app.
  */
 export async function pushChatMessage(
   recipientId: string,
@@ -401,21 +343,24 @@ export async function pushChatMessage(
     ? messagePreview.substring(0, 47) + '...'
     : messagePreview;
 
-  return sendPush(recipientId, role, {
+  const delivered = await sendPushAll(recipientId, role, {
     title: `New message from ${senderName}`,
     body: preview,
     data: {
       type: 'chat',
       tripId,
       senderName,
+      route: '/trip',
     },
     channelId: 'chat',
     sound: 'message.wav',
   });
+  return delivered > 0;
 }
 
 /**
  * Send an "incoming call" push notification (high priority).
+ * Fans out to every registered device, like every other user-facing push.
  */
 export async function pushIncomingCall(
   recipientId: string,
@@ -423,18 +368,20 @@ export async function pushIncomingCall(
   callerName: string,
   tripId: string
 ): Promise<boolean> {
-  return sendPush(recipientId, role, {
+  const delivered = await sendPushAll(recipientId, role, {
     title: `Incoming call from ${callerName}`,
     body: 'Tap to answer',
     data: {
       type: 'call',
       tripId,
       callerName,
+      route: '/trip',
     },
     priority: 'high',
     channelId: 'call',
     sound: 'ringtone.wav',
   });
+  return delivered > 0;
 }
 
 /**

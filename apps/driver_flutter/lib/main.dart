@@ -38,13 +38,22 @@ import 'services/navigation_service.dart';
 /// is complete. Until it confirms completion, the app must stay in onboarding.
 String kInitialTargetRoute = '/login';
 
+/// A tap that arrived before the navigator existed (cold start from a
+/// notification while the app was killed). Flushed after the first frame.
+Map<String, String>? _pendingNotificationTap;
+
 /// Notification taps carry a backend-assigned route. Lifecycle pushes route
 /// to the trip screen; offer pushes open the dashboard, where the provider
 /// reconciles the authoritative offer/trip state (the notification payload
 /// itself is never trusted as state).
 void _routeFromNotification(Map<String, String> data) {
   final nav = ApiService.navigatorKey.currentState;
-  if (nav == null) return;
+  if (nav == null) {
+    // getInitialMessage() can resolve before runApp() has built MaterialApp;
+    // defer instead of dropping the tap.
+    _pendingNotificationTap = data;
+    return;
+  }
   final route = data['route'];
   if (route == '/trip') {
     nav.pushNamed('/trip');
@@ -56,6 +65,22 @@ void _routeFromNotification(Map<String, String> data) {
     // stays idle. No optimistic navigation into a dead offer.
     nav.pushNamedAndRemoveUntil('/', (r) => r.isFirst);
   }
+}
+
+void _flushPendingNotificationTap([int attempt = 0]) {
+  final pending = _pendingNotificationTap;
+  if (pending == null) return;
+  if (ApiService.navigatorKey.currentState == null) {
+    if (attempt < 20) {
+      Future<void>.delayed(
+        const Duration(milliseconds: 100),
+        () => _flushPendingNotificationTap(attempt + 1),
+      );
+    }
+    return;
+  }
+  _pendingNotificationTap = null;
+  _routeFromNotification(pending);
 }
 
 void main() async {
@@ -208,6 +233,9 @@ class _NetRideDriverState extends State<NetRideDriver> with WidgetsBindingObserv
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initDeepLinks();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _flushPendingNotificationTap(),
+    );
   }
 
   @override

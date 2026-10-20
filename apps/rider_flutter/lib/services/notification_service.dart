@@ -4,10 +4,12 @@
 //
 // Delivery model (matches the backend `sendPushAll`):
 //   - FCM messages carry BOTH a `notification` block and a `data` block.
-//   - Foreground / background-with-process: Firebase shows the system
-//     notification itself (Android handles display messages even while the
-//     app is in the foreground), so this service does NOT re-render a local
+//   - Background / terminated: Android and iOS display the system
+//     notification themselves, so this service does NOT re-render a local
 //     notification for the same message — that would double the tray entry.
+//   - Foreground: notification-block messages are delivered to `onMessage`
+//     and are NOT shown by the OS. The in-app socket events render the same
+//     state, so no OS banner is needed while the app is open.
 //   - The in-app notifications history is read from the backend REST API
 //     (GET /api/notifications), which is the single source of truth and
 //     survives pushes fired while the user is offline.
@@ -72,24 +74,21 @@ class NotificationService {
   }) async {
     onNotificationTap = onTap;
 
-    try {
-      await Firebase.initializeApp();
-      _messaging = FirebaseMessaging.instance;
-    } catch (e) {
-      debugPrint('[NOTIF] Firebase unavailable (no google-services.json?): $e');
-      return;
-    }
-
-    // Channels must exist before any notification is shown. The backend
-    // names channels: ride, credits, wallet, promo, referral, default.
-    // Importance is per-channel so ride events can be loud while money
-    // events stay quiet.
+    // Channels must exist before ANY notification is shown — including one
+    // received by FCM seconds after boot. Every channel id the backend can
+    // name is created here; an unknown id makes Android fall back to the
+    // manifest default channel (wrong importance/sound). Importance is
+    // per-channel so ride events can be loud while money events stay quiet.
     const channels = <String, (String, bool)>{
       'ride': ('Ride updates', true),
+      'ride_offer': ('Ride offers', true),
+      'chat': ('Messages', true),
+      'call': ('Calls', true),
       'credits': ('Ride credits', false),
       'wallet': ('Wallet', false),
       'promo': ('Promotions', false),
       'referral': ('Referrals', false),
+      'special': ('Specials & rewards', true),
       'default': ('NetRide', false),
     };
     for (final entry in channels.entries) {
@@ -107,12 +106,20 @@ class NotificationService {
       ));
     }
 
-    // Android 13+ runtime permission. iOS permission is out of scope (the
-    // rider app targets Android; NetRide's iOS builds use in-app audio + UI).
+    // Android 13+ runtime permission. Requested even when Firebase is not
+    // configured so socket-driven local alerts still reach the tray.
     await _local
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
+
+    try {
+      await Firebase.initializeApp();
+      _messaging = FirebaseMessaging.instance;
+    } catch (e) {
+      debugPrint('[NOTIF] Firebase unavailable (no google-services.json?): $e');
+      return;
+    }
 
     // iOS must be asked explicitly or no prompt ever appears and FCM
     // token delivery stays silent.

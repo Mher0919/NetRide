@@ -29,7 +29,7 @@ import {
   RiderDestinationChangedSchema,
 } from '../utils/socket-validation';
 import { safeParseBounded } from '../utils/zod-parse';
-import { isOnline, markOnline, markOffline, touchPresence, pushChatMessage, pushIncomingCall } from '../services/push-notification.service';
+import { markOnline, markOffline, touchPresence, pushChatMessage } from '../services/push-notification.service';
 import { notifyDriverArrived } from '../services/notification.service';
 import { recordRiderActivity } from '../services/demand.service';
 import { z } from 'zod';
@@ -223,26 +223,25 @@ async function relayChatMessage(
 
   io.to(`${counterpartRole}:${counterpartId}`).emit('messageReceived', wirePayload);
 
-  // If recipient is offline (not connected to a socket), send a push notification
-  // so they still see the message on their lock screen / notification tray.
+  // Always mirror the message to a real phone notification. A live socket
+  // does NOT mean the recipient can see the app (backgrounded Android, iOS
+  // suspension), and notification-block FCM messages are not rendered while
+  // the app is in the foreground — so this cannot duplicate an in-app alert.
   try {
-    const recipientOnline = await isOnline(counterpartId, counterpartRole);
-    if (!recipientOnline) {
-      // Fetch sender's display name for the notification
-      const senderNameRes = await pool.query(
-        'SELECT full_name FROM users WHERE id = $1',
-        [self.id]
-      );
-      const senderName = senderNameRes.rows[0]?.full_name || 'Unknown';
-      await pushChatMessage(
-        counterpartId,
-        counterpartRole,
-        senderName,
-        body,
-        payload.tripId
-      );
-      console.log(`[SOCKET] 📲 Push notification sent to offline ${counterpartRole} ${counterpartId}`);
-    }
+    // Fetch sender's display name for the notification
+    const senderNameRes = await pool.query(
+      'SELECT full_name FROM users WHERE id = $1',
+      [self.id]
+    );
+    const senderName = senderNameRes.rows[0]?.full_name || 'Unknown';
+    await pushChatMessage(
+      counterpartId,
+      counterpartRole,
+      senderName,
+      body,
+      payload.tripId
+    );
+    console.log(`[SOCKET] 📲 Push notification sent to ${counterpartRole} ${counterpartId}`);
   } catch (pushErr: any) {
     // Push failure should never break chat delivery
     console.error(`[SOCKET] ⚠️ Push notification failed (non-fatal): ${pushErr.message}`);

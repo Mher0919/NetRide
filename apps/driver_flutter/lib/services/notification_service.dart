@@ -141,15 +141,6 @@ class NotificationService {
 
     await _initLocalNotifications();
 
-    try {
-      await Firebase.initializeApp();
-      _messaging = FirebaseMessaging.instance;
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    } catch (e) {
-      debugPrint('[NOTIF] Firebase unavailable (no google-services.json?): $e');
-      return;
-    }
-
     // Channels the backend may name in pushes. Every channel referenced by
     // the backend must exist or Android silently downgrades/drops the
     // notification. `ride_offer` is the actionable high-importance channel.
@@ -162,6 +153,7 @@ class NotificationService {
       'wallet': ('Wallet', false),
       'promo': ('Promotions', false),
       'referral': ('Referrals', false),
+      'special': ('Specials & rewards', true),
       'default': ('NetRide', false),
     };
     for (final entry in channels.entries) {
@@ -183,6 +175,15 @@ class NotificationService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
+
+    try {
+      await Firebase.initializeApp();
+      _messaging = FirebaseMessaging.instance;
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      debugPrint('[NOTIF] Firebase unavailable (no google-services.json?): $e');
+      return;
+    }
 
     // iOS must be asked explicitly or no prompt ever appears and FCM
     // token delivery stays silent.

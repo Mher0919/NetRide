@@ -61,6 +61,7 @@ const ALL_TYPES: NotificationType[] = [
   'referral_reward',
   'special_reward_ready',
   'special_settled',
+  'driver_connectivity',
 ];
 
 test('meta: covers every notification type exactly once', () => {

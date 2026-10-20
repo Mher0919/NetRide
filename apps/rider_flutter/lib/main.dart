@@ -55,12 +55,21 @@ Future<void> _initStripe() async {
 bool kInitialIsBlocked = false;
 String? kInitialBlockedReason;
 
+/// A tap that arrived before the navigator existed (cold start from a
+/// notification while the app was killed). Flushed after the first frame.
+NetRideNotification? _pendingNotificationTap;
+
 /// Notification taps arrive with a backend-assigned route
 /// ('/trip' | '/credits' | '/'). Navigate with the global navigator so
 /// this works from any screen, foreground or after a killed-process tap.
 void _routeFromNotification(NetRideNotification notification) {
   final nav = ApiService.navigatorKey.currentState;
-  if (nav == null) return;
+  if (nav == null) {
+    // getInitialMessage() can resolve before runApp() has built MaterialApp;
+    // defer instead of dropping the tap.
+    _pendingNotificationTap = notification;
+    return;
+  }
   // SPECIALS: the "your code is ready" push hops straight to the redemption
   // card with the one-time code carried in the push payload (delivered only
   // to this rider; never stored, spec §99).
@@ -82,6 +91,22 @@ void _routeFromNotification(NetRideNotification notification) {
     default:
       break;
   }
+}
+
+void _flushPendingNotificationTap([int attempt = 0]) {
+  final pending = _pendingNotificationTap;
+  if (pending == null) return;
+  if (ApiService.navigatorKey.currentState == null) {
+    if (attempt < 20) {
+      Future<void>.delayed(
+        const Duration(milliseconds: 100),
+        () => _flushPendingNotificationTap(attempt + 1),
+      );
+    }
+    return;
+  }
+  _pendingNotificationTap = null;
+  _routeFromNotification(pending);
 }
 
 /// Resolved at startup from the backend. The backend is the single source of
@@ -247,6 +272,9 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
     WidgetsBinding.instance.addObserver(this);
     AuthService.isAuthenticatedNotifier.addListener(_onAuthChanged);
     _initDeepLinks();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _flushPendingNotificationTap(),
+    );
   }
 
   @override
