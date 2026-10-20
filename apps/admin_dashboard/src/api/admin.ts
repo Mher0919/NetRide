@@ -621,3 +621,61 @@ export const searchGoogleBusinesses = async (params: { q: string; lat?: number; 
   const response = await api.get('/places/text-search', { params });
   return response.data as GoogleBusinessResponse;
 };
+
+export interface GoogleBusinessPhoto {
+  name: string;
+  width: number | null;
+  height: number | null;
+  url: string;
+  thumbUrl: string;
+  attribution: { displayName: string; uri: string | null } | null;
+}
+
+export interface GoogleBusinessReview {
+  authorName: string;
+  authorPhotoUrl: string | null;
+  authorUri: string | null;
+  rating: number;
+  relativeTime: string;
+  text: string;
+  publishTime: string | null;
+}
+
+export interface GoogleAddressComponent {
+  longText: string;
+  shortText: string;
+  types: string[];
+}
+
+/** Full Places (New) details used to autofill the sponsor business profile. */
+export interface GoogleBusinessDetails {
+  placeId: string;
+  name: string;
+  category: string | null;
+  types: string[];
+  description: string | null;
+  address: string | null;
+  shortAddress: string | null;
+  addressComponents: GoogleAddressComponent[];
+  latitude: number | null;
+  longitude: number | null;
+  rating: number | null;
+  reviewCount: number | null;
+  priceLevel: string | null;
+  priceRange: string | null;
+  businessStatus: string | null;
+  googleMapsUri: string | null;
+  openNow: boolean | null;
+  weekdayDescriptions: string[];
+  phone: string | null;
+  website: string | null;
+  photos: GoogleBusinessPhoto[];
+  reviews: GoogleBusinessReview[];
+  level: 'basic' | 'full';
+  attribution: string;
+}
+
+export const getGoogleBusinessDetails = async (placeId: string, level: 'basic' | 'full' = 'full') => {
+  const response = await api.get(`/places/business/${encodeURIComponent(placeId)}`, { params: { level } });
+  return response.data as { business: GoogleBusinessDetails };
+};

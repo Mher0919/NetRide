@@ -55,7 +55,7 @@ const Settings: React.FC = () => {
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {};
-      for (const key of ['business_description', 'manager_name', 'phone', 'email', 'other_contact_info', 'address', 'city', 'state', 'postal_code', 'country']) {
+      for (const key of ['manager_name', 'phone', 'email', 'other_contact_info', 'address', 'city', 'state', 'postal_code', 'country']) {
         const v = settings?.[key];
         if (v !== undefined) payload[key] = v ?? null;
       }
@@ -108,7 +108,19 @@ const Settings: React.FC = () => {
             <TextField label="Business name" value={settings.businessName ?? ''} disabled fullWidth helperText="Contact NetRide to change your business name" />
           </Grid>
           <Grid size={12}>
-            <TextField label="Description" value={settings.business_description ?? ''} onChange={(e) => set('business_description', e.target.value)} fullWidth multiline minRows={2} />
+            {/* Rider-facing identity is owned by NetRide admin. The field is
+                read-only here AND the backend rejects any PATCH that tries to
+                change it (defence in depth — a disabled input is not a
+                security boundary). */}
+            <TextField
+              label="Description"
+              value={(settings.businessDescription as string | undefined) ?? ''}
+              disabled
+              fullWidth
+              multiline
+              minRows={2}
+              helperText="Managed by NetRide — contact support to change your description"
+            />
           </Grid>
           <Grid size={{ xs: 12, sm: 6 }}>
             <TextField label="Manager name" value={settings.manager_name ?? ''} onChange={(e) => set('manager_name', e.target.value)} fullWidth autoComplete="name" />

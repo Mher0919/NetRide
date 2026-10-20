@@ -176,6 +176,13 @@ class LocationsService {
         const tripId = await redis_1.redis.get(`driver:${driverId}:active_trip`);
         if (!tripId)
             return;
+        // Keep the active-trip lock alive for the WHOLE journey: the key TTL is
+        // shorter than the maximum ride duration, and without renewal a long (or
+        // disrupted) trip could make the driver dispatchable again while still
+        // assigned. Fire-and-forget — a renewal failure must never drop the fix.
+        redis_1.redis
+            .expire(`driver:${driverId}:active_trip`, redis_1.DRIVER_ACTIVE_TRIP_TTL_S)
+            .catch(() => undefined);
         // Route-data validation: reject garbage coordinates before they ever
         // reach the trajectory (a bad point would corrupt the polyline, the
         // final snapshot and the admin map). NaN/Infinity or out-of-range

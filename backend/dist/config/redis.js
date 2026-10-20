@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DRIVER_H3_INDEX_PREFIX = exports.DRIVER_H3_CELL_PREFIX = exports.DRIVER_ONLINE_PREFIX = exports.DRIVER_LOCATION_RECORD_PREFIX = exports.DRIVER_HEARTBEAT_PREFIX = exports.DRIVER_LOCATIONS_KEY = exports.redis = void 0;
+exports.DRIVER_H3_INDEX_PREFIX = exports.DRIVER_H3_CELL_PREFIX = exports.DRIVER_ACTIVE_TRIP_TTL_S = exports.DRIVER_ONLINE_PREFIX = exports.DRIVER_LOCATION_RECORD_PREFIX = exports.DRIVER_HEARTBEAT_PREFIX = exports.DRIVER_LOCATIONS_KEY = exports.redis = void 0;
 // backend/src/config/redis.ts
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
@@ -46,6 +46,10 @@ exports.DRIVER_LOCATION_RECORD_PREFIX = 'driver:loc:';
 // lease-online but location-stale (explicit `stale_location` eligibility
 // state) without being treated as absent.
 exports.DRIVER_ONLINE_PREFIX = 'driver:online:';
+// How long the "driver is on a trip" lock lives. RENEWED on every accepted
+// location fix while the key exists, so a legitimately long trip never
+// expires it; it only acts as a safety TTL for a driver whose app vanished.
+exports.DRIVER_ACTIVE_TRIP_TTL_S = 4 * 60 * 60;
 // H3 hexagonal cell index for scalable rider↔driver matching. Each online
 // driver is a member of the set for their current H3 cell; `findNearbyDrivers`
 // queries only the small ring of cells around the pickup (gridDisk) instead of

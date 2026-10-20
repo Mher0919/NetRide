@@ -543,6 +543,21 @@ function setupSocketGateway(io) {
                 const currentTrip = await getCachedCurrentRide(id, types_1.UserRole.DRIVER);
                 if (currentTrip && currentTrip.status !== types_1.TripStatus.COMPLETED && currentTrip.status !== types_1.TripStatus.CANCELLED) {
                     console.log(`[SOCKET] 📡 Broadcasting driver loc to rider:${currentTrip.rider_id}`);
+                    // Link recovered: clear the driver-offline watchdog flag and tell
+                    // the rider the connection is back (set by sweepDriverConnectivity).
+                    try {
+                        const offlineKey = `ride:${currentTrip.id}:driver_offline`;
+                        if (await redis_1.redis.get(offlineKey)) {
+                            await redis_1.redis.del(offlineKey);
+                            io.to(`rider:${currentTrip.rider_id}`).emit('driverConnectivity', {
+                                tripId: currentTrip.id,
+                                connected: true,
+                            });
+                        }
+                    }
+                    catch {
+                        // Connectivity signalling is best-effort.
+                    }
                     io.to(`rider:${currentTrip.rider_id}`).emit('driverLocationUpdate', {
                         driverId: id,
                         ...validated.data
@@ -1085,6 +1100,23 @@ function setupSocketGateway(io) {
                     if (err?.code === 'PAYMENT_METHOD_REQUIRED') {
                         socket.emit('paymentMethodRequired', { message: err.message });
                     }
+                    if (err?.code === 'ACTIVE_RIDE_EXISTS') {
+                        // Single-active-ride guard: hand back the existing trip id so
+                        // the app re-hydrates it instead of double-booking.
+                        const existing = err?.tripId
+                            ? await ride_service_1.RideService.getCurrentRide(id, types_1.UserRole.RIDER).catch(() => null)
+                            : null;
+                        if (existing) {
+                            setCachedCurrentRide(id, types_1.UserRole.RIDER, existing);
+                            socket.emit('tripUpdate', existing);
+                        }
+                        socket.emit('error', {
+                            message: err.message,
+                            code: err.code,
+                            tripId: err.tripId ?? existing?.id ?? null,
+                        });
+                        return;
+                    }
                     socket.emit('error', err.message);
                 }
             });
@@ -1188,14 +1220,26 @@ function setupSocketGateway(io) {
                 // Cancel ride if rider doesn't reconnect within 3 minutes.
                 // This covers: app force-closed, OS killed background process.
                 // Brief app switches reconnect within seconds and clear the timer.
+                // FUTURE scheduled rides are exempt: the rider is not waiting for a
+                // pickup, and the stale-ride watchdog explicitly treats them as
+                // non-stale (this timer previously cancelled them anyway).
                 const timer = setTimeout(async () => {
                     riderAutoCancelTimers.delete(id);
                     try {
                         const currentTrip = await ride_service_1.RideService.getCurrentRide(id, types_1.UserRole.RIDER);
-                        if (currentTrip && currentTrip.status === types_1.TripStatus.REQUESTED) {
-                            console.log(`[SOCKET] 🧹 Auto-cancelling stale request for disconnected rider ${id}: ${currentTrip.id}`);
-                            await ride_service_1.RideService.cancelTrip(currentTrip.id, id);
+                        if (!currentTrip || currentTrip.status !== types_1.TripStatus.REQUESTED)
+                            return;
+                        const scheduledFor = currentTrip.scheduled_at
+                            ? new Date(currentTrip.scheduled_at)
+                            : null;
+                        if (currentTrip.is_scheduled === true &&
+                            scheduledFor != null &&
+                            scheduledFor.getTime() > Date.now()) {
+                            console.log(`[SOCKET] ⏭️ Skipping auto-cancel for future scheduled ride ${currentTrip.id}`);
+                            return;
                         }
+                        console.log(`[SOCKET] 🧹 Auto-cancelling stale request for disconnected rider ${id}: ${currentTrip.id}`);
+                        await ride_service_1.RideService.cancelTrip(currentTrip.id, id);
                     }
                     catch (err) { }
                 }, 180000); // 3 minutes

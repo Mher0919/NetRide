@@ -17,6 +17,10 @@ import { SpecialRedemptionService } from './special-redemption.service';
 import { PaymentsService } from '../payments/payments.service';
 import { stripeMode, isStripeConfigured } from '../payments/stripe.client';
 import {
+  buildSponsorPortalSettingsPatch,
+  SponsorPortalFieldForbiddenError,
+} from './sponsor-portal.settings';
+import {
   sponsorWithdrawalState,
   listSponsorWithdrawals,
   requestSponsorWithdrawal,
@@ -202,21 +206,24 @@ export class SponsorPortalController {
     }
   }
 
-  /** Settings edits allowed to the sponsor: contact + description ONLY (no financial fields, §52). */
+  /**
+   * Settings edits allowed to the sponsor: contact + address ONLY.
+   *
+   * The rider-facing identity (business name, type and the business
+   * DESCRIPTION shown on SPECIALS) is owned by NetRide admin and rejected
+   * here with 403 — disabling the portal input alone is not a security
+   * boundary. See sponsor-portal.settings.ts for the policy.
+   */
   static async updateSettings(req: SponsorRequest, res: Response) {
     try {
-      const allowed = [
-        'business_description', 'manager_name', 'phone', 'email',
-        'other_contact_info', 'address', 'city', 'state', 'postal_code', 'country',
-      ];
-      const patch: Record<string, unknown> = {};
-      for (const key of allowed) {
-        if (req.body[key] !== undefined) patch[key] = req.body[key];
-      }
+      const patch = buildSponsorPortalSettingsPatch(req.body);
       const sponsor = await SponsorService.update(req.sponsor!.id, patch);
       if (!sponsor) return res.status(404).json({ error: 'Sponsor not found' });
       res.json({ sponsor: { businessName: sponsor.business_name, email: sponsor.email, phone: sponsor.phone } });
     } catch (err: any) {
+      if (err instanceof SponsorPortalFieldForbiddenError) {
+        return res.status(403).json({ error: err.message, code: err.code, field: err.field });
+      }
       res.status(400).json({ error: err.message });
     }
   }

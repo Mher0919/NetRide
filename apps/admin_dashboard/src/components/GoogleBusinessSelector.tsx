@@ -1,13 +1,16 @@
 import React from 'react';
 import {
   Alert,
+  Avatar,
   Box,
   Button,
   ButtonBase,
   Chip,
   CircularProgress,
   Divider,
+  Link,
   Paper,
+  Rating,
   Skeleton,
   Stack,
   TextField,
@@ -18,9 +21,12 @@ import SearchIcon from '@mui/icons-material/Search';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import PlaceIcon from '@mui/icons-material/Place';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import {
+  getGoogleBusinessDetails,
   getNearbyGoogleBusinesses,
   searchGoogleBusinesses,
+  type GoogleBusinessDetails,
   type GoogleBusinessSuggestion,
 } from '../api/admin';
 import { resolveApiUrl } from '../api';
@@ -30,6 +36,7 @@ export interface GoogleBusinessSelection {
   name: string;
   category: string | null;
   address: string | null;
+  shortAddress?: string | null;
   latitude: number | null;
   longitude: number | null;
   photoUrl: string | null;
@@ -39,6 +46,9 @@ export interface GoogleBusinessSelection {
   selectionToken: string;
   /** True when hydrated from an existing sponsor (no fresh token). */
   fromExisting?: boolean;
+  /** Full Places details loaded after the business was selected. */
+  details?: GoogleBusinessDetails | null;
+  detailsLoaded?: boolean;
 }
 
 interface Props {
@@ -90,6 +100,30 @@ const suggestionFromSponsor = (sponsor: Record<string, unknown>): GoogleBusiness
 
 export { suggestionFromSponsor };
 
+/** Fold the full Places response into the selection used by the form. */
+function withGoogleDetails(
+  base: GoogleBusinessSelection,
+  details: GoogleBusinessDetails,
+): GoogleBusinessSelection {
+  return {
+    ...base,
+    name: details.name || base.name,
+    category: details.category ?? base.category,
+    address: details.address ?? base.address,
+    shortAddress: details.shortAddress ?? base.shortAddress ?? null,
+    latitude: details.latitude ?? base.latitude,
+    longitude: details.longitude ?? base.longitude,
+    photoUrl: details.photos[0]?.thumbUrl ?? details.photos[0]?.url ?? base.photoUrl,
+    rating: details.rating ?? base.rating,
+    reviewCount: details.reviewCount ?? base.reviewCount,
+    details,
+    detailsLoaded: true,
+  };
+}
+
+const errorMessage = (err: unknown, fallback: string) =>
+  (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? fallback;
+
 const BusinessThumb: React.FC<{ photoUrl: string | null; size: number }> = ({ photoUrl, size }) => {
   const url = resolveApiUrl(photoUrl);
   return (
@@ -134,7 +168,16 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, locationText = '', 
   const [error, setError] = React.useState<string | null>(null);
   const [manualMode, setManualMode] = React.useState(false);
   const [mismatchDismissed, setMismatchDismissed] = React.useState(false);
+  const [detailsLoading, setDetailsLoading] = React.useState(false);
+  const [detailsError, setDetailsError] = React.useState<string | null>(null);
+  const [connectingPlaceId, setConnectingPlaceId] = React.useState<string | null>(null);
   const lastNearbyKey = React.useRef<string>('');
+  const detailsLoadedFor = React.useRef('');
+  const detailsSeq = React.useRef(0);
+  const onChangeRef = React.useRef(onChange);
+  React.useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   const hasLocation =
     location.latitude != null &&
@@ -241,20 +284,72 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, locationText = '', 
     );
   }, [value, hasLocation, location.latitude, location.longitude]);
 
+  /**
+   * Load the full Places record (hours, phone, website, photos and reviews)
+   * immediately after a business is connected. The form receives the enriched
+   * selection so its fields can be autofilled from Google.
+   *
+   * On failure the basic suggestion is still selected — the connection stays
+   * valid and the admin can retry the optional details.
+   */
+  const loadDetails = React.useCallback(async (base: GoogleBusinessSelection) => {
+    const seq = ++detailsSeq.current;
+    setDetailsLoading(true);
+    setDetailsError(null);
+    try {
+      const res = await getGoogleBusinessDetails(base.placeId, 'full');
+      if (seq !== detailsSeq.current) return;
+      detailsLoadedFor.current = base.placeId;
+      onChangeRef.current(withGoogleDetails(base, res.business));
+    } catch (err) {
+      if (seq !== detailsSeq.current) return;
+      detailsLoadedFor.current = base.placeId;
+      setDetailsError(
+        errorMessage(
+          err,
+          'Connected to Google, but ratings, photos and reviews could not be loaded.',
+        ),
+      );
+      onChangeRef.current(base);
+    } finally {
+      if (seq === detailsSeq.current) setDetailsLoading(false);
+    }
+  }, []);
+
+  // Hydrate an existing connection (edit dialog) so reviews/photos are shown
+  // without marking the Google association as changed.
+  React.useEffect(() => {
+    const placeId = value?.placeId;
+    if (!placeId || value?.detailsLoaded) return;
+    if (detailsLoadedFor.current === placeId) return;
+    detailsLoadedFor.current = placeId;
+    void loadDetails(value!);
+  }, [value, loadDetails]);
+
   const select = (business: GoogleBusinessSuggestion) => {
-    onChange({
+    if (disabled || connectingPlaceId) return;
+    const base: GoogleBusinessSelection = {
       placeId: business.placeId,
       name: business.name,
       category: business.category,
       address: business.address,
+      shortAddress: business.shortAddress,
       latitude: business.latitude,
       longitude: business.longitude,
       photoUrl: business.photoUrl,
       rating: business.rating,
       reviewCount: business.reviewCount,
       selectionToken: business.selectionToken,
-    });
+    };
     setMismatchDismissed(false);
+    setConnectingPlaceId(business.placeId);
+    void loadDetails(base).finally(() => setConnectingPlaceId(null));
+  };
+
+  const retryDetails = () => {
+    if (!value) return;
+    detailsLoadedFor.current = '';
+    void loadDetails(value);
   };
 
   const changeBusiness = () => {
@@ -263,12 +358,19 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, locationText = '', 
     setQuery('');
     setDebouncedQuery('');
     setMismatchDismissed(false);
+    setDetailsError(null);
+    detailsLoadedFor.current = '';
+    detailsSeq.current += 1;
     lastNearbyKey.current = '';
   };
 
   const results = debouncedQuery.length >= 2 ? searchResults ?? [] : nearby;
   const showingSearch = debouncedQuery.length >= 2;
   const loadingResults = showingSearch ? searching : loading;
+  const details = value?.details ?? null;
+  const googleMapsUrl =
+    details?.googleMapsUri ??
+    (value?.placeId ? `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(value.placeId)}` : null);
 
   return (
     <Box aria-label="Google business association">
@@ -334,27 +436,219 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, locationText = '', 
               {value.name}
             </Typography>
             {(value.rating != null || value.reviewCount != null) && (
-              <Typography variant="body2" sx={{ color: '#5F6B62', mt: 0.25 }}>
-                {value.rating != null ? `★ ${value.rating.toFixed(1)}` : ''}
-                {value.rating != null && value.reviewCount != null ? ' · ' : ''}
-                {fmtReviews(value.reviewCount) ? `${fmtReviews(value.reviewCount)} reviews` : ''}
-              </Typography>
+              <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                {value.rating != null && (
+                  <Rating
+                    value={value.rating}
+                    precision={0.1}
+                    readOnly
+                    size="small"
+                    sx={{ color: '#E8A33D' }}
+                    aria-label={`Google rating ${value.rating.toFixed(1)} out of 5`}
+                  />
+                )}
+                {value.rating != null && (
+                  <Typography variant="body2" sx={{ color: '#5F6B62', fontWeight: 700 }}>
+                    {value.rating.toFixed(1)}
+                  </Typography>
+                )}
+                {value.reviewCount != null && (
+                  <Typography variant="body2" sx={{ color: '#5F6B62' }}>
+                    · {fmtReviews(value.reviewCount)} reviews
+                  </Typography>
+                )}
+              </Stack>
             )}
-            {value.category && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                {value.category}
-              </Typography>
-            )}
+            <Stack direction="row" spacing={0.75} sx={{ mt: 0.75, flexWrap: 'wrap', gap: 0.75 }}>
+              {value.category && (
+                <Chip size="small" label={value.category} sx={{ fontWeight: 700, fontSize: 10 }} />
+              )}
+              {details?.priceLevel && (
+                <Chip
+                  size="small"
+                  label={`Price ${details.priceLevel}`}
+                  sx={{ bgcolor: '#EDEDFF', color: '#4F46E5', fontWeight: 700, fontSize: 10 }}
+                />
+              )}
+              {details?.priceRange && (
+                <Chip
+                  size="small"
+                  label={details.priceRange}
+                  sx={{ bgcolor: '#EDEDFF', color: '#4F46E5', fontWeight: 700, fontSize: 10 }}
+                />
+              )}
+              {details?.openNow != null && (
+                <Chip
+                  size="small"
+                  label={details.openNow ? 'Open now' : 'Closed now'}
+                  sx={{
+                    bgcolor: details.openNow ? '#E5F0EB' : '#EEEEEE',
+                    color: details.openNow ? '#2E7D32' : '#666',
+                    fontWeight: 700,
+                    fontSize: 10,
+                  }}
+                />
+              )}
+              {details?.businessStatus === 'CLOSED_PERMANENTLY' && (
+                <Chip size="small" label="Permanently closed" sx={{ bgcolor: '#FCE9E9', color: '#C65A5A', fontWeight: 700, fontSize: 10 }} />
+              )}
+            </Stack>
             {value.address && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
                 {value.address}
               </Typography>
             )}
-            <Stack direction="row" spacing={0.5} sx={{ mt: 1, alignItems: 'center' }}>
+            {(details?.phone || details?.website) && (
+              <Stack direction="row" spacing={1.5} sx={{ mt: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
+                {details?.phone && (
+                  <Typography variant="caption" color="text.secondary">{details.phone}</Typography>
+                )}
+                {details?.website && (
+                  <Link
+                    href={details.website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    underline="hover"
+                    variant="caption"
+                    sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}
+                  >
+                    Website <OpenInNewIcon sx={{ fontSize: 12 }} />
+                  </Link>
+                )}
+              </Stack>
+            )}
+            {details?.description && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontSize: 13 }}>
+                {details.description}
+              </Typography>
+            )}
+
+            {detailsLoading && !value.detailsLoaded && (
+              <Stack direction="row" spacing={1} sx={{ mt: 1.25, alignItems: 'center' }}>
+                <CircularProgress size={14} />
+                <Typography variant="caption" color="text.secondary">
+                  Loading ratings, photos and reviews from Google…
+                </Typography>
+              </Stack>
+            )}
+
+            {detailsError && (
+              <Alert
+                severity="warning"
+                sx={{ mt: 1.25, borderRadius: 2 }}
+                action={
+                  <Button color="inherit" size="small" onClick={retryDetails} disabled={disabled || detailsLoading}>
+                    Retry
+                  </Button>
+                }
+              >
+                {detailsError}
+              </Alert>
+            )}
+
+            {details && details.photos.length > 0 && (
+              <Box sx={{ mt: 1.5 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary' }}>
+                  Photos from Google
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
+                  {details.photos.map((photo) => (
+                    <Tooltip
+                      key={photo.name}
+                      title={photo.attribution?.displayName ? `Photo by ${photo.attribution.displayName}` : 'Business photo'}
+                    >
+                      <Box
+                        component="img"
+                        src={resolveApiUrl(photo.thumbUrl || photo.url) ?? undefined}
+                        alt={photo.attribution?.displayName ? `Business photo by ${photo.attribution.displayName}` : 'Business photo'}
+                        sx={{
+                          width: 88,
+                          height: 66,
+                          objectFit: 'cover',
+                          borderRadius: 2,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                        }}
+                      />
+                    </Tooltip>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
+            {details && details.reviews.length > 0 && (
+              <Box sx={{ mt: 1.5 }}>
+                <Stack direction="row" sx={{ alignItems: 'baseline', justifyContent: 'space-between', gap: 1 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary' }}>
+                    Google reviews
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">Powered by Google</Typography>
+                </Stack>
+                <Stack spacing={1} sx={{ mt: 0.75 }}>
+                  {details.reviews.map((review, index) => (
+                    <Paper
+                      key={`${review.authorName}-${index}`}
+                      variant="outlined"
+                      sx={{ p: 1.25, borderRadius: 2 }}
+                    >
+                      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', gap: 0.75 }}>
+                        <Avatar
+                          src={review.authorPhotoUrl ?? undefined}
+                          sx={{ width: 24, height: 24, fontSize: 11, bgcolor: '#E5F0EB', color: '#2E7D32' }}
+                        >
+                          {review.authorName?.[0]?.toUpperCase() ?? 'G'}
+                        </Avatar>
+                        <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                          {review.authorName}
+                        </Typography>
+                        {review.relativeTime && (
+                          <Typography variant="caption" color="text.secondary">
+                            · {review.relativeTime}
+                          </Typography>
+                        )}
+                        <Rating
+                          value={review.rating}
+                          readOnly
+                          size="small"
+                          sx={{ ml: 'auto', color: '#E8A33D', fontSize: 14 }}
+                        />
+                      </Stack>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          mt: 0.5,
+                          fontSize: 13,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 4,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {review.text}
+                      </Typography>
+                    </Paper>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
+            <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center', flexWrap: 'wrap' }}>
               <CheckCircleIcon sx={{ fontSize: 15, color: '#2E7D32' }} />
               <Typography variant="caption" sx={{ color: '#2E7D32', fontWeight: 700 }}>
                 Connected to Google Maps
               </Typography>
+              {googleMapsUrl && (
+                <Link
+                  href={googleMapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  underline="hover"
+                  variant="caption"
+                  sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}
+                >
+                  View on Google Maps <OpenInNewIcon sx={{ fontSize: 12 }} />
+                </Link>
+              )}
             </Stack>
             {!value.fromExisting && value.selectionToken && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
@@ -438,8 +732,8 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, locationText = '', 
                 {results.map((b) => (
                   <Box role="listitem" key={b.placeId}>
                     <ButtonBase
-                      onClick={() => !disabled && select(b)}
-                      disabled={disabled}
+                      onClick={() => select(b)}
+                      disabled={disabled || !!connectingPlaceId}
                       sx={{
                         width: '100%',
                         textAlign: 'left',
@@ -485,6 +779,10 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, locationText = '', 
                           sx={{
                             px: 1.5,
                             py: 0.5,
+                            minWidth: 64,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
                             border: '1px solid',
                             borderColor: 'primary.main',
                             borderRadius: 2,
@@ -494,7 +792,7 @@ const GoogleBusinessSelector: React.FC<Props> = ({ location, locationText = '', 
                             flexShrink: 0,
                           }}
                         >
-                          Select
+                          {connectingPlaceId === b.placeId ? <CircularProgress size={14} /> : 'Select'}
                         </Box>
                       </Stack>
                     </ButtonBase>

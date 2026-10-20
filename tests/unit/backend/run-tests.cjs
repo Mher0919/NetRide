@@ -59,6 +59,7 @@ const SUITES = [
   './modules/partner/partner-auth.unit.test.ts',
   './modules/sponsor/sponsor-discount.unit.test.ts',
   './modules/sponsor/sponsor-auth.unit.test.ts',
+  './modules/sponsor/sponsor-portal-settings.unit.test.ts',
   './modules/sponsor/forgot-password.unit.test.ts',
   './modules/google-places/google-places.unit.test.ts',
   './modules/sponsor/google-association.unit.test.ts',

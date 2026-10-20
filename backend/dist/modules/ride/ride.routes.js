@@ -15,6 +15,8 @@ router.post('/request', auth_middleware_1.authMiddleware, auth_middleware_1.ride
 router.post('/estimate', auth_middleware_1.authMiddleware, auth_middleware_1.riderMiddleware, ride_controller_1.RideController.estimateRide);
 router.post('/accept', auth_middleware_1.authMiddleware, auth_middleware_1.driverMiddleware, ride_controller_1.RideController.acceptTrip);
 router.post('/decline', auth_middleware_1.authMiddleware, auth_middleware_1.driverMiddleware, ride_controller_1.RideController.declineTrip);
+// REST cancellation fallback for drivers whose socket died mid-trip.
+router.post('/driver-cancel', auth_middleware_1.authMiddleware, auth_middleware_1.driverMiddleware, ride_controller_1.RideController.driverCancel);
 router.post('/rate', auth_middleware_1.authMiddleware, ride_controller_1.RideController.rateRide);
 router.post('/cancel', auth_middleware_1.authMiddleware, auth_middleware_1.riderMiddleware, ride_controller_1.RideController.cancelCurrentRide);
 // Post-ride party reporting (042) — both parties may report independently.

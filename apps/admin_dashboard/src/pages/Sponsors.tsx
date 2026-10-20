@@ -135,6 +135,120 @@ const validateProfileFields = (form: typeof emptyForm): string | null => {
   return null;
 };
 
+type SponsorForm = typeof emptyForm;
+
+const GOOGLE_BUSINESS_TYPE_RULES: Array<{ type: string; pattern: RegExp }> = [
+  { type: 'CAFE', pattern: /(cafe|coffee|bakery|tea[_ ]house|dessert|ice[_ ]cream)/i },
+  { type: 'BAR', pattern: /(bar|pub|night[_ ]club|brewery|wine)/i },
+  { type: 'MEDICAL', pattern: /(doctor|dentist|hospital|pharmacy|medical|health|clinic|physiotherapist|veterinary)/i },
+  { type: 'AUTO', pattern: /(car[_ ]|car |auto|gas[_ ]station|parking|repair|dealer|vehicle)/i },
+  { type: 'RETAIL', pattern: /(store|retail|shopping|market|supermarket|clothing|shoe|jewelry|electronics|gift|book[_ ]store|florist|furniture)/i },
+  { type: 'SERVICES', pattern: /(bank|finance|insurance|lawyer|real[_ ]estate|travel[_ ]agency|laundry|salon|beauty|spa|gym|service|professional)/i },
+  { type: 'RESTAURANT', pattern: /(restaurant|pizza|burger|meal|food|sushi|mexican|italian|chinese|japanese|indian|thai|breakfast|brunch)/i },
+];
+
+/** Map a Google category / place type onto the sponsor business-type allowlist. */
+const inferBusinessType = (selection: GoogleBusinessSelection): string | null => {
+  const haystack = [selection.category, ...(selection.details?.types ?? [])]
+    .filter(Boolean)
+    .join(' ');
+  return GOOGLE_BUSINESS_TYPE_RULES.find((rule) => rule.pattern.test(haystack))?.type ?? null;
+};
+
+const addressComponent = (
+  selection: GoogleBusinessSelection,
+  types: string[],
+): string => {
+  const match = (selection.details?.addressComponents ?? []).find((component) =>
+    component.types.some((type) => types.includes(type)),
+  );
+  return match ? match.longText || match.shortText : '';
+};
+
+const priceLevelFromGoogle = (value: string | null | undefined): SponsorForm['priceLevel'] => {
+  const level = (value ?? '').trim();
+  return level === '$' || level === '$$' || level === '$$$' || level === '$$$$' ? level : '';
+};
+
+/**
+ * Apply a connected Google business to the sponsor form. The first connection
+ * (or a new selection) replaces every Google-owned field; when hydrating an
+ * existing sponsor only empty fields are filled so administrator edits are
+ * never silently overwritten.
+ */
+const applyGoogleSelectionToForm = (
+  selection: GoogleBusinessSelection,
+  setForm: React.Dispatch<React.SetStateAction<SponsorForm>>,
+  onlyEmpty: boolean,
+) => {
+  const city = addressComponent(selection, ['locality', 'postal_town', 'administrative_area_level_2']);
+  const state = addressComponent(selection, ['administrative_area_level_1']);
+  const postalCode = addressComponent(selection, ['postal_code']);
+  const country = addressComponent(selection, ['country']);
+  const businessType = inferBusinessType(selection);
+  const description = selection.details?.description ?? null;
+  const phone = selection.details?.phone ?? null;
+  const rating = selection.rating ?? selection.details?.rating ?? null;
+  const reviewCount = selection.reviewCount ?? selection.details?.reviewCount ?? null;
+  const priceLevel = priceLevelFromGoogle(selection.details?.priceLevel);
+  const detailsLoaded = selection.detailsLoaded === true;
+
+  setForm((prev) => {
+    const next = { ...prev };
+    if (onlyEmpty) {
+      if (!next.businessName) next.businessName = selection.name;
+      if (!next.businessDescription && description) next.businessDescription = description;
+      if (!next.phone && phone) next.phone = phone;
+      if (!next.address && selection.address) next.address = selection.address;
+      if (!next.city && city) next.city = city;
+      if (!next.state && state) next.state = state;
+      if (!next.postalCode && postalCode) next.postalCode = postalCode;
+      if (!next.country && country) next.country = country;
+      if (next.latitude === '' && selection.latitude != null) next.latitude = String(selection.latitude);
+      if (next.longitude === '' && selection.longitude != null) next.longitude = String(selection.longitude);
+      if (next.adminRating === '' && rating != null) next.adminRating = String(Math.round(rating * 10) / 10);
+      if (next.adminRatingCount === '' && reviewCount != null) next.adminRatingCount = String(reviewCount);
+      if (!next.priceLevel && priceLevel) next.priceLevel = priceLevel;
+      return next;
+    }
+
+    next.businessName = selection.name || next.businessName;
+    if (businessType) next.businessType = businessType;
+    if (description) next.businessDescription = description;
+
+    if (detailsLoaded) {
+      // Google answered: every field it owns now reflects this business —
+      // including nulls (the administrator fills what Google doesn't have).
+      next.phone = phone ?? '';
+      next.address = selection.address ?? '';
+      next.city = city;
+      next.state = state;
+      next.postalCode = postalCode;
+      next.country = country;
+      next.latitude = selection.latitude != null ? String(selection.latitude) : '';
+      next.longitude = selection.longitude != null ? String(selection.longitude) : '';
+      next.adminRating = rating != null ? String(Math.round(rating * 10) / 10) : '';
+      next.adminRatingCount = reviewCount != null ? String(reviewCount) : '';
+      next.priceLevel = priceLevel;
+    } else {
+      // Details failed to load: keep the administrator's existing values and
+      // only fill what the basic suggestion did provide.
+      if (phone) next.phone = phone;
+      if (selection.address) next.address = selection.address;
+      if (city) next.city = city;
+      if (state) next.state = state;
+      if (postalCode) next.postalCode = postalCode;
+      if (country) next.country = country;
+      if (selection.latitude != null) next.latitude = String(selection.latitude);
+      if (selection.longitude != null) next.longitude = String(selection.longitude);
+      if (rating != null) next.adminRating = String(Math.round(rating * 10) / 10);
+      if (reviewCount != null) next.adminRatingCount = String(reviewCount);
+      if (priceLevel) next.priceLevel = priceLevel;
+    }
+    return next;
+  });
+};
+
 interface SnackState {
   open: boolean;
   message: string;
@@ -281,6 +395,22 @@ const Sponsors: React.FC = () => {
     }
     setCreateLogo(null);
     setCreatePhotos([]);
+  };
+
+  const handleCreateGoogleChange = (selection: GoogleBusinessSelection | null) => {
+    setCreateGoogle(selection);
+    if (selection) applyGoogleSelectionToForm(selection, setForm, false);
+  };
+
+  const handleEditGoogleChange = (selection: GoogleBusinessSelection | null) => {
+    setEditGoogle(selection);
+    if (!selection) {
+      setEditGoogleDirty(true);
+      return;
+    }
+    const hydratingExisting = Boolean(selection.fromExisting);
+    if (!hydratingExisting) setEditGoogleDirty(true);
+    applyGoogleSelectionToForm(selection, setEditForm, hydratingExisting);
   };
 
   const handleCreate = async () => {
@@ -869,16 +999,25 @@ const Sponsors: React.FC = () => {
               address={[form.address, form.city, form.state, form.country].filter(Boolean).join(', ')}
             />
             {!createManual && (
-              <GoogleBusinessSelector
-                location={{
-                  latitude: form.latitude === '' ? null : Number(form.latitude),
-                  longitude: form.longitude === '' ? null : Number(form.longitude),
-                }}
-                locationText={[form.address, form.city, form.state, form.country].filter(Boolean).join(', ')}
-                value={createGoogle}
-                onChange={setCreateGoogle}
-                disabled={saving}
-              />
+              <>
+                <GoogleBusinessSelector
+                  location={{
+                    latitude: form.latitude === '' ? null : Number(form.latitude),
+                    longitude: form.longitude === '' ? null : Number(form.longitude),
+                  }}
+                  locationText={[form.address, form.city, form.state, form.country].filter(Boolean).join(', ')}
+                  value={createGoogle}
+                  onChange={handleCreateGoogleChange}
+                  disabled={saving}
+                />
+                {createGoogle && (
+                  <Alert severity="success" sx={{ borderRadius: 2 }}>
+                    Business details, location, rating, rating count and price level were autofilled
+                    from Google where available. Photos and reviews are shown above. Fill in anything
+                    Google did not provide.
+                  </Alert>
+                )}
+              </>
             )}
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Business profile</Typography>
@@ -893,6 +1032,8 @@ const Sponsors: React.FC = () => {
               value={form.adminRating === '' ? null : Number(form.adminRating)}
               onChange={(v) => setForm({ ...form, adminRating: v == null ? '' : String(v) })}
               disabled={saving}
+              label={createGoogle ? 'Rating (from Google)' : undefined}
+              helperText={createGoogle ? 'Autofilled from Google when available — adjust only if needed.' : undefined}
             />
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 6 }}>
@@ -902,7 +1043,7 @@ const Sponsors: React.FC = () => {
                   value={form.adminRatingCount}
                   onChange={(e) => setForm({ ...form, adminRatingCount: e.target.value })}
                   fullWidth
-                  helperText="How many ratings the value above summarizes."
+                  helperText={createGoogle ? 'Autofilled from Google when available.' : 'How many ratings the value above summarizes.'}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6 }}>
@@ -912,6 +1053,7 @@ const Sponsors: React.FC = () => {
                   value={form.priceLevel}
                   onChange={(e) => setForm({ ...form, priceLevel: e.target.value as typeof form.priceLevel })}
                   fullWidth
+                  helperText={createGoogle ? 'Autofilled from Google when available.' : undefined}
                   slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
                 >
                   {PRICE_LEVELS.map((p) => (
@@ -1121,7 +1263,7 @@ const Sponsors: React.FC = () => {
                       <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Business profile</Typography>
                       <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap', gap: 1 }}>
                         <Typography variant="body2">
-                          Rating (admin-entered):{' '}
+                          Rating:{' '}
                           <b>{sponsor.admin_rating != null ? `★ ${sponsor.admin_rating}` : '—'}</b>
                           {sponsor.admin_rating_count != null ? ` (${sponsor.admin_rating_count} ratings)` : ''}
                         </Typography>
@@ -1149,7 +1291,9 @@ const Sponsors: React.FC = () => {
                         </Stack>
                       )}
                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                        Administrator-entered values — not Google ratings.
+                        {sponsor.google_place_id
+                          ? 'Prefilled from Google when connected — editable by the administrator.'
+                          : 'Administrator-entered values.'}
                       </Typography>
                     </Paper>
 
@@ -1499,12 +1643,16 @@ const Sponsors: React.FC = () => {
               }}
               locationText={[editForm.address, editForm.city, editForm.state, editForm.country].filter(Boolean).join(', ')}
               value={editGoogle}
-              onChange={(v) => {
-                setEditGoogle(v);
-                setEditGoogleDirty(true);
-              }}
+              onChange={handleEditGoogleChange}
               disabled={editSaving}
             />
+            {editGoogle && (
+              <Alert severity="success" sx={{ borderRadius: 2 }}>
+                Business details, location, rating, rating count and price level were autofilled from
+                Google where available. Photos and reviews are shown above. Fill in anything Google
+                did not provide.
+              </Alert>
+            )}
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Business profile</Typography>
             <BusinessImageUpload
@@ -1518,6 +1666,8 @@ const Sponsors: React.FC = () => {
               value={editForm.adminRating === '' ? null : Number(editForm.adminRating)}
               onChange={(v) => setEditForm({ ...editForm, adminRating: v == null ? '' : String(v) })}
               disabled={editSaving}
+              label={editGoogle ? 'Rating (from Google)' : undefined}
+              helperText={editGoogle ? 'Autofilled from Google when available — adjust only if needed.' : undefined}
             />
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 6 }}>
@@ -1527,6 +1677,7 @@ const Sponsors: React.FC = () => {
                   value={editForm.adminRatingCount}
                   onChange={(e) => setEditForm({ ...editForm, adminRatingCount: e.target.value })}
                   fullWidth
+                  helperText={editGoogle ? 'Autofilled from Google when available.' : undefined}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6 }}>
@@ -1536,6 +1687,7 @@ const Sponsors: React.FC = () => {
                   value={editForm.priceLevel}
                   onChange={(e) => setEditForm({ ...editForm, priceLevel: e.target.value as typeof editForm.priceLevel })}
                   fullWidth
+                  helperText={editGoogle ? 'Autofilled from Google when available.' : undefined}
                   slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
                 >
                   {PRICE_LEVELS.map((p) => (

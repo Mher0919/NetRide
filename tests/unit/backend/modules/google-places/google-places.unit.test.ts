@@ -155,6 +155,18 @@ test('shapeDetails basic: identity + rating, no enterprise fields', () => {
     websiteUri: 'https://bluebottlecoffee.com',
     regularOpeningHours: { openNow: true, weekdayDescriptions: ['Monday: 7–5'] },
     reviews: [{ rating: 5, text: { text: 'Great coffee' }, authorAttribution: { displayName: 'A' } }],
+    types: ['coffee_shop', 'cafe'],
+    editorialSummary: { text: 'Small-batch coffee roaster.' },
+    addressComponents: [
+      { longText: 'Oakland', shortText: 'Oakland', types: ['locality'] },
+      { longText: 'California', shortText: 'CA', types: ['administrative_area_level_1'] },
+      { longText: '94607', shortText: '94607', types: ['postal_code'] },
+      { longText: 'United States', shortText: 'US', types: ['country'] },
+    ],
+    priceRange: {
+      startPrice: { currencyCode: 'USD', units: '10' },
+      endPrice: { currencyCode: 'USD', units: '20' },
+    },
   };
   const basic = shapeDetails(raw, 'basic');
   assert.equal(basic.placeId, PLACE_ID);
@@ -166,6 +178,10 @@ test('shapeDetails basic: identity + rating, no enterprise fields', () => {
   assert.equal(basic.photos.length, 1);
   assert.equal(basic.openNow, true);
   assert.equal(basic.attribution, 'Powered by Google');
+  assert.deepEqual(basic.types, ['coffee_shop', 'cafe']);
+  assert.equal(basic.description, null);
+  assert.equal(basic.priceRange, null);
+  assert.deepEqual(basic.addressComponents, []);
 
   const full = shapeDetails(raw, 'full');
   assert.equal(full.phone, '+1 510-555-0100');
@@ -174,6 +190,10 @@ test('shapeDetails basic: identity + rating, no enterprise fields', () => {
   assert.equal(full.reviews[0].authorName, 'A');
   assert.equal(full.reviews[0].text, 'Great coffee');
   assert.equal(full.level, 'full');
+  assert.equal(full.description, 'Small-batch coffee roaster.');
+  assert.equal(full.priceRange, '$10–$20');
+  assert.equal(full.addressComponents.find((c) => c.types.includes('locality'))?.longText, 'Oakland');
+  assert.equal(full.addressComponents.find((c) => c.types.includes('administrative_area_level_1'))?.shortText, 'CA');
 });
 
 test('shapeDetails: missing fields degrade gracefully, never throw', () => {

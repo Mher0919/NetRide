@@ -1,6 +1,32 @@
 import { Trip, Location } from '../../types';
 import { TerminalCancelGuard } from './ride-state.rules';
 export { TerminalCancelGuard, buildTerminalCancelGuardSql } from './ride-state.rules';
+/**
+ * A rider may only have ONE non-terminal ride at a time. This error is
+ * raised when a second request arrives while the first is still live —
+ * clients use `tripId` to re-hydrate the existing ride instead of creating
+ * a duplicate (a killed app that reopens before the first tripUpdate used
+ * to be able to double-book).
+ */
+export declare class ActiveRideExistsError extends Error {
+    readonly tripId: string;
+    readonly tripStatus: string;
+    readonly code = "ACTIVE_RIDE_EXISTS";
+    constructor(tripId: string, tripStatus: string);
+}
+/**
+ * Pure recipient resolution for ride-cancellation notifications. Every
+ * party is told EXCEPT the actor; system-driven cancels notify both (when a
+ * driver is assigned) with their own role key. Exported for unit tests.
+ */
+export declare function resolveCancelNotificationTargets(args: {
+    riderId: string;
+    driverId: string | null;
+    actorRole: 'rider' | 'driver' | 'system';
+}): Array<{
+    recipientId: string;
+    role: 'rider' | 'driver';
+}>;
 export declare class RideService {
     static rateRide(data: {
         ride_id: string;

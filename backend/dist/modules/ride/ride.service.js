@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RideService = exports.buildTerminalCancelGuardSql = void 0;
+exports.RideService = exports.ActiveRideExistsError = exports.buildTerminalCancelGuardSql = void 0;
+exports.resolveCancelNotificationTargets = resolveCancelNotificationTargets;
 // backend/src/modules/ride/ride.service.ts
 console.log('[SVC_INIT] ride.service.ts loaded at', new Date().toISOString());
 const ride_repository_1 = require("./ride.repository");
@@ -66,6 +67,37 @@ const report_reasons_1 = require("../reporting/report.reasons");
 const ride_state_rules_1 = require("./ride-state.rules");
 var ride_state_rules_2 = require("./ride-state.rules");
 Object.defineProperty(exports, "buildTerminalCancelGuardSql", { enumerable: true, get: function () { return ride_state_rules_2.buildTerminalCancelGuardSql; } });
+/**
+ * A rider may only have ONE non-terminal ride at a time. This error is
+ * raised when a second request arrives while the first is still live —
+ * clients use `tripId` to re-hydrate the existing ride instead of creating
+ * a duplicate (a killed app that reopens before the first tripUpdate used
+ * to be able to double-book).
+ */
+class ActiveRideExistsError extends Error {
+    constructor(tripId, tripStatus) {
+        super('You already have an active ride.');
+        this.tripId = tripId;
+        this.tripStatus = tripStatus;
+        this.code = 'ACTIVE_RIDE_EXISTS';
+    }
+}
+exports.ActiveRideExistsError = ActiveRideExistsError;
+/**
+ * Pure recipient resolution for ride-cancellation notifications. Every
+ * party is told EXCEPT the actor; system-driven cancels notify both (when a
+ * driver is assigned) with their own role key. Exported for unit tests.
+ */
+function resolveCancelNotificationTargets(args) {
+    const targets = [];
+    if (args.actorRole !== 'rider') {
+        targets.push({ recipientId: args.riderId, role: 'rider' });
+    }
+    if (args.actorRole !== 'driver' && args.driverId) {
+        targets.push({ recipientId: args.driverId, role: 'driver' });
+    }
+    return targets;
+}
 /** Display name of a platform user (used in notification copy). */
 async function fetchDisplayName(userId) {
     try {
@@ -172,10 +204,13 @@ class RideService {
         return (0, tracing_1.traceAsync)('RideService.requestRide', async () => {
             const traceId = (0, tracing_1.getCurrentTraceId)();
             console.log(`[RIDE] New request from rider ${riderId}${isScheduled ? ' [SCHEDULED]' : ''} [trace=${traceId}]. Pickup: ${pickup.lat}, ${pickup.lng}`);
-            // Booking gate: a saved payment card is required before any ride can
-            // be requested (server-authoritative — the client only redirects).
-            // Seeded test accounts keep the legacy wallet rail for the sandbox.
-            await payments_service_1.PaymentsService.assertRiderPaymentMethod(riderId);
+            // Booking gate: a saved payment card is required for any ride that
+            // still leaves an amount owed AFTER promo/credits/special discounts
+            // (server-authoritative — the client only redirects). The check runs
+            // below, once final_payment_cents is known, so a ride fully covered
+            // by ride credits needs no card. Seeded test accounts and legacy
+            // Stripe-unconfigured environments keep the wallet rail.
+            // (See the assertRiderPaymentMethod call after the discount block.)
             // Idempotency: if key provided, check for existing ride
             if (idempotencyKey) {
                 const existing = await database_1.pool.query(`SELECT * FROM rides WHERE idempotency_key = $1 AND rider_id = $2`, [idempotencyKey, riderId]);
@@ -205,6 +240,22 @@ class RideService {
             let tripId;
             try {
                 await client.query('BEGIN');
+                // Single-active-ride invariant. Locking the rider row serializes
+                // concurrent requests from the same account, so two devices (or a
+                // rapid retry using a NEW idempotency key) can never create two
+                // non-terminal rides. Future scheduled rides do not block an
+                // on-demand request.
+                await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [riderId]);
+                const activeRes = await client.query(`SELECT id, status FROM rides
+            WHERE rider_id = $1
+              AND status NOT IN ('COMPLETED', 'CANCELLED')
+              AND NOT (is_scheduled = TRUE AND scheduled_at > NOW())
+            ORDER BY created_at DESC
+            LIMIT 1`, [riderId]);
+                if (activeRes.rows.length > 0) {
+                    const active = activeRes.rows[0];
+                    throw new ActiveRideExistsError(active.id, active.status);
+                }
                 const res = await client.query(`INSERT INTO rides (
             rider_id, status, pickup_lat, pickup_lng, pickup_address,
             destination_lat, destination_lng, destination_address,
@@ -253,6 +304,15 @@ class RideService {
                         specialRedemptionId: rewards.specialRedemptionId,
                         specialTermsAccepted: rewards.specialTermsAccepted === true,
                     });
+                }
+                // Deferred booking gate: only a ride that still OWES something after
+                // every discount requires a saved card. A ride fully covered by ride
+                // credits (or a 100% promo/special) proceeds without one. Throwing
+                // here rolls back the whole request (402 PAYMENT_METHOD_REQUIRED).
+                const dueRes = await client.query(`SELECT final_payment_cents FROM rides WHERE id = $1`, [tripId]);
+                const dueCents = (0, financial_ledger_service_1.centsValue)(dueRes.rows[0]?.final_payment_cents);
+                if (dueCents > 0) {
+                    await payments_service_1.PaymentsService.assertRiderPaymentMethod(riderId);
                 }
                 await client.query('COMMIT');
             }
@@ -453,7 +513,7 @@ class RideService {
         ride_settlement_service_1.RideSettlementService.snapshotOnAccept(tripId, driverId)
             .catch((err) => console.error(`[RIDE] ⚠️ Fare breakdown snapshot failed: ${err.message}`));
         // Cache active trip for trajectory buffering
-        await redis_1.redis.set(`driver:${driverId}:active_trip`, tripId, 'EX', 14400); // 4h safety TTL
+        await redis_1.redis.set(`driver:${driverId}:active_trip`, tripId, 'EX', redis_1.DRIVER_ACTIVE_TRIP_TTL_S); // renewed by location fixes while the trip runs
         // Step 4: Parallel fan-out — record winner and cancel other offers
         await redis_1.redis.set(`dispatch:winners:${tripId}`, driverId, 'EX', 300);
         const dispatchedJson = await redis_1.redis.get(`match:queue:dispatched:${tripId}`);
@@ -1137,27 +1197,27 @@ class RideService {
             (0, io_handle_1.getIo)().to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
         }
         (0, io_handle_1.getIo)().to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
-        // Real phone notification carrying WHO cancelled and WHY. A null actor
-        // (system watchdog) still notifies the rider so they are not stranded
-        // wondering what happened to their pickup.
+        // Real phone notification carrying WHO cancelled and WHY. EVERY party
+        // is told except the actor — and each with their OWN role key. The
+        // previous version derived a single "opposite of the actor" recipient,
+        // which for system watchdogs addressed the rider with the DRIVER role
+        // key (no token → silently dropped) and a REQUIRED search timeout with
+        // no assigned driver notified nobody at all.
         const actorRole = cancelledBy === null
             ? 'system'
             : cancelledBy === trip.driver_id
                 ? 'driver'
                 : 'rider';
-        const notified = trip.driver_id
-            ? actorRole === 'driver'
-                ? trip.rider_id
-                : actorRole === 'rider'
-                    ? trip.driver_id
-                    : trip.rider_id
-            : null;
-        if (notified) {
-            const recipientRole = actorRole === 'driver' ? 'rider' : 'driver';
-            const cancellerRole = actorRole === 'driver' ? 'DRIVER' : 'RIDER';
-            // Push copy uses a human label (never the raw code); the code + free
-            // text ride along in `data` for the in-app dialog.
-            (0, notification_service_1.notifyRideCancelled)(notified, recipientRole, tripId, actorRole, reasonCode ? (0, report_reasons_1.cancellationReasonLabel)(cancellerRole, reasonCode) : undefined, reasonText ?? undefined).catch(() => undefined);
+        const cancellerRole = actorRole === 'driver' ? 'DRIVER' : 'RIDER';
+        const reasonLabel = reasonCode
+            ? (0, report_reasons_1.cancellationReasonLabel)(cancellerRole, reasonCode)
+            : undefined;
+        for (const target of resolveCancelNotificationTargets({
+            riderId: trip.rider_id,
+            driverId: trip.driver_id ?? null,
+            actorRole,
+        })) {
+            (0, notification_service_1.notifyRideCancelled)(target.recipientId, target.role, tripId, actorRole, reasonLabel, reasonText ?? undefined).catch(() => undefined);
         }
         return updatedTrip;
     }

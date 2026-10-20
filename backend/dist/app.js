@@ -721,11 +721,21 @@ async function runMigrations() {
         // verification_codes.purpose column this migration introduces.
         const hasOtpPurpose = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'verification_codes' AND column_name = 'purpose'");
         if (hasOtpPurpose.rowCount === 0) {
-            console.log('⚡ Applying OTP purpose binding schema (060)...');
+            console.log('🩹 Applying OTP purpose binding schema (060)...');
             const schemaPath = path_1.default.join(__dirname, '../migrations/060_otp_purpose.sql');
             const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
             await database_1.pool.query(schema);
             console.log('✅ OTP purpose binding schema (060) applied');
+        }
+        // Hideable wallet history entries (061). Guarded on the
+        // wallet_transactions.hidden_at column this migration introduces.
+        const hasWalletTxHidden = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'wallet_transactions' AND column_name = 'hidden_at'");
+        if (hasWalletTxHidden.rowCount === 0) {
+            console.log('🩹 Applying wallet transaction visibility schema (061)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/061_wallet_transactions_hidden.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('✅ Wallet transaction visibility schema (061) applied');
         }
         console.log('🚀 All migrations completed');
     }
@@ -828,13 +838,20 @@ function startServer() {
         // relaunching mid-stale-ride would re-attach to a ride that no longer
         // exists, and the admin dashboard would keep listing a ghost "active"
         // ride. Compliments the periodic watchdog in cleanupStaleRides.ts.
-        Promise.resolve().then(() => __importStar(require('./queue/jobs/cleanupStaleRides'))).then(({ sweepStaleActiveRides }) => {
+        Promise.resolve().then(() => __importStar(require('./queue/jobs/cleanupStaleRides'))).then(({ sweepStaleActiveRides, sweepDriverConnectivity }) => {
             sweepStaleActiveRides(io)
                 .then((n) => {
                 if (n > 0)
-                    console.log(`[BOOT] ✅ Reconciled ${n} stale rides left over from previous runtime`);
+                    console.log(`[BOOT] 🧹 Reconciled ${n} stale rides left over from previous runtime`);
             })
                 .catch((err) => console.error(`[BOOT] ⚠️ Stale ride reconciliation failed: ${err.message}`));
+            // Driver-connectivity watchdog: detects an accepted/in-progress ride
+            // whose driver's app stopped reporting and notifies the rider. Runs in
+            // the API process too (not only the cron worker) so single-process
+            // deployments keep the guarantee.
+            setInterval(() => {
+                sweepDriverConnectivity(io).catch((err) => console.error(`[CRON] Driver connectivity sweep failed: ${err.message}`));
+            }, 2 * 60 * 1000);
         });
         // Special redemption hygiene (Every 5 minutes): expire stale validation
         // codes, release the reserved budget (spec §28/§69), collect the remaining

@@ -9,6 +9,14 @@ export declare class RideController {
      * no-op success, and the per-driver exclusion guarantees the ride is
      * never re-offered to this driver.
      */
+    /**
+     * REST driver cancellation — the reliable fallback when the driver app's
+     * socket died mid-trip (the socket emit is the fast path; before this the
+     * app faked a local cancel after 12 s and could diverge from the server).
+     * Ownership + state rules are identical to the socket path because both
+     * call RideService.cancelTrip.
+     */
+    static driverCancel(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static declineTrip(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static rateRide(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static getHistory(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;

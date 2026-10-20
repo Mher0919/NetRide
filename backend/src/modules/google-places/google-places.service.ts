@@ -49,17 +49,27 @@ export interface GoogleBusinessReview {
   publishTime: string | null;
 }
 
+export interface GoogleAddressComponent {
+  longText: string;
+  shortText: string;
+  types: string[];
+}
+
 export interface GoogleBusiness {
   placeId: string;
   name: string;
   category: string | null;
+  types: string[];
+  description: string | null;
   address: string | null;
   shortAddress: string | null;
+  addressComponents: GoogleAddressComponent[];
   latitude: number | null;
   longitude: number | null;
   rating: number | null;
   reviewCount: number | null;
   priceLevel: string | null;
+  priceRange: string | null;
   businessStatus: string | null;
   googleMapsUri: string | null;
   openNow: boolean | null;
@@ -136,7 +146,7 @@ const BASIC_FIELD_MASK = [
   'priceLevel',
 ].join(',');
 
-const FULL_FIELD_MASK = `${BASIC_FIELD_MASK},internationalPhoneNumber,websiteUri,regularOpeningHours,reviews`;
+const FULL_FIELD_MASK = `${BASIC_FIELD_MASK},internationalPhoneNumber,websiteUri,regularOpeningHours,reviews,addressComponents,editorialSummary,priceRange`;
 
 const SUGGESTION_FIELD_MASK = [
   'places.id',
@@ -272,6 +282,55 @@ export function priceLevelLabel(raw: any): string | null {
   }
 }
 
+/**
+ * Google returns address components as long/short text pairs keyed by type.
+ * The admin autofill uses them to populate city / state / postal code /
+ * country without attempting to parse a formatted address string.
+ */
+export function shapeAddressComponents(raw: any): GoogleAddressComponent[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((component: any): GoogleAddressComponent | null => {
+      const types = Array.isArray(component?.types)
+        ? component.types.filter((t: unknown): t is string => typeof t === 'string')
+        : [];
+      const longText = typeof component?.longText === 'string' ? component.longText : '';
+      const shortText = typeof component?.shortText === 'string' ? component.shortText : '';
+      if (types.length === 0 || (!longText && !shortText)) return null;
+      return {
+        longText: longText || shortText,
+        shortText: shortText || longText,
+        types,
+      };
+    })
+    .filter((component: GoogleAddressComponent | null): component is GoogleAddressComponent => component !== null)
+    .slice(0, 20);
+}
+
+/** Google's price range (`$10–$20`) formatted for display, when provided. */
+export function formatPriceRange(raw: any): string | null {
+  const money = (price: any): string | null => {
+    const units = Number(price?.units);
+    const nanos = Number(price?.nanos);
+    if (!Number.isFinite(units)) return null;
+    const amount = units + (Number.isFinite(nanos) ? nanos / 1_000_000_000 : 0);
+    const currency = typeof price?.currencyCode === 'string' ? price.currencyCode : 'USD';
+    try {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency,
+        maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
+      }).format(amount);
+    } catch {
+      return `${currency} ${amount}`;
+    }
+  };
+  const start = money(raw?.startPrice);
+  const end = money(raw?.endPrice);
+  if (start && end) return start === end ? start : `${start}–${end}`;
+  return start ?? end;
+}
+
 export function shapePhoto(raw: any): GoogleBusinessPhoto | null {
   const name: string | undefined = raw?.name;
   if (typeof name !== 'string' || !name.startsWith('places/') || !name.includes('/photos/')) {
@@ -379,18 +438,28 @@ export function shapeDetails(raw: any, level: PlaceLevel): GoogleBusiness {
           .filter((r: GoogleBusinessReview | null): r is GoogleBusinessReview => r !== null)
           .slice(0, 5)
       : [];
+  const types = Array.isArray(raw?.types)
+    ? raw.types.filter((t: unknown): t is string => typeof t === 'string').slice(0, 20)
+    : [];
   return {
     placeId,
     name: typeof name === 'string' && name.trim() ? name.trim() : 'Business',
     category: formatCategory(raw),
+    types,
+    description:
+      level === 'full' && typeof raw?.editorialSummary?.text === 'string' && raw.editorialSummary.text.trim()
+        ? raw.editorialSummary.text.trim().slice(0, 800)
+        : null,
     address: typeof raw?.formattedAddress === 'string' ? raw.formattedAddress : null,
     shortAddress:
       typeof raw?.shortFormattedAddress === 'string' ? raw.shortFormattedAddress : null,
+    addressComponents: level === 'full' ? shapeAddressComponents(raw?.addressComponents) : [],
     latitude: Number.isFinite(lat) ? lat : null,
     longitude: Number.isFinite(lng) ? lng : null,
     rating: Number.isFinite(rating) ? Math.round(rating * 10) / 10 : null,
     reviewCount: Number.isFinite(reviewCount) ? reviewCount : null,
     priceLevel: priceLevelLabel(raw?.priceLevel),
+    priceRange: level === 'full' ? formatPriceRange(raw?.priceRange) : null,
     businessStatus: typeof raw?.businessStatus === 'string' ? raw.businessStatus : null,
     googleMapsUri: typeof raw?.googleMapsUri === 'string' ? raw.googleMapsUri : null,
     openNow: typeof hours?.openNow === 'boolean' ? hours.openNow : null,
