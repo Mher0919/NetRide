@@ -139,6 +139,11 @@ class Trip {
   final double? fareAmount;
   final double? initialMaxFare;
   final int? savingLikelihood;
+
+  /// Flat ride-credit bonus granted on COMPLETED (cents), plus the rider's
+  /// resulting balance. Null/absent on pre-completion payloads.
+  final int? rideCreditRewardCents;
+  final int? rideCreditBalanceCents;
   final RiderInfo? riderInfo;
   final DriverInfo? driverInfo;
 
@@ -161,6 +166,8 @@ class Trip {
     this.fareAmount,
     this.initialMaxFare,
     this.savingLikelihood,
+    this.rideCreditRewardCents,
+    this.rideCreditBalanceCents,
     this.riderInfo,
     this.driverInfo,
     this.updatedAt,
@@ -185,6 +192,8 @@ class Trip {
       fareAmount: (json['fare_amount'] as num?)?.toDouble(),
       initialMaxFare: (json['initial_max_fare'] as num?)?.toDouble(),
       savingLikelihood: (json['saving_likelihood'] as num?)?.toInt(),
+      rideCreditRewardCents: (json['ride_credit_reward_cents'] as num?)?.toInt(),
+      rideCreditBalanceCents: (json['ride_credit_balance_cents'] as num?)?.toInt(),
       riderInfo: json['rider_info'] != null ? RiderInfo.fromJson(json['rider_info']) : null,
       driverInfo: json['driver_info'] != null ? DriverInfo.fromJson(json['driver_info']) : null,
       updatedAt: json['updated_at'] != null

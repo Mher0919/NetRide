@@ -152,7 +152,7 @@ async function request(port, method, path, { token, body, headers } = {}) {
         discountType: 'PERCENTAGE',
         discountPercent: 10,
         maxDiscountPercent: 50,
-        initialBudgetCents: 0,
+        initialBudgetCents: 5000,
       },
     });
     ok('admin creates sponsor A', r.status === 201 && !!r.data?.sponsor?.id, r.data?.error);
@@ -258,7 +258,7 @@ async function request(port, method, path, { token, body, headers } = {}) {
         discountType: 'PERCENTAGE',
         discountPercent: 5,
         maxDiscountPercent: 25,
-        initialBudgetCents: 0,
+        initialBudgetCents: 5000,
       },
     });
     const sponsorBId = r.data?.sponsor?.id;
@@ -329,7 +329,7 @@ async function request(port, method, path, { token, body, headers } = {}) {
         discountType: 'PERCENTAGE',
         discountPercent: 10,
         maxDiscountPercent: 50,
-        initialBudgetCents: 0,
+        initialBudgetCents: 5000,
       },
     });
     const sponsorPortalOnlyId = r.data?.sponsor?.id;
@@ -374,7 +374,7 @@ async function request(port, method, path, { token, body, headers } = {}) {
         discountType: 'PERCENTAGE',
         discountPercent: 10,
         maxDiscountPercent: 50,
-        initialBudgetCents: 0,
+        initialBudgetCents: 5000,
       },
     });
     const sponsorCId = r.data?.sponsor?.id;

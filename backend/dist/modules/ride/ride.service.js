@@ -59,6 +59,7 @@ const queue_1 = require("../../queue/queue");
 const metrics_1 = require("../../observability/metrics");
 const tracing_1 = require("../../utils/tracing");
 const reward_engine_service_1 = require("../../services/reward-engine.service");
+const credits_service_1 = require("../credits/credits.service");
 const wallet_service_1 = require("../wallet/wallet.service");
 const financial_ledger_service_1 = require("../../services/financial-ledger.service");
 const special_redemption_service_1 = require("../sponsor/special-redemption.service");
@@ -767,8 +768,27 @@ class RideService {
             // the wallet ledger's unique idempotency key (wallet-charge:{rideId});
             // non-blocking so a wallet issue can never strand an already-completed
             // trip.
+            //
+            // The Trip projection deliberately carries no money columns, so the
+            // settlement inputs MUST be read from the ride row. Reading
+            // `updatedTrip.final_payment_cents` yielded undefined → 0, which
+            // skipped the wallet charge and wrote a $0 fare into the financial
+            // ledger for every completed ride.
+            const rideMoney = {};
+            let dueCents = 0;
+            let tipCents = 0;
+            try {
+                const moneyRes = await database_1.pool.query(`SELECT final_payment_cents, promo_discount_cents, credits_applied_cents,
+                  tip_amount
+             FROM rides WHERE id = $1`, [tripId]);
+                Object.assign(rideMoney, moneyRes.rows[0] ?? {});
+                dueCents = (0, financial_ledger_service_1.centsValue)(rideMoney.final_payment_cents);
+                tipCents = Math.round(parseFloat(String(rideMoney.tip_amount ?? '0')) * 100) || 0;
+            }
+            catch (err) {
+                console.warn(`[RIDE] ⚠️ Settlement amount read failed (non-blocking) for trip ${tripId}: ${err.message}`);
+            }
             let walletChargeCents = 0;
-            const dueCents = (0, financial_ledger_service_1.centsValue)(updatedTrip.final_payment_cents);
             try {
                 if (dueCents > 0) {
                     const charged = await wallet_service_1.WalletService.chargeForRide(updatedTrip.rider_id, tripId, dueCents);
@@ -796,15 +816,14 @@ class RideService {
             // breakdown (original fare / rider share / sponsor subsidy / driver
             // earnings) is written alongside as separate, traceable components.
             try {
-                const tipCents = Math.round(parseFloat(updatedTrip.tip_amount ?? '0') * 100);
                 const breakdown = await (0, fare_breakdown_service_1.getFareBreakdown)(tripId);
                 await financial_ledger_service_1.FinancialLedgerService.recordRideCompletion({
                     rideId: tripId,
                     riderId: updatedTrip.rider_id,
                     driverId: updatedTrip.driver_id,
                     fareCents: dueCents,
-                    promotionCents: (0, financial_ledger_service_1.centsValue)(updatedTrip.promo_discount_cents),
-                    creditsCents: (0, financial_ledger_service_1.centsValue)(updatedTrip.credits_applied_cents),
+                    promotionCents: (0, financial_ledger_service_1.centsValue)(rideMoney.promo_discount_cents),
+                    creditsCents: (0, financial_ledger_service_1.centsValue)(rideMoney.credits_applied_cents),
                     tipCents,
                     walletPaymentCents: walletChargeCents,
                     amountOwedCents: Math.max(0, dueCents - walletChargeCents),
@@ -839,6 +858,19 @@ class RideService {
                 fare_amount: updatedTrip.fare_amount ?? null,
                 status: 'COMPLETED',
             }).catch((err) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCompleted failed: ${err.message}`));
+            // Rider ride-credit reward: every successfully completed ride grants
+            // the rider a flat credit bonus (idempotent per ride). Attach the
+            // awarded amount + resulting balance to the COMPLETED payload so the
+            // rider app's celebration shows exactly what was credited.
+            try {
+                const reward = await credits_service_1.CreditsService.awardRideCompletion(updatedTrip.rider_id, tripId);
+                updatedTrip.ride_credit_reward_cents =
+                    credits_service_1.CreditsService.RIDE_COMPLETION_REWARD_CENTS;
+                updatedTrip.ride_credit_balance_cents = reward.balance_cents;
+            }
+            catch (err) {
+                console.warn(`[RIDE] ⚠️ Ride-credit reward failed (non-blocking) for trip ${tripId}: ${err.message}`);
+            }
             // Sponsorship/SPECIALS: the completed special ride now issues the
             // one-time validation code (hash-only, TTL). Non-blocking + idempotent;
             // no-op for regular rides (no redemption attached).

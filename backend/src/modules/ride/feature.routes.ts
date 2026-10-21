@@ -5,6 +5,7 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 import { getIo } from '../../gateway/io-handle';
 import { isTestEmail } from '../../utils/testUser';
 import { DriverService } from '../driver/driver.service';
+import { CreditsService } from '../credits/credits.service';
 import { getRevenueAllocationForRide } from '../../services/pricing.service';
 import { validateTipAmount } from '../../security/tip-policy';
 
@@ -206,6 +207,17 @@ router.post('/:rideId/complete-test', authMiddleware, async (req: AuthRequest, r
           }
         } catch (err: any) {
           console.warn(`[RIDE] ⚠️ complete-test allocation lookup failed: ${err.message}`);
+        }
+
+        // Mirror the real completion flow: award the rider's flat ride-credit
+        // bonus and surface it on the COMPLETED payload for the celebration.
+        try {
+          const reward = await CreditsService.awardRideCompletion(ride.rider_id, rideId);
+          (updated as any).ride_credit_reward_cents =
+            CreditsService.RIDE_COMPLETION_REWARD_CENTS;
+          (updated as any).ride_credit_balance_cents = reward.balance_cents;
+        } catch (err: any) {
+          console.warn(`[RIDE] ⚠️ complete-test ride-credit reward failed: ${err.message}`);
         }
 
         getIo().to(`rider:${ride.rider_id}`).emit('tripUpdate', updated);

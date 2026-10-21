@@ -78,6 +78,10 @@ export interface Trip {
     tip_amount?: number;
     initial_max_fare?: number;
     saving_likelihood?: number;
+    /** Flat ride-credit bonus granted to the rider on COMPLETED (cents). */
+    ride_credit_reward_cents?: number;
+    /** Rider's ride-credit balance right after the completion bonus (cents). */
+    ride_credit_balance_cents?: number;
     trajectory?: any;
     requested_at: Date;
     /** Monotonic version bumped on every status-affecting write (migration 055). */

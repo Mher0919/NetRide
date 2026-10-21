@@ -18,7 +18,7 @@ export const unblockUser = async (id: string) => {
 };
 
 export const getRides = async (
-  params: { status?: string, page?: number, limit?: number },
+  params: { status?: string, page?: number, limit?: number, includeTest?: boolean },
   signal?: AbortSignal,
 ) => {
   const response = await api.get('/admin/rides', { params, signal });

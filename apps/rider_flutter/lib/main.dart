@@ -23,6 +23,7 @@ import 'services/auth_service.dart';
 import 'services/user_service.dart';
 import 'services/sound_service.dart';
 import 'services/notification_service.dart';
+import 'components/app_update_gate.dart';
 import 'screens/credits_screen.dart';
 import 'screens/special_redemption_screen.dart';
 import 'theme/app_theme.dart';
@@ -360,8 +361,11 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           initialRoute: '/splash',
-          builder: (context, child) =>
-              GlobalClickSoundListener(child: child ?? const SizedBox.shrink()),
+          builder: (context, child) => AppUpdateGate(
+            child: GlobalClickSoundListener(
+              child: child ?? const SizedBox.shrink(),
+            ),
+          ),
           onGenerateRoute: (settings) {
             Widget page;
             switch (settings.name) {

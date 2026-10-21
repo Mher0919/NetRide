@@ -220,7 +220,7 @@ async function completeSetupIntent(customerId, pmToken, metadata) {
       const fundKey = `colab-fund:${suffix}`;
       r = await request(port, 'POST', '/sponsor/funding/intent', {
         token: tokenA,
-        body: { amountCents: 2500, idempotencyKey: fundKey },
+        body: { amountCents: 5000, idempotencyKey: fundKey },
       });
       ok('funding PaymentIntent client secret issued', r.status === 200 && !!r.data?.clientSecret, r.data?.paymentIntentId);
       const stripe2 = getStripe();
@@ -231,11 +231,11 @@ async function completeSetupIntent(customerId, pmToken, metadata) {
       });
       ok('funding confirmed → budget credited', r.status === 200 && r.data?.status === 'SUCCEEDED', `${confirmedPi.status}`);
       r = await request(port, 'GET', '/sponsor/funding', { token: tokenA });
-      ok('budget reflects the $25.00 credit', Number(r.data?.budget?.initialBudgetCents) === 2500, `$${(Number(r.data?.budget?.initialBudgetCents) / 100).toFixed(2)}`);
+      ok('budget reflects the $50.00 credit', Number(r.data?.budget?.initialBudgetCents) === 5000, `$${(Number(r.data?.budget?.initialBudgetCents) / 100).toFixed(2)}`);
 
       r = await request(port, 'POST', '/sponsor/funding/intent', {
         token: tokenA,
-        body: { amountCents: 2500, idempotencyKey: fundKey },
+        body: { amountCents: 5000, idempotencyKey: fundKey },
       });
       ok('funding idempotency replay refused (no double charge)', r.status === 400);
 

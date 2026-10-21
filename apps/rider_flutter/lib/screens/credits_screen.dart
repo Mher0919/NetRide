@@ -197,6 +197,8 @@ class _CreditsScreenState extends State<CreditsScreen> {
         return 'Applied to ride';
       case 'RIDE_REFUND':
         return 'Refunded from cancelled ride';
+      case 'RIDE_COMPLETION_REWARD':
+        return 'Ride completion reward';
       default:
         return t.description ?? t.type.replaceAll('_', ' ');
     }

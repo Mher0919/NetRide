@@ -27,6 +27,7 @@ import { matchQueue } from '../../queue/queue';
 import { matchJobsTotal, dispatchAcceptOutcomeTotal } from '../../observability/metrics';
 import { traceAsync, getCurrentTraceId } from '../../utils/tracing';
 import { RewardEngine } from '../../services/reward-engine.service';
+import { CreditsService } from '../credits/credits.service';
 import { WalletService } from '../wallet/wallet.service';
 import { FinancialLedgerService, centsValue } from '../../services/financial-ledger.service';
 import { SpecialRedemptionService } from '../sponsor/special-redemption.service';
@@ -919,8 +920,31 @@ export class RideService {
       // the wallet ledger's unique idempotency key (wallet-charge:{rideId});
       // non-blocking so a wallet issue can never strand an already-completed
       // trip.
+      //
+      // The Trip projection deliberately carries no money columns, so the
+      // settlement inputs MUST be read from the ride row. Reading
+      // `updatedTrip.final_payment_cents` yielded undefined → 0, which
+      // skipped the wallet charge and wrote a $0 fare into the financial
+      // ledger for every completed ride.
+      const rideMoney: any = {};
+      let dueCents = 0;
+      let tipCents = 0;
+      try {
+        const moneyRes = await pool.query(
+          `SELECT final_payment_cents, promo_discount_cents, credits_applied_cents,
+                  tip_amount
+             FROM rides WHERE id = $1`,
+          [tripId],
+        );
+        Object.assign(rideMoney, moneyRes.rows[0] ?? {});
+        dueCents = centsValue(rideMoney.final_payment_cents);
+        tipCents = Math.round(parseFloat(String(rideMoney.tip_amount ?? '0')) * 100) || 0;
+      } catch (err: any) {
+        console.warn(
+          `[RIDE] ⚠️ Settlement amount read failed (non-blocking) for trip ${tripId}: ${err.message}`
+        );
+      }
       let walletChargeCents = 0;
-      const dueCents = centsValue((updatedTrip as any).final_payment_cents);
       try {
         if (dueCents > 0) {
           const charged = await WalletService.chargeForRide(
@@ -962,17 +986,14 @@ export class RideService {
       // breakdown (original fare / rider share / sponsor subsidy / driver
       // earnings) is written alongside as separate, traceable components.
       try {
-        const tipCents = Math.round(
-          parseFloat((updatedTrip as any).tip_amount ?? '0') * 100
-        );
         const breakdown = await getFareBreakdown(tripId);
         await FinancialLedgerService.recordRideCompletion({
           rideId: tripId,
           riderId: updatedTrip.rider_id,
           driverId: updatedTrip.driver_id,
           fareCents: dueCents,
-          promotionCents: centsValue((updatedTrip as any).promo_discount_cents),
-          creditsCents: centsValue((updatedTrip as any).credits_applied_cents),
+          promotionCents: centsValue(rideMoney.promo_discount_cents),
+          creditsCents: centsValue(rideMoney.credits_applied_cents),
           tipCents,
           walletPaymentCents: walletChargeCents,
           amountOwedCents: Math.max(0, dueCents - walletChargeCents),
@@ -1010,6 +1031,24 @@ export class RideService {
         fare_amount: (updatedTrip as any).fare_amount ?? null,
         status: 'COMPLETED',
       }).catch((err: any) => console.error(`[RIDE] ⚠️ RewardEngine.onRideCompleted failed: ${err.message}`));
+
+      // Rider ride-credit reward: every successfully completed ride grants
+      // the rider a flat credit bonus (idempotent per ride). Attach the
+      // awarded amount + resulting balance to the COMPLETED payload so the
+      // rider app's celebration shows exactly what was credited.
+      try {
+        const reward = await CreditsService.awardRideCompletion(
+          updatedTrip.rider_id,
+          tripId,
+        );
+        (updatedTrip as any).ride_credit_reward_cents =
+          CreditsService.RIDE_COMPLETION_REWARD_CENTS;
+        (updatedTrip as any).ride_credit_balance_cents = reward.balance_cents;
+      } catch (err: any) {
+        console.warn(
+          `[RIDE] ⚠️ Ride-credit reward failed (non-blocking) for trip ${tripId}: ${err.message}`
+        );
+      }
 
       // Sponsorship/SPECIALS: the completed special ride now issues the
       // one-time validation code (hash-only, TTL). Non-blocking + idempotent;

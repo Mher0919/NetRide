@@ -37,6 +37,7 @@ const typeMeta: Record<string, { label: string; color: string }> = {
   ADMIN_GRANT: { label: 'Admin grant', color: '#2F3A32' },
   RIDE_APPLIED: { label: 'Applied to ride', color: '#C79A4A' },
   RIDE_REFUND: { label: 'Ride refund', color: '#6E8B74' },
+  RIDE_COMPLETION_REWARD: { label: 'Ride completion reward', color: '#5B7760' },
   ADJUSTMENT: { label: 'Adjustment', color: '#888888' },
 };
 

@@ -211,17 +211,16 @@ async function relayChatMessage(io, socket, counterpartRole, payload, self) {
         timestamp: persisted.created_at,
     };
     io.to(`${counterpartRole}:${counterpartId}`).emit('messageReceived', wirePayload);
-    // If recipient is offline (not connected to a socket), send a push notification
-    // so they still see the message on their lock screen / notification tray.
+    // Always mirror the message to a real phone notification. A live socket
+    // does NOT mean the recipient can see the app (backgrounded Android, iOS
+    // suspension), and notification-block FCM messages are not rendered while
+    // the app is in the foreground — so this cannot duplicate an in-app alert.
     try {
-        const recipientOnline = await (0, push_notification_service_1.isOnline)(counterpartId, counterpartRole);
-        if (!recipientOnline) {
-            // Fetch sender's display name for the notification
-            const senderNameRes = await database_1.pool.query('SELECT full_name FROM users WHERE id = $1', [self.id]);
-            const senderName = senderNameRes.rows[0]?.full_name || 'Unknown';
-            await (0, push_notification_service_1.pushChatMessage)(counterpartId, counterpartRole, senderName, body, payload.tripId);
-            console.log(`[SOCKET] 📲 Push notification sent to offline ${counterpartRole} ${counterpartId}`);
-        }
+        // Fetch sender's display name for the notification
+        const senderNameRes = await database_1.pool.query('SELECT full_name FROM users WHERE id = $1', [self.id]);
+        const senderName = senderNameRes.rows[0]?.full_name || 'Unknown';
+        await (0, push_notification_service_1.pushChatMessage)(counterpartId, counterpartRole, senderName, body, payload.tripId);
+        console.log(`[SOCKET] 📲 Push notification sent to ${counterpartRole} ${counterpartId}`);
     }
     catch (pushErr) {
         // Push failure should never break chat delivery

@@ -17,6 +17,7 @@ export type CreditTxType =
   | 'ADMIN_GRANT'
   | 'RIDE_APPLIED'
   | 'RIDE_REFUND'
+  | 'RIDE_COMPLETION_REWARD'
   | 'ADJUSTMENT'
   | 'SPONSOR_REWARD';
 
@@ -48,6 +49,9 @@ function emitBalanceChange(userId: string, balanceCents: number, deltaCents: num
 }
 
 export class CreditsService {
+  /** Flat ride-credit reward granted to the rider after every completed ride. */
+  static readonly RIDE_COMPLETION_REWARD_CENTS = 125;
+
   /** Ensures a credit account exists and returns it. */
   static async getAccount(userId: string): Promise<CreditAccount> {
     const res = await pool.query(
@@ -275,6 +279,21 @@ static async applyToRide(
       client: useClient,
     });
     return { appliedCents: result.applied ? applied : 0, balanceCents: result.balance_cents };
+  }
+
+  /**
+   * Awards the flat ride-completion bonus to the rider. Idempotent per ride:
+   * retries and duplicate completion events post exactly one ledger row, so
+   * the rider can never farm the same ride twice.
+   */
+  static async awardRideCompletion(riderId: string, rideId: string): Promise<CreditResult> {
+    return this.post(riderId, this.RIDE_COMPLETION_REWARD_CENTS, 'RIDE_COMPLETION_REWARD', {
+      idempotencyKey: `ride-completion-reward:${rideId}`,
+      description: `Ride completion reward for ride ${rideId}`,
+      referenceType: 'ride',
+      referenceId: rideId,
+      rideId,
+    });
   }
 
   /**

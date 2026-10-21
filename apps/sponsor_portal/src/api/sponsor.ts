@@ -12,7 +12,10 @@ export interface PortalSponsor {
   status: string;
   discountLabel: string;
   remainingBudgetCents: number;
+  spendableBudgetCents: number;
   usedBudgetCents: number;
+  isLive: boolean;
+  minFundingCents: number;
 }
 
 export const getPortalDashboard = async () => {
@@ -55,6 +58,8 @@ export const updatePortalSettings = async (data: Record<string, unknown>) => {
 export interface PortalFundingData {
   configured: boolean;
   mode: string;
+  isLive: boolean;
+  minFundingCents: number;
   budget: {
     initialBudgetCents: number;
     remainingBudgetCents: number;

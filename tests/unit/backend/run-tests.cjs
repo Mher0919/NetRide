@@ -40,6 +40,7 @@ require(path.join(BACKEND_DIR, 'node_modules', 'ts-node')).register({
 const SUITES = [
   './modules/routing/routing.unit.test.ts',
   './routing/astar-routing.test.ts',
+  './modules/app-version/app-version.unit.test.ts',
   './modules/rewards/rewards.unit.test.ts',
   './modules/ride/ride-cancellation.unit.test.ts',
   './modules/ride/ride-state-guards.unit.test.ts',

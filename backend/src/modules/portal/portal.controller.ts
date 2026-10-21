@@ -12,7 +12,7 @@ import { PortalRequest } from '../../middleware/portal.middleware';
 import { pool } from '../../config/database';
 import { redis } from '../../config/redis';
 import { OTPService } from '../auth/otp.service';
-import { SponsorService } from '../sponsor/sponsor.service';
+import { SponsorService, SPONSOR_MIN_LIVE_FUNDING_CENTS } from '../sponsor/sponsor.service';
 import { PartnerService } from '../partner/partner.service';
 import { findPortalIdentityByEmail } from './portal-identities';
 
@@ -177,7 +177,13 @@ export class PortalController {
             businessType: sponsor.business_type,
             status: sponsor.status,
             remainingBudgetCents: cents(sponsor.remaining_budget_cents),
+            spendableBudgetCents: Math.max(
+              0,
+              cents(sponsor.remaining_budget_cents) - cents(sponsor.reserved_budget_cents),
+            ),
             usedBudgetCents: cents(sponsor.used_budget_cents),
+            isLive: SponsorService.isEligible(sponsor),
+            minFundingCents: SPONSOR_MIN_LIVE_FUNDING_CENTS,
           },
           stats: {
             pendingValidations: pending.rows[0].n,

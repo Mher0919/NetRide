@@ -68,6 +68,14 @@ import UserPicker from '../components/UserPicker';
 const fmtUSD = (cents: number | null | undefined) =>
   ((cents ?? 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
+/** Minimum spendable funding required for a sponsor to be Live in the rider app. */
+const MIN_LIVE_FUNDING_CENTS = 5000; // $50.00
+
+const liveChipProps = (isLive: boolean) =>
+  isLive
+    ? { label: 'Live', bg: '#E5F0EB', fg: '#2E7D32' }
+    : { label: 'Offline', bg: '#FCE9E9', fg: '#C65A5A' };
+
 const fmtDateTime = (v: string | null | undefined) =>
   v ? new Date(v).toLocaleString() : '—';
 
@@ -440,8 +448,9 @@ const Sponsors: React.FC = () => {
         return;
       }
     }
-    if (!(Number(form.initialBudgetCents) >= 0)) {
-      notify('Initial budget must be >= $0', 'error');
+    const initialBudgetCents = Math.round(Number(form.initialBudgetCents));
+    if (!(initialBudgetCents >= MIN_LIVE_FUNDING_CENTS)) {
+      notify(`Initial funding must be at least ${fmtUSD(MIN_LIVE_FUNDING_CENTS)}`, 'error');
       return;
     }
     const lat = form.latitude === '' ? null : Number(form.latitude);
@@ -476,7 +485,7 @@ const Sponsors: React.FC = () => {
         discountPercent: form.discountType === 'PERCENTAGE' ? Number(form.discountPercent) : undefined,
         maxDiscountPercent: form.discountType === 'PERCENTAGE' ? Number(form.maxDiscountPercent) : undefined,
         discountFixedAmountCents: form.discountType === 'FIXED_AMOUNT' ? Math.round(Number(form.discountFixedAmountCents)) : undefined,
-        initialBudgetCents: Math.round(Number(form.initialBudgetCents)),
+        initialBudgetCents,
         specialsEnabled: true,
         latitude: lat,
         longitude: lng,
@@ -553,6 +562,10 @@ const Sponsors: React.FC = () => {
     const cents = Math.round(Number(adjustForm.amountCents));
     if (!(cents > 0)) {
       notify('Amount must be > $0', 'error');
+      return;
+    }
+    if (adjustForm.direction === 'CREDIT' && cents < MIN_LIVE_FUNDING_CENTS) {
+      notify(`Funding credits must be at least ${fmtUSD(MIN_LIVE_FUNDING_CENTS)}`, 'error');
       return;
     }
     if (!adjustForm.reason.trim()) {
@@ -852,19 +865,20 @@ const Sponsors: React.FC = () => {
               <TableCell>Reserved</TableCell>
               <TableCell>Used</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>Live</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
                   <CircularProgress size={28} />
                 </TableCell>
               </TableRow>
             ) : sponsors.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   {loadError
                     ? 'We could not load sponsors. Check your connection and try again.'
                     : 'No sponsors yet. Click “New Sponsor” to fund your first SPECIALS.'}
@@ -926,6 +940,12 @@ const Sponsors: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Chip size="small" label={s.status} sx={{ bgcolor: sc.bg, color: sc.fg, fontWeight: 700, fontSize: 11 }} />
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const chip = liveChipProps(Boolean(s.isLive));
+                        return <Chip size="small" label={chip.label} sx={{ bgcolor: chip.bg, color: chip.fg, fontWeight: 700, fontSize: 11 }} />;
+                      })()}
                     </TableCell>
                     <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                       <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
@@ -1113,7 +1133,7 @@ const Sponsors: React.FC = () => {
               value={form.initialBudgetCents}
               onChange={(e) => setForm({ ...form, initialBudgetCents: e.target.value })}
               fullWidth
-              helperText="BIGINT cents — e.g. 100000 = $1,000. Credits the sponsor ledger + remaining budget."
+              helperText={`Minimum ${fmtUSD(MIN_LIVE_FUNDING_CENTS)} required to go Live. Entered in cents — e.g. 100000 = $1,000.`}
             />
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Portal login (optional)</Typography>
@@ -1191,7 +1211,13 @@ const Sponsors: React.FC = () => {
                   {!resolveApiUrl(sponsor?.logo_url as string) && <StorefrontIcon />}
                 </Box>
                 <Box>
-                  <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.business_name}</Typography>
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.business_name}</Typography>
+                    {sponsor && (() => {
+                      const chip = liveChipProps(Boolean((sponsor as Record<string, unknown>).isLive));
+                      return <Chip size="small" label={chip.label} sx={{ bgcolor: chip.bg, color: chip.fg, fontWeight: 800, fontSize: 10 }} />;
+                    })()}
+                  </Stack>
                   <Typography variant="caption" color="text.secondary">
                     {detail?.sponsor?.spendableCents !== undefined ? `${fmtUSD(detail.sponsor.spendableCents)} spendable` : ''}
                   </Typography>
@@ -1240,6 +1266,14 @@ const Sponsors: React.FC = () => {
                         </Paper>
                       </Grid>
                     </Grid>
+
+                    {!Boolean((sponsor as Record<string, unknown>).isLive) &&
+                      Number(sponsor.remaining_budget_cents) - Number(sponsor.reserved_budget_cents) < MIN_LIVE_FUNDING_CENTS && (
+                        <Alert severity="error" sx={{ borderRadius: 2 }}>
+                          At least {fmtUSD(MIN_LIVE_FUNDING_CENTS)} in available funding is required to go Live.
+                          Add funds to make this sponsor visible to riders.
+                        </Alert>
+                      )}
 
                     <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Discount</Typography>
@@ -1559,7 +1593,11 @@ const Sponsors: React.FC = () => {
               value={adjustForm.amountCents}
               onChange={(e) => setAdjustForm({ ...adjustForm, amountCents: e.target.value })}
               fullWidth
-              helperText="e.g. 50000 = $500"
+              helperText={
+                adjustForm.direction === 'CREDIT'
+                  ? `Minimum ${fmtUSD(MIN_LIVE_FUNDING_CENTS)} per credit — e.g. 50000 = $500.`
+                  : 'e.g. 50000 = $500'
+              }
             />
             <TextField
               label="Reason *"

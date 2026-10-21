@@ -12,7 +12,9 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  TablePagination
+  TablePagination,
+  FormControlLabel,
+  Switch
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useNavigate } from 'react-router-dom';
@@ -36,6 +38,11 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<any>(null);
+  // Completed rides hide E2E/sandbox test rides by default so the list and
+  // its money cards describe real operations. The backend always excludes
+  // test rides from the gross/driver/platform totals, even while they are
+  // visible here.
+  const [showTest, setShowTest] = useState(false);
   // Socket liveness: the table must say "reconnecting" instead of silently
   // serving frozen data when the realtime channel drops.
   const [connected, setConnected] = useState(false);
@@ -75,7 +82,14 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
     }
     try {
       const data = await getRides(
-        { status, page: page + 1, limit: rowsPerPage },
+        {
+          status,
+          page: page + 1,
+          limit: rowsPerPage,
+          // Active monitoring keeps showing every ride (test rides are
+          // useful live); the Completed tab owns the visibility switch.
+          includeTest: status === 'ACTIVE' ? true : showTest,
+        },
         controller.signal,
       );
       if (seq !== reqSeq.current) return;
@@ -94,7 +108,7 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [status, page, rowsPerPage]);
+  }, [status, page, rowsPerPage, showTest]);
 
   useEffect(() => {
     fetchRides();
@@ -143,9 +157,10 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
         }
       } 
       else if (status === 'COMPLETED' && updatedTrip.status === 'COMPLETED') {
-        if (page === 0) {
-          setRides(prev => [{ ...updatedTrip }, ...prev].slice(0, rowsPerPage));
-        }
+        // A completed ride may be a hidden test ride, and totals must stay
+        // production-only. Re-fetch the filtered, authoritative page rather
+        // than prepending the unclassified socket payload.
+        fetchRides({ silent: true });
       }
     });
 
@@ -210,15 +225,32 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
             sx={{ fontWeight: 700, fontSize: '0.65rem', borderRadius: '6px' }}
           />
         </Box>
-        <Button 
-          startIcon={loading ? undefined : <RefreshIcon />} 
-          variant="contained" 
-          onClick={fetchRides}
-          disabled={loading}
-          sx={{ borderRadius: '12px' }}
-        >
-          {loading ? <CircularProgress size={20} color="inherit" /> : 'Refresh'}
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          {status === 'COMPLETED' && (
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={showTest}
+                  onChange={(e) => {
+                    setShowTest(e.target.checked);
+                    setPage(0);
+                  }}
+                />
+              }
+              label={<Typography variant="body2" color="text.secondary">Show test rides</Typography>}
+            />
+          )}
+          <Button 
+            startIcon={loading ? undefined : <RefreshIcon />} 
+            variant="contained" 
+            onClick={fetchRides}
+            disabled={loading}
+            sx={{ borderRadius: '12px' }}
+          >
+            {loading ? <CircularProgress size={20} color="inherit" /> : 'Refresh'}
+          </Button>
+        </Box>
       </Box>
 
       {status === 'COMPLETED' && summary && (
@@ -254,6 +286,12 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
         </Box>
       )}
 
+      {status === 'COMPLETED' && showTest && summary && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2, mt: -1 }}>
+          Financial totals exclude test rides.
+        </Typography>
+      )}
+
       <Paper sx={{ width: '100%', mb: 2, border: 'none', overflow: 'hidden' }}>
         <TableContainer>
           <Table sx={{ minWidth: 750 }}>
@@ -279,6 +317,13 @@ const Rides: React.FC<RidesProps> = ({ status, title }) => {
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
                         <Typography variant="body2" sx={{ fontWeight: 700 }}>{riderName(ride)}</Typography>
                         <Chip label="RIDER" size="small" sx={{ ml: 1, height: 16, fontSize: '0.6rem', fontWeight: 700 }} />
+                        {ride.is_test && (
+                          <Chip
+                            label="TEST"
+                            size="small"
+                            sx={{ ml: 1, height: 16, fontSize: '0.6rem', fontWeight: 800, bgcolor: '#FFF4E5', color: '#B26A00' }}
+                          />
+                        )}
                       </Box>
                       {driverName(ride) ? (
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>

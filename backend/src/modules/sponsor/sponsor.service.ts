@@ -29,6 +29,13 @@ import { TEST_EMAIL_SQL } from '../../utils/testUser';
 export type SponsorshipDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
 export type SponsorStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'DEPLETED';
 
+/**
+ * Minimum spendable funding (integer cents) a sponsor must hold to be shown
+ * in the rider app. Below this the sponsor is offline, and both the sponsor
+ * dashboard and the admin dashboard flag it.
+ */
+export const SPONSOR_MIN_LIVE_FUNDING_CENTS = 5000; // $50.00
+
 export interface SponsorRow {
   id: string;
   business_name: string;
@@ -227,7 +234,10 @@ export class SponsorService {
    * before anything is visible) and records the INITIAL_FUNDING ledger row.
    */
   static async create(input: SponsorCreateInput, actor?: { id?: string; role?: string }): Promise<SponsorRow> {
-    const budget = Math.max(0, Math.round(input.initialBudgetCents));
+    const budget = Math.round(input.initialBudgetCents);
+    if (!Number.isFinite(budget) || budget < SPONSOR_MIN_LIVE_FUNDING_CENTS) {
+      throw new Error(`Initial funding must be at least $${(SPONSOR_MIN_LIVE_FUNDING_CENTS / 100).toFixed(2)}`);
+    }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -379,6 +389,9 @@ export class SponsorService {
   ): Promise<SponsorRow> {
     const delta = Math.round(deltaCents);
     if (delta === 0) throw new Error('Adjustment amount must be non-zero');
+    if (delta > 0 && delta < SPONSOR_MIN_LIVE_FUNDING_CENTS) {
+      throw new Error(`Funding credits must be at least $${(SPONSOR_MIN_LIVE_FUNDING_CENTS / 100).toFixed(2)}`);
+    }
     if (!reason || !reason.trim()) throw new Error('A reason is required for budget adjustments');
 
     const client = await pool.connect();
@@ -640,13 +653,13 @@ export class SponsorService {
   /**
    * Eligibility is decided HERE, in one place (spec §10-11/§88-89):
    * status ACTIVE + specials_enabled + map_listing_enabled + coordinates +
-   * spendable budget > 0.
+   * spendable budget >= $50 (the minimum to be Live in the rider app).
    */
   static isEligible(sponsor: Pick<SponsorRow, 'status' | 'specials_enabled' | 'map_listing_enabled' | 'latitude' | 'longitude' | 'remaining_budget_cents' | 'reserved_budget_cents' | 'discount_type' | 'discount_percent' | 'discount_fixed_amount_cents'>): boolean {
     if (sponsor.status !== 'ACTIVE') return false;
     if (!sponsor.specials_enabled || !sponsor.map_listing_enabled) return false;
     if (sponsor.latitude == null || sponsor.longitude == null) return false;
-    if (centsValue(sponsor.remaining_budget_cents) - centsValue(sponsor.reserved_budget_cents) <= 0) return false;
+    if (centsValue(sponsor.remaining_budget_cents) - centsValue(sponsor.reserved_budget_cents) < SPONSOR_MIN_LIVE_FUNDING_CENTS) return false;
     if (sponsor.discount_type === 'PERCENTAGE') return Number(sponsor.discount_percent ?? 0) > 0;
     return centsValue(sponsor.discount_fixed_amount_cents) > 0;
   }
@@ -671,7 +684,7 @@ export class SponsorService {
       `map_listing_enabled = TRUE`,
       `latitude IS NOT NULL`,
       `longitude IS NOT NULL`,
-      `remaining_budget_cents - reserved_budget_cents > 0`,
+      `remaining_budget_cents - reserved_budget_cents >= ${SPONSOR_MIN_LIVE_FUNDING_CENTS}`,
       `NOT ${SponsorService.testSponsorSql('sponsors')}`,
     ];
     if (opts.businessType) {
@@ -707,7 +720,7 @@ export class SponsorService {
        WHERE status = 'ACTIVE' AND specials_enabled = TRUE
          AND map_listing_enabled = TRUE AND latitude IS NOT NULL
          AND longitude IS NOT NULL
-         AND remaining_budget_cents - reserved_budget_cents > 0
+         AND remaining_budget_cents - reserved_budget_cents >= ${SPONSOR_MIN_LIVE_FUNDING_CENTS}
          AND NOT ${SponsorService.testSponsorSql('sponsors')}`,
     );
     return res.rows[0]?.n ?? 0;

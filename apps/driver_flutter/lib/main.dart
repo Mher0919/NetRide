@@ -24,6 +24,7 @@ import 'services/auth_service.dart';
 import 'services/sound_service.dart';
 import 'services/navigation_voice_service.dart';
 import 'services/notification_service.dart';
+import 'components/app_update_gate.dart';
 import 'theme/app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -297,8 +298,11 @@ class _NetRideDriverState extends State<NetRideDriver> with WidgetsBindingObserv
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       initialRoute: '/splash',
-      builder: (context, child) =>
-          GlobalClickSoundListener(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => AppUpdateGate(
+        child: GlobalClickSoundListener(
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
       onGenerateRoute: (settings) {
         Widget page;
         switch (settings.name) {

@@ -206,7 +206,7 @@ const ok = (name, cond, extra = '') => {
 
     const funding = await PaymentsService.createSponsorFundingIntent({
       sponsorId,
-      amountCents: 2500,
+      amountCents: 5000,
       idempotencyKey: `e2e-sponsor-funding:${suffix}`,
     });
     ok('sponsor funding PaymentIntent client secret issued', !!funding.clientSecret, funding.paymentIntentId);
@@ -215,7 +215,7 @@ const ok = (name, cond, extra = '') => {
     const reconciled = await PaymentsService.reconcileSponsorFundingIntent(funding.paymentRowId, funding.paymentIntentId);
     ok('funding intent reconciled → budget credited (webhook-equivalent)', reconciled.status === 'SUCCEEDED', reconciled.status);
     const sponsorAfter = (await pool.query(`SELECT remaining_budget_cents FROM sponsors WHERE id = $1`, [sponsorId])).rows[0];
-    ok('sponsor budget actually credited', Number(sponsorAfter.remaining_budget_cents) === 2500, `$${(Number(sponsorAfter.remaining_budget_cents) / 100).toFixed(2)}`);
+    ok('sponsor budget actually credited', Number(sponsorAfter.remaining_budget_cents) === 5000, `$${(Number(sponsorAfter.remaining_budget_cents) / 100).toFixed(2)}`);
     ok('adding the card did NOT charge or credit anything (0 pre-funding)', true, 'card setup is money-neutral by design');
     const sponsorMethods = await PaymentsService.sponsorPaymentProfile(sponsorId);
     ok('sponsor methods listed', sponsorMethods.methods.length === 1);

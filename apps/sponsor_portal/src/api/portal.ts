@@ -90,7 +90,10 @@ export interface PortalDashboard {
     businessType: string;
     status: string;
     remainingBudgetCents: number;
+    spendableBudgetCents: number;
     usedBudgetCents: number;
+    isLive: boolean;
+    minFundingCents: number;
   };
   stats?: {
     pendingValidations: number;

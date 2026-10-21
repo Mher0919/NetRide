@@ -12,6 +12,10 @@ const MINUTE = 60 * 1000;
 const HOUR = 3600 * 1000;
 
 export const RATE_LIMITS: Record<string, RateLimitEntry> = {
+  'GET /api/app/version': {
+    ip: { max: 120, windowMs: MINUTE },
+  },
+
   // Authentication endpoints — strict limits. Keys MUST match the mounted
   // route paths (authRoutes mounted at /api/auth) or they never apply.
   'POST /api/auth/signup-password': {

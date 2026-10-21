@@ -184,8 +184,9 @@ const Funding: React.FC = () => {
     }
   };
 
+  const minFundingCents = data?.minFundingCents ?? 5000;
   const amountCents = Math.round(Number(amount) * 100);
-  const amountValid = Number.isFinite(amountCents) && amountCents > 0;
+  const amountValid = Number.isFinite(amountCents) && amountCents >= minFundingCents;
 
   const withdrawAmountCents = Math.round(Number(withdrawAmount) * 100);
   const maxWithdrawCents = Math.max(0, data?.budget.spendableBudgetCents ?? 0);
@@ -301,11 +302,20 @@ const Funding: React.FC = () => {
           </Typography>
         </Box>
         {data && (
-          <Chip
-            label={`Stripe: ${data.mode}${data.configured ? '' : ' (not configured)'}`}
-            color={data.mode === 'test' ? 'warning' : data.mode === 'live' ? 'success' : 'default'}
-            sx={{ flexShrink: 0 }}
-          />
+          <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+            <Chip
+              label={data.isLive ? 'Live' : 'Offline'}
+              sx={{
+                fontWeight: 800,
+                bgcolor: data.isLive ? '#E5F0EB' : '#FCE9E9',
+                color: data.isLive ? '#2E7D32' : '#C65A5A',
+              }}
+            />
+            <Chip
+              label={`Stripe: ${data.mode}${data.configured ? '' : ' (not configured)'}`}
+              color={data.mode === 'test' ? 'warning' : data.mode === 'live' ? 'success' : 'default'}
+            />
+          </Stack>
         )}
       </Box>
 
@@ -359,6 +369,13 @@ const Funding: React.FC = () => {
               </Paper>
             ))}
           </Box>
+
+          {data.budget.spendableBudgetCents < minFundingCents && (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              At least {fmtUSD(minFundingCents)} in available funding is required to go Live.
+              Add funds to be visible to riders.
+            </Alert>
+          )}
 
           <Paper sx={{ p: 2.5, borderRadius: '16px', mb: 3 }}>
             <Stack
@@ -482,7 +499,10 @@ const Funding: React.FC = () => {
             size="large"
             variant="outlined"
             startIcon={<AddCardIcon />}
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              if (!amount) setAmount((minFundingCents / 100).toFixed(0));
+              setOpen(true);
+            }}
             sx={{ mb: 3 }}
           >
             Add funds
@@ -586,7 +606,11 @@ const Funding: React.FC = () => {
             onChange={(e) => setAmount(sanitizeAmount(e.target.value))}
             inputMode="decimal"
             error={amount !== '' && !amountValid}
-            helperText={amount !== '' && !amountValid ? 'Enter an amount greater than $0.' : ' '}
+            helperText={
+              amount !== '' && !amountValid
+                ? `Minimum ${fmtUSD(minFundingCents)} is required to go Live.`
+                : `Minimum ${fmtUSD(minFundingCents)} per top-up.`
+            }
             slotProps={{
               input: {
                 startAdornment: <InputAdornment position="start">$</InputAdornment>,

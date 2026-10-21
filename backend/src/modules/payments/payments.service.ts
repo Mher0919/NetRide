@@ -17,7 +17,7 @@
 import { pool } from '../../config/database';
 import { env } from '../../config/env';
 import { WalletService } from '../wallet/wallet.service';
-import { SponsorService } from '../sponsor/sponsor.service';
+import { SponsorService, SPONSOR_MIN_LIVE_FUNDING_CENTS } from '../sponsor/sponsor.service';
 import { tryGetStripeGateway, type StripeGateway } from './stripe.gateway';
 import { isStripeConfigured, stripeMode } from './stripe.client';
 import { isTestEmail } from '../../utils/testUser';
@@ -30,6 +30,7 @@ export type StripePaymentPurpose =
 
 export const WALLET_TOPUP_MIN_CENTS = 100; // $1.00
 export const WALLET_TOPUP_MAX_CENTS = 500_000; // $5,000.00
+export const SPONSOR_FUNDING_MIN_CENTS = SPONSOR_MIN_LIVE_FUNDING_CENTS; // $50.00
 
 /** Booking gate: the rider must have a saved card before requesting a ride. */
 export class PaymentMethodRequiredError extends Error {
@@ -63,6 +64,7 @@ export class PaymentsService {
       currency: env.STRIPE_CURRENCY,
       walletTopupMinCents: WALLET_TOPUP_MIN_CENTS,
       walletTopupMaxCents: WALLET_TOPUP_MAX_CENTS,
+      sponsorFundingMinCents: SPONSOR_FUNDING_MIN_CENTS,
     };
   }
 
@@ -627,8 +629,8 @@ export class PaymentsService {
     paymentMethodId?: string | null;
   }): Promise<{ paymentRowId: string; clientSecret: string; paymentIntentId: string }> {
     const amountCents = Math.round(args.amountCents);
-    if (!Number.isFinite(amountCents) || amountCents <= 0 || amountCents > 10_000_000) {
-      throw new Error('Invalid funding amount');
+    if (!Number.isFinite(amountCents) || amountCents < SPONSOR_FUNDING_MIN_CENTS || amountCents > 10_000_000) {
+      throw new Error(`Minimum funding amount is ${(SPONSOR_FUNDING_MIN_CENTS / 100).toFixed(2)}`);
     }
     const gateway = gatewayOrNull();
     if (!gateway) throw new Error('Stripe is not configured');
@@ -759,8 +761,8 @@ export class PaymentsService {
     idempotencyKey?: string;
   }): Promise<{ url: string; paymentRowId: string }> {
     const amountCents = Math.round(args.amountCents);
-    if (!Number.isFinite(amountCents) || amountCents <= 0 || amountCents > 10_000_000) {
-      throw new Error('Invalid funding amount');
+    if (!Number.isFinite(amountCents) || amountCents < SPONSOR_FUNDING_MIN_CENTS || amountCents > 10_000_000) {
+      throw new Error(`Minimum funding amount is ${(SPONSOR_FUNDING_MIN_CENTS / 100).toFixed(2)}`);
     }
     const gateway = gatewayOrNull();
     if (!gateway) throw new Error('Stripe is not configured');

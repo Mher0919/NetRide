@@ -12,7 +12,11 @@ import { Request, Response } from 'express';
 import { pool } from '../../config/database';
 import { env } from '../../config/env';
 import { centsValue } from '../../services/financial-ledger.service';
-import { SponsorService, discountLabelFor } from './sponsor.service';
+import {
+  SponsorService,
+  discountLabelFor,
+  SPONSOR_MIN_LIVE_FUNDING_CENTS,
+} from './sponsor.service';
 import { SpecialRedemptionService } from './special-redemption.service';
 import { PaymentsService } from '../payments/payments.service';
 import { stripeMode, isStripeConfigured } from '../payments/stripe.client';
@@ -68,7 +72,13 @@ export class SponsorPortalController {
           status: sponsor.status,
           discountLabel: discountLabelFor(sponsor),
           remainingBudgetCents: sponsor.remaining_budget_cents,
+          spendableBudgetCents: Math.max(
+            0,
+            sponsor.remaining_budget_cents - sponsor.reserved_budget_cents,
+          ),
           usedBudgetCents: sponsor.used_budget_cents,
+          isLive: SponsorService.isEligible(sponsor),
+          minFundingCents: SPONSOR_MIN_LIVE_FUNDING_CENTS,
         },
         stats: {
           pendingValidations: pending.rows[0].n,
@@ -250,6 +260,8 @@ export class SponsorPortalController {
       res.json({
         configured: isStripeConfigured(),
         mode: stripeMode(),
+        isLive: SponsorService.isEligible(sponsor),
+        minFundingCents: SPONSOR_MIN_LIVE_FUNDING_CENTS,
         budget: {
           initialBudgetCents: sponsor.initial_budget_cents,
           remainingBudgetCents: sponsor.remaining_budget_cents,

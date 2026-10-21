@@ -64,6 +64,7 @@ import partnerPortalRoutes from './modules/partner/partner-portal.routes';
 import portalRoutes from './modules/portal/portal.routes';
 import paymentsRoutes from './modules/payments/payments.routes';
 import adminPaymentsRoutes from './modules/payments/admin-payments.routes';
+import appVersionRoutes from './modules/app-version/app-version.routes';
 import { PaymentsController as StripeWebhookController } from './modules/payments/payments.controller';
 import { SpecialRedemptionService } from './modules/sponsor/special-redemption.service';
 import { RideSettlementService } from './modules/payments/ride-settlement.service';
@@ -314,6 +315,7 @@ app.use('/api/routing', routingRoutes);
 app.use('/api/routing', routingApi);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin', adminRewardsRoutes);
+app.use('/api/app', appVersionRoutes);
 app.use('/api/credits', creditsRoutes);
 app.use('/api/promo', promoRoutes);
 app.use('/api/referral', referralRoutes);
@@ -780,6 +782,17 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('✅ Wallet transaction visibility schema (061) applied');
+    }
+
+    const hasAppReleaseConfigs = await pool.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_name = 'app_release_configs'"
+    );
+    if (hasAppReleaseConfigs.rowCount === 0) {
+      console.log('Applying app release config schema (20261020)...');
+      const schemaPath = path.join(__dirname, '../migrations/20261020_app_release_configs.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('App release config schema (20261020) applied');
     }
 
     console.log('🚀 All migrations completed');

@@ -81,13 +81,24 @@ const SponsorDashboard: React.FC<{ data: PortalDashboard; onChanged: () => void 
 
   return (
     <Box>
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
-          {sponsor.businessName}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {String(sponsor.businessType ?? 'BUSINESS').toLowerCase()} partner · status: {sponsor.status} · budget remaining: {fmtUSD(sponsor.remainingBudgetCents)}
-        </Typography>
+      <Box sx={{ mb: 3, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
+            {sponsor.businessName}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {String(sponsor.businessType ?? 'BUSINESS').toLowerCase()} partner · status: {sponsor.status} · budget remaining: {fmtUSD(sponsor.remainingBudgetCents)}
+          </Typography>
+        </Box>
+        <Chip
+          label={sponsor.isLive ? 'Live' : 'Offline'}
+          sx={{
+            flexShrink: 0,
+            fontWeight: 800,
+            bgcolor: sponsor.isLive ? '#E5F0EB' : '#FCE9E9',
+            color: sponsor.isLive ? '#2E7D32' : '#C65A5A',
+          }}
+        />
       </Box>
 
       <Button variant="contained" size="large" startIcon={<DialpadIcon />} onClick={openCode} sx={{ mb: 3 }}>

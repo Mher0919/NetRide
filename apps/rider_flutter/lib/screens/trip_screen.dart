@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../services/secure_token_store.dart';
 
+import 'package:confetti/confetti.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -908,122 +909,250 @@ class _ArrivalSummaryDialog extends StatefulWidget {
 }
 
 class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
+  late final ConfettiController _confettiController;
+
+  @override
+  void initState() {
+    super.initState();
+    _confettiController = ConfettiController(
+      duration: const Duration(seconds: 3),
+    );
+    _confettiController.play();
+  }
+
+  @override
+  void dispose() {
+    _confettiController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final finalFare = widget.trip.fareAmount ?? 0.0;
+    final rewardCents = widget.trip.rideCreditRewardCents ?? 0;
+    final balanceCents = widget.trip.rideCreditBalanceCents;
 
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-      backgroundColor: Colors.white,
-      title: const Center(
-        child: Text(
-          'You have arrived! 🎉',
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-            fontSize: 22,
-            color: Color(0xFF2F3A32),
-          ),
-        ),
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
+    return PopScope(
+      canPop: false,
+      child: Stack(
+        alignment: Alignment.topCenter,
         children: [
-          const Text(
-            'Your trip is complete. Here is your final fare summary:',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: Colors.grey, height: 1.5),
+          ModalBarrier(
+            color: Colors.black.withOpacity(0.54),
+            dismissible: false,
           ),
-          const SizedBox(height: 24),
-          Text(
-            '\$${finalFare.toStringAsFixed(2)}',
-            style: const TextStyle(
-              fontSize: 38,
-              fontWeight: FontWeight.w900,
-              color: Color(0xFF2F3A32),
+          Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F4EF),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: const Color(0xFFD8D2CA), width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.25),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.all(28),
+              child: Material(
+                color: Colors.transparent,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 100,
+                      height: 100,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFF5B7760),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.check_rounded,
+                          size: 60,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Congratulations!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFF2F3A32),
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (rewardCents > 0) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'You earned \$${(rewardCents / 100).toStringAsFixed(2)} in ride credits',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFF2F3A32),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6E8B74).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF6E8B74).withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.savings_outlined,
+                              color: Color(0xFF5B7760),
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                balanceCents != null
+                                    ? 'Added! New balance: \$${(balanceCents / 100).toStringAsFixed(2)}'
+                                    : 'Added to your ride credits',
+                                style: const TextStyle(
+                                  color: Color(0xFF5B7760),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Your trip is complete.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xFF2F3A32),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Text(
+                      'Final fare: \$${finalFare.toStringAsFixed(2)}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF2F3A32),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final rideProvider = Provider.of<RideProvider>(
+                            context,
+                            listen: false,
+                          );
+                          final trip = rideProvider.currentTrip;
+                          rideProvider.reset();
+                          try {
+                            final nav = Navigator.of(
+                              context,
+                              rootNavigator: true,
+                            );
+                            nav.pop(); // Close the arrival dialog
+                            if (trip != null) {
+                              // A completed SPECIAL ride pops the validation
+                              // code card right away: the rider must show
+                              // this code inside the deal place to get their
+                              // deal back (card refund or a little extra in
+                              // ride credits). They can close it for now —
+                              // the Explore "SPECIAL CODES" card keeps it
+                              // handy.
+                              final specials = Provider.of<SpecialsProvider>(
+                                context,
+                                listen: false,
+                              );
+                              final readyId = specials.consumeReadyNotice();
+                              if (readyId != null) {
+                                final card = specials.pending
+                                    .where((e) => e.id == readyId)
+                                    .toList();
+                                if (card.isNotEmpty) {
+                                  final r = card.first;
+                                  await showDialog<void>(
+                                    context: nav.context,
+                                    barrierDismissible: false,
+                                    builder: (_) => SpecialReadyDialog(
+                                      redemption: r,
+                                      code: specials.codeFor(r.id),
+                                    ),
+                                  );
+                                }
+                              }
+                              if (!nav.context.mounted) return;
+                              nav.pushReplacement(
+                                MaterialPageRoute(
+                                  builder: (_) => RatingScreen(trip: trip),
+                                ),
+                              );
+                            } else {
+                              nav.pop();
+                            }
+                          } catch (e) {
+                            debugPrint(
+                              '[ARRIVAL] Navigation error after reset: $e',
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF5B7760),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text(
+                          'RATE YOUR TRIP',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 16),
+          ConfettiWidget(
+            confettiController: _confettiController,
+            blastDirectionality: BlastDirectionality.explosive,
+            shouldLoop: false,
+            colors: const [
+              Color(0xFF5B7760),
+              Color(0xFFE5A93B),
+              Colors.white,
+            ],
+          ),
         ],
       ),
-      actionsAlignment: MainAxisAlignment.center,
-      actions: [
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () async {
-              final rideProvider = Provider.of<RideProvider>(
-                context,
-                listen: false,
-              );
-              final trip = rideProvider.currentTrip;
-              rideProvider.reset();
-              try {
-                final nav = Navigator.of(context, rootNavigator: true);
-                nav.pop(); // Close the arrival dialog
-                if (trip != null) {
-                  // A completed SPECIAL ride pops the validation code card
-                  // right away: the rider must show this code inside the
-                  // deal place to get their deal back (card refund or a
-                  // little extra in ride credits). They can close it for
-                  // now — the Explore "SPECIAL CODES" card keeps it handy.
-                  final specials = Provider.of<SpecialsProvider>(
-                    context,
-                    listen: false,
-                  );
-                  final readyId = specials.consumeReadyNotice();
-                  if (readyId != null) {
-                    final card = specials.pending
-                        .where((e) => e.id == readyId)
-                        .toList();
-                    if (card.isNotEmpty) {
-                      final r = card.first;
-                      await showDialog<void>(
-                        context: nav.context,
-                        barrierDismissible: false,
-                        builder: (_) => SpecialReadyDialog(
-                          redemption: r,
-                          code: specials.codeFor(r.id),
-                        ),
-                      );
-                    }
-                  }
-                  if (!nav.context.mounted) return;
-                  nav.pushReplacement(
-                    MaterialPageRoute(
-                      builder: (_) => RatingScreen(trip: trip),
-                    ),
-                  );
-                } else {
-                  nav.pop();
-                }
-              } catch (e) {
-                debugPrint('[ARRIVAL] Navigation error after reset: $e');
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2F3A32),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(
-                vertical: 14,
-                horizontal: 16,
-              ),
-              minimumSize: const Size(0, 48),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              textStyle: const TextStyle(fontSize: 15, height: 1.25),
-            ),
-            child: const Text(
-              'RATE YOUR TRIP',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
-                height: 1.25,
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

@@ -7,7 +7,12 @@
 import { Request, Response } from 'express';
 import { pool } from '../../config/database';
 import { centsValue } from '../../services/financial-ledger.service';
-import { SponsorService, discountLabelFor, SponsorStatus } from './sponsor.service';
+import {
+  SponsorService,
+  discountLabelFor,
+  SponsorStatus,
+  SPONSOR_MIN_LIVE_FUNDING_CENTS,
+} from './sponsor.service';
 import { SpecialRedemptionService } from './special-redemption.service';
 import { StorageService } from '../../services/storage.service';
 import { validateUploadMime } from '../../security/file-policy';
@@ -253,6 +258,8 @@ export class AdminSponsorController {
         ...s,
         discountLabel: discountLabelFor(s),
         spendableCents: s.remaining_budget_cents - s.reserved_budget_cents,
+        isLive: SponsorService.isEligible(s),
+        minFundingCents: SPONSOR_MIN_LIVE_FUNDING_CENTS,
       })), total });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -276,6 +283,8 @@ export class AdminSponsorController {
           ...sponsor,
           discountLabel: discountLabelFor(sponsor),
           spendableCents: sponsor.remaining_budget_cents - sponsor.reserved_budget_cents,
+          isLive: SponsorService.isEligible(sponsor),
+          minFundingCents: SPONSOR_MIN_LIVE_FUNDING_CENTS,
           // Same classification the list uses (marker + email + portal user).
           is_test: await SponsorService.isTestSponsor(sponsor.id),
         },
@@ -312,7 +321,11 @@ export class AdminSponsorController {
         if (!(cents > 0)) return res.status(400).json({ error: 'Fixed discount must be > $0' });
       }
       const budget = Math.round(Number(b.initialBudgetCents ?? 0));
-      if (!(budget >= 0)) return res.status(400).json({ error: 'Budget must be >= 0' });
+      if (!(budget >= SPONSOR_MIN_LIVE_FUNDING_CENTS)) {
+        return res.status(400).json({
+          error: `Initial funding must be at least $${(SPONSOR_MIN_LIVE_FUNDING_CENTS / 100).toFixed(2)}`,
+        });
+      }
       const lat = b.latitude != null && b.latitude !== '' ? Number(b.latitude) : null;
       const lng = b.longitude != null && b.longitude !== '' ? Number(b.longitude) : null;
       if (lat != null && (isNaN(lat) || lat < -90 || lat > 90)) {

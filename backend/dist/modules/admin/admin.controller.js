@@ -880,8 +880,8 @@ class AdminController {
     static async getRides(req, res) {
         const { status } = req.query;
         // ---------------------------------------------------------------- input
-        // Validate query parameters before they reach Prisma. An unvalidated
-        // status previously reached `prisma.ride.count()` as an invalid enum
+        // Validate query parameters before they reach the database. An
+        // unvalidated status previously reached the query as an invalid enum
         // value and threw "Invalid value for argument `status`. Expected
         // TripStatus" → HTTP 500. Malformed input is a client error (400), not a
         // server failure.
@@ -905,40 +905,65 @@ class AdminController {
             return res.status(400).json({ error: 'limit must be an integer between 1 and 100.', code: 'INVALID_LIMIT' });
         }
         const skip = (page - 1) * limit;
-        const where = {};
-        if (statusFilter === 'ACTIVE') {
-            where.status = { notIn: ['COMPLETED', 'CANCELLED'] };
-        }
-        else if (statusFilter === 'COMPLETED') {
-            where.status = 'COMPLETED';
-        }
+        // Test accounts (E2E/sandbox/dev seeds) are hidden by default; admins
+        // opt in with includeTest=true. Classification uses the canonical
+        // platform-wide ride rule (TEST_RIDE_SQL) so the list, the Completed
+        // Rides totals and the Revenue section can never disagree about what a
+        // test ride is. Prisma cannot express the email rule, so the list is
+        // built with parameterised raw SQL.
+        const includeTest = String(req.query.includeTest ?? '').toLowerCase() === 'true';
+        const statusSql = statusFilter === 'ACTIVE'
+            ? `r.status NOT IN ('COMPLETED', 'CANCELLED')`
+            : statusFilter === 'COMPLETED'
+                ? `r.status = 'COMPLETED'`
+                : 'TRUE';
+        const testRideSql = (0, testUser_1.rideScopeCondition)('test', 'r', 'ru', 'du');
+        const whereSql = `${statusSql}${includeTest ? '' : ` AND NOT ${testRideSql}`}`;
         try {
-            const [rides, total] = await Promise.all([
-                prisma_service_1.prisma.ride.findMany({
-                    where,
-                    skip,
-                    take: limit,
-                    orderBy: { created_at: 'desc' },
-                    include: {
-                        rider: { select: { full_name: true, email: true, phone_number: true } },
-                        driver: { select: { full_name: true, email: true, phone_number: true } },
-                    },
-                }),
-                prisma_service_1.prisma.ride.count({ where }),
+            const [ridesRes, totalRes] = await Promise.all([
+                database_1.pool.query(`SELECT r.*,
+                  json_build_object(
+                    'full_name', ru.full_name,
+                    'email', ru.email,
+                    'phone_number', ru.phone_number
+                  ) AS rider,
+                  CASE WHEN du.id IS NULL THEN NULL ELSE json_build_object(
+                    'full_name', du.full_name,
+                    'email', du.email,
+                    'phone_number', du.phone_number
+                  ) END AS driver,
+                  (${testRideSql}) AS is_test
+             FROM rides r
+             LEFT JOIN users ru ON ru.id = r.rider_id
+             LEFT JOIN users du ON du.id = r.driver_id
+            WHERE ${whereSql}
+            ORDER BY r.created_at DESC
+            LIMIT $1 OFFSET $2`, [limit, skip]),
+                database_1.pool.query(`SELECT COUNT(*)::int AS c
+             FROM rides r
+             LEFT JOIN users ru ON ru.id = r.rider_id
+             LEFT JOIN users du ON du.id = r.driver_id
+            WHERE ${whereSql}`),
             ]);
+            const rides = ridesRes.rows;
+            const total = totalRes.rows[0]?.c ?? 0;
             // Server-computed financial summary for the page being viewed. Only
             // the backend may decide these numbers — they come from the
             // settlement ledger, never from the client. Live/active rides have
             // no settlement yet, so no summary is attached.
+            //
+            // TEST RIDES NEVER CONTRIBUTE to gross / driver / platform totals,
+            // regardless of whether the admin is currently showing them in the
+            // table. The summary is production-only by construction.
             //
             // The summary is an enhancement, never a dependency: a ledger/query
             // failure must not turn the whole list request into a 500 (the old
             // behaviour made Completed Rides completely unusable whenever the
             // summary query failed).
             let summary = undefined;
-            if (statusFilter === 'COMPLETED' && rides.length > 0) {
+            if (statusFilter === 'COMPLETED') {
                 try {
-                    summary = await financial_ledger_service_1.FinancialLedgerService.summarizeRides(rides.map((r) => r.id));
+                    summary = await financial_ledger_service_1.FinancialLedgerService.summarizeRides(rides.filter((r) => r.is_test !== true).map((r) => r.id));
                 }
                 catch (summaryError) {
                     console.error(`[ADMIN] ⚠️ Ride summary unavailable: ${summaryError.message}`);
