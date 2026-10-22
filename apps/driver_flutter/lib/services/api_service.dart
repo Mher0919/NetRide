@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'auth_service.dart';
+import 'app_update_events.dart';
 import 'device_fingerprint.dart';
 
 /// Centralized HTTP configuration for the driver app. Identical lifecycle
@@ -18,6 +20,14 @@ class ApiService {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   static bool _initialized = false;
+  static const String _appId = 'driver';
+  static String? _appVersion;
+  static String? _appBuildNumber;
+  static String? _appPlatform;
+  static String get appId => _appId;
+  static String? get appVersion => _appVersion;
+  static String? get appBuildNumber => _appBuildNumber;
+  static String? get appPlatform => _appPlatform;
   static Dio? _dio;
 
   /// Canonical base URL, always ending in a trailing slash so relative
@@ -51,6 +61,17 @@ class ApiService {
   static Future<void> init() async {
     if (_initialized && _dio != null) return;
 
+    try {
+      final info = await PackageInfo.fromPlatform();
+      _appVersion = info.version;
+      _appBuildNumber = info.buildNumber.isEmpty ? null : info.buildNumber;
+      _appPlatform = defaultTargetPlatform == TargetPlatform.iOS
+          ? 'ios'
+          : 'android';
+    } catch (error) {
+      debugPrint('[API] App version metadata unavailable: $error');
+    }
+
     final client = Dio(
       BaseOptions(
         baseUrl: baseUrl,
@@ -67,6 +88,15 @@ class ApiService {
     client.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
         final token = SecureTokenStore.token;
+
+        if (_appVersion != null && _appPlatform != null) {
+          options.headers['X-App-Id'] = _appId;
+          options.headers['X-App-Platform'] = _appPlatform;
+          options.headers['X-App-Version'] = _appVersion;
+          if (_appBuildNumber != null) {
+            options.headers['X-App-Build'] = _appBuildNumber;
+          }
+        }
 
         debugPrint('[API DEBUG] 🛰️ ${options.method} ${options.uri}');
 
@@ -93,6 +123,13 @@ class ApiService {
         return handler.next(options);
       },
       onError: (DioException e, handler) async {
+        if (e.response?.statusCode == 426) {
+          final data = e.response?.data;
+          if (data is Map && data['code'] == 'APP_UPDATE_REQUIRED') {
+            appUpdateEnforcementSignal.value++;
+          }
+        }
+
         if (e.response?.statusCode == 401) {
           // Single-flight guard: if the request was already retried once
           // after a backend sync and STILL 401s, do not enter recovery again.

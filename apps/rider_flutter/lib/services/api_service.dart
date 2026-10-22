@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'auth_service.dart';
+import 'app_update_events.dart';
 
 /// Centralized HTTP configuration for the rider app.
 ///
@@ -27,6 +29,15 @@ class ApiService {
 
   /// Whether [init] has completed. Useful for sanity-checking callers.
   static bool _initialized = false;
+  static const String _appId = 'rider';
+  static String? _appVersion;
+  static String? _appBuildNumber;
+  static String? _appPlatform;
+
+  static String get appId => _appId;
+  static String? get appVersion => _appVersion;
+  static String? get appBuildNumber => _appBuildNumber;
+  static String? get appPlatform => _appPlatform;
 
   /// Lazily-created Dio instance. The first access AFTER [init] has
   /// completed returns the configured client; accessing it before
@@ -68,6 +79,17 @@ class ApiService {
   static Future<void> init() async {
     if (_initialized && _dio != null) return;
 
+    try {
+      final info = await PackageInfo.fromPlatform();
+      _appVersion = info.version;
+      _appBuildNumber = info.buildNumber.isEmpty ? null : info.buildNumber;
+      _appPlatform = defaultTargetPlatform == TargetPlatform.iOS
+          ? 'ios'
+          : 'android';
+    } catch (error) {
+      debugPrint('[API] App version metadata unavailable: $error');
+    }
+
     final client = Dio(
       BaseOptions(
         baseUrl: baseUrl,
@@ -85,6 +107,15 @@ class ApiService {
       onRequest: (options, handler) async {
         final token = SecureTokenStore.token;
 
+        if (_appVersion != null && _appPlatform != null) {
+          options.headers['X-App-Id'] = _appId;
+          options.headers['X-App-Platform'] = _appPlatform;
+          options.headers['X-App-Version'] = _appVersion;
+          if (_appBuildNumber != null) {
+            options.headers['X-App-Build'] = _appBuildNumber;
+          }
+        }
+
         debugPrint('[API DEBUG] 🛰️ ${options.method} ${options.uri}');
 
         if (token != null && token.isNotEmpty) {
@@ -95,6 +126,13 @@ class ApiService {
         return handler.next(options);
       },
       onError: (DioException e, handler) async {
+        if (e.response?.statusCode == 426) {
+          final data = e.response?.data;
+          if (data is Map && data['code'] == 'APP_UPDATE_REQUIRED') {
+            appUpdateEnforcementSignal.value++;
+          }
+        }
+
         // Only attempt recovery on a true 401 with a token that we sent.
         if (e.response?.statusCode == 401) {
           // Single-flight guard: if the request was already retried once

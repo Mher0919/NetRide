@@ -547,7 +547,15 @@ class DriverProvider with ChangeNotifier {
       'reconnectionDelay': 1000,
       'reconnectionDelayMax': 15000,
       'randomizationFactor': 0.5,
-      'auth': {'token': token, 'role': 'DRIVER'},
+      'auth': {
+        'token': token,
+        'role': 'DRIVER',
+        if (ApiService.appVersion != null) 'appId': ApiService.appId,
+        if (ApiService.appVersion != null) 'platform': ApiService.appPlatform,
+        if (ApiService.appVersion != null) 'version': ApiService.appVersion,
+        if (ApiService.appBuildNumber != null)
+          'build': ApiService.appBuildNumber,
+      },
     });
 
     _socket!.onConnect((_) {

@@ -454,6 +454,129 @@ export const updatePricingProfile = async (code: string, data: Record<string, un
   return response.data as { profile: any };
 };
 
+export type AppUpdateTarget = {
+  app: 'rider' | 'driver';
+  platform: 'android' | 'ios';
+};
+
+export interface AppUpdateFieldsPayload {
+  campaignName: string | null;
+  latestVersion: string;
+  minimumVersion: string;
+  latestBuild: number | null;
+  minimumBuild: number | null;
+  storeUrl: string;
+  popupTitle: string;
+  popupMessage: string;
+  buttonText: string;
+  supportingText: string | null;
+  announcementLabel: string | null;
+  accentColor: string | null;
+}
+
+export interface AppUpdatePublished extends AppUpdateFieldsPayload {
+  app: AppUpdateTarget['app'];
+  platform: AppUpdateTarget['platform'];
+  releaseNotes: string | null;
+  isActive: boolean;
+  campaignStatus: 'DRAFT' | 'PUBLISHED' | 'DISABLED';
+  publishedAt: string | null;
+  publishedBy: string | null;
+  publishedByName?: string | null;
+  updatedBy: string | null;
+  updatedByName?: string | null;
+  updatedAt: string | null;
+  draftRevision: number;
+  source: 'database' | 'default';
+}
+
+export interface AppUpdateDraft extends AppUpdateFieldsPayload {
+  revision: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  updatedByName?: string | null;
+}
+
+export interface AppUpdateConfig {
+  app: AppUpdateTarget['app'];
+  platform: AppUpdateTarget['platform'];
+  published: AppUpdatePublished;
+  draft: AppUpdateDraft | null;
+  draftRevision: number;
+  source: 'database' | 'default';
+}
+
+export interface AppUpdateHistoryEvent {
+  id: string;
+  action: string;
+  actorId: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  details: Record<string, unknown>;
+  createdAt: string | null;
+}
+
+export const listAppUpdateConfigs = async () => {
+  const response = await api.get('/admin/app-updates');
+  return response.data as { configs: AppUpdateConfig[] };
+};
+
+export const saveAppUpdateDraft = async (
+  app: string,
+  platform: string,
+  data: AppUpdateFieldsPayload & { expectedRevision: number },
+) => {
+  const response = await api.put(
+    `/admin/app-updates/${app}/${platform}/draft`,
+    data,
+  );
+  return response.data as { config: AppUpdateConfig };
+};
+
+export const discardAppUpdateDraft = async (
+  app: string,
+  platform: string,
+  expectedRevision: number,
+) => {
+  const response = await api.delete(
+    `/admin/app-updates/${app}/${platform}/draft`,
+    { params: { expectedRevision } },
+  );
+  return response.data as { config: AppUpdateConfig };
+};
+
+export const publishAppUpdate = async (
+  app: string,
+  platform: string,
+  expectedRevision: number,
+) => {
+  const response = await api.post(
+    `/admin/app-updates/${app}/${platform}/publish`,
+    { expectedRevision },
+  );
+  return response.data as { config: AppUpdateConfig };
+};
+
+export const deactivateAppUpdate = async (
+  app: string,
+  platform: string,
+  expectedRevision: number,
+  reason?: string,
+) => {
+  const response = await api.post(
+    `/admin/app-updates/${app}/${platform}/deactivate`,
+    { expectedRevision, reason: reason || null },
+  );
+  return response.data as { config: AppUpdateConfig };
+};
+
+export const getAppUpdateHistory = async (app: string, platform: string) => {
+  const response = await api.get(
+    `/admin/app-updates/${app}/${platform}/history`,
+  );
+  return response.data as { events: AppUpdateHistoryEvent[] };
+};
+
 export const getRevenueOverview = async (params: { scope?: 'production' | 'test' } = {}) => {
   const response = await api.get('/admin/revenue', { params });
   return response.data;

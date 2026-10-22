@@ -16,6 +16,7 @@ import { rateLimitMiddleware } from './middleware/rateLimit.middleware';
 import { identifyUser } from './middleware/identifyUser.middleware';
 import { authMiddleware } from './middleware/auth.middleware';
 import { attachPrivateFileAccessTokens } from './middleware/fileAccessToken.middleware';
+import { enforceAppVersion } from './middleware/appVersion.middleware';
 import { initSentry } from './observability/sentry';
 import { logger } from './observability/logger';
 import { requestContext, requestLogger } from './middleware/pinoHttp';
@@ -65,6 +66,17 @@ import portalRoutes from './modules/portal/portal.routes';
 import paymentsRoutes from './modules/payments/payments.routes';
 import adminPaymentsRoutes from './modules/payments/admin-payments.routes';
 import appVersionRoutes from './modules/app-version/app-version.routes';
+import appUpdateAdminRoutes from './modules/app-version/app-update.admin.routes';
+import { getReleaseConfig } from './modules/app-version/app-version.service';
+import {
+  APP_IDS,
+  APP_PLATFORMS,
+  AppId,
+  AppPlatform,
+  evaluateVersion,
+  isValidVersion,
+  parseVersion,
+} from './modules/app-version/app-version.utils';
 import { PaymentsController as StripeWebhookController } from './modules/payments/payments.controller';
 import { SpecialRedemptionService } from './modules/sponsor/special-redemption.service';
 import { RideSettlementService } from './modules/payments/ride-settlement.service';
@@ -155,7 +167,16 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-portal-type'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'x-portal-type',
+    'X-App-Id',
+    'X-App-Platform',
+    'X-App-Version',
+    'X-App-Build',
+    'X-Device-Id',
+  ],
 }));
 // Trust Render proxy so req.ip resolves individual client IPs
 // instead of the proxy IP. This fixes rate-limit key collisions
@@ -186,6 +207,7 @@ app.use(requestLogger);
 // Must run BEFORE rate-limit so authenticated requests use user-based keys.
 app.use(identifyUser);
 app.use(rateLimitMiddleware);
+app.use(enforceAppVersion);
 // Admin JSON responses may embed private document references; this mints
 // short-lived, purpose-scoped access tokens for the authenticated admin
 // (public profile photos are left untouched). MUST run after identifyUser so
@@ -267,6 +289,43 @@ io.use(async (socket, next) => {
     // change sessions immediately (fails closed on lookup errors).
     await AuthService.assertTokenStillValid(decoded);
 
+    const appIdRaw = String(socket.handshake.auth.appId ?? '')
+      .trim()
+      .toLowerCase();
+    const platformRaw = String(socket.handshake.auth.platform ?? '')
+      .trim()
+      .toLowerCase();
+    const appVersion = String(socket.handshake.auth.version ?? '').trim();
+    if (
+      appIdRaw &&
+      platformRaw &&
+      appVersion &&
+      (APP_IDS as readonly string[]).includes(appIdRaw) &&
+      (APP_PLATFORMS as readonly string[]).includes(platformRaw) &&
+      parseVersion(appVersion)
+    ) {
+      try {
+        const config = await getReleaseConfig(
+          appIdRaw as AppId,
+          platformRaw as AppPlatform,
+        );
+        const buildRaw = String(socket.handshake.auth.build ?? '').trim();
+        const appBuild = /^\d+$/.test(buildRaw) ? Number(buildRaw) : null;
+        if (
+          config.isActive &&
+          config.campaignStatus === 'PUBLISHED' &&
+          isValidVersion(config.minimumVersion) &&
+          evaluateVersion(config, appVersion, appBuild).updateRequired
+        ) {
+          return next(new Error('APP_UPDATE_REQUIRED'));
+        }
+      } catch (error: any) {
+        console.error(
+          `[APP-VERSION] Socket enforcement skipped: ${error.message}`,
+        );
+      }
+    }
+
     // Resolve the ACTIVE session role from the application context supplied
     // by the connecting client (e.g. the Driver App sends `role: 'driver'`,
     // the Rider App sends `role: 'rider'`). This is the single source of
@@ -313,6 +372,7 @@ app.use('/api/geospatial', geospatialRoutes);
 app.use('/api/navigation', navigationRoutes);
 app.use('/api/routing', routingRoutes);
 app.use('/api/routing', routingApi);
+app.use('/api/admin', appUpdateAdminRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin', adminRewardsRoutes);
 app.use('/api/app', appVersionRoutes);
@@ -793,6 +853,17 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('App release config schema (20261020) applied');
+    }
+
+    const hasAppUpdateCampaigns = await pool.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'app_release_configs' AND column_name = 'draft_config'"
+    );
+    if (hasAppUpdateCampaigns.rowCount === 0) {
+      console.log('Applying app update campaign schema (20261021)...');
+      const schemaPath = path.join(__dirname, '../migrations/20261021_app_update_campaigns.sql');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('App update campaign schema (20261021) applied');
     }
 
     console.log('🚀 All migrations completed');

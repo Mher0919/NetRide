@@ -6,6 +6,7 @@ import {
   DEFAULT_RELEASE_CONFIGS,
   compareVersions,
   evaluateVersion,
+  isAllowedStoreUrl,
   isBelowVersion,
   isValidVersion,
 } from '../../../../../backend/src/modules/app-version/app-version.utils';
@@ -88,6 +89,53 @@ test('evaluateVersion fails open when the installed version is malformed', () =>
   });
 });
 
+test('store URLs must be the canonical HTTPS listing for the target app', () => {
+  const riderAndroid =
+    'https://play.google.com/store/apps/details?id=com.netride.rider.rider_flutter';
+  const driverAndroid =
+    'https://play.google.com/store/apps/details?id=com.netride.driver.driver_flutter';
+  const riderIos = 'https://apps.apple.com/us/app/netride/id123456789';
+
+  assert.equal(isAllowedStoreUrl(riderAndroid, 'rider', 'android'), true);
+  assert.equal(isAllowedStoreUrl(driverAndroid, 'driver', 'android'), true);
+  assert.equal(isAllowedStoreUrl(riderIos, 'rider', 'ios'), true);
+  assert.equal(isAllowedStoreUrl(riderAndroid, 'driver', 'android'), false);
+  assert.equal(isAllowedStoreUrl(riderAndroid, 'rider', 'ios'), false);
+  assert.equal(isAllowedStoreUrl(riderIos, 'rider', 'android'), false);
+  assert.equal(
+    isAllowedStoreUrl(
+      'http://play.google.com/store/apps/details?id=com.netride.rider.rider_flutter',
+      'rider',
+      'android',
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedStoreUrl(
+      'https://evil.example/store/apps/details?id=com.netride.rider.rider_flutter',
+      'rider',
+      'android',
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedStoreUrl(
+      'https://apps.apple.com/us/search?term=NetRide',
+      'rider',
+      'ios',
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedStoreUrl(
+      'https://user:pass@play.google.com/store/apps/details?id=com.netride.rider.rider_flutter',
+      'rider',
+      'android',
+    ),
+    false,
+  );
+});
+
 test('default release configs cover every app and platform', () => {
   for (const app of APP_IDS) {
     for (const platform of APP_PLATFORMS) {
@@ -97,7 +145,10 @@ test('default release configs cover every app and platform', () => {
       assert.equal(isValidVersion(config.latestVersion), true);
       assert.equal(isValidVersion(config.minimumVersion), true);
       assert.ok(compareVersions(config.latestVersion, config.minimumVersion) >= 0);
-      assert.ok(config.storeUrl.length > 0);
+      assert.equal(config.storeUrl, '');
+      assert.equal(config.campaignStatus, 'PUBLISHED');
+      assert.ok(config.popupTitle.length > 0);
+      assert.ok(config.popupMessage.length > 0);
     }
   }
 });

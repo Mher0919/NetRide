@@ -6,6 +6,7 @@ import {
   APP_IDS,
   APP_PLATFORMS,
   evaluateVersion,
+  isAllowedStoreUrl,
 } from './app-version.utils';
 
 const versionQuerySchema = z.object({
@@ -34,30 +35,43 @@ export class AppVersionController {
 
     try {
       const config = await getReleaseConfig(app, platform);
+      const enabled =
+        config.isActive && config.campaignStatus === 'PUBLISHED';
       const decision =
-        config.isActive && currentVersion
+        enabled && currentVersion
           ? evaluateVersion(config, currentVersion, buildNumber ?? null)
           : { updateRequired: false, updateAvailable: false };
+      const storeUrl = isAllowedStoreUrl(config.storeUrl, app, platform)
+        ? config.storeUrl
+        : '';
 
       res.set(
         'Cache-Control',
-        'public, max-age=60, stale-while-revalidate=300',
+        'public, max-age=30, stale-while-revalidate=120',
       );
       return res.json({
         app: config.app,
         platform: config.platform,
-        enabled: config.isActive,
+        enabled,
+        campaign_status: config.campaignStatus,
         latest_version: config.latestVersion,
         minimum_version: config.minimumVersion,
         latest_build: config.latestBuild,
         minimum_build: config.minimumBuild,
-        store_url: config.storeUrl,
+        store_url: storeUrl,
         release_notes: config.releaseNotes,
+        popup_title: config.popupTitle,
+        popup_message: config.popupMessage,
+        button_text: config.buttonText,
+        supporting_text: config.supportingText,
+        announcement_label: config.announcementLabel,
+        accent_color: config.accentColor,
+        published_at: config.publishedAt,
         update_required: decision.updateRequired,
         update_available: decision.updateAvailable,
       });
     } catch (error: any) {
-      console.error(`[APP-VERSION] ❌ Version check failed: ${error.message}`);
+      console.error(`[APP-VERSION] Version check failed: ${error.message}`);
       return res.status(500).json({
         error: 'Unable to load app version information right now.',
       });

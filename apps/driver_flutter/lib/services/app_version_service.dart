@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_update/in_app_update.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -8,47 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api_service.dart';
+import 'app_update_policy.dart';
 
-enum UpdateUrgency { none, optional, required }
-
-enum AppUpdateChoice { update, later }
-
-enum AppUpdateLaunchResult {
-  storeOpened,
-  updateStarted,
-  flexibleStarted,
-  cancelled,
-  failed,
-}
-
-class AppUpdatePolicy {
-  const AppUpdatePolicy({
-    required this.currentVersion,
-    required this.currentBuild,
-    required this.latestVersion,
-    required this.minimumVersion,
-    required this.latestBuild,
-    required this.minimumBuild,
-    required this.storeUrl,
-    required this.releaseNotes,
-    required this.urgency,
-    required this.enabled,
-  });
-
-  final String currentVersion;
-  final int? currentBuild;
-  final String latestVersion;
-  final String minimumVersion;
-  final int? latestBuild;
-  final int? minimumBuild;
-  final String storeUrl;
-  final String? releaseNotes;
-  final UpdateUrgency urgency;
-  final bool enabled;
-
-  bool get hasUpdate => urgency != UpdateUrgency.none;
-  bool get isRequired => urgency == UpdateUrgency.required;
-}
+export 'app_update_policy.dart';
 
 class AppVersionService {
   AppVersionService._();
@@ -60,21 +23,25 @@ class AppVersionService {
   static const String _cacheAtKey = 'app_version_policy_driver_at';
   static const String _optionalSkipKey = 'app_version_optional_skipped_driver';
   static const String _optionalSkipAtKey = 'app_version_optional_skipped_driver_at';
-  static const String _androidFallbackStoreUrl =
-      'https://play.google.com/store/apps/details?id=com.netride.driver.driver_flutter';
-  static const String _iosFallbackStoreUrl =
-      'https://apps.apple.com/us/search?term=NetRide%20Driver';
   static const Duration _cacheMaxAge = Duration(hours: 24);
   static const Duration _optionalPromptWindow = Duration(hours: 24);
+  static const Duration _requestTimeout = Duration(seconds: 6);
 
   StreamSubscription<InstallStatus>? _flexibleUpdateSubscription;
 
-  Future<AppUpdatePolicy?> check() async {
+  Future<AppUpdatePolicy?> check({
+    Duration timeout = _requestTimeout,
+  }) async {
     final packageInfo = await PackageInfo.fromPlatform();
     final currentVersion = packageInfo.version;
     final currentBuild = int.tryParse(packageInfo.buildNumber);
 
     Map<String, dynamic>? raw;
+    final cancelToken = CancelToken();
+    final timer = Timer(timeout, () {
+      cancelToken.cancel('version-check-timeout');
+    });
+
     try {
       final response = await ApiService.dio.get<dynamic>(
         'app/version',
@@ -84,6 +51,11 @@ class AppVersionService {
           'currentVersion': currentVersion,
           'buildNumber': ?currentBuild,
         },
+        cancelToken: cancelToken,
+        options: Options(
+          receiveTimeout: timeout,
+          sendTimeout: timeout,
+        ),
       );
       if (response.data is Map) {
         raw = Map<String, dynamic>.from(response.data as Map);
@@ -91,12 +63,20 @@ class AppVersionService {
       }
     } catch (error) {
       debugPrint('[APP-UPDATE] Version check failed: $error');
+    } finally {
+      timer.cancel();
     }
 
     raw ??= await _readCache();
     if (raw == null) return null;
 
-    return _policyFrom(raw, currentVersion, currentBuild);
+    return buildAppUpdatePolicy(
+      raw: raw,
+      currentVersion: currentVersion,
+      currentBuild: currentBuild,
+      appId: _appId,
+      platform: _platformName,
+    );
   }
 
   Future<bool> shouldPromptOptional(AppUpdatePolicy policy) async {
@@ -154,11 +134,14 @@ class AppVersionService {
       }
     }
 
-    final storeUrl = policy.storeUrl.isNotEmpty
-        ? policy.storeUrl
-        : (defaultTargetPlatform == TargetPlatform.iOS
-            ? _iosFallbackStoreUrl
-            : _androidFallbackStoreUrl);
+    final storeUrl = policy.storeUrl;
+    if (!isAllowedStoreUrl(
+      storeUrl,
+      appId: _appId,
+      platform: _platformName,
+    )) {
+      return AppUpdateLaunchResult.missingStoreUrl;
+    }
 
     try {
       final opened = await launchUrl(
@@ -203,102 +186,6 @@ class AppVersionService {
     return 'android';
   }
 
-  AppUpdatePolicy _policyFrom(
-    Map<String, dynamic> raw,
-    String currentVersion,
-    int? currentBuild,
-  ) {
-    final enabled = raw['enabled'] != false;
-    final latestVersion =
-        _stringValue(raw['latest_version']) ?? currentVersion;
-    final minimumVersion =
-        _stringValue(raw['minimum_version']) ?? currentVersion;
-    final latestBuild = _intValue(raw['latest_build']);
-    final minimumBuild = _intValue(raw['minimum_build']);
-
-    final required = enabled &&
-        (raw['update_required'] == true ||
-            _isBelow(
-              currentVersion,
-              currentBuild,
-              minimumVersion,
-              minimumBuild,
-            ));
-    final available = enabled &&
-        (required ||
-            raw['update_available'] == true ||
-            _isBelow(
-              currentVersion,
-              currentBuild,
-              latestVersion,
-              latestBuild,
-            ));
-
-    final urgency = required
-        ? UpdateUrgency.required
-        : available
-            ? UpdateUrgency.optional
-            : UpdateUrgency.none;
-
-    return AppUpdatePolicy(
-      currentVersion: currentVersion,
-      currentBuild: currentBuild,
-      latestVersion: latestVersion,
-      minimumVersion: minimumVersion,
-      latestBuild: latestBuild,
-      minimumBuild: minimumBuild,
-      storeUrl: _stringValue(raw['store_url']) ?? '',
-      releaseNotes: _stringValue(raw['release_notes']),
-      urgency: urgency,
-      enabled: enabled,
-    );
-  }
-
-  bool _isBelow(
-    String currentVersion,
-    int? currentBuild,
-    String targetVersion,
-    int? targetBuild,
-  ) {
-    final comparison = _compareVersions(currentVersion, targetVersion);
-    if (comparison != 0) return comparison < 0;
-    if (currentBuild == null || targetBuild == null) return false;
-    return currentBuild < targetBuild;
-  }
-
-  int _compareVersions(String left, String right) {
-    final a = _parseVersion(left);
-    final b = _parseVersion(right);
-    if (a == null || b == null) return 0;
-
-    final length = a.length > b.length ? a.length : b.length;
-    for (var i = 0; i < length; i++) {
-      final av = i < a.length ? a[i] : 0;
-      final bv = i < b.length ? b[i] : 0;
-      if (av < bv) return -1;
-      if (av > bv) return 1;
-    }
-    return 0;
-  }
-
-  List<int>? _parseVersion(String value) {
-    final core = value.trim().split('+').first.split('-').first;
-    if (!RegExp(r'^\d+(\.\d+){0,3}$').hasMatch(core)) return null;
-    return core.split('.').map(int.parse).toList(growable: false);
-  }
-
-  String? _stringValue(dynamic value) {
-    if (value is String && value.trim().isNotEmpty) return value.trim();
-    return null;
-  }
-
-  int? _intValue(dynamic value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value);
-    return null;
-  }
-
   Future<void> _cache(Map<String, dynamic> raw) async {
     final prefs = await SharedPreferences.getInstance();
     final cacheable = Map<String, dynamic>.from(raw)
@@ -320,7 +207,9 @@ class AppVersionService {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is Map) return Map<String, dynamic>.from(decoded);
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('[APP-UPDATE] Ignoring invalid cached policy: $error');
+    }
     return null;
   }
 }
