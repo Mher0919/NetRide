@@ -68,6 +68,15 @@ class _MapScreenState extends State<MapScreen>
   double _estimateDurationSeconds = 0.0;
   bool _hasNavigatedToTrip = false;
 
+  // Fare arrival: the first routing response can omit the backend-priced
+  // fare (cold backend / cache hit), which used to strand the sheet on "—".
+  // While the checkout is open and the fare is still unknown, retry once a
+  // second (silently) until a price lands.
+  bool _farePending = false;
+  Timer? _fareRetryTimer;
+  int _fareRetryAttempts = 0;
+  static const int _maxFareRetryAttempts = 20;
+
   /// Notice id that already got its pre-pickup driver-cancel apology
   /// dialog. One dialog per driver cancellation (a fresh notice id pops it
   /// again), while a repeated rebuild must not.
@@ -136,6 +145,7 @@ class _MapScreenState extends State<MapScreen>
   // so drags and snap animations share one value source.
   late final AnimationController _sheetController;
   double _dragStartFraction = 0.0;
+  bool _overscrollCollapsing = false;
   static const double _sheetMinHeight = 96;
   static const double _sheetMaxFraction = 0.62;
 
@@ -214,7 +224,8 @@ class _MapScreenState extends State<MapScreen>
     final t = Curves.easeOutCubic.transform(_cameraMoveController.value);
     final lat = from.latitude + (to.latitude - from.latitude) * t;
     final lng = from.longitude + (to.longitude - from.longitude) * t;
-    final zoom = _cameraMoveFromZoom + (_cameraMoveToZoom - _cameraMoveFromZoom) * t;
+    final zoom =
+        _cameraMoveFromZoom + (_cameraMoveToZoom - _cameraMoveFromZoom) * t;
     try {
       _mapController.move(LatLng(lat, lng), zoom);
     } catch (_) {
@@ -323,10 +334,12 @@ class _MapScreenState extends State<MapScreen>
         address: intent.address,
       );
       _shouldFollowUser = false;
+      _mapExpanded = true;
     });
+    // Land on the request page immediately — never wait for the routing
+    // round-trip (a slow/cold backend made the tap look like a no-op).
+    _openRidePanel();
     _updateRoute();
-    // Land on the request page directly: expand the ride-options sheet
-    // (it opens via _updateRoute once the route resolves).
     _sheetController.value = 1;
     // Demand signal for the heatmap (same as a manual destination pick).
     context.read<RideProvider>().reportActivity(
@@ -432,6 +445,7 @@ class _MapScreenState extends State<MapScreen>
     _geohashTimer?.cancel();
     _cameraFitTimer?.cancel();
     _creditsZeroTimer?.cancel();
+    _fareRetryTimer?.cancel();
     _sheetController.dispose();
     _cameraMoveController.dispose();
     _creditsShakeController.dispose();
@@ -720,8 +734,48 @@ class _MapScreenState extends State<MapScreen>
       _panelOpen = true;
       _loadingEstimates = true;
       _estimateFare = 0.0;
+      _farePending = true;
+      _fareRetryAttempts = 0;
     });
     await _fetchEstimate();
+    _scheduleFareRetry();
+  }
+
+  /// Keeps polling (once a second) until the backend fare arrives, so the
+  /// rider never has to close/reopen the sheet to see the price.
+  void _scheduleFareRetry() {
+    _fareRetryTimer?.cancel();
+    if (!mounted || !_panelOpen || _estimateFare > 0) return;
+    if (_fareRetryAttempts >= _maxFareRetryAttempts) {
+      if (_farePending) setState(() => _farePending = false);
+      return;
+    }
+    _fareRetryAttempts++;
+    _fareRetryTimer = Timer(const Duration(seconds: 1), () async {
+      if (!mounted || !_panelOpen || _estimateFare > 0) return;
+      final pickup = _pickup;
+      final destination = _destination;
+      if (pickup == null || destination == null) return;
+      await _refreshEstimateInBackground(
+        originLat: pickup.lat,
+        originLng: pickup.lng,
+        destLat: destination.lat,
+        destLng: destination.lng,
+      );
+      if (!mounted) return;
+      if (_estimateFare > 0) {
+        if (_farePending) setState(() => _farePending = false);
+        return;
+      }
+      _scheduleFareRetry();
+    });
+  }
+
+  void _cancelFareRetry() {
+    _fareRetryTimer?.cancel();
+    _fareRetryTimer = null;
+    _fareRetryAttempts = 0;
+    _farePending = false;
   }
 
   /// Pulls the ride estimate (route geometry + platform fare).
@@ -791,6 +845,7 @@ class _MapScreenState extends State<MapScreen>
         setState(() {
           _routePoints = plan.points;
           _loadingEstimates = false;
+          if (_estimateFare > 0) _farePending = false;
         });
       }
     } catch (e) {
@@ -838,6 +893,7 @@ class _MapScreenState extends State<MapScreen>
       setState(() {
         _loadingEstimates = false;
         if (plan.points.isNotEmpty) _routePoints = plan.points;
+        if (_estimateFare > 0) _farePending = false;
       });
       debugPrint(
         '[ESTIMATE] Background fare refresh landed: ${fareTotal ?? 'no fare'}',
@@ -966,12 +1022,15 @@ class _MapScreenState extends State<MapScreen>
     // is in flight, and this guard makes a programmatic second call a no-op.
     if (_requesting) return;
     if (_pickup == null || _destination == null) return;
-    // SPECIALS: attach the rider's CREATED redemption (if any) so the
-    // backend applies the sponsor discount inside the pricing transaction.
+    // SPECIALS: only a ride started from a Special attaches its redemption
+    // (set by the ride intent). A stale CREATED redemption must NEVER be
+    // silently attached to a regular ride the rider planned manually.
     final specials = Provider.of<SpecialsProvider>(context, listen: false);
-    _specialRedemptionId = specials.canAttachToRide
-        ? specials.current!.id
-        : null;
+    if (_specialRedemptionId != null &&
+        (!specials.canAttachToRide ||
+            specials.current?.id != _specialRedemptionId)) {
+      _specialRedemptionId = null;
+    }
     if (_specialRedemptionId != null && !_specialTermsAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -995,9 +1054,7 @@ class _MapScreenState extends State<MapScreen>
       );
       await _openWalletScreen();
       if (!mounted) return;
-      if (_finalCents > 0 &&
-          _stripeConfigured &&
-          _paymentMethodLabel == null) {
+      if (_finalCents > 0 && _stripeConfigured && _paymentMethodLabel == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -1009,6 +1066,7 @@ class _MapScreenState extends State<MapScreen>
         return;
       }
     }
+    _cancelFareRetry();
     setState(() => _requesting = true);
     Provider.of<RideProvider>(context, listen: false).requestRide(
       _pickup!,
@@ -1045,6 +1103,7 @@ class _MapScreenState extends State<MapScreen>
     }
     if (!mounted) return;
     _cameraFitTimer?.cancel();
+    _cancelFareRetry();
     setState(() {
       _panelOpen = false;
       _requesting = false;
@@ -1180,10 +1239,43 @@ class _MapScreenState extends State<MapScreen>
   void _onSheetDragEnd(DragEndDetails details) {
     final velocity = details.primaryVelocity ?? 0;
     final v = _sheetController.value;
+    // Bias toward dismissing: a downward pull that clears a quarter of the
+    // range (or flicks down) collapses the sheet instead of springing back.
     final target = velocity.abs() > 350
         ? (velocity < 0 ? 1.0 : 0.0)
-        : (v > 0.45 ? 1.0 : 0.0);
+        : (v > 0.72 ? 1.0 : 0.0);
     _animateSheetTo(target);
+  }
+
+  /// Dragging down at the top of the expanded sheet's scroll view collapses
+  /// the sheet (otherwise the inner Scrollable swallows every downward drag
+  /// and the sheet can never be dismissed from "Choose your ride").
+  bool _onSheetScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    final maxH = MediaQuery.sizeOf(context).height * _sheetMaxFraction;
+    final range = maxH - _sheetMinHeight;
+    if (range <= 0) return false;
+
+    if (notification is OverscrollNotification &&
+        notification.overscroll < 0 &&
+        notification.metrics.pixels <= notification.metrics.minScrollExtent &&
+        _sheetController.value > 0) {
+      _overscrollCollapsing = true;
+      _sheetController.value =
+          (_sheetController.value + notification.overscroll / range)
+              .clamp(0.0, 1.0)
+              .toDouble();
+      return true;
+    }
+
+    if (notification is ScrollEndNotification && _overscrollCollapsing) {
+      _overscrollCollapsing = false;
+      final velocity = notification.dragDetails?.primaryVelocity ?? 0;
+      final shouldCollapse = velocity > 150 || _sheetController.value < 0.9;
+      _animateSheetTo(shouldCollapse ? 0.0 : 1.0);
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -1213,7 +1305,8 @@ class _MapScreenState extends State<MapScreen>
     // (previously such a restore could strand the rider on Explore because
     // the panel had never opened). The ride staying on this map is only
     // ever a SEARCHING state.
-    final activeTripForNavigation = rideProvider.tripId != null &&
+    final activeTripForNavigation =
+        rideProvider.tripId != null &&
         (rideProvider.status == models.TripStatus.ACCEPTED ||
             rideProvider.status == models.TripStatus.DRIVER_ARRIVING ||
             rideProvider.status == models.TripStatus.IN_PROGRESS);
@@ -1303,488 +1396,542 @@ class _MapScreenState extends State<MapScreen>
                           final vpHeight = viewport.maxHeight;
                           final vpInsets = MediaQuery.paddingOf(context);
                           return RefreshIndicator(
-                        color: const Color(0xFF5B7760),
-                        onRefresh: _refreshHome,
-                        child: SingleChildScrollView(
-                        physics: const AlwaysScrollableScrollPhysics(
-                            parent: BouncingScrollPhysics()),
-                        padding: const EdgeInsets.only(bottom: 24),
-                        child: SafeArea(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 10,
-                            ),
-                            // When the page content is shorter than the
-                            // viewport (e.g. no active specials), fill the
-                            // height and center the content so the map stays
-                            // near the middle instead of drifting up with
-                            // blank space beneath it.
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                minHeight: _mapExpanded
-                                    ? 0
-                                    : math.max(
-                                        0.0,
-                                        vpHeight -
-                                            vpInsets.top -
-                                            vpInsets.bottom,
-                                      ),
+                            color: const Color(0xFF5B7760),
+                            onRefresh: _refreshHome,
+                            child: SingleChildScrollView(
+                              physics: const AlwaysScrollableScrollPhysics(
+                                parent: BouncingScrollPhysics(),
                               ),
-                              child: Column(
-                                mainAxisAlignment: _mapExpanded
-                                    ? MainAxisAlignment.start
-                                    : MainAxisAlignment.center,
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.stretch,
-                              children: [
-                                if (!_mapExpanded) ...[
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 16,
-                                          vertical: 8,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          borderRadius: BorderRadius.circular(
-                                            24,
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withOpacity(
-                                                0.05,
-                                              ),
-                                              blurRadius: 10,
-                                              offset: const Offset(0, 4),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Text(
-                                          _firstName.isNotEmpty
-                                              ? 'Hello, $_firstName'
-                                              : 'Welcome',
-                                          style: theme.textTheme.bodyMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w600,
-                                                color: const Color(0xFF2F3A32),
-                                              ),
-                                        ),
-                                      ),
-                                      Container(
-                                        width: 12,
-                                        height: 12,
-                                        decoration: BoxDecoration(
-                                          color: rideProvider.isConnected
-                                              ? const Color(0xFF6E8B74)
-                                              : const Color(0xFFC65A5A),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: Colors.white,
-                                            width: 2,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                              padding: const EdgeInsets.only(bottom: 24),
+                              child: SafeArea(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                    vertical: 10,
                                   ),
-                                  const SizedBox(height: 14),
-                                  _buildExploreLocationCard(theme),
-                                  const SizedBox(height: 10),
-                                  Hero(
-                                    tag: 'search_container',
-                                    child: _buildWhereToCard(theme),
-                                  ),
-                                  // Small breathing room below the destination
-                                  // cards: the greeting/cards stay pinned to the
-                                  // top, while recents, specials and the map sit
-                                  // slightly lower. The rest of the spare height
-                                  // stays at the bottom, so short pages (no
-                                  // specials) feel balanced instead of having all
-                                  // the empty space under the map.
-                                  const SizedBox(height: 28),
-                                  if (_recentSearches.isNotEmpty) ...[
-                                    const SizedBox(height: 14),
-                                    _buildRecentSearches(theme),
-                                  ],
-                                  // SPECIAL CODES — open validation cards
-                                  // (one per completed special ride) between
-                                  // Recents and SPECIALS. Renders nothing
-                                  // when no code is pending validation.
-                                  const ExploreValidationSection(),
-                                  // SPECIALS — conditional section living INSIDE
-                                  // Explore. Renders nothing when the backend
-                                  // reports zero eligible active specials (the
-                                  // widget's own visibility rule), so Explore
-                                  // stays clean in both cases.
-                                  const ExploreSpecialsSection(),
-                                ], // end of the non-fullscreen spread
-                                const SizedBox(height: 14),
-                                if (_smoothedPosition != null)
-                                  AnimatedSize(
-                                    duration: const Duration(milliseconds: 380),
-                                    curve: Curves.easeInOutCubic,
-                                    alignment: Alignment.topCenter,
-                                    child: SizedBox(
-                                      height: _mapExpanded
-                                          ? fullMapHeight
-                                          : miniMapHeight,
-                                      child: AnimatedPadding(
-                                        duration: const Duration(
-                                          milliseconds: 380,
-                                        ),
-                                        curve: Curves.easeInOutCubic,
-                                        padding: _mapExpanded
-                                            ? EdgeInsets.zero
-                                            : const EdgeInsets.only(bottom: 4),
-                                        child: AnimatedContainer(
-                                          duration: const Duration(
-                                            milliseconds: 380,
-                                          ),
-                                          curve: Curves.easeInOutCubic,
-                                          clipBehavior: Clip.antiAlias,
-                                          decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(
-                                              _mapExpanded ? 0 : 28,
+                                  // When the page content is shorter than the
+                                  // viewport (e.g. no active specials), fill the
+                                  // height and center the content so the map stays
+                                  // near the middle instead of drifting up with
+                                  // blank space beneath it.
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      minHeight: _mapExpanded
+                                          ? 0
+                                          : math.max(
+                                              0.0,
+                                              vpHeight -
+                                                  vpInsets.top -
+                                                  vpInsets.bottom,
                                             ),
-                                            boxShadow: _mapExpanded
-                                                ? null
-                                                : [
+                                    ),
+                                    child: Column(
+                                      mainAxisAlignment: _mapExpanded
+                                          ? MainAxisAlignment.start
+                                          : MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        if (!_mapExpanded) ...[
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 8,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white,
+                                                  borderRadius:
+                                                      BorderRadius.circular(24),
+                                                  boxShadow: [
                                                     BoxShadow(
                                                       color: Colors.black
-                                                          .withOpacity(0.10),
-                                                      blurRadius: 24,
+                                                          .withOpacity(0.05),
+                                                      blurRadius: 10,
                                                       offset: const Offset(
                                                         0,
-                                                        10,
+                                                        4,
                                                       ),
                                                     ),
-                                                  ],
-                                          ),
-                                          child: Stack(
-                                            children: [
-                                              Listener(
-                                                // In mini mode a light tap expands the map
-                                                // (state A -> B); drags and pinches pan/zoom the
-                                                // map directly (interaction enabled below). Raw
-                                                // pointer events are used because flutter_map's
-                                                // tap recognizer would win the gesture arena
-                                                // against a wrapping GestureDetector.
-                                                onPointerDown: _mapExpanded
-                                                    ? null
-                                                    : (e) {
-                                                        _miniTapDownPosition =
-                                                            e.position;
-                                                        _miniTapDownAt =
-                                                            DateTime.now();
-                                                      },
-                                                onPointerUp: _mapExpanded
-                                                    ? null
-                                                    : (e) {
-                                                        final down =
-                                                            _miniTapDownPosition;
-                                                        final downAt =
-                                                            _miniTapDownAt;
-                                                        _miniTapDownPosition =
-                                                            null;
-                                                        _miniTapDownAt = null;
-                                                        if (down == null ||
-                                                            downAt == null)
-                                                          return;
-                                                        final moved =
-                                                            (e.position - down)
-                                                                .distance;
-                                                        final elapsed =
-                                                            DateTime.now()
-                                                                .difference(
-                                                                  downAt,
-                                                                );
-                                                        if (moved < 16 &&
-                                                            elapsed <
-                                                                const Duration(
-                                                                  milliseconds:
-                                                                      400,
-                                                                )) {
-                                                          _expandMap();
-                                                        }
-                                                      },
-                                                child: FlutterMap(
-                                                  mapController: _mapController,
-                                                  options: MapOptions(
-                                                    initialCenter:
-                                                        _smoothedPosition!,
-                                                    initialZoom: 15.0,
-                                                    minZoom: 10,
-                                                    maxZoom: 18,
-                                                    interactionOptions:
-                                                        InteractionOptions(
-                                                          flags: _mapExpanded
-                                                              ? InteractiveFlag
-                                                                        .all &
-                                                                    ~InteractiveFlag
-                                                                        .rotate
-                                                              : InteractiveFlag
-                                                                    .none,
-                                                        ),
-                                                    onMapReady: () {
-                                                      setState(
-                                                        () =>
-                                                            _isMapReady = true,
-                                                      );
-                                                    },
-                                                    onPositionChanged:
-                                                        (pos, hasGesture) {
-                                                          if (hasGesture) {
-                                                            setState(
-                                                              () =>
-                                                                  _shouldFollowUser =
-                                                                      false,
-                                                            );
-                                                          }
-                                                        },
-                                                  ),
-                                                  children: [
-                                                    TileLayer(
-                                                      urlTemplate:
-                                                          'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-                                                      maxNativeZoom: 16,
-                                                      userAgentPackageName:
-                                                          'com.NetRide.rider',
-                                                      tileBuilder:
-                                                          brandedMapTile,
-                                                    ),
-                                                    AnimatedOpacity(
-                                                      opacity:
-                                                          _routePoints
-                                                              .isNotEmpty
-                                                          ? 1
-                                                          : 0,
-                                                      duration: const Duration(
-                                                        milliseconds: 350,
-                                                      ),
-                                                      child:
-                                                          _routePoints.isEmpty
-                                                          ? const SizedBox.shrink()
-                                                          : PolylineLayer(
-                                                              polylines: [
-                                                                Polyline<
-                                                                  Object
-                                                                >(
-                                                                  points:
-                                                                      _routePoints,
-                                                                  color: const Color(
-                                                                    0xFF5B7760,
-                                                                  ),
-                                                                  strokeWidth:
-                                                                      4.0,
-                                                                  borderColor:
-                                                                      Colors
-                                                                          .white,
-                                                                  borderStrokeWidth:
-                                                                      1.0,
-                                                                ),
-                                                              ],
-                                                            ),
-                                                    ),
-                                                    MarkerLayer(
-                                                      markers: [
-                                                        if (_smoothedPosition !=
-                                                            null)
-                                                          Marker(
-                                                            point:
-                                                                _smoothedPosition!,
-                                                            width: 40,
-                                                            height: 40,
-                                                            child:
-                                                                _buildUserLocationMarker(),
-                                                          ),
-                                                        if (_pickup != null &&
-                                                            _pickup!.address !=
-                                                                'Current Location')
-                                                          Marker(
-                                                            point: LatLng(
-                                                              _pickup!.lat,
-                                                              _pickup!.lng,
-                                                            ),
-                                                            width: 30,
-                                                            height: 30,
-                                                            child:
-                                                                _buildPinMarker(
-                                                                  const Color(
-                                                                    0xFF5B7760,
-                                                                  ),
-                                                                  isPickup:
-                                                                      true,
-                                                                ),
-                                                          ),
-                                                        if (_destination !=
-                                                            null)
-                                                          Marker(
-                                                            point: LatLng(
-                                                              _destination!.lat,
-                                                              _destination!.lng,
-                                                            ),
-                                                            width: 30,
-                                                            height: 30,
-                                                            child:
-                                                                _buildPinMarker(
-                                                                  const Color(
-                                                                    0xFF2F3A32,
-                                                                  ),
-                                                                  isPickup:
-                                                                      false,
-                                                                ),
-                                                          ),
-                                                        // SPECIALS sponsor markers (eligible active
-                                                        // specials only — deactivated sponsors drop
-                                                        // out of the list on the next refresh, so zero
-                                                        // active specials means zero markers).
-                                                        for (final s
-                                                            in eligibleSponsors)
-                                                          Marker(
-                                                            point: LatLng(
-                                                              s.latitude!,
-                                                              s.longitude!,
-                                                            ),
-                                                            width:
-                                                                selectedSponsorId ==
-                                                                    s.id
-                                                                ? 48
-                                                                : 36,
-                                                            height:
-                                                                selectedSponsorId ==
-                                                                    s.id
-                                                                ? 48
-                                                                : 36,
-                                                            child: GestureDetector(
-                                                              behavior:
-                                                                  HitTestBehavior
-                                                                      .opaque,
-                                                              onTap: () =>
-                                                                  SpecialBusinessSheet.show(
-                                                                    context,
-                                                                    sponsor: s,
-                                                                  ),
-                                                              child:
-                                                                  _buildSponsorMarker(
-                                                                    s,
-                                                                    selected:
-                                                                        selectedSponsorId ==
-                                                                        s.id,
-                                                                  ),
-                                                            ),
-                                                          ),
-                                                      ],
-                                                    ),
-                                                    for (var entry
-                                                        in rideProvider
-                                                            .nearbyDrivers
-                                                            .entries)
-                                                      SmoothDriverMarker(
-                                                        driverId: entry.key,
-                                                        position: LatLng(
-                                                          entry.value.lat,
-                                                          entry.value.lng,
-                                                        ),
-                                                        heading:
-                                                            entry
-                                                                .value
-                                                                .heading ??
-                                                            0,
-                                                      ),
                                                   ],
                                                 ),
-                                              ),
-                                              // Tap-to-expand hint pill — glued to the mini map
-                                              // so it stays with it (state A).
-                                              if (!_mapExpanded)
-                                                Positioned(
-                                                  top: 10,
-                                                  right: 10,
-                                                  child: IgnorePointer(
-                                                    child: Container(
-                                                      padding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 12,
-                                                            vertical: 6,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.white
-                                                            .withOpacity(0.92),
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              999,
-                                                            ),
-                                                        border: Border.all(
-                                                          color: const Color(
-                                                            0xFFD8D2CA,
-                                                          ),
+                                                child: Text(
+                                                  _firstName.isNotEmpty
+                                                      ? 'Hello, $_firstName'
+                                                      : 'Welcome',
+                                                  style: theme
+                                                      .textTheme
+                                                      .bodyMedium
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: const Color(
+                                                          0xFF2F3A32,
                                                         ),
-                                                        boxShadow: [
-                                                          BoxShadow(
-                                                            color: Colors.black
-                                                                .withOpacity(
-                                                                  0.06,
-                                                                ),
-                                                            blurRadius: 8,
-                                                            offset:
-                                                                const Offset(
-                                                                  0,
-                                                                  3,
-                                                                ),
-                                                          ),
-                                                        ],
                                                       ),
-                                                      child: const Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons
-                                                                .open_in_full_rounded,
-                                                            size: 12,
-                                                            color: Color(
-                                                              0xFF5B7760,
+                                                ),
+                                              ),
+                                              Container(
+                                                width: 12,
+                                                height: 12,
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      rideProvider.isConnected
+                                                      ? const Color(0xFF6E8B74)
+                                                      : const Color(0xFFC65A5A),
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: Colors.white,
+                                                    width: 2,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 14),
+                                          _buildExploreLocationCard(theme),
+                                          const SizedBox(height: 10),
+                                          Hero(
+                                            tag: 'search_container',
+                                            child: _buildWhereToCard(theme),
+                                          ),
+                                          // Small breathing room below the destination
+                                          // cards: the greeting/cards stay pinned to the
+                                          // top, while recents, specials and the map sit
+                                          // slightly lower. The rest of the spare height
+                                          // stays at the bottom, so short pages (no
+                                          // specials) feel balanced instead of having all
+                                          // the empty space under the map.
+                                          const SizedBox(height: 28),
+                                          if (_recentSearches.isNotEmpty) ...[
+                                            const SizedBox(height: 14),
+                                            _buildRecentSearches(theme),
+                                          ],
+                                          // SPECIAL CODES — open validation cards
+                                          // (one per completed special ride) between
+                                          // Recents and SPECIALS. Renders nothing
+                                          // when no code is pending validation.
+                                          const ExploreValidationSection(),
+                                          // SPECIALS — conditional section living INSIDE
+                                          // Explore. Renders nothing when the backend
+                                          // reports zero eligible active specials (the
+                                          // widget's own visibility rule), so Explore
+                                          // stays clean in both cases.
+                                          const ExploreSpecialsSection(),
+                                        ], // end of the non-fullscreen spread
+                                        const SizedBox(height: 14),
+                                        if (_smoothedPosition != null)
+                                          AnimatedSize(
+                                            duration: const Duration(
+                                              milliseconds: 380,
+                                            ),
+                                            curve: Curves.easeInOutCubic,
+                                            alignment: Alignment.topCenter,
+                                            child: SizedBox(
+                                              height: _mapExpanded
+                                                  ? fullMapHeight
+                                                  : miniMapHeight,
+                                              child: AnimatedPadding(
+                                                duration: const Duration(
+                                                  milliseconds: 380,
+                                                ),
+                                                curve: Curves.easeInOutCubic,
+                                                padding: _mapExpanded
+                                                    ? EdgeInsets.zero
+                                                    : const EdgeInsets.only(
+                                                        bottom: 4,
+                                                      ),
+                                                child: AnimatedContainer(
+                                                  duration: const Duration(
+                                                    milliseconds: 380,
+                                                  ),
+                                                  curve: Curves.easeInOutCubic,
+                                                  clipBehavior: Clip.antiAlias,
+                                                  decoration: BoxDecoration(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          _mapExpanded ? 0 : 28,
+                                                        ),
+                                                    boxShadow: _mapExpanded
+                                                        ? null
+                                                        : [
+                                                            BoxShadow(
+                                                              color: Colors
+                                                                  .black
+                                                                  .withOpacity(
+                                                                    0.10,
+                                                                  ),
+                                                              blurRadius: 24,
+                                                              offset:
+                                                                  const Offset(
+                                                                    0,
+                                                                    10,
+                                                                  ),
                                                             ),
+                                                          ],
+                                                  ),
+                                                  child: Stack(
+                                                    children: [
+                                                      Listener(
+                                                        // In mini mode a light tap expands the map
+                                                        // (state A -> B); drags and pinches pan/zoom the
+                                                        // map directly (interaction enabled below). Raw
+                                                        // pointer events are used because flutter_map's
+                                                        // tap recognizer would win the gesture arena
+                                                        // against a wrapping GestureDetector.
+                                                        onPointerDown:
+                                                            _mapExpanded
+                                                            ? null
+                                                            : (e) {
+                                                                _miniTapDownPosition =
+                                                                    e.position;
+                                                                _miniTapDownAt =
+                                                                    DateTime.now();
+                                                              },
+                                                        onPointerUp:
+                                                            _mapExpanded
+                                                            ? null
+                                                            : (e) {
+                                                                final down =
+                                                                    _miniTapDownPosition;
+                                                                final downAt =
+                                                                    _miniTapDownAt;
+                                                                _miniTapDownPosition =
+                                                                    null;
+                                                                _miniTapDownAt =
+                                                                    null;
+                                                                if (down ==
+                                                                        null ||
+                                                                    downAt ==
+                                                                        null)
+                                                                  return;
+                                                                final moved =
+                                                                    (e.position -
+                                                                            down)
+                                                                        .distance;
+                                                                final elapsed =
+                                                                    DateTime.now()
+                                                                        .difference(
+                                                                          downAt,
+                                                                        );
+                                                                if (moved <
+                                                                        16 &&
+                                                                    elapsed <
+                                                                        const Duration(
+                                                                          milliseconds:
+                                                                              400,
+                                                                        )) {
+                                                                  _expandMap();
+                                                                }
+                                                              },
+                                                        child: FlutterMap(
+                                                          mapController:
+                                                              _mapController,
+                                                          options: MapOptions(
+                                                            initialCenter:
+                                                                _smoothedPosition!,
+                                                            initialZoom: 15.0,
+                                                            minZoom: 10,
+                                                            maxZoom: 18,
+                                                            interactionOptions: InteractionOptions(
+                                                              flags:
+                                                                  _mapExpanded
+                                                                  ? InteractiveFlag
+                                                                            .all &
+                                                                        ~InteractiveFlag
+                                                                            .rotate
+                                                                  : InteractiveFlag
+                                                                        .none,
+                                                            ),
+                                                            onMapReady: () {
+                                                              setState(
+                                                                () =>
+                                                                    _isMapReady =
+                                                                        true,
+                                                              );
+                                                            },
+                                                            onPositionChanged:
+                                                                (
+                                                                  pos,
+                                                                  hasGesture,
+                                                                ) {
+                                                                  if (hasGesture) {
+                                                                    setState(
+                                                                      () => _shouldFollowUser =
+                                                                          false,
+                                                                    );
+                                                                  }
+                                                                },
                                                           ),
-                                                          SizedBox(width: 5),
-                                                          Text(
-                                                            'Tap map for full screen · scroll to explore',
-                                                            style: TextStyle(
-                                                              fontSize: 10.5,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w700,
-                                                              color: Color(
-                                                                0xFF5B7760,
+                                                          children: [
+                                                            TileLayer(
+                                                              urlTemplate:
+                                                                  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+                                                              maxNativeZoom: 16,
+                                                              userAgentPackageName:
+                                                                  'com.NetRide.rider',
+                                                              tileBuilder:
+                                                                  brandedMapTile,
+                                                            ),
+                                                            AnimatedOpacity(
+                                                              opacity:
+                                                                  _routePoints
+                                                                      .isNotEmpty
+                                                                  ? 1
+                                                                  : 0,
+                                                              duration:
+                                                                  const Duration(
+                                                                    milliseconds:
+                                                                        350,
+                                                                  ),
+                                                              child:
+                                                                  _routePoints
+                                                                      .isEmpty
+                                                                  ? const SizedBox.shrink()
+                                                                  : PolylineLayer(
+                                                                      polylines: [
+                                                                        Polyline<
+                                                                          Object
+                                                                        >(
+                                                                          points:
+                                                                              _routePoints,
+                                                                          color: const Color(
+                                                                            0xFF5B7760,
+                                                                          ),
+                                                                          strokeWidth:
+                                                                              4.0,
+                                                                          borderColor:
+                                                                              Colors.white,
+                                                                          borderStrokeWidth:
+                                                                              1.0,
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                            ),
+                                                            MarkerLayer(
+                                                              markers: [
+                                                                if (_smoothedPosition !=
+                                                                    null)
+                                                                  Marker(
+                                                                    point:
+                                                                        _smoothedPosition!,
+                                                                    width: 40,
+                                                                    height: 40,
+                                                                    child:
+                                                                        _buildUserLocationMarker(),
+                                                                  ),
+                                                                if (_pickup !=
+                                                                        null &&
+                                                                    _pickup!.address !=
+                                                                        'Current Location')
+                                                                  Marker(
+                                                                    point: LatLng(
+                                                                      _pickup!
+                                                                          .lat,
+                                                                      _pickup!
+                                                                          .lng,
+                                                                    ),
+                                                                    width: 30,
+                                                                    height: 30,
+                                                                    child: _buildPinMarker(
+                                                                      const Color(
+                                                                        0xFF5B7760,
+                                                                      ),
+                                                                      isPickup:
+                                                                          true,
+                                                                    ),
+                                                                  ),
+                                                                if (_destination !=
+                                                                    null)
+                                                                  Marker(
+                                                                    point: LatLng(
+                                                                      _destination!
+                                                                          .lat,
+                                                                      _destination!
+                                                                          .lng,
+                                                                    ),
+                                                                    width: 30,
+                                                                    height: 30,
+                                                                    child: _buildPinMarker(
+                                                                      const Color(
+                                                                        0xFF2F3A32,
+                                                                      ),
+                                                                      isPickup:
+                                                                          false,
+                                                                    ),
+                                                                  ),
+                                                                // SPECIALS sponsor markers (eligible active
+                                                                // specials only — deactivated sponsors drop
+                                                                // out of the list on the next refresh, so zero
+                                                                // active specials means zero markers). While
+                                                                // the rider is planning/requesting a regular
+                                                                // ride, deal pins are hidden so the request
+                                                                // map only shows the trip.
+                                                                if (!_panelOpen &&
+                                                                    _destination ==
+                                                                        null)
+                                                                  for (final s
+                                                                      in eligibleSponsors)
+                                                                    Marker(
+                                                                      point: LatLng(
+                                                                        s.latitude!,
+                                                                        s.longitude!,
+                                                                      ),
+                                                                      width:
+                                                                          selectedSponsorId ==
+                                                                              s.id
+                                                                          ? 48
+                                                                          : 36,
+                                                                      height:
+                                                                          selectedSponsorId ==
+                                                                              s.id
+                                                                          ? 48
+                                                                          : 36,
+                                                                      child: GestureDetector(
+                                                                        behavior:
+                                                                            HitTestBehavior.opaque,
+                                                                        onTap: () => SpecialBusinessSheet.show(
+                                                                          context,
+                                                                          sponsor:
+                                                                              s,
+                                                                        ),
+                                                                        child: _buildSponsorMarker(
+                                                                          s,
+                                                                          selected:
+                                                                              selectedSponsorId ==
+                                                                              s.id,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                              ],
+                                                            ),
+                                                            for (var entry
+                                                                in rideProvider
+                                                                    .nearbyDrivers
+                                                                    .entries)
+                                                              SmoothDriverMarker(
+                                                                driverId:
+                                                                    entry.key,
+                                                                position:
+                                                                    LatLng(
+                                                                      entry
+                                                                          .value
+                                                                          .lat,
+                                                                      entry
+                                                                          .value
+                                                                          .lng,
+                                                                    ),
+                                                                heading:
+                                                                    entry
+                                                                        .value
+                                                                        .heading ??
+                                                                    0,
+                                                              ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      // Tap-to-expand hint pill — glued to the mini map
+                                                      // so it stays with it (state A).
+                                                      if (!_mapExpanded)
+                                                        Positioned(
+                                                          top: 10,
+                                                          right: 10,
+                                                          child: IgnorePointer(
+                                                            child: Container(
+                                                              padding:
+                                                                  const EdgeInsets.symmetric(
+                                                                    horizontal:
+                                                                        12,
+                                                                    vertical: 6,
+                                                                  ),
+                                                              decoration: BoxDecoration(
+                                                                color: Colors
+                                                                    .white
+                                                                    .withOpacity(
+                                                                      0.92,
+                                                                    ),
+                                                                borderRadius:
+                                                                    BorderRadius.circular(
+                                                                      999,
+                                                                    ),
+                                                                border: Border.all(
+                                                                  color: const Color(
+                                                                    0xFFD8D2CA,
+                                                                  ),
+                                                                ),
+                                                                boxShadow: [
+                                                                  BoxShadow(
+                                                                    color: Colors
+                                                                        .black
+                                                                        .withOpacity(
+                                                                          0.06,
+                                                                        ),
+                                                                    blurRadius:
+                                                                        8,
+                                                                    offset:
+                                                                        const Offset(
+                                                                          0,
+                                                                          3,
+                                                                        ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                              child: const Row(
+                                                                mainAxisSize:
+                                                                    MainAxisSize
+                                                                        .min,
+                                                                children: [
+                                                                  Icon(
+                                                                    Icons
+                                                                        .open_in_full_rounded,
+                                                                    size: 12,
+                                                                    color: Color(
+                                                                      0xFF5B7760,
+                                                                    ),
+                                                                  ),
+                                                                  SizedBox(
+                                                                    width: 5,
+                                                                  ),
+                                                                  Text(
+                                                                    'Tap map for full screen · scroll to explore',
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          10.5,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w700,
+                                                                      color: Color(
+                                                                        0xFF5B7760,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                ],
                                                               ),
                                                             ),
                                                           ),
-                                                        ],
-                                                      ),
-                                                    ),
+                                                        ),
+                                                    ],
                                                   ),
                                                 ),
-                                            ],
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                      ),
+                                      ],
                                     ),
                                   ),
-                              ],
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
                     ),
-                  );
-                      },
-                    ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
 
                 // Part 2: back arrow — only in full-screen map mode (B/C) AND when the
                 // choose-your-ride panel is closed. The panel has no top-left
@@ -1946,10 +2093,12 @@ class _MapScreenState extends State<MapScreen>
 
   /// Collapsed state: centered drag handle + one-line ride summary.
   Widget _buildSheetPill(ThemeData theme) {
-    // Calculation in flight → "Calculating…" (§6). No backend fare available
-    // after calculation (offline / cached plan without fare) → an em dash
-    // instead of a locally-computed or $0.00 price.
-    final priceText = _loadingEstimates
+    // Calculation in flight (or being retried) → "Calculating…" (§6). Only
+    // after the retries are exhausted without a backend fare do we show an
+    // em dash instead of a locally-computed or $0.00 price.
+    final awaitingFare =
+        _loadingEstimates || (_farePending && _estimateFare <= 0);
+    final priceText = awaitingFare
         ? 'Calculating…'
         : (_estimateFare <= 0
               ? '—'
@@ -2042,325 +2191,291 @@ class _MapScreenState extends State<MapScreen>
     // ONE scroll container for the whole body: the sheet is drag-resized
     // between the pill and full height, and fixed header/footer rows would
     // otherwise overflow by a few pixels mid-drag. Everything scrolls.
-    return SingleChildScrollView(
-      physics: const ClampingScrollPhysics(),
-      child: Column(
-        children: [
-          const SizedBox(height: 10),
-          Container(
-            width: 38,
-            height: 5,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ),
-          const SizedBox(height: 6),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 6, 12, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  searching ? 'Finding your driver…' : 'Choose your ride',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF2F3A32),
-                  ),
-                ),
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onSheetScrollNotification,
+      child: SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 38,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(999),
               ),
-              if (cancelling)
-                const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Color(0xFF5B7760),
+            ),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 6, 12, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      searching ? 'Finding your driver…' : 'Choose your ride',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF2F3A32),
+                      ),
                     ),
                   ),
-                )
-              else
-                TextButton(
-                  onPressed: _closePanel,
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF5B7760),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    side: const BorderSide(color: Color(0xFF5B7760)),
-                  ),
-                  child: const Text(
-                    'Cancel',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 6),
-        if (_loadingEstimates)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: CircularProgressIndicator(color: Color(0xFF5B7760)),
-          )
-        else if (searching)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: requestFailure != null
-                  ? Column(
-                      children: [
-                        const Icon(
-                          Icons.error_outline_rounded,
-                          size: 40,
-                          color: Color(0xFFC65A5A),
+                  if (cancelling)
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFF5B7760),
                         ),
-                        const SizedBox(height: 14),
-                        Text(
-                          'Ride request failed',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF2F3A32),
+                      ),
+                    )
+                  else
+                    TextButton(
+                      onPressed: _closePanel,
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF5B7760),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 6,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        side: const BorderSide(color: Color(0xFF5B7760)),
+                      ),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            if (_loadingEstimates)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: CircularProgressIndicator(color: Color(0xFF5B7760)),
+              )
+            else if (searching)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: requestFailure != null
+                    ? Column(
+                        children: [
+                          const Icon(
+                            Icons.error_outline_rounded,
+                            size: 40,
+                            color: Color(0xFFC65A5A),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 28),
-                          child: Text(
-                            requestFailure!,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 13.5,
-                              height: 1.4,
-                              color: const Color(0xFF2F3A32).withOpacity(0.75),
+                          const SizedBox(height: 14),
+                          Text(
+                            'Ride request failed',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: const Color(0xFF2F3A32),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                // Safe retry: the provider re-issues the SAME
-                                // idempotency key, so an outcome that was
-                                // actually successful resolves to the same
-                                // ride instead of creating a duplicate.
-                                Provider.of<RideProvider>(
-                                  context,
-                                  listen: false,
-                                ).retryPendingRequest();
-                              },
-                              icon: const Icon(
-                                Icons.refresh,
-                                size: 18,
-                                color: Color(0xFF5B7760),
+                          const SizedBox(height: 8),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 28),
+                            child: Text(
+                              requestFailure!,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                height: 1.4,
+                                color: const Color(
+                                  0xFF2F3A32,
+                                ).withOpacity(0.75),
                               ),
-                              label: const Text(
-                                'Try Again',
-                                style: TextStyle(
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  // Safe retry: the provider re-issues the SAME
+                                  // idempotency key, so an outcome that was
+                                  // actually successful resolves to the same
+                                  // ride instead of creating a duplicate.
+                                  Provider.of<RideProvider>(
+                                    context,
+                                    listen: false,
+                                  ).retryPendingRequest();
+                                },
+                                icon: const Icon(
+                                  Icons.refresh,
+                                  size: 18,
                                   color: Color(0xFF5B7760),
-                                  fontWeight: FontWeight.w700,
+                                ),
+                                label: const Text(
+                                  'Try Again',
+                                  style: TextStyle(
+                                    color: Color(0xFF5B7760),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(
+                                    color: Color(0xFF5B7760),
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 12,
+                                  ),
                                 ),
                               ),
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFF5B7760)),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                              const SizedBox(width: 10),
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  Provider.of<RideProvider>(
+                                    context,
+                                    listen: false,
+                                  ).clearRequestFailure();
+                                  _closePanel(cancelIfRequesting: false);
+                                },
+                                icon: const Icon(
+                                  Icons.close,
+                                  size: 18,
+                                  color: Color(0xFFC65A5A),
                                 ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 12,
+                                label: const Text(
+                                  'Close',
+                                  style: TextStyle(
+                                    color: Color(0xFFC65A5A),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(
+                                    color: Color(0xFFE5B9B9),
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 12,
+                                  ),
                                 ),
                               ),
+                            ],
+                          ),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          const SizedBox(
+                            width: 36,
+                            height: 36,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              color: Color(0xFF5B7760),
                             ),
-                            const SizedBox(width: 10),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Matching you with nearby drivers…',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF2F3A32),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          if (cancelling)
+                            const Text(
+                              'Cancelling ride request…',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: Color(0xFFC65A5A),
+                              ),
+                            )
+                          else
                             OutlinedButton.icon(
-                              onPressed: () {
-                                Provider.of<RideProvider>(
-                                  context,
-                                  listen: false,
-                                ).clearRequestFailure();
-                                _closePanel(cancelIfRequesting: false);
-                              },
+                              onPressed: _requestCancel,
                               icon: const Icon(
                                 Icons.close,
                                 size: 18,
                                 color: Color(0xFFC65A5A),
                               ),
                               label: const Text(
-                                'Close',
+                                'Cancel Ride',
                                 style: TextStyle(
                                   color: Color(0xFFC65A5A),
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
                               style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFFE5B9B9)),
+                                side: const BorderSide(
+                                  color: Color(0xFFE5B9B9),
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
+                                  horizontal: 22,
                                   vertical: 12,
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                      ],
-                    )
-                  : Column(
-                      children: [
-                        const SizedBox(
-                          width: 36,
-                          height: 36,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            color: Color(0xFF5B7760),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Matching you with nearby drivers…',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF2F3A32),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        if (cancelling)
-                          const Text(
-                            'Cancelling ride request…',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: Color(0xFFC65A5A),
-                            ),
-                          )
-                        else
-                          OutlinedButton.icon(
-                            onPressed: _requestCancel,
-                            icon: const Icon(
-                              Icons.close,
-                              size: 18,
-                              color: Color(0xFFC65A5A),
-                            ),
-                            label: const Text(
-                              'Cancel Ride',
-                              style: TextStyle(
-                                color: Color(0xFFC65A5A),
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Color(0xFFE5B9B9)),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 22,
-                                vertical: 12,
-                              ),
-                            ),
-                          ),
-                      ],
+                        ],
+                      ),
+              )
+            else
+              Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Column(
+                  children: [
+                    _buildRideCard(theme),
+                    const SizedBox(height: 10),
+                    _buildRewardsPanel(theme),
+                    SizedBox(height: 14 + bottomInset),
+                  ],
+                ),
+              ),
+            if (!_loadingEstimates && !searching) ...[
+              Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 18 + bottomInset),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton(
+                    onPressed: _confirmRide,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _creditsToUseCents > 0
+                          ? const Color(0xFF4CAF50)
+                          : const Color(0xFF2F3A32),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
-          )
-        else
-          Padding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-            child: Column(
-                children: [
-                  _buildRideCard(theme),
-                  const SizedBox(height: 10),
-                  _buildRewardsPanel(theme),
-                  SizedBox(height: 14 + bottomInset),
-                ],
-              ),
-          ),
-        if (!_loadingEstimates && !searching) ...[
-          // SPECIALS: when the rider has a CREATED redemption, the checkout
-          // advertises the applied special right above the confirm button.
-          Builder(
-            builder: (context) {
-              final attachable = context
-                  .select<SpecialsProvider, SpecialRedemption?>(
-                    (s) => s.canAttachToRide ? s.current : null,
-                  );
-              if (attachable == null) return const SizedBox.shrink();
-              return Padding(
-                padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 9,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF5B7760).withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: const Color(0xFF5B7760)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.storefront_rounded,
-                        size: 16,
-                        color: Color(0xFF5B7760),
+                    child: Text(
+                      _creditsToUseCents > 0
+                          ? 'Confirm with ride credits'
+                          : 'Confirm NetRide Premium',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
                       ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          'SPECIAL at ${attachable.sponsorName} — '
-                          '${attachable.discountLabel.isEmpty ? 'save on this ride' : '${attachable.discountLabel} off'}',
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF5B7760),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, 18 + bottomInset),
-            child: SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: ElevatedButton(
-                onPressed: _confirmRide,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _creditsToUseCents > 0
-                      ? const Color(0xFF4CAF50)
-                      : const Color(0xFF2F3A32),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(
-                  _creditsToUseCents > 0
-                      ? 'Confirm with ride credits'
-                      : 'Confirm NetRide Premium',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.5,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-        ],
-        ],
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -3211,6 +3326,15 @@ class _MapScreenState extends State<MapScreen>
                           fontWeight: FontWeight.w800,
                           color: Color(0xFF2F3A32),
                           letterSpacing: -0.5,
+                        ),
+                      )
+                    else if (_farePending || _loadingEstimates)
+                      const Text(
+                        'Calculating…',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF5B7760),
                         ),
                       )
                     else

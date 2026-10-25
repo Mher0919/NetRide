@@ -139,9 +139,7 @@ class SpecialsProvider extends ChangeNotifier {
       final results = await Future.wait([
         SpecialsService.list(lat: _geoLat, lng: _geoLng),
         SpecialsService.count(),
-        _introChecked
-            ? Future.value(_introSeen)
-            : SpecialsService.introSeen(),
+        _introChecked ? Future.value(_introSeen) : SpecialsService.introSeen(),
         SpecialsService.currentRedemption(),
       ]);
       _sponsors = results[0] as List<SponsorSpecial>;
@@ -317,8 +315,7 @@ class SpecialsProvider extends ChangeNotifier {
   /// Cached Google business for a Special, or null while unknown.
   GoogleBusinessResult? businessFor(String sponsorId) =>
       _businessBySpecial[sponsorId];
-  bool businessLoading(String sponsorId) =>
-      _businessLoading[sponsorId] == true;
+  bool businessLoading(String sponsorId) => _businessLoading[sponsorId] == true;
 
   /// Loads Google business info for a Special (deduped per request level).
   /// Never throws — a failure is cached as an "unavailable" result so the
@@ -331,7 +328,8 @@ class SpecialsProvider extends ChangeNotifier {
     if (sponsorId.isEmpty) return null;
     final existing = _businessBySpecial[sponsorId];
     if (!force && existing != null) {
-      final satisfied = existing.manual ||
+      final satisfied =
+          existing.manual ||
           (existing.business != null &&
               (level == 'basic' || existing.business!.isFull));
       if (satisfied || _businessLoading[sponsorId] == true) return existing;
@@ -386,6 +384,7 @@ class SpecialsProvider extends ChangeNotifier {
       if (started >= 5) break;
       if (!s.isGoogleConnected) continue;
       if (s.coverImageUrl?.isNotEmpty == true) continue;
+      if (s.photoUrls.isNotEmpty) continue;
       if (_photoHydrationRequested.contains(s.id)) continue;
       if (_businessBySpecial.containsKey(s.id) ||
           _businessLoading[s.id] == true) {

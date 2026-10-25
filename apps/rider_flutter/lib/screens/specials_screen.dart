@@ -22,7 +22,6 @@ import 'package:provider/provider.dart';
 import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
 import '../services/specials_service.dart';
-import '../utils/file_url.dart';
 import '../widgets/special_business_sheet.dart';
 import '../widgets/special_card.dart';
 
@@ -61,6 +60,7 @@ class _SpecialsScreenState extends State<SpecialsScreen> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    context.read<SpecialsProvider>().addListener(_onProviderChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final specials = context.read<SpecialsProvider>();
@@ -71,8 +71,26 @@ class _SpecialsScreenState extends State<SpecialsScreen> {
 
   @override
   void dispose() {
+    context.read<SpecialsProvider>().removeListener(_onProviderChanged);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Fallback for a cold/failed page load: the provider's authoritative
+  /// active-special list (already used by Explore) seeds this page instead
+  /// of leaving it stuck on "Coming Soon".
+  void _onProviderChanged() {
+    if (!mounted || _items.isNotEmpty) return;
+    if (_loadingInitial || _loadingMore) return;
+    final specials = context.read<SpecialsProvider>();
+    if (!specials.loaded || specials.sponsors.isEmpty) return;
+    setState(() {
+      _items = List<SponsorSpecial>.of(specials.sponsors);
+      _offset = _items.length;
+      _hasMore = false;
+      _error = null;
+    });
+    _warmPhotos();
   }
 
   void _onScroll() {
@@ -92,12 +110,18 @@ class _SpecialsScreenState extends State<SpecialsScreen> {
       _offset = 0;
       _hasMore = true;
     });
-    await _loadNextPage();
-    if (mounted) setState(() => _loadingInitial = false);
+    await _fetchPage();
+    if (!mounted) return;
+    setState(() => _loadingInitial = false);
+    _onProviderChanged();
   }
 
   Future<void> _loadNextPage() async {
-    if (_loadingMore || !_hasMore || _loadingInitial) return;
+    if (_loadingInitial || _loadingMore || !_hasMore) return;
+    await _fetchPage();
+  }
+
+  Future<void> _fetchPage() async {
     setState(() => _loadingMore = true);
     final specials = context.read<SpecialsProvider>();
     try {
@@ -135,15 +159,19 @@ class _SpecialsScreenState extends State<SpecialsScreen> {
   }
 
   double? _ratingFor(SponsorSpecial s) {
-    final business =
-        context.read<SpecialsProvider>().businessFor(s.id)?.business;
+    final business = context
+        .read<SpecialsProvider>()
+        .businessFor(s.id)
+        ?.business;
     return business?.rating ?? s.adminRating;
   }
 
   List<SponsorSpecial> get _visibleItems {
     Iterable<SponsorSpecial> items = _items;
     if (_category != null) {
-      items = items.where((s) => specialCategoryLabel(s.businessType) == _category);
+      items = items.where(
+        (s) => specialCategoryLabel(s.businessType) == _category,
+      );
     }
     if (_distanceMiles != null) {
       items = items.where((s) {
@@ -324,7 +352,7 @@ class _SpecialsScreenState extends State<SpecialsScreen> {
 
     // Backend-authoritative: zero eligible specials → Coming Soon.
     if (_items.isEmpty && !_hasActiveFilters && _error == null) {
-      return _ComingSoonView(onRetry: _loadFirstPage);
+      return const _ComingSoonView();
     }
 
     final visible = _visibleItems;
@@ -573,9 +601,7 @@ class _FilterPill extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(30),
             border: Border.all(
-              color: active
-                  ? const Color(0xFF5B7760)
-                  : const Color(0xFFD8D2CA),
+              color: active ? const Color(0xFF5B7760) : const Color(0xFFD8D2CA),
             ),
           ),
           child: Row(
@@ -663,17 +689,10 @@ class _SpecialListTile extends StatelessWidget {
 
   final SponsorSpecial sponsor;
 
-  String? _imageUrl(SpecialsProvider specials) {
-    final cover = sponsor.coverImageUrl;
-    if (cover != null && cover.isNotEmpty) return resolveFileUrl(cover);
-    final photos = specials.businessFor(sponsor.id)?.business?.photos;
-    if (photos != null && photos.isNotEmpty) {
-      final p = photos.first;
-      final url = p.url.isNotEmpty ? p.url : p.thumbUrl;
-      if (url.isNotEmpty) return resolveApiUrl(url);
-    }
-    return null;
-  }
+  String? _imageUrl(SpecialsProvider specials) => specialPrimaryImageUrl(
+    sponsor,
+    specials.businessFor(sponsor.id)?.business,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -718,8 +737,7 @@ class _SpecialListTile extends StatelessWidget {
                         ? CachedNetworkImage(
                             imageUrl: imageUrl,
                             fit: BoxFit.cover,
-                            fadeInDuration:
-                                const Duration(milliseconds: 240),
+                            fadeInDuration: const Duration(milliseconds: 240),
                             placeholder: (_, _) => _fallback(),
                             errorWidget: (_, _, _) => _fallback(),
                           )
@@ -921,9 +939,7 @@ class _ErrorNote extends StatelessWidget {
 }
 
 class _ComingSoonView extends StatelessWidget {
-  const _ComingSoonView({required this.onRetry});
-
-  final Future<void> Function() onRetry;
+  const _ComingSoonView();
 
   @override
   Widget build(BuildContext context) {
@@ -970,23 +986,6 @@ class _ComingSoonView extends StatelessWidget {
                         fontSize: 14,
                         height: 1.45,
                         color: const Color(0xFF2F3A32).withValues(alpha: 0.6),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    OutlinedButton.icon(
-                      onPressed: onRetry,
-                      icon: const Icon(Icons.refresh_rounded, size: 18),
-                      label: const Text('Check again'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF5B7760),
-                        side: const BorderSide(color: Color(0xFF5B7760)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 22,
-                          vertical: 13,
-                        ),
                       ),
                     ),
                   ],
@@ -1040,11 +1039,7 @@ class _SpecialSkeletonTile extends StatelessWidget {
 }
 
 class _SkeletonBox extends StatefulWidget {
-  const _SkeletonBox({
-    this.width,
-    required this.height,
-    this.radius = 12,
-  });
+  const _SkeletonBox({this.width, required this.height, this.radius = 12});
 
   final double? width;
   final double height;

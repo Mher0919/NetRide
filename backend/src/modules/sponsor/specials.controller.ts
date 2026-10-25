@@ -18,16 +18,20 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 
 function publicSponsor(sponsor: any) {
   const { id, business_name, business_type, business_description, address, city,
-          state, latitude, longitude, logo_url, cover_image_url,
+          state, latitude, longitude, logo_url, cover_image_url, photo_urls,
           google_place_id, google_business_name, google_business_category,
           admin_rating, admin_rating_count, price_level,
           discount_type, discount_percent, max_discount_percent,
           discount_fixed_amount_cents, status } = sponsor;
   const kmAway = sponsor.km_away != null ? Number(sponsor.km_away) : null;
+  const photoUrls = Array.isArray(photo_urls)
+    ? photo_urls.filter((u: unknown) => typeof u === 'string' && u.length > 0)
+    : [];
   return {
     id, businessName: business_name, businessType: business_type,
     businessDescription: business_description, address, city, state,
     latitude, longitude, logoUrl: logo_url, coverImageUrl: cover_image_url,
+    photoUrls,
     googlePlaceId: google_place_id ?? null,
     googleBusinessName: google_business_name ?? null,
     googleBusinessCategory: google_business_category ?? null,

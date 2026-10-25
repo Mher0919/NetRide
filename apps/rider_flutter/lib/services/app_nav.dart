@@ -7,7 +7,7 @@
 
 import 'package:flutter/foundation.dart';
 
-class AppNav {
+class AppNav extends ChangeNotifier {
   AppNav._();
   static final AppNav instance = AppNav._();
 
@@ -17,11 +17,19 @@ class AppNav {
   static const int activity = 2;
   static const int account = 3;
 
-  final ValueNotifier<int?> _request = ValueNotifier<int?>(null);
-  ValueNotifier<int?> get request => _request;
+  int? _pending;
 
-  void goToTab(int index) => _request.value = index;
+  /// Ask MainWrapper to switch tabs. Always notifies — even when the same
+  /// tab is requested twice — so a tap can never be silently swallowed.
+  void goToTab(int index) {
+    _pending = index;
+    notifyListeners();
+  }
 
   /// Called by MainWrapper once it consumed the request.
-  void consume() => _request.value = null;
+  int? take() {
+    final value = _pending;
+    _pending = null;
+    return value;
+  }
 }

@@ -32,22 +32,26 @@ class _MainWrapperState extends State<MainWrapper> {
   @override
   void initState() {
     super.initState();
-    AppNav.instance.request.addListener(_onNavRequest);
+    AppNav.instance.addListener(_onNavRequest);
+    // Apply any tab request that arrived while this wrapper was off-tree
+    // (e.g. a deep link or a sheet fired during a trip screen).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _onNavRequest();
+    });
     _checkAuth();
   }
 
   @override
   void dispose() {
-    AppNav.instance.request.removeListener(_onNavRequest);
+    AppNav.instance.removeListener(_onNavRequest);
     super.dispose();
   }
 
   /// Surfaces elsewhere in the app (Explore SPECIALS header, the Special
   /// business sheet) ask to switch tabs through AppNav.
   void _onNavRequest() {
-    final tab = AppNav.instance.request.value;
+    final tab = AppNav.instance.take();
     if (tab == null || !mounted) return;
-    AppNav.instance.consume();
     _onItemTapped(tab);
   }
 
@@ -83,9 +87,7 @@ class _MainWrapperState extends State<MainWrapper> {
   @override
   Widget build(BuildContext context) {
     if (_isChecking) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -98,10 +100,7 @@ class _MainWrapperState extends State<MainWrapper> {
             children: [
               _ConnectionBanner(connected: ride.isConnected),
               Expanded(
-                child: IndexedStack(
-                  index: _selectedIndex,
-                  children: _screens,
-                ),
+                child: IndexedStack(index: _selectedIndex, children: _screens),
               ),
             ],
           );

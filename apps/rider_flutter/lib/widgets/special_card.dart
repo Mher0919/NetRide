@@ -99,8 +99,51 @@ String specialDistanceLabel(SponsorSpecial s) {
     final miles = km * 0.621371;
     return '${miles < 10 ? miles.toStringAsFixed(1) : miles.round()} mi';
   }
-  final place = [s.city, s.state].where((v) => v?.isNotEmpty ?? false).join(', ');
+  final place = [
+    s.city,
+    s.state,
+  ].where((v) => v?.isNotEmpty ?? false).join(', ');
   return place.isEmpty ? 'Local' : place;
+}
+
+/// Resolved photo URLs for a Special. Admin-uploaded imagery always wins:
+/// cover image → admin gallery → Google business photos. Duplicates are
+/// dropped so the hero and the gallery never repeat the same picture.
+List<String> specialImageUrls(
+  SponsorSpecial sponsor, [
+  GoogleBusiness? business,
+]) {
+  final urls = <String>[];
+  void add(String? raw) {
+    if (raw == null || raw.isEmpty) return;
+    if (!urls.contains(raw)) urls.add(raw);
+  }
+
+  final cover = sponsor.coverImageUrl;
+  if (cover != null && cover.isNotEmpty) add(resolveFileUrl(cover));
+  for (final photo in sponsor.photoUrls) {
+    add(resolveFileUrl(photo));
+  }
+  for (final photo in business?.photos ?? const <GoogleBusinessPhoto>[]) {
+    final raw = photo.url.isNotEmpty ? photo.url : photo.thumbUrl;
+    if (raw.isNotEmpty) add(resolveApiUrl(raw));
+  }
+  // Last resort: the admin-uploaded logo, so an uploaded brand image still
+  // renders instead of the generic gradient. Never mixed into a photo gallery.
+  if (urls.isEmpty) {
+    final logo = sponsor.logoUrl;
+    if (logo != null && logo.isNotEmpty) add(resolveFileUrl(logo));
+  }
+  return urls;
+}
+
+/// Primary image for a Special card / hero, or null for the branded fallback.
+String? specialPrimaryImageUrl(
+  SponsorSpecial sponsor, [
+  GoogleBusiness? business,
+]) {
+  final images = specialImageUrls(sponsor, business);
+  return images.isEmpty ? null : images.first;
 }
 
 class SpecialCard extends StatelessWidget {
@@ -119,32 +162,22 @@ class SpecialCard extends StatelessWidget {
   final double width;
   final double height;
 
-  String? _imageUrl(GoogleBusiness? business) {
-    final cover = sponsor.coverImageUrl;
-    if (cover != null && cover.isNotEmpty) return resolveFileUrl(cover);
-    final photos = business?.photos;
-    if (photos != null && photos.isNotEmpty) {
-      final p = photos.first;
-      final url = p.url.isNotEmpty ? p.url : p.thumbUrl;
-      if (url.isNotEmpty) return resolveApiUrl(url);
-    }
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
     final business = context.select<SpecialsProvider, GoogleBusiness?>(
       (p) => p.businessFor(sponsor.id)?.business,
     );
-    final imageUrl = _imageUrl(business);
+    final imageUrl = specialPrimaryImageUrl(sponsor, business);
     final rating = business?.rating;
     final label = specialDiscountLabel(sponsor);
-    final meta = '${specialCategoryLabel(sponsor.businessType)} · ${specialDistanceLabel(sponsor)}';
+    final meta =
+        '${specialCategoryLabel(sponsor.businessType)} · ${specialDistanceLabel(sponsor)}';
 
     return Semantics(
       button: true,
       selected: selected,
-      label: 'Special at ${sponsor.businessName}: $label. $meta. Opens details.',
+      label:
+          'Special at ${sponsor.businessName}: $label. $meta. Opens details.',
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,

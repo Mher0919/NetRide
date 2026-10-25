@@ -42,6 +42,9 @@ class SponsorSpecial {
   final double? longitude;
   final String? logoUrl;
   final String? coverImageUrl;
+
+  /// Admin-uploaded business photos (`/api/files/:id`), in display order.
+  final List<String> photoUrls;
   final String? googlePlaceId;
   final String? googleBusinessName;
   final String? googleBusinessCategory;
@@ -64,6 +67,7 @@ class SponsorSpecial {
     this.longitude,
     this.logoUrl,
     this.coverImageUrl,
+    this.photoUrls = const [],
     this.googlePlaceId,
     this.googleBusinessName,
     this.googleBusinessCategory,
@@ -78,30 +82,36 @@ class SponsorSpecial {
   bool get isGoogleConnected =>
       googlePlaceId != null && googlePlaceId!.isNotEmpty;
 
-  factory SponsorSpecial.fromJson(Map<String, dynamic> json) =>
-      SponsorSpecial(
-        id: json['id'] as String? ?? '',
-        businessName: json['businessName'] as String? ?? '',
-        businessType: json['businessType'] as String?,
-        businessDescription: json['businessDescription'] as String?,
-        address: json['address'] as String?,
-        city: json['city'] as String?,
-        state: json['state'] as String?,
-        latitude: (json['latitude'] as num?)?.toDouble(),
-        longitude: (json['longitude'] as num?)?.toDouble(),
-        logoUrl: json['logoUrl'] as String?,
-        coverImageUrl: json['coverImageUrl'] as String?,
-        googlePlaceId: json['googlePlaceId'] as String?,
-        googleBusinessName: json['googleBusinessName'] as String?,
-        googleBusinessCategory: json['googleBusinessCategory'] as String?,
-        adminRating: (json['adminRating'] as num?)?.toDouble(),
-        adminRatingCount: json['adminRatingCount'] as int?,
-        priceLevel: json['priceLevel'] as String?,
-        discount: SponsorDiscount.fromJson(
-            (json['discount'] as Map<String, dynamic>?) ?? const {}),
-        kmAway: (json['kmAway'] as num?)?.toDouble(),
-        status: json['status'] as String? ?? '',
-      );
+  factory SponsorSpecial.fromJson(Map<String, dynamic> json) => SponsorSpecial(
+    id: json['id'] as String? ?? '',
+    businessName: json['businessName'] as String? ?? '',
+    businessType: json['businessType'] as String?,
+    businessDescription: json['businessDescription'] as String?,
+    address: json['address'] as String?,
+    city: json['city'] as String?,
+    state: json['state'] as String?,
+    latitude: (json['latitude'] as num?)?.toDouble(),
+    longitude: (json['longitude'] as num?)?.toDouble(),
+    logoUrl: json['logoUrl'] as String?,
+    coverImageUrl: json['coverImageUrl'] as String?,
+    photoUrls:
+        (json['photoUrls'] as List?)
+            ?.whereType<String>()
+            .where((u) => u.isNotEmpty)
+            .toList() ??
+        const [],
+    googlePlaceId: json['googlePlaceId'] as String?,
+    googleBusinessName: json['googleBusinessName'] as String?,
+    googleBusinessCategory: json['googleBusinessCategory'] as String?,
+    adminRating: (json['adminRating'] as num?)?.toDouble(),
+    adminRatingCount: json['adminRatingCount'] as int?,
+    priceLevel: json['priceLevel'] as String?,
+    discount: SponsorDiscount.fromJson(
+      (json['discount'] as Map<String, dynamic>?) ?? const {},
+    ),
+    kmAway: (json['kmAway'] as num?)?.toDouble(),
+    status: json['status'] as String? ?? '',
+  );
 }
 
 /// Redemption row as normalized by the backend (snake_case columns).
@@ -183,12 +193,12 @@ class SpecialRedemption {
   });
 
   bool get isActive => const [
-        'CREATED',
-        'RIDE_PENDING',
-        'WAITING_FOR_SPONSOR',
-        'SPONSOR_VALIDATED',
-        'REWARD_SELECTED',
-      ].contains(status);
+    'CREATED',
+    'RIDE_PENDING',
+    'WAITING_FOR_SPONSOR',
+    'SPONSOR_VALIDATED',
+    'REWARD_SELECTED',
+  ].contains(status);
 
   factory SpecialRedemption.fromJson(Map<String, dynamic> json) {
     DateTime? ts(String? raw) => DateTime.tryParse(raw ?? '');

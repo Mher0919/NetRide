@@ -15,6 +15,7 @@
 // hide their section instead of faking data.
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -24,7 +25,6 @@ import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
 import '../services/app_nav.dart';
 import '../services/ride_intent.dart';
-import '../utils/file_url.dart';
 import 'special_card.dart';
 
 class SpecialBusinessSheet extends StatefulWidget {
@@ -96,26 +96,41 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
 
   Future<void> _rideThere() async {
     final s = widget.sponsor;
-    if (_booking || s.latitude == null || s.longitude == null) return;
-    setState(() => _booking = true);
+    if (_booking) return;
     final specials = context.read<SpecialsProvider>();
+    final business = specials.businessFor(s.id)?.business;
+    final lat = s.latitude ?? business?.latitude;
+    final lng = s.longitude ?? business?.longitude;
     final messenger = ScaffoldMessenger.of(context);
+    if (lat == null || lng == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This special has no location yet. Please try again later.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() => _booking = true);
     try {
       await specials.pickSponsor(s.id);
       if (!mounted) return;
+      // Take the rider to Explore first, then hand the map screen the intent
+      // so the ride-options flow opens on the visible tab with the special
+      // attached — regardless of which tab this sheet was opened from.
+      AppNav.instance.goToTab(AppNav.explore);
       RideIntent.instance.startSpecialRide(
         SpecialRideIntent(
-          lat: s.latitude!,
-          lng: s.longitude!,
-          address: s.address ?? s.businessName,
+          lat: lat,
+          lng: lng,
+          address: (business?.address?.isNotEmpty ?? false)
+              ? business!.address!
+              : (s.address ?? s.businessName),
           sponsorName: s.businessName,
           discountLabel: specialDiscountLabel(s),
         ),
       );
-      // Take the rider to Explore, where the intent opens the normal ride
-      // planning flow (route + ride options + confirm) with the special
-      // attached — regardless of which tab this sheet was opened from.
-      AppNav.instance.goToTab(AppNav.explore);
       Navigator.of(context).pop();
     } catch (_) {
       if (!mounted) return;
@@ -138,9 +153,24 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
     final specials = context.watch<SpecialsProvider>();
     final result = specials.businessFor(widget.sponsor.id);
     final business = result?.business;
-    final loading = result == null && specials.businessLoading(widget.sponsor.id);
+    final loading =
+        result == null && specials.businessLoading(widget.sponsor.id);
     final manual = result?.manual == true;
     final googleDown = result != null && !result.googleAvailable && !manual;
+    final images = specialImageUrls(widget.sponsor, business);
+    final galleryImages = images.length > 1
+        ? images.sublist(1)
+        : const <String>[];
+    final hasAdminImage =
+        (widget.sponsor.coverImageUrl?.isNotEmpty ?? false) ||
+        widget.sponsor.photoUrls.isNotEmpty;
+    final googleHero = !hasAdminImage && (business?.photos.isNotEmpty ?? false)
+        ? business!.photos.first
+        : null;
+    final galleryHasGoogle =
+        business != null &&
+        business.photos.isNotEmpty &&
+        (hasAdminImage || business.photos.length > 1);
 
     return DraggableScrollableSheet(
       controller: _sheetController,
@@ -167,16 +197,14 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
             controller: scrollController,
             physics: const BouncingScrollPhysics(),
             slivers: [
-              SliverToBoxAdapter(
-                child: _buildHandle(context),
-              ),
+              SliverToBoxAdapter(child: _buildHandle(context)),
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildHero(context, business, loading),
+                      _buildHero(context, images, googleHero, loading),
                       const SizedBox(height: 14),
                       _buildIdentity(context, business, loading),
                       const SizedBox(height: 16),
@@ -191,17 +219,17 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                       if (business != null) ...[
                         const SizedBox(height: 20),
                         _buildBusinessInfo(context, business),
-                        if (business.photos.length > 1) ...[
-                          const SizedBox(height: 20),
-                          _buildGallery(context, business),
-                        ],
-                        if (business.hasReviews) ...[
-                          const SizedBox(height: 20),
-                          _buildReviews(context, business),
-                        ],
                       ] else if (loading) ...[
                         const SizedBox(height: 20),
                         _buildInfoSkeleton(context),
+                      ],
+                      if (galleryImages.isNotEmpty) ...[
+                        const SizedBox(height: 20),
+                        _buildGallery(context, galleryImages, galleryHasGoogle),
+                      ],
+                      if (business != null && business.hasReviews) ...[
+                        const SizedBox(height: 20),
+                        _buildReviews(context, business),
                       ],
                       const SizedBox(height: 28),
                       _buildFooter(context),
@@ -221,90 +249,90 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
     return Semantics(
       label: 'Business details. Swipe up for more information.',
       container: true,
-      child: Stack(
-        alignment: Alignment.topCenter,
-        children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onVerticalDragEnd: (details) {
-              // Swiping down on the handle dismisses the sheet (the content
-              // drag handles collapse/expand between the snap points).
-              if ((details.primaryVelocity ?? 0) > 260) {
-                Navigator.of(context).maybePop();
-              }
-            },
-            child: Padding(
-              padding: const EdgeInsets.only(top: 10, bottom: 12),
-              child: Container(
-                width: 44,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD8D2CA),
-                  borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        height: 50,
+        child: Stack(
+          alignment: Alignment.topCenter,
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragEnd: (details) {
+                // Swiping down on the handle dismisses the sheet (the content
+                // drag handles collapse/expand between the snap points).
+                if ((details.primaryVelocity ?? 0) > 260) {
+                  Navigator.of(context).maybePop();
+                }
+              },
+              child: const Padding(
+                padding: EdgeInsets.only(top: 14),
+                child: SizedBox(
+                  width: 44,
+                  height: 4,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Color(0xFFD8D2CA),
+                      borderRadius: BorderRadius.all(Radius.circular(4)),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-          Positioned(
-            right: 12,
-            top: 6,
-            child: Material(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(30),
-              elevation: 1,
-              shadowColor: Colors.black.withValues(alpha: 0.15),
-              child: InkWell(
+            Positioned(
+              right: 12,
+              top: 8,
+              child: Material(
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(30),
-                onTap: () => Navigator.of(context).maybePop(),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: const Color(0xFFD8D2CA)),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.close_rounded,
-                        size: 15,
-                        color: Color(0xFF2F3A32),
-                      ),
-                      SizedBox(width: 4),
-                      Text(
-                        'Close',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                elevation: 1,
+                shadowColor: Colors.black.withValues(alpha: 0.15),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(30),
+                  onTap: () => Navigator.of(context).maybePop(),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(color: const Color(0xFFD8D2CA)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.close_rounded,
+                          size: 15,
                           color: Color(0xFF2F3A32),
                         ),
-                      ),
-                    ],
+                        SizedBox(width: 4),
+                        Text(
+                          'Close',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF2F3A32),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildHero(
     BuildContext context,
-    GoogleBusiness? business,
+    List<String> images,
+    GoogleBusinessPhoto? googlePhoto,
     bool loading,
   ) {
-    final s = widget.sponsor;
-    final googlePhoto =
-        business != null && business.photos.isNotEmpty ? business.photos.first : null;
-    final cover = s.coverImageUrl;
-    final url = googlePhoto != null
-        ? resolveApiUrl(googlePhoto.url.isNotEmpty ? googlePhoto.url : googlePhoto.thumbUrl)
-        : (cover != null && cover.isNotEmpty ? resolveFileUrl(cover) : null);
+    final url = images.isEmpty ? null : images.first;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
@@ -331,7 +359,10 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                 left: 8,
                 bottom: 8,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(20),
@@ -402,7 +433,9 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                 margin: const EdgeInsets.only(left: 8, top: 3),
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                 decoration: BoxDecoration(
-                  color: openNow ? const Color(0xFFE5F0EB) : const Color(0xFFFCE9E9),
+                  color: openNow
+                      ? const Color(0xFFE5F0EB)
+                      : const Color(0xFFFCE9E9),
                   borderRadius: BorderRadius.circular(30),
                 ),
                 child: Text(
@@ -410,7 +443,9 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: openNow ? const Color(0xFF2E7D32) : const Color(0xFFC65A5A),
+                    color: openNow
+                        ? const Color(0xFF2E7D32)
+                        : const Color(0xFFC65A5A),
                   ),
                 ),
               ),
@@ -420,7 +455,11 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
         Row(
           children: [
             if (rating != null && rating > 0) ...[
-              const Icon(Icons.star_rounded, size: 16, color: Color(0xFFE8A33D)),
+              const Icon(
+                Icons.star_rounded,
+                size: 16,
+                color: Color(0xFFE8A33D),
+              ),
               const SizedBox(width: 3),
               Text(
                 rating.toStringAsFixed(1),
@@ -495,7 +534,11 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
         children: [
           Row(
             children: [
-              const Icon(Icons.local_offer_rounded, size: 15, color: Colors.white70),
+              const Icon(
+                Icons.local_offer_rounded,
+                size: 15,
+                color: Colors.white70,
+              ),
               const SizedBox(width: 6),
               Text(
                 'SPECIAL',
@@ -550,10 +593,11 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                     )
                   : const Icon(Icons.directions_car_filled_rounded, size: 19),
               label: Text(
-                _booking
-                    ? 'Getting your ride ready…'
-                    : 'Request a ride to this place',
-                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+                _booking ? 'Getting your ride ready…' : 'Request a Ride',
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),
@@ -575,7 +619,8 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
       icon: Icons.storefront_rounded,
       color: const Color(0xFF6E8B74),
       title: 'Business info from Netride',
-      body: 'This Special was provided by the business. Google business information is not linked.',
+      body:
+          'This Special was provided by the business. Google business information is not linked.',
     );
   }
 
@@ -637,14 +682,16 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
 
   Widget _buildBusinessInfo(BuildContext context, GoogleBusiness business) {
     final s = widget.sponsor;
-    final address =
-        (business.address?.isNotEmpty ?? false) ? business.address : s.address;
+    final address = (business.address?.isNotEmpty ?? false)
+        ? business.address
+        : s.address;
     final phone = business.phone;
     final website = business.website;
-    final hasActions = (business.latitude != null && business.longitude != null) ||
-        (s.latitude != null && s.longitude != null) ||
-        phone != null ||
-        website != null;
+    final eta = _etaLabel(s);
+    final hasActions =
+        eta != null ||
+        (phone?.isNotEmpty ?? false) ||
+        (website?.isNotEmpty ?? false);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -660,10 +707,7 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
           child: Column(
             children: [
               if (address != null && address.isNotEmpty)
-                _InfoRow(
-                  icon: Icons.location_on_rounded,
-                  text: address,
-                ),
+                _InfoRow(icon: Icons.location_on_rounded, text: address),
               if (business.hasHours)
                 _InfoRow(
                   icon: Icons.schedule_rounded,
@@ -683,8 +727,6 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                 ),
               if (phone != null && phone.isNotEmpty)
                 _InfoRow(icon: Icons.call_rounded, text: phone),
-              if (website != null && website.isNotEmpty)
-                _InfoRow(icon: Icons.language_rounded, text: _prettyUrl(website)),
             ],
           ),
         ),
@@ -692,33 +734,21 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
           const SizedBox(height: 12),
           Row(
             children: [
-              if (s.latitude != null || business.latitude != null)
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.directions_rounded,
-                    label: 'Directions',
-                    onTap: () {
-                      final lat = business.latitude ?? s.latitude;
-                      final lng = business.longitude ?? s.longitude;
-                      if (lat == null || lng == null) return;
-                      _openExternal(
-                        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng',
-                      );
-                    },
-                  ),
-                ),
+              if (eta != null) Expanded(child: _EtaTile(label: eta)),
               if (phone != null && phone.isNotEmpty) ...[
-                const SizedBox(width: 8),
+                if (eta != null) const SizedBox(width: 8),
                 Expanded(
                   child: _ActionButton(
                     icon: Icons.call_rounded,
                     label: 'Call',
-                    onTap: () => _openExternal('tel:${phone.replaceAll(' ', '')}'),
+                    onTap: () =>
+                        _openExternal('tel:${phone.replaceAll(' ', '')}'),
                   ),
                 ),
               ],
               if (website != null && website.isNotEmpty) ...[
-                const SizedBox(width: 8),
+                if (eta != null || (phone?.isNotEmpty ?? false))
+                  const SizedBox(width: 8),
                 Expanded(
                   child: _ActionButton(
                     icon: Icons.language_rounded,
@@ -730,29 +760,49 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
             ],
           ),
         ],
-        if (business.googleMapsUri != null) ...[
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => _openExternal(business.googleMapsUri!),
-              icon: const Icon(Icons.map_rounded, size: 16),
-              label: const Text('View on Google Maps'),
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF5B7760),
-                textStyle: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-        ],
       ],
     );
   }
 
-  Widget _buildGallery(BuildContext context, GoogleBusiness business) {
+  /// Driving ETA label from the backend's straight-line `kmAway` (≈30 mph
+  /// urban average, same heuristic used by address search). Falls back to the
+  /// rider's last known origin when the list was fetched without geo.
+  String? _etaLabel(SponsorSpecial s) {
+    var km = s.kmAway;
+    if (km == null) {
+      final specials = context.read<SpecialsProvider>();
+      final fromLat = specials.geoLat;
+      final fromLng = specials.geoLng;
+      final lat = s.latitude;
+      final lng = s.longitude;
+      if (fromLat != null && fromLng != null && lat != null && lng != null) {
+        km = _haversineKm(fromLat, fromLng, lat, lng);
+      }
+    }
+    if (km == null || km <= 0) return null;
+    final minutes = (km * 0.621371 * 2).ceil();
+    return minutes <= 1 ? 'ETA under 1 min' : 'ETA $minutes min';
+  }
+
+  double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
+    const radiusKm = 6371.0;
+    double radians(double degrees) => degrees * math.pi / 180;
+    final dLat = radians(lat2 - lat1);
+    final dLon = radians(lon2 - lon1);
+    final a =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(radians(lat1)) *
+            math.cos(radians(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    return 2 * radiusKm * math.asin(math.min(1, math.sqrt(a)));
+  }
+
+  Widget _buildGallery(
+    BuildContext context,
+    List<String> images,
+    bool showGoogleAttribution,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -762,18 +812,13 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
           height: 104,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: business.photos.length - 1,
+            itemCount: images.length,
             separatorBuilder: (_, _) => const SizedBox(width: 8),
             itemBuilder: (context, i) {
-              final photo = business.photos[i + 1];
-              final url = resolveApiUrl(
-                photo.thumbUrl.isNotEmpty ? photo.thumbUrl : photo.url,
-              );
+              final url = images[i];
               return Semantics(
                 image: true,
-                label: photo.attributionName != null
-                    ? 'Photo by ${photo.attributionName}'
-                    : 'Business photo',
+                label: 'Business photo',
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
                   child: CachedNetworkImage(
@@ -781,7 +826,8 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                     width: 140,
                     height: 104,
                     fit: BoxFit.cover,
-                    placeholder: (_, _) => const _SkeletonBox(width: 140, height: 104, radius: 0),
+                    placeholder: (_, _) =>
+                        const _SkeletonBox(width: 140, height: 104, radius: 0),
                     errorWidget: (_, _, _) => const SizedBox(
                       width: 140,
                       height: 104,
@@ -793,8 +839,10 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
             },
           ),
         ),
-        const SizedBox(height: 6),
-        const _GoogleAttribution(),
+        if (showGoogleAttribution) ...[
+          const SizedBox(height: 6),
+          const _GoogleAttribution(),
+        ],
       ],
     );
   }
@@ -809,7 +857,11 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
             const _SectionTitle('Reviews'),
             const Spacer(),
             if (rating != null && rating > 0) ...[
-              const Icon(Icons.star_rounded, size: 16, color: Color(0xFFE8A33D)),
+              const Icon(
+                Icons.star_rounded,
+                size: 16,
+                color: Color(0xFFE8A33D),
+              ),
               const SizedBox(width: 2),
               Text(
                 rating.toStringAsFixed(1),
@@ -868,13 +920,6 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
       return colon >= 0 ? line.substring(colon + 1).trim() : line;
     }
     return 'See Google Maps for hours';
-  }
-
-  String _prettyUrl(String url) {
-    final cleaned = url.replaceFirst(RegExp(r'^https?://'), '');
-    return cleaned.endsWith('/')
-        ? cleaned.substring(0, cleaned.length - 1)
-        : cleaned;
   }
 }
 
@@ -963,6 +1008,46 @@ class _ActionButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _EtaTile extends StatelessWidget {
+  const _EtaTile({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      decoration: BoxDecoration(
+        color: const Color(0xFFE5F0EB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFB7CDBF)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.schedule_rounded,
+            size: 16,
+            color: Color(0xFF5B7760),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF2F3A32),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1075,11 +1160,7 @@ class _GoogleAttribution extends StatelessWidget {
 
 /// Soft pulsing placeholder used while Google content loads (spec §20).
 class _SkeletonBox extends StatefulWidget {
-  const _SkeletonBox({
-    this.width,
-    required this.height,
-    this.radius = 12,
-  });
+  const _SkeletonBox({this.width, required this.height, this.radius = 12});
 
   final double? width;
   final double height;
