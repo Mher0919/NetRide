@@ -54,6 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late Future<Map<String, dynamic>> _connectStatusFuture;
   bool _isVerified = false;
   bool _hasPassword = false;
+  final Set<String> _hiddenPayoutIds = {};
   bool _showVerificationHint = false;
   bool _dobLocked = false;
   double _rating = 5.0;
@@ -1592,7 +1593,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final lifetimeCents = _centsValue(w['lifetime_earnings_cents']);
         final balance = NumberFormat.simpleCurrency(name: 'USD').format(balanceCents / 100);
         final lifetime = NumberFormat.simpleCurrency(name: 'USD').format(lifetimeCents / 100);
-        final payouts = (w['recent_payouts'] as List?) ?? const [];
+        final payouts = ((w['recent_payouts'] as List?) ?? const [])
+            .where(
+              (p) => !_hiddenPayoutIds.contains((p as Map)['id']?.toString()),
+            )
+            .toList();
         // Weekly manual-withdrawal availability (server-computed; window
         // always opens Monday 00:00 UTC, one withdrawal per week).
         final withdrawal = w['withdrawal'] as Map<String, dynamic>?;
@@ -1604,8 +1609,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final withdrawalLabel = withdrawalEligible
             ? 'Withdrawal available'
             : nextAvailable != null
-                ? 'Next withdrawal: ${DateFormat('EEE, MMM d').format(nextAvailable)}'
-                : 'One withdrawal per week (Mondays)';
+                ? 'Already withdrawn — next available ${DateFormat('EEEE, MMMM d').format(nextAvailable)}'
+                : 'Already withdrawn — next withdrawal available Monday';
         return _buildSectionCard(
           title: 'Wallet',
           children: [
@@ -1676,8 +1681,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: 'Request payout',
               subtitle: withdrawalLabel,
               trailing: TextButton(
-                onPressed: (balanceCents > 0 && withdrawalEligible)
-                    ? _showRequestPayoutDialog
+                onPressed: balanceCents > 0 || !withdrawalEligible
+                    ? () => _handleWithdrawalTap(
+                          eligible: withdrawalEligible,
+                          nextAvailable: nextAvailable,
+                        )
                     : null,
                 child: const Text('Withdraw', style: TextStyle(fontWeight: FontWeight.w700)),
               ),
@@ -1701,7 +1709,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 }
                 final amt = NumberFormat.simpleCurrency(name: 'USD').format(cents / 100);
                 final isAuto = method == 'WEEKLY_AUTO';
-                return Padding(
+                final payoutId = p['id']?.toString();
+                return Dismissible(
+                  key: ValueKey('payout-${payoutId ?? when}-$cents'),
+                  direction: DismissDirection.endToStart,
+                  onDismissed: (_) {
+                    if (payoutId != null) _deletePayout(payoutId);
+                  },
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFC65A5A),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                  child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Row(
                     children: [
@@ -1749,6 +1776,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ],
                   ),
+                  ),
                 );
               }),
             ],
@@ -1758,6 +1786,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+
+  /// Hide one payout history entry (swipe left). Server-side this is a
+  /// visibility flag, so weekly limits and reconciliation are unaffected.
+  Future<void> _deletePayout(String payoutId) async {
+    if (!mounted) return;
+    // Remove locally first so Dismissible never sees a dismissed widget
+    // rebuilt by an unrelated parent update.
+    setState(() => _hiddenPayoutIds.add(payoutId));
+    try {
+      await UserService.hidePayout(payoutId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payout removed from history')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _hiddenPayoutIds.remove(payoutId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not remove payout. Please try again.')),
+      );
+    }
+  }
+
+  /// Withdrawals are once per calendar week (window opens Monday 00:00 UTC).
+  /// When the driver already withdrew, tapping explains the next available
+  /// Monday with an explicit date instead of silently doing nothing.
+  Future<void> _handleWithdrawalTap({
+    required bool eligible,
+    required DateTime? nextAvailable,
+  }) async {
+    if (!eligible) {
+      final nextLabel = nextAvailable != null
+          ? DateFormat('EEEE, MMMM d').format(nextAvailable)
+          : 'Monday';
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text(
+            'Already withdrawn',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          content: Text(
+            'You can withdraw once a week. Your next withdrawal is available '
+            'on $nextLabel.',
+            style: const TextStyle(height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    await _showRequestPayoutDialog();
+  }
 
   // ----- On-demand payout dialog (5% fee preview) -------------------------
 

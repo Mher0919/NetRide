@@ -15,12 +15,20 @@ class SpecialRideIntent {
   final String sponsorName;
   final String discountLabel;
 
+  /// Sponsor + redemption created by the special sheet. Passing them with
+  /// the intent prevents a concurrent specials refresh from racing the
+  /// attach and leaving the checkout without its discount.
+  final String? sponsorId;
+  final String? redemptionId;
+
   const SpecialRideIntent({
     required this.lat,
     required this.lng,
     required this.address,
     required this.sponsorName,
     required this.discountLabel,
+    this.sponsorId,
+    this.redemptionId,
   });
 }
 

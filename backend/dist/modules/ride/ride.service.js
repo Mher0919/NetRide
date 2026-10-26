@@ -1258,9 +1258,47 @@ class RideService {
         // check here silently routed drivers through the RIDER query, so their
         // history (and any client rollup built on it) came back empty.
         if ((role ?? '').toUpperCase() === 'DRIVER') {
-            return ride_repository_1.RideRepository.findByDriverId(userId);
+            const rides = await ride_repository_1.RideRepository.findByDriverId(userId);
+            return this.attachDriverEarnings(rides);
         }
         return ride_repository_1.RideRepository.findByRiderId(userId);
+    }
+    /**
+     * Attaches the driver's authoritative take-home (`driver_earnings_cents`)
+     * to each history row. The driver app must display the 60% share — never
+     * the gross rider fare — and the immutable fare breakdown is the same
+     * source that funded the wallet credit. Legacy rides without a breakdown
+     * fall back to the financial ledger, then to the configured 60% split.
+     */
+    static async attachDriverEarnings(rides) {
+        if (rides.length === 0)
+            return rides;
+        try {
+            const ids = rides.map((r) => r.id);
+            const res = await database_1.pool.query(`SELECT r.id,
+                COALESCE(NULLIF(b.driver_earnings_cents, 0),
+                         NULLIF(ft.driver_share_cents, 0),
+                         ROUND(COALESCE(r.fare_amount, 0) * 100 * 0.60)) AS driver_earnings_cents
+           FROM rides r
+           LEFT JOIN ride_fare_breakdowns b ON b.ride_id = r.id
+           LEFT JOIN financial_transactions ft
+                  ON ft.ride_id = r.id AND ft.type = 'RIDE_COMPLETION'
+          WHERE r.id = ANY($1::uuid[])`, [ids]);
+            const byId = new Map();
+            for (const row of res.rows) {
+                byId.set(row.id, (0, financial_ledger_service_1.centsValue)(row.driver_earnings_cents));
+            }
+            for (const ride of rides) {
+                const earnings = byId.get(ride.id);
+                if (earnings != null) {
+                    ride.driver_earnings_cents = earnings;
+                }
+            }
+        }
+        catch (err) {
+            console.warn(`[RIDE] driver history earnings enrichment failed: ${err.message}`);
+        }
+        return rides;
     }
     static async getCurrentRide(userId, role) {
         console.log(`[RIDE] getCurrentRide userId=${userId} role=${role} RideRepository=${typeof ride_repository_1.RideRepository} fcdByDriverId=${typeof ride_repository_1.RideRepository.findCurrentByDriverId}`);

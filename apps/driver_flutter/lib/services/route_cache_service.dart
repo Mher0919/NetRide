@@ -1,5 +1,6 @@
 import 'dart:collection';
 import 'dart:convert';
+import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/route_models.dart';
 import '../utils/spatial_hash.dart';
@@ -15,12 +16,11 @@ class RouteCacheEntry {
     this.accessCount = 1,
   });
 
-  RouteCacheEntry copyWith({int? accessCount}) =>
-      RouteCacheEntry(
-        route: route,
-        cachedAt: cachedAt,
-        accessCount: accessCount ?? this.accessCount,
-      );
+  RouteCacheEntry copyWith({int? accessCount}) => RouteCacheEntry(
+    route: route,
+    cachedAt: cachedAt,
+    accessCount: accessCount ?? this.accessCount,
+  );
 
   bool get isExpired {
     final age = DateTime.now().difference(cachedAt);
@@ -64,10 +64,13 @@ class RouteCacheService {
 
     for (final oHash in originNeighbors) {
       for (final dHash in destNeighbors) {
-        final key = '${SpatialHash.routeCacheKey(0, 0, 0, 0).split(':')[0]}:$oHash:$dHash';
+        final key =
+            '${SpatialHash.routeCacheKey(0, 0, 0, 0).split(':')[0]}:$oHash:$dHash';
         final entry = _memoryCache[key];
 
-        if (entry != null && !entry.isExpired) {
+        if (entry != null &&
+            !entry.isExpired &&
+            _hasUsableGeometry(entry.route)) {
           final score = _proximityScore(originHash, destHash, oHash, dHash);
           if (score > bestScore) {
             bestScore = score;
@@ -82,14 +85,24 @@ class RouteCacheService {
       return bestEntry.route;
     }
 
-    final diskEntry = _readFromDisk(originHash, destHash, originNeighbors, destNeighbors);
-    if (diskEntry != null) {
+    final diskEntry = _readFromDisk(
+      originHash,
+      destHash,
+      originNeighbors,
+      destNeighbors,
+    );
+    if (diskEntry != null && _hasUsableGeometry(diskEntry.route)) {
       _memoryCache['route:$originHash:$destHash'] = diskEntry;
       return diskEntry.route;
     }
 
     return null;
   }
+
+  /// Old cache payloads (before geometry was persisted) have zero points.
+  /// Treat them as a miss so the next request fetches a renderable route.
+  bool _hasUsableGeometry(RouteResponse route) =>
+      route.polyline.length >= 2 || route.steps.isNotEmpty;
 
   Future<void> set(RouteResponse route) async {
     final key = 'route:${route.originHex}:${route.destHex}';
@@ -104,8 +117,18 @@ class RouteCacheService {
     await _writeToDisk(key, entry);
   }
 
-  Future<void> invalidate(double originLat, double originLng, double destLat, double destLng) async {
-    final key = SpatialHash.routeCacheKey(originLat, originLng, destLat, destLng);
+  Future<void> invalidate(
+    double originLat,
+    double originLng,
+    double destLat,
+    double destLng,
+  ) async {
+    final key = SpatialHash.routeCacheKey(
+      originLat,
+      originLng,
+      destLat,
+      destLng,
+    );
     _memoryCache.remove(key);
     await _prefs?.remove('$_diskPrefix$key');
   }
@@ -113,7 +136,8 @@ class RouteCacheService {
   Future<void> clearAll() async {
     _memoryCache.clear();
     if (_prefs != null) {
-      final keys = _prefs!.getKeys()
+      final keys = _prefs!
+          .getKeys()
           .where((k) => k.startsWith(_diskPrefix))
           .toList();
       for (final key in keys) {
@@ -122,7 +146,12 @@ class RouteCacheService {
     }
   }
 
-  int _proximityScore(String originHash, String destHash, String oHash, String dHash) {
+  int _proximityScore(
+    String originHash,
+    String destHash,
+    String oHash,
+    String dHash,
+  ) {
     int score = 0;
     if (oHash == originHash) score += 2;
     if (dHash == destHash) score += 2;
@@ -135,12 +164,19 @@ class RouteCacheService {
     _memoryCache[exactKey] = entry.copyWith(accessCount: entry.accessCount + 1);
   }
 
-  RouteCacheEntry? _readFromDisk(String originHash, String destHash, List<String> originNeighbors, List<String> destNeighbors) {
+  RouteCacheEntry? _readFromDisk(
+    String originHash,
+    String destHash,
+    List<String> originNeighbors,
+    List<String> destNeighbors,
+  ) {
     if (_prefs == null) return null;
 
     for (final oHash in originNeighbors) {
       for (final dHash in destNeighbors) {
-        final key = '$_diskPrefix' 'route:$oHash:$dHash';
+        final key =
+            '$_diskPrefix'
+            'route:$oHash:$dHash';
         final prefs = _prefs;
         if (prefs == null) return null;
         final raw = prefs.getString(key);
@@ -149,15 +185,42 @@ class RouteCacheService {
         try {
           final data = jsonDecode(raw) as Map<String, dynamic>;
           final cachedAt = DateTime.parse(data['cachedAt'] as String);
+          final polyline = <LatLng>[];
+          final rawPolyline = data['polyline'];
+          if (rawPolyline is List) {
+            for (final c in rawPolyline) {
+              if (c is List && c.length >= 2 && c[0] is num && c[1] is num) {
+                polyline.add(
+                  LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()),
+                );
+              }
+            }
+          }
+          final steps = <RouteStep>[];
+          final rawSteps = data['steps'];
+          if (rawSteps is List) {
+            for (final s in rawSteps) {
+              if (s is Map) {
+                steps.add(RouteStep.fromJson(Map<String, dynamic>.from(s)));
+              }
+            }
+          }
+          // Legacy payload without geometry is unusable for navigation —
+          // drop it so the caller fetches a real route.
+          if (polyline.length < 2) {
+            prefs.remove(key);
+            continue;
+          }
           final entry = RouteCacheEntry(
             route: RouteResponse(
               originHex: oHash,
               destHex: dHash,
               distanceMeters: (data['distanceMeters'] as num).toDouble(),
               durationSeconds: (data['durationSeconds'] as num).toDouble(),
-              trafficDurationSeconds: (data['trafficDurationSeconds'] as num?)?.toDouble(),
-              polyline: const [],
-              steps: const [],
+              trafficDurationSeconds: (data['trafficDurationSeconds'] as num?)
+                  ?.toDouble(),
+              polyline: polyline,
+              steps: steps,
               engine: data['engine'] as String? ?? 'cache',
               cacheHit: true,
             ),

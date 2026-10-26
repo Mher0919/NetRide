@@ -10,6 +10,7 @@ import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../../middleware/auth.middleware';
 import { NavigationService } from '../../services/navigation.service';
 import { RerouteService } from '../../services/reroute.service';
+import { SpeedLimitService } from '../../services/speed-limit.service';
 import { pool } from '../../config/database';
 
 const router = Router();
@@ -90,6 +91,28 @@ router.get('/cached', authMiddleware, async (req: AuthRequest, res) => {
   } catch (err: any) {
     console.error(`[NAV] /cached failed: ${err.message}`);
     res.status(500).json({ error: 'Failed to read cached route' });
+  }
+});
+
+/**
+ * GET /api/navigation/speed-limit?lat=...&lng=...
+ * Returns the legal speed limit (MPH) at the driver's current position.
+ * Backed by Google Roads `speedLimits`, cached for 60 s server-side. Always
+ * answers 200 with `speedLimitMph: null` when no limit can be resolved so the
+ * driver app keeps its last known value instead of inventing one.
+ */
+router.get('/speed-limit', authMiddleware, async (req: AuthRequest, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return res.status(400).json({ error: 'lat and lng are required' });
+  }
+  try {
+    const result = await SpeedLimitService.lookup(lat, lng);
+    res.json(result);
+  } catch (err: any) {
+    console.error(`[NAV] /speed-limit failed: ${err.message}`);
+    res.json({ speedLimitMph: null, roadName: null, source: 'unavailable' });
   }
 });
 

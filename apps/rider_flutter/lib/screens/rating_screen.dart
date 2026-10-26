@@ -20,6 +20,14 @@ class _RatingScreenState extends State<RatingScreen> {
   bool _isSubmitting = false;
   final _commentController = TextEditingController();
 
+  /// The rating screen can be the ONLY route left in the navigator (the map
+  /// replaced the tab wrapper when the trip was accepted). Popping it used to
+  /// reveal an empty black navigator. Always return to a fresh Explore.
+  void _finish() {
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+  }
+
   void _submit() async {
     if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
@@ -39,8 +47,10 @@ class _RatingScreenState extends State<RatingScreen> {
       );
 
       if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Thank you for your feedback!')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Thank you for your feedback!')),
+        );
+        _finish();
       }
     } on DioException catch (e) {
       // A rejected submit must NEVER trap the rider on this page. Surface
@@ -55,10 +65,10 @@ class _RatingScreenState extends State<RatingScreen> {
           serverMsg != null && serverMsg.toLowerCase().contains('already rated');
       if (alreadyRated) {
         if (mounted) {
-          Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Thank you for your feedback!')),
           );
+          _finish();
         }
         return;
       }
@@ -80,7 +90,12 @@ class _RatingScreenState extends State<RatingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _finish();
+      },
+      child: Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -89,7 +104,7 @@ class _RatingScreenState extends State<RatingScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.close, color: Colors.black),
-            onPressed: () => Navigator.pop(context),
+            onPressed: _finish,
           )
         ],
       ),
@@ -231,6 +246,7 @@ class _RatingScreenState extends State<RatingScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

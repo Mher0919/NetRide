@@ -798,6 +798,14 @@ async function runMigrations() {
             await database_1.pool.query(schema);
             console.log('App update campaign schema (20261021) applied');
         }
+        const hasPayoutHidden = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'payouts' AND column_name = 'hidden_at'");
+        if (hasPayoutHidden.rowCount === 0) {
+            console.log('Applying payout visibility schema (20261025)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/20261025_payouts_visibility.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('Payout visibility schema (20261025) applied');
+        }
         console.log('🚀 All migrations completed');
     }
     catch (err) {

@@ -114,24 +114,29 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
     }
     setState(() => _booking = true);
     try {
-      await specials.pickSponsor(s.id);
+      final redemption = await specials.pickSponsor(s.id);
       if (!mounted) return;
-      // Take the rider to Explore first, then hand the map screen the intent
-      // so the ride-options flow opens on the visible tab with the special
-      // attached — regardless of which tab this sheet was opened from.
-      AppNav.instance.goToTab(AppNav.explore);
-      RideIntent.instance.startSpecialRide(
-        SpecialRideIntent(
-          lat: lat,
-          lng: lng,
-          address: (business?.address?.isNotEmpty ?? false)
-              ? business!.address!
-              : (s.address ?? s.businessName),
-          sponsorName: s.businessName,
-          discountLabel: specialDiscountLabel(s),
-        ),
+      final intent = SpecialRideIntent(
+        lat: lat,
+        lng: lng,
+        address: (business?.address?.isNotEmpty ?? false)
+            ? business!.address!
+            : (s.address ?? s.businessName),
+        sponsorName: s.businessName,
+        discountLabel: specialDiscountLabel(s),
+        sponsorId: redemption.sponsorId.isNotEmpty
+            ? redemption.sponsorId
+            : s.id,
+        redemptionId: redemption.id,
       );
+      // Close the sheet FIRST, then switch to Explore and deliver the intent
+      // on the next frame. Opening the checkout behind a still-animating
+      // modal was the race that could leave the rider looking at a bare map.
       Navigator.of(context).pop();
+      AppNav.instance.goToTab(AppNav.explore);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        RideIntent.instance.startSpecialRide(intent);
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() => _booking = false);

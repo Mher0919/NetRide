@@ -17,6 +17,7 @@ export declare class DriverController {
     static getWallet(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static requestOnDemandPayout(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static listMyPayouts(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    static deleteMyPayout(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static getDocumentRequirements(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static resubmitDocument(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     static batchResubmitDocuments(req: any, res: Response): Promise<Response<any, Record<string, any>> | undefined>;

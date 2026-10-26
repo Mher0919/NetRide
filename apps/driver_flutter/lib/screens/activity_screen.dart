@@ -165,7 +165,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
     final completed = _history.where((r) => r['status'] == 'COMPLETED').toList();
     double total = 0;
     for (var ride in completed) {
-      total += double.tryParse((ride['fare_amount'] ?? ride['estimated_fare'] ?? '0').toString()) ?? 0;
+      total += _driverEarningsCents(ride) / 100.0;
     }
 
     return Container(
@@ -205,9 +205,35 @@ class _ActivityScreenState extends State<ActivityScreen> {
     );
   }
 
+  /// The driver is paid the fare share (60%), never the gross rider fare.
+  /// The backend attaches the authoritative `driver_earnings_cents`; the
+  /// local 60% fallback keeps legacy rows correct before they are enriched.
+  int _driverEarningsCents(dynamic ride) {
+    final authoritative = ride['driver_earnings_cents'];
+    if (authoritative is num) return authoritative.round();
+    if (authoritative is String) {
+      final parsed = int.tryParse(authoritative);
+      if (parsed != null) return parsed;
+    }
+    final fare =
+        double.tryParse(
+          (ride['fare_amount'] ?? ride['estimated_fare'] ?? '0').toString(),
+        ) ??
+        0.0;
+    return (fare * 100 * 0.60).round();
+  }
+
   Widget _buildRideCard(dynamic ride) {
-    final dateStr = ride['requested_at'] ?? ride['created_at'];
-    final date = dateStr != null ? DateTime.parse(dateStr.toString()) : DateTime.now();
+    // Show when the ride actually happened, in the driver's local timezone.
+    // Formatting the raw UTC timestamp without .toLocal() made trip times
+    // appear hours off.
+    final dateStr = ride['completed_at'] ??
+        ride['started_at'] ??
+        ride['requested_at'] ??
+        ride['created_at'];
+    final parsed =
+        dateStr != null ? DateTime.tryParse(dateStr.toString()) : null;
+    final date = (parsed ?? DateTime.now()).toLocal();
     final formattedDate = DateFormat('MMM d, h:mm a').format(date);
     final rating = ride['rating'];
     final status = ride['status'] ?? 'UNKNOWN';
@@ -216,6 +242,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
     Color fareColor;
     String farePrefix;
     if (status == 'COMPLETED') {
+      fare = (_driverEarningsCents(ride) / 100).toStringAsFixed(2);
       fareColor = Colors.green[700]!;
       farePrefix = '+\$';
     } else if (status == 'CANCELLED') {

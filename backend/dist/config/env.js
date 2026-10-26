@@ -16,6 +16,9 @@ const envSchema = zod_1.z.object({
     JWT_SECRET: zod_1.z.string(),
     GOOGLE_MAPS_API_KEY: zod_1.z.string().optional(),
     GOOGLE_ROUTES_API_KEY: zod_1.z.string().optional(),
+    // Google Roads API (speed limits). Falls back to GOOGLE_MAPS_API_KEY /
+    // GOOGLE_ROUTES_API_KEY. Enable "Roads API" on the key's project.
+    GOOGLE_ROADS_API_KEY: zod_1.z.string().optional(),
     // ---- Google Places API (New) ---------------------------------------------
     // Preferred key for Google business information (SPECIALS). Falls back to
     // GOOGLE_MAPS_API_KEY, then GOOGLE_ROUTES_API_KEY. Server-side only — the

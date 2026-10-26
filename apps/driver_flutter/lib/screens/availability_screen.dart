@@ -36,6 +36,9 @@ class AvailabilityScreen extends StatefulWidget {
 
 class _AvailabilityScreenState extends State<AvailabilityScreen> {
   final MapController _mapController = MapController();
+
+  /// Natural current-location zoom for the dashboard map.
+  static const double _defaultMapZoom = 14.5;
   StreamSubscription<GpsFix>? _positionSubscription;
   Timer? _heartbeatTimer;
   GpsFix? _lastPosition;
@@ -60,6 +63,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   double _weeklyTips = 0;
   int _weeklyRides = 0;
 
+  /// Refreshes the rollup when an active ride returns to idle, so the
+  /// dashboard shows the just-completed fare without a manual pull.
+  DriverProvider? _driverProvider;
+  bool _wasOnTrip = false;
+
   // Demand heatmap (server-computed from real rider activity).
   List<DemandZone> _demandZones = [];
   Timer? _demandTimer;
@@ -71,6 +79,28 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     _checkPermissions();
     _fetchProfile();
     _loadWeeklyEarnings();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final provider = Provider.of<DriverProvider>(context, listen: false);
+    if (!identical(provider, _driverProvider)) {
+      _driverProvider?.removeListener(_onDriverStateChanged);
+      _driverProvider = provider;
+      _wasOnTrip = provider.currentTrip != null;
+      provider.addListener(_onDriverStateChanged);
+    }
+  }
+
+  void _onDriverStateChanged() {
+    final onTrip = _driverProvider?.currentTrip != null;
+    if (_wasOnTrip && !onTrip) {
+      // Trip just reached a terminal state: reload the server rollup while
+      // the dashboard is still mounted behind the trip screen.
+      _loadWeeklyEarnings();
+    }
+    _wasOnTrip = onTrip;
   }
 
   // ── Earnings ──────────────────────────────────────────────────────
@@ -526,6 +556,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
   @override
   void dispose() {
+    _driverProvider?.removeListener(_onDriverStateChanged);
     _positionSubscription?.cancel();
     _heartbeatTimer?.cancel();
     _demandTimer?.cancel();
@@ -628,7 +659,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
       if (_shouldFollowUser && _isMapReady) {
         try {
-          _mapController.move(fix.position, 15.0);
+          _mapController.move(fix.position, _defaultMapZoom);
         } catch (_) {
           // flutter_map internal state not ready yet — safe to ignore
         }
@@ -729,7 +760,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     _shouldFollowUser = true;
     if (_lastPosition != null && _isMapReady) {
       try {
-        _mapController.move(_lastPosition!.position, 15.0);
+        _mapController.move(_lastPosition!.position, _defaultMapZoom);
       } catch (_) {}
     }
     _loadWeeklyEarnings();
@@ -916,7 +947,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                       mapController: _mapController,
                       options: MapOptions(
                         initialCenter: initialCenter,
-                        initialZoom: 15.0,
+                        initialZoom: _defaultMapZoom,
                         minZoom: 12,
                         maxZoom: 18,
                         onMapReady: () => setState(() => _isMapReady = true),
@@ -1110,7 +1141,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                         setState(() => _shouldFollowUser = true);
     if (_lastPosition != null) {
       try {
-        _mapController.move(_lastPosition!.position, 15.0);
+        _mapController.move(_lastPosition!.position, _defaultMapZoom);
                           } catch (_) {}
                         }
                       },

@@ -344,6 +344,22 @@ class DriverController {
             res.status(500).json({ error: 'Failed to list payouts.' });
         }
     }
+    static async deleteMyPayout(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId)
+                return res.status(401).json({ error: 'Unauthorized' });
+            const hidden = await driver_service_1.DriverService.hideMyPayout(userId, String(req.params.id));
+            if (!hidden) {
+                return res.status(404).json({ error: 'Payout not found.' });
+            }
+            res.json({ hidden: true });
+        }
+        catch (error) {
+            console.error(`[DRIVER] Delete payout error: ${error.message}`);
+            res.status(500).json({ error: 'Failed to delete payout.' });
+        }
+    }
     static async getDocumentRequirements(req, res) {
         try {
             const userId = req.user?.id;

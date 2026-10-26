@@ -25,6 +25,7 @@ router.get('/profile-changes/current', auth_middleware_1.authMiddleware, driver_
 router.get('/wallet', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getWallet);
 router.post('/wallet/request-payout', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.requestOnDemandPayout);
 router.get('/payouts', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.listMyPayouts);
+router.delete('/payouts/:id', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.deleteMyPayout);
 // Document requirements + resubmission
 router.get('/documents/requirements', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.getDocumentRequirements);
 router.post('/documents/resubmit', auth_middleware_1.authMiddleware, driver_controller_1.DriverController.resubmitDocument);

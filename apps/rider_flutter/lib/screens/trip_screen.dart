@@ -39,6 +39,10 @@ class _TripScreenState extends State<TripScreen> {
   StreamSubscription<Position>? _positionSubscription;
   bool _dialogShown = false;
 
+  /// Comfortable current-location zoom: close enough to navigate, wide
+  /// enough to see the surrounding streets and the car ahead.
+  static const double _defaultMapZoom = 14.5;
+
   /// Throttles raw GPS fixes into a bounded 1 Hz stream so the backend
   /// is never flooded (and its socket budget never silently drops
   /// updates — which is what made the marker jitter).
@@ -77,6 +81,18 @@ class _TripScreenState extends State<TripScreen> {
           ),
         ).listen((position) {
           if (!mounted) return;
+          // After pickup the rider and driver are one moving unit: the
+          // driver's GPS is authoritative, so stop updating/reporting the
+          // rider's separate position.
+          final status = Provider.of<RideProvider>(
+            context,
+            listen: false,
+          ).status;
+          if (status == models.TripStatus.IN_PROGRESS ||
+              status == models.TripStatus.COMPLETED ||
+              status == models.TripStatus.CANCELLED) {
+            return;
+          }
           setState(() {
             _riderLocation = LatLng(position.latitude, position.longitude);
           });
@@ -407,7 +423,7 @@ class _TripScreenState extends State<TripScreen> {
             mapController: _mapController,
             options: MapOptions(
               initialCenter: driverLocation,
-              initialZoom: 15.0,
+              initialZoom: _defaultMapZoom,
               minZoom: 12,
               maxZoom: 18,
               onMapReady: () {},
@@ -432,7 +448,11 @@ class _TripScreenState extends State<TripScreen> {
                 ),
               MarkerLayer(
                 markers: [
-                  if (_riderLocation != null)
+                  // Before pickup the rider and driver are apart, so both
+                  // markers are meaningful. Once the trip is IN_PROGRESS they
+                  // are in the same car: show ONLY the driver's moving marker
+                  // instead of a redundant rider dot that can drift stale.
+                  if (_riderLocation != null && rideProvider.isPrePickup)
                     Marker(
                       point: _riderLocation!,
                       width: 40,
@@ -553,8 +573,8 @@ class _TripScreenState extends State<TripScreen> {
                                         models.TripStatus.DRIVER_ARRIVING
                                     ? 'DRIVER HAS ARRIVED'
                                     : rideProvider.isPrePickup
-                                        ? 'DRIVER IS ARRIVING'
-                                        : 'TRIP IN PROGRESS',
+                                    ? 'DRIVER IS ARRIVING'
+                                    : 'TRIP IN PROGRESS',
                                 style: const TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w800,
@@ -603,6 +623,27 @@ class _TripScreenState extends State<TripScreen> {
               ),
             ),
           ),
+
+          // Center-on-driver control during the ride. After pickup the rider
+          // moves with the driver, so "current location" is the driver's
+          // live marker.
+          if (rideProvider.status == models.TripStatus.IN_PROGRESS)
+            Positioned(
+              bottom: 292,
+              right: 16,
+              child: FloatingActionButton(
+                heroTag: 'rider_trip_locate_fab',
+                mini: true,
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF2F3A32),
+                elevation: 4,
+                shape: const CircleBorder(),
+                onPressed: () {
+                  _mapController.move(driverLocation, _defaultMapZoom);
+                },
+                child: const Icon(Icons.my_location_rounded, size: 22),
+              ),
+            ),
 
           // Tip FAB (during trip only, above the bottom controls)
           if (rideProvider.isPrePickup ||
@@ -655,11 +696,12 @@ class _TripScreenState extends State<TripScreen> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          rideProvider.status == models.TripStatus.DRIVER_ARRIVING
+                          rideProvider.status ==
+                                  models.TripStatus.DRIVER_ARRIVING
                               ? 'Waiting at pickup'
                               : rideProvider.isPrePickup
-                                  ? 'Arriving in ${(etaSec / 60).ceil()} min'
-                                  : 'ETA ${(etaSec / 60).ceil()} min',
+                              ? 'Arriving in ${(etaSec / 60).ceil()} min'
+                              : 'ETA ${(etaSec / 60).ceil()} min',
                           style: const TextStyle(
                             color: Color(0xFF2F3A32),
                             fontSize: 13,
@@ -879,10 +921,7 @@ class RideCancelledDialog extends StatelessWidget {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2F3A32),
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(
-                vertical: 14,
-                horizontal: 16,
-              ),
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
               minimumSize: const Size(0, 48),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -1145,11 +1184,7 @@ class _ArrivalSummaryDialogState extends State<_ArrivalSummaryDialog> {
             confettiController: _confettiController,
             blastDirectionality: BlastDirectionality.explosive,
             shouldLoop: false,
-            colors: const [
-              Color(0xFF5B7760),
-              Color(0xFFE5A93B),
-              Colors.white,
-            ],
+            colors: const [Color(0xFF5B7760), Color(0xFFE5A93B), Colors.white],
           ),
         ],
       ),

@@ -808,26 +808,39 @@ export class DriverService {
     );
     const wRes = await pool.query(`SELECT * FROM driver_wallets WHERE driver_id = $1`, [userId]);
     const wallet = wRes.rows[0];
+    // Only visible payout rows. A driver may hide a history entry from their
+    // own account view (visibility flag only — the ledger row is kept so the
+    // weekly withdrawal rule and reconciliation stay intact).
     const pRes = await pool.query(
       `SELECT id, amount_cents, fee_cents, net_cents, status, method, requested_at, processed_at, reference, notes
-       FROM payouts WHERE driver_id = $1 ORDER BY requested_at DESC LIMIT 5`,
+       FROM payouts WHERE driver_id = $1 AND hidden_at IS NULL
+       ORDER BY requested_at DESC LIMIT 5`,
       [userId]
     );
 
-    // Trailing-7-day rollup from the SETTLED financial ledger (the same
-    // source that funded the wallet credits) so the driver app's "THIS
-    // WEEK" card can never drift from the balance. `driver_share_cents`
-    // is the fare take-home; `tip_cents` is the tip captured at
-    // completion. Tips added AFTER completion land as TIP_CREDIT wallet
-    // credits instead, so they are summed separately (never double-counted).
+    // Trailing-7-day rollup from the ride's immutable fare breakdown (the
+    // same driver-share that funded the wallet credit at completion). The
+    // driver is paid the fare share regardless of whether the rider-side
+    // card capture/Stripe settlement is still pending, so this rollup MUST
+    // NOT depend on financial_transactions.status = 'SETTLED'.
+    // `tip_cents` is the tip captured at completion; tips added AFTER
+    // completion land as TIP_CREDIT wallet credits and are summed
+    // separately (never double-counted).
     const weekRes = await pool.query(
       `SELECT
-         COALESCE(SUM(driver_share_cents), 0) AS earnings_cents,
-         COALESCE(SUM(tip_cents), 0)          AS tip_cents,
-         COUNT(*)                             AS rides
-       FROM financial_transactions
-       WHERE driver_id = $1 AND status = 'SETTLED' AND type = 'RIDE_COMPLETION'
-         AND completed_at >= NOW() - INTERVAL '7 days'`,
+         COALESCE(SUM(COALESCE(NULLIF(b.driver_earnings_cents, 0),
+                               NULLIF(ft.driver_share_cents, 0),
+                               ROUND(COALESCE(r.fare_amount, 0) * 100 * 0.60))), 0)
+           AS earnings_cents,
+         COALESCE(SUM(COALESCE(ft.tip_cents, 0)), 0) AS tip_cents,
+         COUNT(DISTINCT r.id) AS rides
+       FROM rides r
+       LEFT JOIN ride_fare_breakdowns b ON b.ride_id = r.id
+       LEFT JOIN financial_transactions ft
+              ON ft.ride_id = r.id AND ft.type = 'RIDE_COMPLETION'
+       WHERE r.driver_id = $1
+         AND r.status = 'COMPLETED'
+         AND COALESCE(r.completed_at, r.updated_at) >= NOW() - INTERVAL '7 days'`,
       [userId]
     );
     const afterTipRes = await pool.query(
@@ -982,11 +995,30 @@ export class DriverService {
   static async listMyPayouts(userId: string, limit: number, offset: number) {
     const res = await pool.query(
       `SELECT id, amount_cents, fee_cents, net_cents, status, method, requested_at, processed_at, reference, notes
-       FROM payouts WHERE driver_id = $1 ORDER BY requested_at DESC LIMIT $2 OFFSET $3`,
+       FROM payouts WHERE driver_id = $1 AND hidden_at IS NULL
+       ORDER BY requested_at DESC LIMIT $2 OFFSET $3`,
       [userId, limit, offset]
     );
-    const total = await pool.query(`SELECT COUNT(*)::int AS c FROM payouts WHERE driver_id = $1`, [userId]);
+    const total = await pool.query(
+      `SELECT COUNT(*)::int AS c FROM payouts WHERE driver_id = $1 AND hidden_at IS NULL`,
+      [userId]
+    );
     return { payouts: res.rows, total: total.rows[0]?.c ?? 0 };
+  }
+
+  /**
+   * Hides one payout history entry from the driver's own account view.
+   * Visibility only: the row is never deleted, so the weekly withdrawal
+   * rule (which counts PENDING/PROCESSING/PAID ON_DEMAND rows) and all
+   * financial reconciliation keep seeing it.
+   */
+  static async hideMyPayout(userId: string, payoutId: string): Promise<boolean> {
+    const res = await pool.query(
+      `UPDATE payouts SET hidden_at = NOW()
+       WHERE id = $1 AND driver_id = $2 AND hidden_at IS NULL`,
+      [payoutId, userId]
+    );
+    return (res.rowCount ?? 0) > 0;
   }
 
   // ============================================================
@@ -1364,8 +1396,34 @@ export class DriverService {
    */
   static async creditOnRideComplete(driverId: string, fareCents: number, tipCents: number, rideId: string) {
     if (!driverId) return;
-    const safeFare = Math.max(0, Math.round(fareCents));
-    const safeTip = Math.max(0, Math.round(tipCents));
+    let safeFare = Math.max(0, Math.round(fareCents));
+    let safeTip = Math.max(0, Math.round(tipCents));
+
+    // Defensive fallback: some ride projections historically omitted the
+    // fare/tip columns, which made the completion credit skip the fare and
+    // only credit an after-trip tip. The ride row is the source of truth.
+    if (safeFare <= 0 || safeTip <= 0) {
+      try {
+        const money = await pool.query(
+          `SELECT fare_amount, tip_amount FROM rides WHERE id = $1`,
+          [rideId],
+        );
+        if (safeFare <= 0) {
+          safeFare = Math.max(
+            0,
+            Math.round(parseFloat(String(money.rows[0]?.fare_amount ?? '0')) * 100) || 0,
+          );
+        }
+        if (safeTip <= 0) {
+          safeTip = Math.max(
+            0,
+            Math.round(parseFloat(String(money.rows[0]?.tip_amount ?? '0')) * 100) || 0,
+          );
+        }
+      } catch {
+        // Keep whatever the caller supplied.
+      }
+    }
     if (safeFare + safeTip <= 0) return;
 
     // Authoritative allocation from the price snapshot (persisted at accept);

@@ -55,8 +55,9 @@ class NavigationRoute {
       totalMeters: (data['distance'] as num?)?.toDouble() ?? 0.0,
       etaSeconds: etaSec > 0 ? etaSec : durationSec,
       trafficEtaSeconds: trafficEta,
-      speedLimitsByRoad: ((data['speedLimitsByRoad'] as Map?) ?? const {})
-          .map((k, v) => MapEntry(k as String, (v as num).toInt())),
+      speedLimitsByRoad: ((data['speedLimitsByRoad'] as Map?) ?? const {}).map(
+        (k, v) => MapEntry(k as String, (v as num).toInt()),
+      ),
       engine: engine,
       cacheHit: data['cache_hit'] == true || data['cacheHit'] == true,
     );
@@ -220,10 +221,16 @@ class NavigationRoute {
   }
 
   static String _extractRoadName(String instruction) {
-    final ontoMatch = RegExp(r'onto\s+(.+?)(?:\.|$)', caseSensitive: false).firstMatch(instruction);
+    final ontoMatch = RegExp(
+      r'onto\s+(.+?)(?:\.|$)',
+      caseSensitive: false,
+    ).firstMatch(instruction);
     if (ontoMatch != null) return ontoMatch.group(1)!.trim();
 
-    final atMatch = RegExp(r'at\s+(.+?)(?:\.|$)', caseSensitive: false).firstMatch(instruction);
+    final atMatch = RegExp(
+      r'at\s+(.+?)(?:\.|$)',
+      caseSensitive: false,
+    ).firstMatch(instruction);
     if (atMatch != null) return atMatch.group(1)!.trim();
 
     return '';
@@ -261,10 +268,8 @@ class NavigationService extends ChangeNotifier {
   SpeedMonitor get speedMonitor => _speedMonitor;
   NavigationLeg? get currentLeg => _leg;
   RerouteStage get rerouteStage => _rerouteController.stage;
-  OffRoutePhase get offRoutePhase =>
-      _rerouteController.offRoutePhase;
-  double get offRouteDeviationM =>
-      _matcher?.lastSnap?.distanceMeters ?? 0;
+  OffRoutePhase get offRoutePhase => _rerouteController.offRoutePhase;
+  double get offRouteDeviationM => _matcher?.lastSnap?.distanceMeters ?? 0;
 
   void _applyRoute(NavigationRoute route) {
     _route = route;
@@ -299,7 +304,12 @@ class NavigationService extends ChangeNotifier {
   /// Distance thresholds (meters) at which the NEXT maneuver is re-announced
   /// while the driver is still on the same step.
   static const List<double> _announceThresholdsMeters = [
-    1609.34 * 2, 1609.34, 804.67, 402.34, 200, 100,
+    1609.34 * 2,
+    1609.34,
+    804.67,
+    402.34,
+    200,
+    100,
   ];
 
   Future<void> startNavigation({
@@ -310,10 +320,16 @@ class NavigationService extends ChangeNotifier {
     Map<String, dynamic>? cachedRoute,
   }) async {
     // Validate origin and destination before any API calls.
-    final originError = RouteValidator.validateOrigin(start.latitude, start.longitude);
+    final originError = RouteValidator.validateOrigin(
+      start.latitude,
+      start.longitude,
+    );
     if (originError != null) throw originError;
 
-    final destError = RouteValidator.validateDestination(end.latitude, end.longitude);
+    final destError = RouteValidator.validateDestination(
+      end.latitude,
+      end.longitude,
+    );
     if (destError != null) throw destError;
 
     // Increment version to invalidate any in-flight route from a previous call.
@@ -321,6 +337,24 @@ class NavigationService extends ChangeNotifier {
     final requestVersion = _routeRequestVersion;
     _tripId = tripId;
     _leg = leg;
+
+    // A cold start can reach here before the driver provider has a GPS fix,
+    // in which case TripScreen falls back to the pickup as the origin. That
+    // produces a zero-length route (no visible line). Wait briefly for the
+    // real fix and use it when we have one.
+    final directMeters = const Distance().as(LengthUnit.Meter, start, end);
+    if (directMeters < 50) {
+      await GpsTracker.instance.start();
+      final fix = await _firstFixWithin(const Duration(seconds: 4));
+      if (fix != null) {
+        final fixMeters = const Distance().as(
+          LengthUnit.Meter,
+          fix.position,
+          end,
+        );
+        if (fixMeters >= 50) start = fix.position;
+      }
+    }
 
     Map<String, dynamic>? data = cachedRoute;
     if (data == null) {
@@ -333,11 +367,25 @@ class NavigationService extends ChangeNotifier {
     // If a newer navigation was started while we were fetching, discard
     // this result to avoid stale route overwrites.
     if (_routeRequestVersion != requestVersion) {
-      debugPrint('[NAV] Discarding stale route result (version $requestVersion < $_routeRequestVersion)');
+      debugPrint(
+        '[NAV] Discarding stale route result (version $requestVersion < $_routeRequestVersion)',
+      );
       return;
     }
 
-    _applyRoute(NavigationRoute.fromServer(data));
+    var route = NavigationRoute.fromServer(data);
+    // A cached/degraded payload with no usable geometry must not leave the
+    // driver on a map with no route line during the pickup leg. Recompute
+    // once from the resolved origin.
+    if (route.polyline.length < 2) {
+      debugPrint(
+        '[NAV] Route geometry unusable — re-fetching from current origin',
+      );
+      data = await _fetchRouteWithRetry(start, end, leg);
+      if (_routeRequestVersion != requestVersion) return;
+      route = NavigationRoute.fromServer(data);
+    }
+    _applyRoute(route);
 
     await _speedMonitor.start(route: data);
 
@@ -348,6 +396,18 @@ class NavigationService extends ChangeNotifier {
     _isNavigating = true;
     _speakRoutePreview(tripId: tripId, leg: leg);
     notifyListeners();
+  }
+
+  /// Returns the last GPS fix, or waits briefly for the first one. Never
+  /// throws: a missing fix simply falls back to the supplied origin.
+  Future<GpsFix?> _firstFixWithin(Duration timeout) async {
+    final existing = GpsTracker.instance.lastFix;
+    if (existing != null) return existing;
+    try {
+      return await GpsTracker.instance.fixes.first.timeout(timeout);
+    } catch (_) {
+      return GpsTracker.instance.lastFix;
+    }
   }
 
   /// Fetch route with up to 2 retries for transient failures.
@@ -367,7 +427,9 @@ class NavigationService extends ChangeNotifier {
           rethrow;
         }
         final delay = Duration(milliseconds: (500 * (attempt + 1)).round());
-        debugPrint('[NAV] Route attempt $attempt failed (transient), retrying in ${delay.inMilliseconds}ms: $e');
+        debugPrint(
+          '[NAV] Route attempt $attempt failed (transient), retrying in ${delay.inMilliseconds}ms: $e',
+        );
         await Future.delayed(delay);
       }
     }
@@ -392,7 +454,9 @@ class NavigationService extends ChangeNotifier {
         isTransient: true,
       );
     }
-    if (msg.contains('socket') || msg.contains('network') || msg.contains('connection')) {
+    if (msg.contains('socket') ||
+        msg.contains('network') ||
+        msg.contains('connection')) {
       return const RouteError(
         category: RouteErrorCategory.networkError,
         message: 'Network error during routing',
@@ -400,13 +464,18 @@ class NavigationService extends ChangeNotifier {
         isTransient: true,
       );
     }
-    if (msg.contains('401') || msg.contains('unauthorized') || msg.contains('403') || msg.contains('forbidden')) {
+    if (msg.contains('401') ||
+        msg.contains('unauthorized') ||
+        msg.contains('403') ||
+        msg.contains('forbidden')) {
       return const RouteError(
         category: RouteErrorCategory.apiAuthentication,
         message: 'API authentication failed',
       );
     }
-    if (msg.contains('429') || msg.contains('too many requests') || msg.contains('rate limit')) {
+    if (msg.contains('429') ||
+        msg.contains('too many requests') ||
+        msg.contains('rate limit')) {
       return const RouteError(
         category: RouteErrorCategory.rateLimited,
         message: 'Rate limited',
@@ -414,13 +483,17 @@ class NavigationService extends ChangeNotifier {
         isTransient: true,
       );
     }
-    if (msg.contains('402') || msg.contains('quota') || msg.contains('billing')) {
+    if (msg.contains('402') ||
+        msg.contains('quota') ||
+        msg.contains('billing')) {
       return const RouteError(
         category: RouteErrorCategory.apiQuota,
         message: 'API quota exceeded',
       );
     }
-    if (msg.contains('no route') || msg.contains('not found') || msg.contains('ZERO_RESULTS')) {
+    if (msg.contains('no route') ||
+        msg.contains('not found') ||
+        msg.contains('ZERO_RESULTS')) {
       return const RouteError(
         category: RouteErrorCategory.noRouteFound,
         message: 'No route found',
@@ -449,7 +522,10 @@ class NavigationService extends ChangeNotifier {
     if (_leg != NavigationLeg.pickup) return;
     _leg = NavigationLeg.destination;
     // Validate coordinates before starting destination navigation
-    final destError = RouteValidator.validateDestination(end.latitude, end.longitude);
+    final destError = RouteValidator.validateDestination(
+      end.latitude,
+      end.longitude,
+    );
     if (destError != null) throw destError;
     await startNavigation(
       tripId: _tripId ?? '',
@@ -551,7 +627,8 @@ class NavigationService extends ChangeNotifier {
       // either into a new step (index advanced) or past a distance
       // threshold toward the next maneuver. Widget rebuilds, orientation
       // changes, and unrelated button presses cannot re-trigger speech.
-      if (!NavigationVoiceService.instance.muted && _shouldAnnounce(progress, snap)) {
+      if (!NavigationVoiceService.instance.muted &&
+          _shouldAnnounce(progress, snap)) {
         _speakNextManeuver(progress);
       }
     }
@@ -569,7 +646,10 @@ class NavigationService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _speakRoutePreview({required String tripId, required NavigationLeg leg}) {
+  void _speakRoutePreview({
+    required String tripId,
+    required NavigationLeg leg,
+  }) {
     // Speak the takeoff preview exactly once per (trip, leg). Repeated
     // startNavigation calls for the SAME leg — caused by widget rebuilds,
     // leg-swap postFrame callbacks, or rehydration — are no-ops here.
@@ -593,7 +673,9 @@ class NavigationService extends ChangeNotifier {
       final distanceStr = formatDistance(next.cumulativeStartMeters);
       String nextText = "";
       if (next.name.isNotEmpty) {
-        final modifierStr = next.modifier.isNotEmpty ? next.modifier : 'proceed';
+        final modifierStr = next.modifier.isNotEmpty
+            ? next.modifier
+            : 'proceed';
         nextText = "In $distanceStr, turn $modifierStr onto ${next.name}.";
       } else if (next.type.isNotEmpty) {
         nextText = "In $distanceStr, ${next.type}.";
@@ -643,7 +725,9 @@ class NavigationService extends ChangeNotifier {
     final distanceStr = formatDistance(progress.distanceToNextManeuver);
     String instruction = "";
     if (nextManeuver.name.isNotEmpty) {
-      final modifierStr = nextManeuver.modifier.isNotEmpty ? nextManeuver.modifier : 'proceed';
+      final modifierStr = nextManeuver.modifier.isNotEmpty
+          ? nextManeuver.modifier
+          : 'proceed';
       instruction = "$modifierStr onto ${nextManeuver.name}";
     } else if (nextManeuver.type.isNotEmpty) {
       instruction = nextManeuver.type;

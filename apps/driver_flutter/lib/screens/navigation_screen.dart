@@ -16,6 +16,7 @@ import '../services/navigation_service.dart';
 import '../services/off_route_detector.dart';
 import '../services/reroute_controller.dart';
 import '../services/route_progress_calculator.dart';
+import '../services/speed_limit_service.dart';
 import '../services/speed_monitor.dart';
 import '../services/communication_service.dart';
 import '../services/sound_service.dart';
@@ -60,45 +61,94 @@ class NavigationScreen extends StatefulWidget {
 class _NavigationScreenState extends State<NavigationScreen> {
   final MapController _mapController = MapController();
 
+  /// Navigation follow camera: slightly wider than the old 17 so the driver
+  /// sees the road ahead, with the map rotated so the direction of travel is
+  /// always up. The centre is pushed ahead of the vehicle so more of the
+  /// upcoming route is visible than the road already driven.
+  static const double _followZoom = 16.0;
+  static const double _lookAheadMeters = 110.0;
+
   /// While true the camera tracks the driver; any user pan/fling pauses
   /// follow for [_followPause] so the driver can inspect the map.
   bool _following = true;
   bool _mapReady = false;
   Timer? _followPauseTimer;
+  Timer? _speedLimitTimer;
   static const Duration _followPause = Duration(seconds: 12);
   GpsFix? _lastFollowedFix;
+  double _lastHeadingDeg = 0;
 
   @override
   void initState() {
     super.initState();
     GpsTracker.instance.addListener(_onGpsTick);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refreshSpeedLimit();
+    });
+    // Google Roads speed limits refresh once a minute while navigating.
+    _speedLimitTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _refreshSpeedLimit(),
+    );
   }
 
   @override
   void dispose() {
     _followPauseTimer?.cancel();
+    _speedLimitTimer?.cancel();
     GpsTracker.instance.removeListener(_onGpsTick);
     super.dispose();
   }
 
   void _onGpsTick() {
-    if (!_following || !_mapReady) return;
     final fix = GpsTracker.instance.lastFix;
     if (fix == null || fix == _lastFollowedFix) return;
     _lastFollowedFix = fix;
-    _mapController.move(fix.position, _mapController.camera.zoom);
+    if (fix.speedMps > 0.5 && fix.headingDeg.isFinite) {
+      _lastHeadingDeg = fix.headingDeg;
+    }
+    if (!_following || !_mapReady) return;
+    _followCamera(fix.position);
+  }
+
+  /// Centre the camera ahead of [position], rotated so the driver's heading
+  /// points up. Slow/stationary fixes keep the last valid heading so the map
+  /// never spins while waiting at a light.
+  void _followCamera(LatLng position) {
+    final bearing = _normalizedBearing(_lastHeadingDeg);
+    final target = const Distance().offset(position, _lookAheadMeters, bearing);
+    _mapController.moveAndRotate(target, _followZoom, -_lastHeadingDeg);
+  }
+
+  double _normalizedBearing(double heading) {
+    final h = heading % 360;
+    return h > 180 ? h - 360 : h;
   }
 
   /// Locate button: snap back to the driver's current position and orient
-  /// the map to face the way the phone is pointing (like the Explore map).
+  /// the map to face the way the phone is pointing.
   void _locateMe() {
     final fix = GpsTracker.instance.lastFix;
     if (fix == null || !_mapReady) return;
     _following = true;
     _followPauseTimer?.cancel();
     _lastFollowedFix = null;
-    _mapController.move(fix.position, _mapController.camera.zoom);
-    _mapController.rotate(fix.headingDeg);
+    if (fix.speedMps > 0.5 && fix.headingDeg.isFinite) {
+      _lastHeadingDeg = fix.headingDeg;
+    }
+    _followCamera(fix.position);
+  }
+
+  Future<void> _refreshSpeedLimit() async {
+    if (!mounted) return;
+    final fix = GpsTracker.instance.lastFix;
+    if (fix == null) return;
+    final result = await SpeedLimitService.lookup(fix.position);
+    if (!mounted || result.speedLimitMph == null) return;
+    Provider.of<NavigationService>(
+      context,
+      listen: false,
+    ).speedMonitor.applyExternalLimit(result.speedLimitMph!);
   }
 
   void _onUserMapGesture() {
@@ -172,11 +222,12 @@ class _NavigationScreenState extends State<NavigationScreen> {
     final nextManeuver = currentStep ?? nextStep;
     final instruction = nextManeuver != null
         ? (nextManeuver.name.isNotEmpty
-            ? '${_capitalize(nextManeuver.modifier)} onto ${nextManeuver.name}'
-            : _capitalize(nextManeuver.type))
+              ? '${_capitalize(nextManeuver.modifier)} onto ${nextManeuver.name}'
+              : _capitalize(nextManeuver.type))
         : 'Continue';
-    final distanceToManeuver =
-        nav.formatDistance(progress?.distanceToNextManeuver ?? 0);
+    final distanceToManeuver = nav.formatDistance(
+      progress?.distanceToNextManeuver ?? 0,
+    );
     final maneuverIcon = nextManeuver != null
         ? maneuverIconFromOSRM(nextManeuver.type, nextManeuver.modifier)
         : Icons.navigation_rounded;
@@ -188,15 +239,16 @@ class _NavigationScreenState extends State<NavigationScreen> {
       final rawStep = route.rawSteps[progress.currentStepIndex];
       final stepLanes = (rawStep['lanes'] as List?) ?? const [];
       for (final lane in stepLanes) {
-        final indications = ((lane as Map)['indications'] as List?)
-                ?.cast<String>() ??
-            const [];
+        final indications =
+            ((lane as Map)['indications'] as List?)?.cast<String>() ?? const [];
         final valid = (lane['valid'] == true);
         if (indications.isEmpty) continue;
-        lanes.add(LaneGuidance(
-          indication: indications.first.toLowerCase(),
-          valid: valid,
-        ));
+        lanes.add(
+          LaneGuidance(
+            indication: indications.first.toLowerCase(),
+            valid: valid,
+          ),
+        );
       }
     }
 
@@ -207,14 +259,19 @@ class _NavigationScreenState extends State<NavigationScreen> {
             child: FlutterMap(
               mapController: _mapController,
               options: MapOptions(
-                initialCenter: gps?.position ?? const LatLng(34.0522, -118.2437),
-                initialZoom: 17.0,
+                initialCenter:
+                    gps?.position ?? const LatLng(34.0522, -118.2437),
+                initialZoom: _followZoom,
                 minZoom: 12,
                 maxZoom: 18,
                 onMapReady: () {
                   _mapReady = true;
-                  if (gps != null) {
-                    _mapController.move(gps.position, 17.0);
+                  final fix = gps ?? GpsTracker.instance.lastFix;
+                  if (fix != null) {
+                    if (fix.speedMps > 0.5 && fix.headingDeg.isFinite) {
+                      _lastHeadingDeg = fix.headingDeg;
+                    }
+                    _followCamera(fix.position);
                   }
                 },
                 onMapEvent: (event) {
@@ -227,14 +284,18 @@ class _NavigationScreenState extends State<NavigationScreen> {
               ),
               children: [
                 TileLayer(
-                  urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+                  urlTemplate:
+                      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
                   maxNativeZoom: 16,
                   userAgentPackageName: 'com.NetRide.driver',
                 ),
-                if (polylines.isNotEmpty)
-                  PolylineLayer(polylines: polylines),
+                if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
                 MarkerLayer(markers: markers),
-                if (riderLocation != null)
+                // The rider is only a separate moving marker before pickup.
+                // Once the trip is IN_PROGRESS they are in the car with the
+                // driver, so displaying/animating a second rider marker is
+                // both redundant and misleading.
+                if (riderLocation != null && nav.leg == NavigationLeg.pickup)
                   SmoothRiderMarker(
                     position: LatLng(riderLocation.lat, riderLocation.lng),
                   ),
@@ -263,88 +324,87 @@ class _NavigationScreenState extends State<NavigationScreen> {
                         rerouteStage == RerouteStage.backendRequest,
                       ),
                     ],
+                    const SizedBox(height: 10),
+                    // Voice + locate + speed HUD share one compact row BELOW
+                    // the maneuver card. They can never overlap the card or
+                    // each other on short screens (the old absolute offsets
+                    // did).
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        FloatingActionButton(
+                          heroTag: 'nav_locate_fab',
+                          mini: true,
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF2F3A32),
+                          elevation: 4,
+                          shape: const CircleBorder(),
+                          onPressed: _locateMe,
+                          child: const Icon(
+                            Icons.my_location_rounded,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        ValueListenableBuilder<bool>(
+                          valueListenable:
+                              NavigationVoiceService.instance.mutedListenable,
+                          builder: (context, muted, _) {
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.15),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SoundIconButton(
+                                    onPressed: () {
+                                      NavigationVoiceService.instance.setMuted(
+                                        !muted,
+                                      );
+                                    },
+                                    icon: Icon(
+                                      muted
+                                          ? Icons.volume_off_rounded
+                                          : Icons.volume_up_rounded,
+                                      color: const Color(0xFF2F3A32),
+                                    ),
+                                  ),
+                                  Container(
+                                    margin: const EdgeInsets.only(right: 12),
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: muted ? Colors.red : Colors.green,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 10),
+                        ValueListenableBuilder<SpeedHud>(
+                          valueListenable: nav.speedMonitor.hud,
+                          builder: (context, speedHudValue, _) {
+                            return SpeedHudCard(value: speedHudValue);
+                          },
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
-            ),
-          ),
-
-          Positioned(
-            top: 0,
-            right: 16,
-            child: SafeArea(
-              child: ValueListenableBuilder<SpeedHud>(
-                valueListenable: nav.speedMonitor.hud,
-                builder: (context, speedHudValue, _) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 220),
-                    child: SpeedHudCard(value: speedHudValue),
-                  );
-                },
-              ),
-            ),
-          ),
-
-          Positioned(
-            right: 16,
-            // Raised above the trip screen's "⋯" action menu (bottom: 322)
-            // so the two floating controls stack without overlapping.
-            bottom: 378,
-            child: FloatingActionButton(
-              heroTag: 'nav_locate_fab',
-              mini: true,
-              backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF2F3A32),
-              elevation: 4,
-              shape: const CircleBorder(),
-              onPressed: _locateMe,
-              child: const Icon(Icons.my_location_rounded, size: 22),
-            ),
-          ),
-
-          Positioned(
-            right: 16,
-            bottom: 300,
-            child: ValueListenableBuilder<bool>(
-              valueListenable: NavigationVoiceService.instance.mutedListenable,
-              builder: (context, muted, _) {
-                return Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SoundIconButton(
-                        onPressed: () {
-                          NavigationVoiceService.instance.setMuted(!muted);
-                        },
-                        icon: Icon(
-                          muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                          color: const Color(0xFF2F3A32),
-                        ),
-                      ),
-                      Container(
-                        margin: const EdgeInsets.only(right: 12),
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: muted ? Colors.red : Colors.green,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
             ),
           ),
 
@@ -365,23 +425,25 @@ class _NavigationScreenState extends State<NavigationScreen> {
     final heading = atPickup
         ? 'AT PICKUP — WAITING FOR RIDER'
         : isPickupLeg
-            ? 'EN ROUTE TO PICKUP'
-            : 'EN ROUTE TO DESTINATION';
-    final address =
-        isPickupLeg ? widget.pickupAddress : widget.destinationAddress;
+        ? 'EN ROUTE TO PICKUP'
+        : 'EN ROUTE TO DESTINATION';
+    final address = isPickupLeg
+        ? widget.pickupAddress
+        : widget.destinationAddress;
     final etaSec = progress?.etaSeconds ?? 0;
     final remaining = progress?.totalRemainingMeters ?? 0;
     final actionLabel = isPickupLeg ? 'START TRIP' : 'COMPLETE TRIP';
-    final actionEnabled =
-        isPickupLeg ? widget.canPickupRider : widget.canCompleteTrip;
-    final onAction =
-        isPickupLeg ? widget.onPickupRider : widget.onCompleteTrip;
+    final actionEnabled = isPickupLeg
+        ? widget.canPickupRider
+        : widget.canCompleteTrip;
+    final onAction = isPickupLeg ? widget.onPickupRider : widget.onCompleteTrip;
 
     final etaLabel = atPickup
         ? 'ARRIVED'
         : (etaSec > 0 ? 'ETA ${(etaSec / 60).ceil()} min' : 'ETA \u2014');
-    final remainingLabel =
-        atPickup ? 'At pickup' : nav.formatDistance(remaining);
+    final remainingLabel = atPickup
+        ? 'At pickup'
+        : nav.formatDistance(remaining);
 
     final comm = context.watch<CommunicationService>();
 
@@ -426,8 +488,11 @@ class _NavigationScreenState extends State<NavigationScreen> {
             ),
             const SizedBox(width: 10),
           ] else ...[
-            const Icon(Icons.swap_horiz_rounded,
-                color: Color(0xFFB97A00), size: 18),
+            const Icon(
+              Icons.swap_horiz_rounded,
+              color: Color(0xFFB97A00),
+              size: 18,
+            ),
             const SizedBox(width: 10),
           ],
           Expanded(
@@ -465,21 +530,13 @@ class _NavigationScreenState extends State<NavigationScreen> {
             ),
           ],
         ),
-        child: const Icon(
-          Icons.navigation,
-          color: Colors.white,
-          size: 18,
-        ),
+        child: const Icon(Icons.navigation, color: Colors.white, size: 18),
       ),
     );
   }
 
   Widget _buildDestinationMarker() {
-    return const Icon(
-      Icons.location_on,
-      color: Color(0xFFC65A5A),
-      size: 30,
-    );
+    return const Icon(Icons.location_on, color: Color(0xFFC65A5A), size: 30);
   }
 
   String _capitalize(String? s) {

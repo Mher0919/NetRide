@@ -694,6 +694,16 @@ class DriverProvider with ChangeNotifier {
     });
 
     _socket!.on('riderLocationUpdate', (data) {
+      // The rider is only tracked separately before pickup. After the trip
+      // starts they move with the driver, so late rider updates must not
+      // keep a stale second marker alive.
+      final trip = _currentTrip;
+      if (trip != null &&
+          (trip.status == models.TripStatus.IN_PROGRESS ||
+              trip.status == models.TripStatus.COMPLETED ||
+              trip.status == models.TripStatus.CANCELLED)) {
+        return;
+      }
       _riderLocation = models.Location.fromJson(data);
       notifyListeners();
     });

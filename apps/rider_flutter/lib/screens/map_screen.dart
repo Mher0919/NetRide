@@ -52,6 +52,10 @@ class _MapScreenState extends State<MapScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   final MapController _mapController = MapController();
   final RoutingService _routingService = RoutingService();
+
+  /// Natural default for the rider's current-location view: wide enough to
+  /// see context and the road ahead without feeling zoomed into the roof.
+  static const double _defaultMapZoom = 14.5;
   LatLng? _userPosition;
   LatLng? _smoothedPosition;
   models.Location? _pickup;
@@ -125,6 +129,12 @@ class _MapScreenState extends State<MapScreen>
   // discovered by the rider. Sent with the ride request so the backend
   // applies the sponsor discount inside the pricing transaction.
   String? _specialRedemptionId;
+  // Snapshot carried by the ride intent so the checkout can render the
+  // attached deal immediately even if a concurrent specials refresh has not
+  // re-hydrated the provider's `current` redemption yet.
+  String? _specialSponsorId;
+  String? _specialSponsorName;
+  String? _specialDiscountLabel;
 
   // Zero-balance feedback: tapping the disabled Ride Credits toggle shakes
   // the row and flashes a red "no credits" hint (pulse).
@@ -267,6 +277,14 @@ class _MapScreenState extends State<MapScreen>
       duration: const Duration(milliseconds: 420),
     );
     RideIntent.instance.notifier.addListener(_onRideIntent);
+    // A special ride can be requested while this screen is off-tree (e.g. a
+    // sheet opened over a notification route). Consume any intent that was
+    // delivered before the listener existed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && RideIntent.instance.notifier.value != null) {
+        _onRideIntent();
+      }
+    });
     _initCacheServices();
     _initLiveLocation();
     _fetchProfile();
@@ -322,9 +340,19 @@ class _MapScreenState extends State<MapScreen>
     RideIntent.instance.clear();
 
     final specials = context.read<SpecialsProvider>();
-    _specialRedemptionId = specials.canAttachToRide
-        ? specials.current!.id
-        : null;
+    // Prefer the redemption carried by the intent: a concurrent specials
+    // refresh may not have re-hydrated `current` yet, and dropping the id
+    // would silently turn the ride into a non-special checkout.
+    _specialRedemptionId =
+        intent.redemptionId ??
+        (specials.canAttachToRide ? specials.current!.id : null);
+    _specialSponsorId =
+        intent.sponsorId ??
+        (specials.current?.sponsorId.isNotEmpty == true
+            ? specials.current!.sponsorId
+            : null);
+    _specialSponsorName = intent.sponsorName;
+    _specialDiscountLabel = intent.discountLabel;
 
     final userPos = _userPosition;
     setState(() {
@@ -346,6 +374,13 @@ class _MapScreenState extends State<MapScreen>
     _openRidePanel();
     _updateRoute();
     _sheetController.value = 1;
+    // Re-assert the expansion after the first frame. The special sheet is
+    // dismissing at the same time; without this, a rebuild during that
+    // transition could leave the rider looking at a full-screen map with the
+    // checkout collapsed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _panelOpen) _animateSheetTo(1);
+    });
     // Demand signal for the heatmap (same as a manual destination pick).
     context.read<RideProvider>().reportActivity(
       'REQUEST_FLOW',
@@ -564,7 +599,7 @@ class _MapScreenState extends State<MapScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (mounted && _isMapReady) {
           try {
-            _mapController.move(_smoothedPosition!, 15.0);
+            _mapController.move(_smoothedPosition!, _defaultMapZoom);
           } catch (e) {
             debugPrint('Map move error: $e');
           }
@@ -631,7 +666,7 @@ class _MapScreenState extends State<MapScreen>
       _updateRoute();
     } else {
       setState(() => _routePoints = []);
-      _mapController.move(_userPosition!, 15.0);
+      _mapController.move(_userPosition!, _defaultMapZoom);
     }
   }
 
@@ -943,11 +978,14 @@ class _MapScreenState extends State<MapScreen>
     final fare = _fareCents;
     if (fare <= 0) return 0;
     final specials = context.read<SpecialsProvider>();
-    final redemption = specials.current;
-    if (redemption == null) return 0;
+    final current = specials.current;
+    final sponsorId = current?.id == _specialRedemptionId
+        ? current!.sponsorId
+        : _specialSponsorId;
+    if (sponsorId == null || sponsorId.isEmpty) return 0;
     SponsorSpecial? sponsor;
     for (final s in specials.sponsors) {
-      if (s.id == redemption.sponsorId) {
+      if (s.id == sponsorId) {
         sponsor = s;
         break;
       }
@@ -1031,10 +1069,17 @@ class _MapScreenState extends State<MapScreen>
     // (set by the ride intent). A stale CREATED redemption must NEVER be
     // silently attached to a regular ride the rider planned manually.
     final specials = Provider.of<SpecialsProvider>(context, listen: false);
+    // Only drop the attach when the provider proves a DIFFERENT redemption
+    // is current. A null/hydrating `current` (concurrent refresh right
+    // after the special sheet created it) must not silently remove the
+    // discount the rider just chose.
     if (_specialRedemptionId != null &&
-        (!specials.canAttachToRide ||
-            specials.current?.id != _specialRedemptionId)) {
+        specials.current != null &&
+        specials.current!.id != _specialRedemptionId) {
       _specialRedemptionId = null;
+      _specialSponsorId = null;
+      _specialSponsorName = null;
+      _specialDiscountLabel = null;
     }
     if (_specialRedemptionId != null && !_specialTermsAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1122,6 +1167,9 @@ class _MapScreenState extends State<MapScreen>
       _promoPreview = null;
       _promoApplied = false;
       _specialRedemptionId = null;
+      _specialSponsorId = null;
+      _specialSponsorName = null;
+      _specialDiscountLabel = null;
       _applyCredits = false;
       _creditUseCents = null;
       _creditAmountError = null;
@@ -1641,7 +1689,8 @@ class _MapScreenState extends State<MapScreen>
                                                           options: MapOptions(
                                                             initialCenter:
                                                                 _smoothedPosition!,
-                                                            initialZoom: 15.0,
+                                                            initialZoom:
+                                                                _defaultMapZoom,
                                                             minZoom: 10,
                                                             maxZoom: 18,
                                                             interactionOptions: InteractionOptions(
@@ -2004,7 +2053,10 @@ class _MapScreenState extends State<MapScreen>
                         onPressed: () {
                           setState(() => _shouldFollowUser = true);
                           if (_smoothedPosition != null) {
-                            _mapController.move(_smoothedPosition!, 15.0);
+                            _mapController.move(
+                              _smoothedPosition!,
+                              _defaultMapZoom,
+                            );
                           }
                         },
                         child: const Icon(Icons.my_location),
@@ -2563,16 +2615,21 @@ class _MapScreenState extends State<MapScreen>
   /// Small banner inside the checkout panel announcing the attached special.
   /// Replaces the promo-code row: a special ride never combines with a promo.
   Widget _buildSpecialBanner(ThemeData theme) {
-    final redemption = Provider.of<SpecialsProvider>(
+    final current = Provider.of<SpecialsProvider>(
       context,
       listen: false,
     ).current;
-    final name = (redemption?.sponsorName?.isNotEmpty ?? false)
-        ? redemption!.sponsorName!
-        : 'Your deal';
-    final label = (redemption?.discountLabel?.isNotEmpty ?? false)
-        ? redemption!.discountLabel!
-        : 'SPECIAL';
+    final redemption = current?.id == _specialRedemptionId ? current : null;
+    final redemptionName = redemption?.sponsorName ?? '';
+    final redemptionLabel = redemption?.discountLabel ?? '';
+    final intentName = _specialSponsorName ?? '';
+    final intentLabel = _specialDiscountLabel ?? '';
+    final name = redemptionName.isNotEmpty
+        ? redemptionName
+        : (intentName.isNotEmpty ? intentName : 'Your deal');
+    final label = redemptionLabel.isNotEmpty
+        ? redemptionLabel
+        : (intentLabel.isNotEmpty ? intentLabel : 'SPECIAL');
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(

@@ -51,14 +51,13 @@ class UserService {
   /// code (e.g. "PROFILE_CHANGE_PENDING", "RATE_LIMITED",
   /// "PHONE_NOT_VERIFIED") — callers should map these to UI messages.
   static Future<Map<String, dynamic>> submitProfileChange(
-      Map<String, dynamic> changes, {String? reason}) async {
+    Map<String, dynamic> changes, {
+    String? reason,
+  }) async {
     try {
       final response = await ApiService.dio.post(
         '/driver/profile-changes',
-        data: {
-          'changes': changes,
-          if (reason != null) 'reason': reason,
-        },
+        data: {'changes': changes, if (reason != null) 'reason': reason},
       );
       return (response.data is Map)
           ? Map<String, dynamic>.from(response.data as Map)
@@ -105,7 +104,8 @@ class UserService {
   /// wallet, verifies the driver's Stripe Connect payout eligibility, and
   /// transfers the funds automatically (5% fee).
   static Future<Map<String, dynamic>> requestOnDemandPayout(
-      int amountCents) async {
+    int amountCents,
+  ) async {
     try {
       final response = await ApiService.dio.post(
         '/driver/wallet/request-payout',
@@ -125,9 +125,22 @@ class UserService {
         '/driver/payouts',
         queryParameters: {'limit': limit},
       );
-      return response.data is List
-          ? List<dynamic>.from(response.data as List)
-          : <dynamic>[];
+      final data = response.data;
+      if (data is List) return List<dynamic>.from(data);
+      if (data is Map && data['payouts'] is List) {
+        return List<dynamic>.from(data['payouts'] as List);
+      }
+      return <dynamic>[];
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Hides one payout history entry from the driver's own account view.
+  /// The ledger row is retained server-side for weekly limits/reconciliation.
+  static Future<void> hidePayout(String payoutId) async {
+    try {
+      await ApiService.dio.delete('/driver/payouts/$payoutId');
     } catch (e) {
       rethrow;
     }
@@ -137,8 +150,9 @@ class UserService {
 
   static Future<Map<String, dynamic>> getDocumentRequirements() async {
     try {
-      final response =
-          await ApiService.dio.get('/driver/documents/requirements');
+      final response = await ApiService.dio.get(
+        '/driver/documents/requirements',
+      );
       return (response.data is Map)
           ? Map<String, dynamic>.from(response.data as Map)
           : <String, dynamic>{};
@@ -192,7 +206,8 @@ class UserService {
   // ============================================================
 
   static Future<Map<String, dynamic>> submitNewVehicle(
-      Map<String, dynamic> data) async {
+    Map<String, dynamic> data,
+  ) async {
     try {
       final response = await ApiService.dio.post(
         '/driver/vehicles/submit',
@@ -208,8 +223,9 @@ class UserService {
 
   static Future<Map<String, dynamic>> getPendingVehicleSubmissions() async {
     try {
-      final response =
-          await ApiService.dio.get('/driver/vehicles/submissions/pending');
+      final response = await ApiService.dio.get(
+        '/driver/vehicles/submissions/pending',
+      );
       return (response.data is Map)
           ? Map<String, dynamic>.from(response.data as Map)
           : <String, dynamic>{};
@@ -220,7 +236,9 @@ class UserService {
 
   /// Fetch nearby vehicle inspection locations for the given ZIP code.
   /// Returns { stations: [...], lat, lon, zip, count }.
-  static Future<Map<String, dynamic>> getInspectionLocations(String zipCode) async {
+  static Future<Map<String, dynamic>> getInspectionLocations(
+    String zipCode,
+  ) async {
     try {
       final response = await ApiService.dio.get(
         '/geospatial/inspection-locations',

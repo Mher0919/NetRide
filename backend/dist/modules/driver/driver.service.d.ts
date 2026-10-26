@@ -96,6 +96,13 @@ export declare class DriverService {
         payouts: any[];
         total: any;
     }>;
+    /**
+     * Hides one payout history entry from the driver's own account view.
+     * Visibility only: the row is never deleted, so the weekly withdrawal
+     * rule (which counts PENDING/PROCESSING/PAID ON_DEMAND rows) and all
+     * financial reconciliation keep seeing it.
+     */
+    static hideMyPayout(userId: string, payoutId: string): Promise<boolean>;
     static submitNewVehicle(userId: string, data: any): Promise<{
         success: boolean;
         submission: any;

@@ -1,4 +1,4 @@
-﻿// lib/screens/special_redemption_screen.dart
+// lib/screens/special_redemption_screen.dart
 //
 // The rider's active redemption â€” a single card that walks the lifecycle:
 //   CREATED             â†’ book a ride to the business
@@ -15,6 +15,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
+import '../services/app_nav.dart';
+import '../services/ride_intent.dart';
 import '../services/specials_service.dart';
 
 class SpecialRedemptionScreen extends StatefulWidget {
@@ -103,7 +105,9 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
       ),
       body: Consumer<SpecialsProvider>(
         builder: (context, specials, _) {
-          if (specials.loading && specials.current == null && specials.pending.isEmpty) {
+          if (specials.loading &&
+              specials.current == null &&
+              specials.pending.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
           final r = _resolve(specials);
@@ -134,8 +138,11 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.storefront_rounded,
-                size: 44, color: Color(0xFF9AA79E)),
+            const Icon(
+              Icons.storefront_rounded,
+              size: 44,
+              color: Color(0xFF9AA79E),
+            ),
             const SizedBox(height: 14),
             const Text(
               'No active special',
@@ -192,8 +199,11 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
               color: Colors.white.withOpacity(0.16),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: const Icon(Icons.storefront_rounded,
-                color: Colors.white, size: 26),
+            child: const Icon(
+              Icons.storefront_rounded,
+              color: Colors.white,
+              size: 26,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -261,8 +271,35 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
         height: 52,
         child: FilledButton(
           onPressed: () {
+            final lat = r.sponsorLatitude;
+            final lng = r.sponsorLongitude;
+            if (lat == null || lng == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'This special has no location yet. Please try again later.',
+                  ),
+                ),
+              );
+              return;
+            }
+            final intent = SpecialRideIntent(
+              lat: lat,
+              lng: lng,
+              address: (r.sponsorAddress?.isNotEmpty ?? false)
+                  ? r.sponsorAddress!
+                  : r.sponsorName,
+              sponsorName: r.sponsorName,
+              discountLabel: r.discountLabel,
+              sponsorId: r.sponsorId,
+              redemptionId: r.id,
+            );
             Navigator.of(context).popUntil((route) => route.isFirst);
-            context.read<SpecialsProvider>().refresh();
+            AppNav.instance.goToTab(AppNav.explore);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              RideIntent.instance.startSpecialRide(intent);
+            });
+            specials.refresh();
           },
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF5B7760),
@@ -272,10 +309,7 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
           ),
           child: const Text(
             'Book my ride to this business',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
           ),
         ),
       ),
@@ -436,8 +470,11 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
         ),
         child: Column(
           children: [
-            const Icon(Icons.verified_rounded,
-                color: Color(0xFF5B7760), size: 44),
+            const Icon(
+              Icons.verified_rounded,
+              color: Color(0xFF5B7760),
+              size: 44,
+            ),
             const SizedBox(height: 12),
             const Text(
               'Visit confirmed',
@@ -466,7 +503,8 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
 
   // --------------------------------------------------------- CANCELLED
   List<Widget> _cancelledBody(SpecialRedemption r) {
-    final reason = r.cancellationReasonText ??
+    final reason =
+        r.cancellationReasonText ??
         (r.cancellationReasonCode ?? '').replaceAll('_', ' ').toLowerCase();
     return [
       _infoCard(
@@ -489,7 +527,6 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
       ),
     ];
   }
-
 
   Widget _infoCard(String message, {IconData icon = Icons.info_rounded}) {
     return Container(

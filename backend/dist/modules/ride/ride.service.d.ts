@@ -94,6 +94,14 @@ export declare class RideService {
      */
     private static _terminalCancel;
     static getHistory(userId: string, role: string): Promise<Trip[]>;
+    /**
+     * Attaches the driver's authoritative take-home (`driver_earnings_cents`)
+     * to each history row. The driver app must display the 60% share — never
+     * the gross rider fare — and the immutable fare breakdown is the same
+     * source that funded the wallet credit. Legacy rides without a breakdown
+     * fall back to the financial ledger, then to the configured 60% split.
+     */
+    private static attachDriverEarnings;
     static getCurrentRide(userId: string, role: string): Promise<Trip | null>;
     static deleteHistory(rideId: string, userId: string): Promise<boolean>;
 }

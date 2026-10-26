@@ -390,15 +390,14 @@ class _TripScreenState extends State<TripScreen> {
           onChat: () => _openChat(context, trip),
           onCall: () => _dialParticipant(context, trip),
         ),
-        // Ride actions menu (⋯ bottom-right) — holds Cancel Ride. Keeps the
-        // top of the navigation screen free of overlapping controls; only
-        // available before pickup (ACCEPTED / DRIVER_ARRIVING), like the old
-        // pills.
+        // Ride actions menu (⋯ bottom-right) — holds Cancel Ride. Anchored
+        // just above the bottom sheet so the voice/locate controls can sit
+        // higher on the right without colliding with it.
         if (trip.status == models.TripStatus.ACCEPTED ||
             trip.status == models.TripStatus.DRIVER_ARRIVING)
           Positioned(
             right: 16,
-            bottom: 322,
+            bottom: 316,
             child: _RideActionMenu(
               onCancel: () =>
                   _showCancelDialog(context, driverProvider, trip),
@@ -408,9 +407,10 @@ class _TripScreenState extends State<TripScreen> {
             isPickup: trip.status == models.TripStatus.ACCEPTED ||
                 trip.status == models.TripStatus.DRIVER_ARRIVING))
           Positioned(
-            bottom: 280,
+            bottom: 316,
             left: 20,
-            right: 20,
+            // Keep clear of the bottom-right "⋯" control.
+            right: 80,
             child: IgnorePointer(
               ignoring: true,
               child: Container(

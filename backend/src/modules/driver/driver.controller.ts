@@ -352,6 +352,22 @@ export class DriverController {
     }
   }
 
+  static async deleteMyPayout(req: any, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const hidden = await DriverService.hideMyPayout(userId, String(req.params.id));
+      if (!hidden) {
+        return res.status(404).json({ error: 'Payout not found.' });
+      }
+      res.json({ hidden: true });
+    } catch (error: any) {
+      console.error(`[DRIVER] Delete payout error: ${error.message}`);
+      res.status(500).json({ error: 'Failed to delete payout.' });
+    }
+  }
+
   static async getDocumentRequirements(req: any, res: Response) {
     try {
       const userId = req.user?.id;

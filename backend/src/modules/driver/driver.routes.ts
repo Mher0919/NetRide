@@ -28,6 +28,7 @@ router.get('/profile-changes/current', authMiddleware, DriverController.getCurre
 router.get('/wallet', authMiddleware, DriverController.getWallet);
 router.post('/wallet/request-payout', authMiddleware, DriverController.requestOnDemandPayout);
 router.get('/payouts', authMiddleware, DriverController.listMyPayouts);
+router.delete('/payouts/:id', authMiddleware, DriverController.deleteMyPayout);
 
 // Document requirements + resubmission
 router.get('/documents/requirements', authMiddleware, DriverController.getDocumentRequirements);

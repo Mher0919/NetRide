@@ -58,8 +58,12 @@ class SpeedLimitMap {
   int _currentLimitMph;
   bool _currentIsFreeway;
 
-  SpeedLimitMap._(this._byRoad, this._currentRoad, this._currentLimitMph,
-      this._currentIsFreeway);
+  SpeedLimitMap._(
+    this._byRoad,
+    this._currentRoad,
+    this._currentLimitMph,
+    this._currentIsFreeway,
+  );
 
   factory SpeedLimitMap.fromRoute(Map<String, dynamic> route) {
     final raw = (route['speedLimitsByRoad'] as Map?) ?? const {};
@@ -71,9 +75,11 @@ class SpeedLimitMap {
 
     // Pick the first key with a limit; that's the road the driver
     // is on for the majority of the leg (the detector makes the
-    // same simplification on the backend).
+    // same simplification on the backend). When the route carries no
+    // limit map (Google plan), the HUD starts without a limit and the
+    // per-minute Google Roads lookup fills it in — never a fake 30 mph.
     String name = '';
-    int limit = 30;
+    int limit = 0;
     bool isFw = false;
     if (byRoad.isNotEmpty) {
       final first = byRoad.entries.first;
@@ -92,10 +98,10 @@ class SpeedLimitMap {
     final s = steps[newStepIndex];
     final roadName = (s['name'] as String?) ?? '';
     final ref = (s['ref'] as String?) ?? '';
-    final key = [roadName, ref].firstWhere(
-      (k) => _byRoad.containsKey(k),
-      orElse: () => '',
-    );
+    final key = [
+      roadName,
+      ref,
+    ].firstWhere((k) => _byRoad.containsKey(k), orElse: () => '');
     if (key.isEmpty) return;
     _currentRoad = key;
     _currentLimitMph = _byRoad[key] ?? _currentLimitMph;
@@ -122,6 +128,10 @@ class SpeedMonitor extends ChangeNotifier {
   StreamSubscription<GpsFix>? _sub;
   SpeedLimitMap? _limits;
 
+  /// Limit resolved by the per-minute Google Roads lookup. Used when the
+  /// route itself does not carry a speed-limit map (Google Routes plan).
+  int _externalLimitMph = 0;
+
   // Exponential moving average for speed smoothing.
   double _smoothedMps = 0;
   static const double _alpha = 0.4; // higher = snappier
@@ -131,6 +141,7 @@ class SpeedMonitor extends ChangeNotifier {
   /// the cached route is in hand.
   Future<void> start({required Map<String, dynamic> route}) async {
     _limits = SpeedLimitMap.fromRoute(route);
+    _externalLimitMph = 0;
     _sub?.cancel();
     _sub = GpsTracker.instance.fixes.listen(_onFix);
   }
@@ -140,17 +151,33 @@ class SpeedMonitor extends ChangeNotifier {
     _recompute(); // force a HUD update with new limit
   }
 
+  /// Applies a Google Roads limit (refreshed once a minute by the
+  /// navigation screen). A failed lookup passes 0 and keeps the last value.
+  void applyExternalLimit(int speedLimitMph, {String? roadName}) {
+    if (speedLimitMph <= 0) return;
+    if (_externalLimitMph == speedLimitMph && roadName == null) return;
+    _externalLimitMph = speedLimitMph;
+    _recompute();
+  }
+
   Future<void> stop() async {
-    await _sub?.cancel();
+    final sub = _sub;
     _sub = null;
     _limits = null;
+    _externalLimitMph = 0;
+    await sub?.cancel();
     hud.value = SpeedHud.empty;
     notifyListeners();
   }
 
   @override
   void dispose() {
-    stop();
+    // Tear down synchronously: calling the async stop() here let its
+    // post-await `hud.value` write run after the notifier was disposed.
+    _sub?.cancel();
+    _sub = null;
+    _limits = null;
+    _externalLimitMph = 0;
     hud.dispose();
     super.dispose();
   }
@@ -169,14 +196,16 @@ class SpeedMonitor extends ChangeNotifier {
     // EMA smoothing. Reject spikes > 60 m/s (~134 mph) as GPS glitches
     // so a single bad sample doesn't flash a 200 mph warning.
     if (fix.speedMps > 60) return;
-    _smoothedMps =
-        _alpha * fix.speedMps + (1 - _alpha) * _smoothedMps;
+    _smoothedMps = _alpha * fix.speedMps + (1 - _alpha) * _smoothedMps;
     _recompute();
   }
 
   void _recompute() {
     final mph = (_smoothedMps * _mpsToMph).round();
-    final limit = _limits?.limitMph ?? 0;
+    final routeLimit = _limits?.limitMph ?? 0;
+    // The per-minute Google Roads lookup is the freshest source; the
+    // route-derived map remains a fallback when no external limit is known.
+    final limit = _externalLimitMph > 0 ? _externalLimitMph : routeLimit;
     final isFw = _limits?.isFreeway ?? false;
     final threshold = (isFw ? limit + 10 : limit).toInt();
     final speeding = limit > 0 && mph > threshold;

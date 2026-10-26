@@ -30,7 +30,7 @@ class GoogleRoutesService {
         destLat: destination.latitude,
         destLng: destination.longitude,
       );
-      if (cached != null) {
+      if (cached != null && cached.polyline.length >= 2) {
         debugPrint('[GAPI] Route cache HIT for $key');
         return cached;
       }

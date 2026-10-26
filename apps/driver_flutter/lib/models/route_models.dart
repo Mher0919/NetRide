@@ -103,16 +103,22 @@ class RouteResponse {
   factory RouteResponse.fromJson(Map<String, dynamic> json) {
     final stepsRaw = json['steps'] as List<dynamic>? ?? [];
     return RouteResponse(
-      originHex: (json['origin_hex'] as String?) ?? (json['originHex'] as String?) ?? '',
-      destHex: (json['dest_hex'] as String?) ?? (json['destHex'] as String?) ?? '',
+      originHex:
+          (json['origin_hex'] as String?) ??
+          (json['originHex'] as String?) ??
+          '',
+      destHex:
+          (json['dest_hex'] as String?) ?? (json['destHex'] as String?) ?? '',
       distanceMeters: (json['distanceMeters'] as num?)?.toDouble() ?? 0,
       durationSeconds: (json['durationSeconds'] as num?)?.toDouble() ?? 0,
-      trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)?.toDouble(),
-      polyline: _decodePolylineFromGeometry(json['geometry'])
-          .isNotEmpty
+      trafficDurationSeconds: (json['trafficDurationSeconds'] as num?)
+          ?.toDouble(),
+      polyline: _decodePolylineFromGeometry(json['geometry']).isNotEmpty
           ? _decodePolylineFromGeometry(json['geometry'])
           : _decodeCoordinates(json['polyline']),
-      steps: stepsRaw.map((s) => RouteStep.fromJson(s as Map<String, dynamic>)).toList(),
+      steps: stepsRaw
+          .map((s) => RouteStep.fromJson(s as Map<String, dynamic>))
+          .toList(),
       engine: json['engine'] as String? ?? 'GoogleRoutes',
       cacheHit: json['cacheHit'] as bool? ?? false,
     );
@@ -124,13 +130,18 @@ class RouteResponse {
     'distanceMeters': distanceMeters,
     'durationSeconds': durationSeconds,
     'trafficDurationSeconds': trafficDurationSeconds,
+    // Geometry MUST survive the disk cache. Omitting it produced cache hits
+    // with zero polyline points, which is why the driver map sometimes
+    // showed no route line at all after accepting a ride.
+    'polyline': polyline.map((p) => <double>[p.longitude, p.latitude]).toList(),
     'steps': steps.map((s) => s.toJson()).toList(),
     'engine': engine,
     'cachedAt': DateTime.now().toIso8601String(),
   };
 
   double get distanceMiles => distanceMeters / 1609.34;
-  double get durationMinutes => (trafficDurationSeconds ?? durationSeconds) / 60;
+  double get durationMinutes =>
+      (trafficDurationSeconds ?? durationSeconds) / 60;
   String get etaLabel {
     final min = durationMinutes.round();
     if (min < 60) return '$min min';
@@ -181,7 +192,8 @@ class RouteSummary {
     required this.cachedAt,
   });
 
-  double get durationMinutes => (trafficDurationSeconds ?? durationSeconds) / 60;
+  double get durationMinutes =>
+      (trafficDurationSeconds ?? durationSeconds) / 60;
 
   bool needsRefresh({Duration maxAge = const Duration(minutes: 15)}) {
     return DateTime.now().difference(cachedAt) > maxAge;
