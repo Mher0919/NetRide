@@ -484,13 +484,13 @@ class _ReferralScreenState extends State<ReferralScreen> {
   }
 
   String _subtitle(ReferralHistoryEntry h) {
-    final date = h.scannedAt;
+    final date = h.scannedAt?.toLocal();
     final dateStr = date != null ? DateFormat('MMM d, y').format(date) : '';
     switch (h.status) {
       case 'FIRST_RIDE_COMPLETED':
       case 'REWARD_GRANTED':
         return 'Completed — \$5 credited to you'
-            '${h.rewardGrantedAt != null ? ' ${DateFormat('MMM d, y').format(h.rewardGrantedAt!)}' : ''}';
+            '${h.rewardGrantedAt != null ? ' ${DateFormat('MMM d, y').format(h.rewardGrantedAt!.toLocal())}' : ''}';
       default:
         // LINKED / QR_SCANNED / FIRST_RIDE_PENDING — the friend used your
         // code; you earn once they complete a ride.

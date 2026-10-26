@@ -205,7 +205,7 @@ class _CreditsScreenState extends State<CreditsScreen> {
   }
 
   String _subtitle(CreditTransaction t) {
-    final date = DateFormat('MMM d, y · h:mm a').format(t.createdAt);
+    final date = DateFormat('MMM d, y · h:mm a').format(t.createdAt.toLocal());
     if (t.description != null && t.description!.isNotEmpty) return '$date · ${t.description}';
     return date;
   }

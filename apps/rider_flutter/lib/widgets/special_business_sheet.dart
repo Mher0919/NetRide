@@ -134,7 +134,11 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
       // modal was the race that could leave the rider looking at a bare map.
       Navigator.of(context).pop();
       AppNav.instance.goToTab(AppNav.explore);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Wait for the sheet pop + tab switch to finish before asking the map to
+      // open checkout. Delivering the intent while the map is still offstage
+      // meant the panel opened before FlutterMap was attached, and the rider
+      // was left on a bare map.
+      Future<void>.delayed(const Duration(milliseconds: 250), () {
         RideIntent.instance.startSpecialRide(intent);
       });
     } catch (_) {

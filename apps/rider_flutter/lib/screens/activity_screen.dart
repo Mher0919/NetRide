@@ -182,8 +182,14 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Widget _buildRideCard(dynamic ride, ThemeData theme) {
-    final dateStr = ride['requested_at'] ?? ride['created_at'];
-    final date = dateStr != null ? DateTime.parse(dateStr.toString()) : DateTime.now();
+    // Use the actual ride time and convert the server UTC timestamp into the
+    // device's geographical timezone (never format UTC as if it were local).
+    final dateStr = ride['completed_at'] ??
+        ride['started_at'] ??
+        ride['requested_at'] ??
+        ride['created_at'];
+    final parsed = dateStr != null ? DateTime.tryParse(dateStr.toString()) : null;
+    final date = (parsed ?? DateTime.now()).toLocal();
     final formattedDate = DateFormat('EEE, MMM d • h:mm a').format(date);
     final status = ride['status']?.toString().toUpperCase() ?? 'COMPLETED';
     final fare = ride['fare_amount'] ?? ride['estimated_fare'] ?? '0.00';

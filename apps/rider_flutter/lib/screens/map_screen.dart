@@ -2,6 +2,7 @@ import 'dart:async';
 import '../services/secure_token_store.dart';
 import 'dart:math' as math;
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -10,6 +11,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/ride_provider.dart';
+import '../services/app_nav.dart';
 import '../services/ride_intent.dart';
 import '../providers/specials_provider.dart';
 import '../models/special_models.dart';
@@ -97,6 +99,19 @@ class _MapScreenState extends State<MapScreen>
   /// drives cancellation/close cleanup without a local "request" flag.
   String? _resumedSearchTripId;
 
+  /// True while the sheet is a forward booking checkout (not an active
+  /// backend search). The build-time IDLE cleanup must not close a panel the
+  /// rider just opened from a Special before they have requested the ride.
+  bool _panelOpenedForPlanning = false;
+
+  /// Protects intent delivery from stale/duplicate MapScreen instances that
+  /// can exist under the current route (old tab wrappers). Only the visible
+  /// map should consume a special ride intent.
+  Timer? _intentRetryTimer;
+  int _intentRetryCount = 0;
+  bool _sheetRenderLogged = false;
+  final GlobalKey _sheetContentKey = GlobalKey();
+
   // Rewards options at checkout (promo code + ride credits + payment).
   final TextEditingController _promoCodeController = TextEditingController();
   bool _applyCredits = false;
@@ -161,7 +176,8 @@ class _MapScreenState extends State<MapScreen>
   late final AnimationController _sheetController;
   double _dragStartFraction = 0.0;
   bool _overscrollCollapsing = false;
-  static const double _sheetMinHeight = 96;
+  // Roomy collapsed state: a 96 px strip made the grab area feel tiny.
+  static const double _sheetMinHeight = 116;
   static const double _sheetMaxFraction = 0.62;
 
   // Smooth camera pan used when a Special is selected (spec §14/§28).
@@ -337,7 +353,43 @@ class _MapScreenState extends State<MapScreen>
   void _onRideIntent() {
     final intent = RideIntent.instance.notifier.value;
     if (intent == null || !mounted) return;
+
+    // A duplicate/older MapScreen may still be listening from a route that
+    // is no longer on top. It must NOT consume the intent and open checkout
+    // invisibly — leave it for the visible map and retry shortly if this is
+    // the only listener.
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      _intentRetryTimer?.cancel();
+      if (_intentRetryCount < 25) {
+        _intentRetryCount++;
+        _intentRetryTimer = Timer(const Duration(milliseconds: 200), () {
+          if (mounted && RideIntent.instance.notifier.value != null) {
+            _onRideIntent();
+          }
+        });
+      }
+      return;
+    }
+
+    _intentRetryCount = 0;
+    _intentRetryTimer?.cancel();
     RideIntent.instance.clear();
+    // Ensure the wrapper is showing Explore even if the earlier tab request
+    // was lost during the sheet dismiss/tab transition.
+    AppNav.instance.goToTab(AppNav.explore);
+    debugPrint(
+      '[EXPLORE] special ride intent received: ${intent.address} '
+      '(${intent.lat}, ${intent.lng}) redemption=${intent.redemptionId}',
+    );
+
+    // A fresh booking panel must never be mistaken for the tail of a previous
+    // (cancelled/released) search. Leaving these flags set made the build-time
+    // "search ended" cleanup close the special checkout immediately, which
+    // left the rider looking at a bare map.
+    _resumedSearchTripId = null;
+    _hasNavigatedToTrip = false;
+    _panelOpenedForPlanning = true;
 
     final specials = context.read<SpecialsProvider>();
     // Prefer the redemption carried by the intent: a concurrent specials
@@ -380,6 +432,33 @@ class _MapScreenState extends State<MapScreen>
     // checkout collapsed.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _panelOpen) _animateSheetTo(1);
+    });
+    // Belt-and-braces after the modal's pop animation: if a rebuild during
+    // the tab/sheet transition dropped the panel, put it back for this
+    // explicit special booking.
+    Future<void>.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted || _pickup == null || _destination == null) return;
+      debugPrint(
+        '[EXPLORE] special checkout state: open=$_panelOpen '
+        'pickup=${_pickup != null} destination=${_destination != null} '
+        'sheet=${_sheetController.value.toStringAsFixed(2)}',
+      );
+      if (!_panelOpen) setState(() => _panelOpen = true);
+      _sheetController.value = 1;
+      _animateSheetTo(1);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final box =
+            _sheetContentKey.currentContext?.findRenderObject() as RenderBox?;
+        if (box == null || !box.hasSize) {
+          debugPrint('[EXPLORE] checkout card is NOT laid out');
+        } else {
+          debugPrint(
+            '[EXPLORE] checkout card rect=${box.localToGlobal(Offset.zero)} '
+            'size=${box.size} screen=${MediaQuery.sizeOf(context)}',
+          );
+        }
+      });
     });
     // Demand signal for the heatmap (same as a manual destination pick).
     context.read<RideProvider>().reportActivity(
@@ -478,6 +557,7 @@ class _MapScreenState extends State<MapScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     RideIntent.instance.notifier.removeListener(_onRideIntent);
+    _intentRetryTimer?.cancel();
     context.read<RideProvider>().removeListener(_onRideProviderChanged);
     _specialsProvider.removeListener(_onSpecialSelectionChanged);
     _specialsRefreshTimer?.cancel();
@@ -716,6 +796,16 @@ class _MapScreenState extends State<MapScreen>
   /// Fits the camera to the pickup -> destination corridor (with margin).
   void _fitRouteCamera() {
     if (!mounted) return;
+    if (!_isMapReady) {
+      // The map can be offstage in the tab stack (Special booking arrives
+      // from another tab). Retry once it has rendered instead of throwing
+      // "FlutterMap widget rendered at least once".
+      _cameraFitTimer?.cancel();
+      _cameraFitTimer = Timer(const Duration(milliseconds: 250), () {
+        if (mounted) _fitRouteCamera();
+      });
+      return;
+    }
     if (_routePoints.isEmpty || _pickup == null || _destination == null) return;
     try {
       final bounds = LatLngBounds.fromPoints([
@@ -724,7 +814,14 @@ class _MapScreenState extends State<MapScreen>
         ..._routePoints,
       ]);
       _mapController.fitCamera(
-        CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(56)),
+        CameraFit.bounds(
+          bounds: bounds,
+          // Short routes (e.g. a 100 m special) otherwise fill the screen at
+          // street level. Cap the fitted zoom so the request map always has
+          // useful neighbourhood context around the route.
+          padding: const EdgeInsets.all(72),
+          maxZoom: 14.0,
+        ),
       );
     } catch (e) {
       debugPrint('fitCamera error: $e');
@@ -770,6 +867,8 @@ class _MapScreenState extends State<MapScreen>
   }
 
   Future<void> _openRidePanel() async {
+    _panelOpenedForPlanning = true;
+    debugPrint('[EXPLORE] opening ride options panel');
     setState(() {
       _panelOpen = true;
       _loadingEstimates = true;
@@ -1117,6 +1216,7 @@ class _MapScreenState extends State<MapScreen>
       }
     }
     _cancelFareRetry();
+    _panelOpenedForPlanning = false;
     setState(() => _requesting = true);
     Provider.of<RideProvider>(context, listen: false).requestRide(
       _pickup!,
@@ -1152,10 +1252,12 @@ class _MapScreenState extends State<MapScreen>
       }
     }
     if (!mounted) return;
+    debugPrint('[EXPLORE] closing ride options panel');
     _cameraFitTimer?.cancel();
     _cancelFareRetry();
     setState(() {
       _panelOpen = false;
+      _panelOpenedForPlanning = false;
       _requesting = false;
       _resumedSearchTripId = null;
       _mapExpanded = false;
@@ -1292,11 +1394,22 @@ class _MapScreenState extends State<MapScreen>
   void _onSheetDragEnd(DragEndDetails details) {
     final velocity = details.primaryVelocity ?? 0;
     final v = _sheetController.value;
-    // Bias toward dismissing: a downward pull that clears a quarter of the
-    // range (or flicks down) collapses the sheet instead of springing back.
-    final target = velocity.abs() > 350
+
+    // Grabbing the collapsed handle and pulling up should ALWAYS open. The
+    // previous shared threshold made short/slow upward swipes spring back
+    // down, which felt broken. Opening and closing are now directional.
+    if (_dragStartFraction < 0.10) {
+      _animateSheetTo(v > 0.02 || velocity < -80 ? 1.0 : 0.0);
+      return;
+    }
+    if (_dragStartFraction > 0.90) {
+      _animateSheetTo(velocity > 220 || v < 0.55 ? 0.0 : 1.0);
+      return;
+    }
+
+    final target = velocity.abs() > 220
         ? (velocity < 0 ? 1.0 : 0.0)
-        : (v > 0.72 ? 1.0 : 0.0);
+        : (v > 0.50 ? 1.0 : 0.0);
     _animateSheetTo(target);
   }
 
@@ -1399,8 +1512,10 @@ class _MapScreenState extends State<MapScreen>
     // a cancellation — whether the search was locally initiated, resumed
     // after a driver cancel, or cancelled from the TripScreen.
     if (_panelOpen &&
+        !_panelOpenedForPlanning &&
         (_requesting || _resumedSearchTripId != null) &&
         rideProvider.status == models.TripStatus.IDLE) {
+      debugPrint('[EXPLORE] closing panel: active search ended');
       _hasNavigatedToTrip = true; // prevent re-entry
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _closePanel(cancelIfRequesting: false);
@@ -2112,6 +2227,8 @@ class _MapScreenState extends State<MapScreen>
       left: 0,
       right: 0,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        dragStartBehavior: DragStartBehavior.down,
         onVerticalDragStart: _onSheetDragStart,
         onVerticalDragUpdate: _onSheetDragUpdate,
         onVerticalDragEnd: _onSheetDragEnd,
@@ -2121,8 +2238,17 @@ class _MapScreenState extends State<MapScreen>
             final t = _sheetController.value;
             final height = _sheetHeightForFraction(t);
             final isCollapsed = t < 0.05;
+            if (!_sheetRenderLogged && t > 0.99) {
+              _sheetRenderLogged = true;
+              debugPrint(
+                '[EXPLORE] checkout card rendered '
+                '(routeCurrent=${ModalRoute.of(context)?.isCurrent}, '
+                'height=${height.toStringAsFixed(0)})',
+              );
+            }
 
             return SizedBox(
+              key: _sheetContentKey,
               height: height,
               child: Container(
                 decoration: BoxDecoration(
@@ -2166,6 +2292,9 @@ class _MapScreenState extends State<MapScreen>
                     : '\$${_estimateFare.toStringAsFixed(2)}'));
     return GestureDetector(
       onTap: () => _animateSheetTo(1),
+      // The drag gesture intentionally lives on the stable parent sheet
+      // (not here). If the pill owned it, swapping the pill for the expanded
+      // body mid-drag disposed the recognizer and the sheet stopped opening.
       behavior: HitTestBehavior.opaque,
       child: FittedBox(
         fit: BoxFit.scaleDown,
@@ -2246,6 +2375,10 @@ class _MapScreenState extends State<MapScreen>
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final cancelling = Provider.of<RideProvider>(context).cancelling;
     final requestFailure = Provider.of<RideProvider>(context).requestFailure;
+    // While the sheet is still opening, a vertical drag must resize the
+    // sheet — never scroll its contents. Scrolling only becomes available
+    // once the card is fully expanded.
+    final scrollEnabled = _sheetController.value >= 0.999;
 
     // ONE scroll container for the whole body: the sheet is drag-resized
     // between the pill and full height, and fixed header/footer rows would
@@ -2253,7 +2386,9 @@ class _MapScreenState extends State<MapScreen>
     return NotificationListener<ScrollNotification>(
       onNotification: _onSheetScrollNotification,
       child: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
+        physics: scrollEnabled
+            ? const ClampingScrollPhysics()
+            : const NeverScrollableScrollPhysics(),
         child: Column(
           children: [
             const SizedBox(height: 10),

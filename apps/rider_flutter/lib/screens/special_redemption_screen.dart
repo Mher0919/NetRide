@@ -296,7 +296,7 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
             );
             Navigator.of(context).popUntil((route) => route.isFirst);
             AppNav.instance.goToTab(AppNav.explore);
-            WidgetsBinding.instance.addPostFrameCallback((_) {
+            Future<void>.delayed(const Duration(milliseconds: 250), () {
               RideIntent.instance.startSpecialRide(intent);
             });
             specials.refresh();
@@ -384,7 +384,7 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
             const SizedBox(height: 12),
             if (r.validationExpiresAt != null)
               Text(
-                'Expires ${DateFormat('h:mm a Â· MMM d').format(r.validationExpiresAt!)}',
+                'Expires ${DateFormat('h:mm a Â· MMM d').format(r.validationExpiresAt!.toLocal())}',
                 style: TextStyle(
                   fontSize: 12,
                   color: const Color(0xFF2F3A32).withOpacity(0.55),
