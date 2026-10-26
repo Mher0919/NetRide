@@ -53,6 +53,7 @@ export declare const env: {
     SPONSOR_CREDIT_BONUS: number;
     SPONSOR_DRIVER_SHARE: number;
     SPONSOR_LEDGER_ENFORCED: number;
+    STRIPE_CONNECT_COUNTRY: string;
     STRIPE_ALLOW_LIVE: boolean;
     STRIPE_CURRENCY: string;
     MOBILE_PAYMENT_RETURN_URL: string;

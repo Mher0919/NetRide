@@ -115,7 +115,19 @@ void _flushPendingNotificationTap([int attempt = 0]) {
 /// complete. Until it confirms completion, the app must stay in onboarding.
 String kInitialTargetRoute = '/login';
 
-void main() async {
+void main() {
+  runZonedGuarded(
+    _bootstrap,
+    (error, stack) {
+      debugPrint('[FATAL] Uncaught async error: $error');
+      debugPrint('[FATAL] Stack: $stack');
+    },
+  );
+}
+
+/// Runs inside the same guarded zone that owns the Flutter binding, so
+/// zone-local configuration and [runApp] always agree.
+Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Production error boundary — never show stack traces to users.
@@ -219,41 +231,33 @@ void main() async {
     kInitialTargetRoute = '/login';
   }
 
-  runZonedGuarded(
-    () {
-      runApp(
-        MultiProvider(
-          providers: [
-            ChangeNotifierProvider(create: (_) {
-              final provider = RideProvider();
-              if (token != null) {
-                provider.initSocket(token);
-                // Socket-independent recovery: adopt an authoritative active
-                // ride over REST even if the WebSocket never connects.
-                provider.hydrateFromServer();
-              }
-              return provider;
-            }),
-            // Communication service is shared across the trip screens for
-            // chat + masked calls. The service is attached lazily once a
-            // trip is active so it doesn't burn listeners on the splash
-            // screen or login flow.
-            ChangeNotifierProvider(create: (_) => CommunicationService()),
-            // SPECIALS state. It subscribes to RideProvider's socket relay
-            // so live redemption transitions re-render without polling.
-            ChangeNotifierProvider(
-              create: (ctx) =>
-                  SpecialsProvider(ride: ctx.read<RideProvider>()),
-            ),
-          ],
-          child: const NetRideRider(),
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) {
+          final provider = RideProvider();
+          if (token != null) {
+            provider.initSocket(token);
+            // Socket-independent recovery: adopt an authoritative active
+            // ride over REST even if the WebSocket never connects.
+            provider.hydrateFromServer();
+          }
+          return provider;
+        }),
+        // Communication service is shared across the trip screens for
+        // chat + masked calls. The service is attached lazily once a
+        // trip is active so it doesn't burn listeners on the splash
+        // screen or login flow.
+        ChangeNotifierProvider(create: (_) => CommunicationService()),
+        // SPECIALS state. It subscribes to RideProvider's socket relay
+        // so live redemption transitions re-render without polling.
+        ChangeNotifierProvider(
+          create: (ctx) =>
+              SpecialsProvider(ride: ctx.read<RideProvider>()),
         ),
-      );
-    },
-    (error, stack) {
-      debugPrint('[FATAL] Uncaught async error: $error');
-      debugPrint('[FATAL] Stack: $stack');
-    },
+      ],
+      child: const NetRideRider(),
+    ),
   );
 }
 

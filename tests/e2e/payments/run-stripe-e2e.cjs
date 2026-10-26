@@ -229,12 +229,12 @@ const ok = (name, cond, extra = '') => {
       connectBlocked = err.message;
     }
     if (connectBlocked) {
-      // Stripe Dashboard policy (Accounts v1 support) blocks new connected
-      // accounts on this sandbox — the flow itself is validated below up to
-      // the point the external policy intervenes.
-      console.log('  [SKIP] driver Connect account creation — blocked by Stripe account policy');
+      // Stripe refused connected-account creation (platform/API policy).
+      // The flow itself is validated below up to the point the external
+      // policy intervenes.
+      console.log('  [SKIP] driver Connect account creation — refused by Stripe account policy');
       console.log(`         ${connectBlocked.slice(0, 160)}`);
-      console.log('         Enable "Accounts v1 support": Stripe Dashboard → Settings → Developers → API policies.');
+      console.log('         Check the platform Connect status / API policies in the Stripe Dashboard.');
     } else {
       ok('driver Connect account created (or reused)', !!connect.accountId, connect.accountId);
       const status = await ConnectService.getStatus(driverId);
@@ -258,6 +258,11 @@ const ok = (name, cond, extra = '') => {
     console.error('❌ E2E step failed:', err.message);
   } finally {
     // Cleanup
+    const connectRow = await pool.query(
+      `SELECT stripe_account_id FROM driver_stripe_accounts WHERE driver_id = $1`,
+      [driverId],
+    );
+    const connectAccountId = connectRow.rows[0]?.stripe_account_id;
     await pool.query(`DELETE FROM stripe_payments WHERE user_id = $1`, [riderId]);
     await pool.query(`DELETE FROM stripe_customers WHERE user_id = $1`, [riderId]);
     await pool.query(`DELETE FROM wallet_transactions WHERE user_id = $1`, [riderId]);
@@ -270,6 +275,19 @@ const ok = (name, cond, extra = '') => {
     const sLedger = await pool.query(`SELECT id FROM sponsor_ledger_entries WHERE sponsor_id = $1`, [sponsorId]);
     if (sLedger.rows[0]?.id) await pool.query(`DELETE FROM sponsor_ledger_entries WHERE sponsor_id = $1`, [sponsorId]);
     await pool.query(`DELETE FROM sponsors WHERE id = $1`, [sponsorId]);
+    // The connected account lives in Stripe test mode; don't leave probes
+    // behind across runs. v2 accounts must be closed with their applied
+    // configurations; v1 accounts are deleted.
+    if (connectAccountId) {
+      try {
+        const account = await getStripe().v2.core.accounts.retrieve(connectAccountId);
+        await getStripe().v2.core.accounts.close(connectAccountId, {
+          applied_configurations: account.applied_configurations,
+        });
+      } catch {
+        await getStripe().accounts.del(connectAccountId).catch(() => undefined);
+      }
+    }
     await client.end();
     console.log(`\nSTRIPE E2E: ${passed} passed, ${failed} failed`);
     setTimeout(() => process.exit(failed > 0 ? 1 : 0), 300);

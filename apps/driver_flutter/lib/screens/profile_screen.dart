@@ -51,6 +51,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isEditing = false;
   bool _isSendingEmailLink = false;
   bool _isRequestingPayout = false;
+  late Future<Map<String, dynamic>> _connectStatusFuture;
   bool _isVerified = false;
   bool _hasPassword = false;
   bool _showVerificationHint = false;
@@ -86,6 +87,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    _connectStatusFuture = DriverPaymentsService.getConnectStatus(sync: true);
     _fetchProfile();
   }
 
@@ -1434,17 +1436,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// never assumed from "the driver finished the onboarding form".
   Widget _buildStripeConnectCard() {
     return FutureBuilder<Map<String, dynamic>>(
-      future: DriverPaymentsService.getConnectStatus(),
+      future: _connectStatusFuture,
       builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+          return _buildSectionCard(
+            title: 'Stripe payout account',
+            children: const [
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 18),
+                child: Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ],
+          );
+        }
         final status = snap.data;
         final configured = status?['configured'] == true;
         final payoutReady = status?['payoutReady'] == true;
-        final label = !configured
-            ? 'Payouts are not configured yet on this server'
-            : payoutReady
-                ? 'Payouts enabled — you can receive transfers'
-                : 'Payout setup incomplete';
-        final color = !configured
+        final checkFailed = snap.hasError;
+        final label = checkFailed
+            ? 'Could not check payout status'
+            : !configured
+                ? 'Payouts are not configured yet on this server'
+                : payoutReady
+                    ? 'Payouts enabled — you can receive transfers'
+                    : 'Payout setup incomplete';
+        final color = checkFailed || !configured
             ? const Color(0xFF6B6B6B)
             : payoutReady
                 ? const Color(0xFF5B7760)
@@ -1478,7 +1496,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               runSpacing: 8,
               children: [
                 TextButton(
-                  onPressed: () => _startStripeOnboarding(),
+                  onPressed:
+                      configured ? () => _startStripeOnboarding() : null,
                   child: Text(payoutReady ? 'Update payout info' : 'Set up payouts'),
                 ),
                 TextButton(
@@ -1504,29 +1523,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           fullscreenDialog: true,
-          builder: (_) => StripeConnectOnboardingWebView(
-            url: url,
-            onDone: () => _refreshConnectStatus(),
-          ),
+          builder: (_) => StripeConnectOnboardingWebView(url: url),
         ),
       );
-    } catch (_) {
+      if (!mounted) return;
+      await _refreshConnectStatus();
+    } on PayoutOnboardingException catch (e) {
+      debugPrint('[PAYOUT] Onboarding unavailable: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Payout onboarding is not available right now.')),
+        SnackBar(content: Text(e.message)),
+      );
+    } catch (e) {
+      debugPrint('[PAYOUT] Onboarding failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ErrorHandler.friendly(
+            e,
+            fallback: 'Payout onboarding is not available right now.',
+          )),
+        ),
       );
     }
   }
 
   Future<void> _refreshConnectStatus() async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
           content: Text('Checking payout status with Stripe…'),
-          duration: Duration(seconds: 1)),
-    );
-    setState(() {});
+          duration: Duration(seconds: 1),
+        ),
+      );
+    // Pull the authoritative account state from Stripe instead of only
+    // re-reading the last webhook-synced row.
+    final future = DriverPaymentsService.getConnectStatus(sync: true);
+    setState(() => _connectStatusFuture = future);
+    try {
+      await future;
+    } catch (e) {
+      debugPrint('[PAYOUT] Status sync failed: $e');
+    }
   }
 
   /// Wallet summary card: balance, lifetime earnings, current payout card,
@@ -1896,7 +1936,63 @@ class StripeConnectOnboardingWebView extends StatefulWidget {
 
 class _StripeConnectOnboardingWebViewState
     extends State<StripeConnectOnboardingWebView> {
+  late final WebViewController _controller;
   bool _loaded = false;
+  bool _closed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // The controller must be created once. Recreating it on every build
+    // reloads the hosted onboarding page and loses the driver's progress.
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          // Stripe-hosted payout onboarding is the only page this WebView
+          // should render. Allow Stripe and intercept the backend's
+          // onboarding return/refresh redirects; block every other host so a
+          // tampered URL cannot turn this into an in-app phishing surface
+          // with JavaScript enabled.
+          onNavigationRequest: (request) {
+            final uri = Uri.tryParse(request.url);
+            if (uri == null) return NavigationDecision.prevent;
+            if (_isPayoutReturn(uri)) {
+              _close();
+              return NavigationDecision.prevent;
+            }
+            final host = uri.host.toLowerCase();
+            final allowed = uri.scheme == 'https' &&
+                (host == 'stripe.com' || host.endsWith('.stripe.com'));
+            return allowed
+                ? NavigationDecision.navigate
+                : NavigationDecision.prevent;
+          },
+          onPageFinished: (_) {
+            if (mounted) setState(() => _loaded = true);
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(widget.url));
+  }
+
+  bool _isPayoutReturn(Uri uri) {
+    if (uri.scheme == 'netride') return true;
+    final backend = Uri.tryParse(ApiService.baseUrl);
+    if (backend == null || backend.host.isEmpty) return false;
+    return uri.scheme == backend.scheme &&
+        uri.host.toLowerCase() == backend.host.toLowerCase() &&
+        uri.path.startsWith('/api/payments/connect/');
+  }
+
+  void _close() {
+    if (_closed) return;
+    _closed = true;
+    widget.onDone?.call();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1915,40 +2011,12 @@ class _StripeConnectOnboardingWebViewState
         ),
         leading: IconButton(
           icon: const Icon(Icons.close, color: Color(0xFF2F3A32)),
-          onPressed: () {
-            widget.onDone?.call();
-            Navigator.of(context).pop();
-          },
+          onPressed: _close,
         ),
       ),
       body: Stack(
         children: [
-          WebViewWidget(
-            controller: WebViewController()
-              ..setJavaScriptMode(JavaScriptMode.unrestricted)
-              ..setNavigationDelegate(
-                NavigationDelegate(
-                  // Stripe-hosted payout onboarding is the only page this
-                  // WebView should ever render. Block every other host so a
-                  // tampered/redirected URL cannot turn this screen into an
-                  // in-app phishing surface with JavaScript enabled.
-                  onNavigationRequest: (request) {
-                    final uri = Uri.tryParse(request.url);
-                    final host = uri?.host.toLowerCase() ?? '';
-                    final allowed = uri != null &&
-                        uri.scheme == 'https' &&
-                        (host == 'stripe.com' || host.endsWith('.stripe.com'));
-                    return allowed
-                        ? NavigationDecision.navigate
-                        : NavigationDecision.prevent;
-                  },
-                  onPageFinished: (_) {
-                    if (mounted) setState(() => _loaded = true);
-                  },
-                ),
-              )
-              ..loadRequest(Uri.parse(widget.url)),
-          ),
+          WebViewWidget(controller: _controller),
           if (!_loaded)
             const Center(
               child: CircularProgressIndicator(

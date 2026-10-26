@@ -266,7 +266,30 @@ export class PaymentsController {
       });
       res.json(result);
     } catch (err: any) {
-      res.status(400).json({ error: err.message });
+      const raw = String(err?.message ?? 'Unknown error');
+      console.error(
+        `[STRIPE] connect onboarding failed for driver ${req.user!.id}: ${raw}`,
+      );
+
+      let status = 502;
+      let code = 'connect_onboarding_failed';
+      if (/not configured/i.test(raw)) {
+        status = 503;
+        code = 'stripe_not_configured';
+      } else if (/Live Stripe keys are blocked/i.test(raw)) {
+        status = 503;
+        code = 'stripe_live_blocked';
+      } else if (/CONNECT_ACCOUNT_CREATION_BLOCKED/i.test(raw)) {
+        status = 409;
+        code = 'connect_account_creation_blocked';
+      }
+
+      // Never leak Stripe/account internals to the driver app; the actionable
+      // reason stays in the server log.
+      res.status(status).json({
+        error: 'Payout setup is not available right now. Please try again later.',
+        code,
+      });
     }
   }
 

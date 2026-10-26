@@ -190,6 +190,9 @@ const envSchema = z.object({
   // Optional Connect OAuth client id (only needed for the OAuth flow; the
   // Express onboarding used here does not require it).
   STRIPE_CONNECT_CLIENT_ID: z.string().optional(),
+  // Country used for Accounts v2 recipient creation (ISO 3166-1 alpha-2).
+  // Must be a country where the platform can onboard connected accounts.
+  STRIPE_CONNECT_COUNTRY: z.string().default('US'),
   // Hard interlock: live keys (sk_live_…) are refused unless this is 'true'
   // AND NODE_ENV=production. Prevents a test/dev process ever touching live.
   STRIPE_ALLOW_LIVE: z.enum(['true', 'false']).transform(v => v === 'true').default(false),

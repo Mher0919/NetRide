@@ -84,7 +84,19 @@ void _flushPendingNotificationTap([int attempt = 0]) {
   _routeFromNotification(pending);
 }
 
-void main() async {
+void main() {
+  runZonedGuarded(
+    _bootstrap,
+    (error, stack) {
+      debugPrint('[FATAL] Uncaught async error: $error');
+      debugPrint('[FATAL] Stack: $stack');
+    },
+  );
+}
+
+/// Runs inside the same guarded zone that owns the Flutter binding, so
+/// zone-local configuration and [runApp] always agree.
+Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Production error boundary — never show stack traces to users.
@@ -185,36 +197,28 @@ void main() async {
     await NotificationService.instance.registerDevice();
   }
 
-  runZonedGuarded(
-    () {
-      runApp(
-        MultiProvider(
-          providers: [
-            ChangeNotifierProvider(create: (_) {
-              final provider = DriverProvider();
-              // A foreground push is suppressed by the notification service
-              // while the in-app offer card is already visible.
-              NotificationService.instance.offerVisible =
-                  () => provider.incomingRequest != null;
-              if (token != null) {
-                provider.initSocket(token);
-                // Socket-independent recovery: adopt an authoritative active
-                // trip over REST even if the WebSocket never connects.
-                provider.hydrateFromServer();
-              }
-              return provider;
-            }),
-            ChangeNotifierProvider(create: (_) => NavigationService()),
-            ChangeNotifierProvider(create: (_) => CommunicationService()),
-          ],
-          child: NetRideDriver(isAuthenticated: token != null),
-        ),
-      );
-    },
-    (error, stack) {
-      debugPrint('[FATAL] Uncaught async error: $error');
-      debugPrint('[FATAL] Stack: $stack');
-    },
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) {
+          final provider = DriverProvider();
+          // A foreground push is suppressed by the notification service
+          // while the in-app offer card is already visible.
+          NotificationService.instance.offerVisible =
+              () => provider.incomingRequest != null;
+          if (token != null) {
+            provider.initSocket(token);
+            // Socket-independent recovery: adopt an authoritative active
+            // trip over REST even if the WebSocket never connects.
+            provider.hydrateFromServer();
+          }
+          return provider;
+        }),
+        ChangeNotifierProvider(create: (_) => NavigationService()),
+        ChangeNotifierProvider(create: (_) => CommunicationService()),
+      ],
+      child: NetRideDriver(isAuthenticated: token != null),
+    ),
   );
 }
 

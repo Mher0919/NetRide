@@ -54,6 +54,7 @@ const rateLimit_middleware_1 = require("./middleware/rateLimit.middleware");
 const identifyUser_middleware_1 = require("./middleware/identifyUser.middleware");
 const auth_middleware_1 = require("./middleware/auth.middleware");
 const fileAccessToken_middleware_1 = require("./middleware/fileAccessToken.middleware");
+const appVersion_middleware_1 = require("./middleware/appVersion.middleware");
 const sentry_1 = require("./observability/sentry");
 const logger_1 = require("./observability/logger");
 const pinoHttp_1 = require("./middleware/pinoHttp");
@@ -99,6 +100,10 @@ const partner_portal_routes_1 = __importDefault(require("./modules/partner/partn
 const portal_routes_1 = __importDefault(require("./modules/portal/portal.routes"));
 const payments_routes_1 = __importDefault(require("./modules/payments/payments.routes"));
 const admin_payments_routes_1 = __importDefault(require("./modules/payments/admin-payments.routes"));
+const app_version_routes_1 = __importDefault(require("./modules/app-version/app-version.routes"));
+const app_update_admin_routes_1 = __importDefault(require("./modules/app-version/app-update.admin.routes"));
+const app_version_service_1 = require("./modules/app-version/app-version.service");
+const app_version_utils_1 = require("./modules/app-version/app-version.utils");
 const payments_controller_1 = require("./modules/payments/payments.controller");
 const special_redemption_service_1 = require("./modules/sponsor/special-redemption.service");
 const ride_settlement_service_1 = require("./modules/payments/ride-settlement.service");
@@ -193,7 +198,16 @@ app.use((0, cors_1.default)({
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-portal-type'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-portal-type',
+        'X-App-Id',
+        'X-App-Platform',
+        'X-App-Version',
+        'X-App-Build',
+        'X-Device-Id',
+    ],
 }));
 // Trust Render proxy so req.ip resolves individual client IPs
 // instead of the proxy IP. This fixes rate-limit key collisions
@@ -220,6 +234,7 @@ app.use(pinoHttp_1.requestLogger);
 // Must run BEFORE rate-limit so authenticated requests use user-based keys.
 app.use(identifyUser_middleware_1.identifyUser);
 app.use(rateLimit_middleware_1.rateLimitMiddleware);
+app.use(appVersion_middleware_1.enforceAppVersion);
 // Admin JSON responses may embed private document references; this mints
 // short-lived, purpose-scoped access tokens for the authenticated admin
 // (public profile photos are left untouched). MUST run after identifyUser so
@@ -292,6 +307,34 @@ io.use(async (socket, next) => {
         // Reject tokens of deactivated users / demoted admins / pre-password-
         // change sessions immediately (fails closed on lookup errors).
         await auth_service_1.AuthService.assertTokenStillValid(decoded);
+        const appIdRaw = String(socket.handshake.auth.appId ?? '')
+            .trim()
+            .toLowerCase();
+        const platformRaw = String(socket.handshake.auth.platform ?? '')
+            .trim()
+            .toLowerCase();
+        const appVersion = String(socket.handshake.auth.version ?? '').trim();
+        if (appIdRaw &&
+            platformRaw &&
+            appVersion &&
+            app_version_utils_1.APP_IDS.includes(appIdRaw) &&
+            app_version_utils_1.APP_PLATFORMS.includes(platformRaw) &&
+            (0, app_version_utils_1.parseVersion)(appVersion)) {
+            try {
+                const config = await (0, app_version_service_1.getReleaseConfig)(appIdRaw, platformRaw);
+                const buildRaw = String(socket.handshake.auth.build ?? '').trim();
+                const appBuild = /^\d+$/.test(buildRaw) ? Number(buildRaw) : null;
+                if (config.isActive &&
+                    config.campaignStatus === 'PUBLISHED' &&
+                    (0, app_version_utils_1.isValidVersion)(config.minimumVersion) &&
+                    (0, app_version_utils_1.evaluateVersion)(config, appVersion, appBuild).updateRequired) {
+                    return next(new Error('APP_UPDATE_REQUIRED'));
+                }
+            }
+            catch (error) {
+                console.error(`[APP-VERSION] Socket enforcement skipped: ${error.message}`);
+            }
+        }
         // Resolve the ACTIVE session role from the application context supplied
         // by the connecting client (e.g. the Driver App sends `role: 'driver'`,
         // the Rider App sends `role: 'rider'`). This is the single source of
@@ -336,8 +379,10 @@ app.use('/api/geospatial', geospatial_routes_1.default);
 app.use('/api/navigation', navigation_routes_1.default);
 app.use('/api/routing', routing_routes_1.default);
 app.use('/api/routing', routing_api_1.default);
+app.use('/api/admin', app_update_admin_routes_1.default);
 app.use('/api/admin', admin_routes_1.default);
 app.use('/api/admin', admin_rewards_routes_1.default);
+app.use('/api/app', app_version_routes_1.default);
 app.use('/api/credits', credits_routes_1.default);
 app.use('/api/promo', promo_routes_1.default);
 app.use('/api/referral', referral_routes_1.default);
@@ -736,6 +781,22 @@ async function runMigrations() {
             const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
             await database_1.pool.query(schema);
             console.log('✅ Wallet transaction visibility schema (061) applied');
+        }
+        const hasAppReleaseConfigs = await database_1.pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'app_release_configs'");
+        if (hasAppReleaseConfigs.rowCount === 0) {
+            console.log('Applying app release config schema (20261020)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/20261020_app_release_configs.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('App release config schema (20261020) applied');
+        }
+        const hasAppUpdateCampaigns = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'app_release_configs' AND column_name = 'draft_config'");
+        if (hasAppUpdateCampaigns.rowCount === 0) {
+            console.log('Applying app update campaign schema (20261021)...');
+            const schemaPath = path_1.default.join(__dirname, '../migrations/20261021_app_update_campaigns.sql');
+            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
+            await database_1.pool.query(schema);
+            console.log('App update campaign schema (20261021) applied');
         }
         console.log('🚀 All migrations completed');
     }

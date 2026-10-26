@@ -137,7 +137,12 @@ export interface StripeGateway {
     idempotencyKey?: string;
   }): Promise<{ refundId: string; status: string | null }>;
 
-  createExpressAccount(params: { driverId: string; email?: string | null; country?: string }): Promise<{ accountId: string }>;
+  createExpressAccount(params: {
+    driverId: string;
+    email?: string | null;
+    name?: string | null;
+    country?: string;
+  }): Promise<{ accountId: string }>;
 
   createAccountLink(params: { accountId: string; refreshUrl: string; returnUrl: string }): Promise<{ url: string; expiresAt: number | null }>;
 
@@ -185,6 +190,24 @@ function cardFromPaymentMethod(pm: any): StripeSavedCard | null {
     expMonth: pm.card?.exp_month ?? null,
     expYear: pm.card?.exp_year ?? null,
   };
+}
+
+/**
+ * True when Stripe rejects Accounts v2 itself (platform not opted in, older
+ * API routings). Those platforms still need the legacy v1 fallback.
+ */
+function isAccountsV2Unavailable(err: any): boolean {
+  const code = String(err?.code ?? '').toLowerCase();
+  if (
+    code === 'accounts_v2_access_blocked' ||
+    code === 'non_connect_platform_accounts_v2_access_blocked'
+  ) {
+    return true;
+  }
+  if (err?.statusCode === 403 || err?.statusCode === 404) return true;
+  return /Accounts v2 is not enabled|does not have permission|Unknown (?:URL|endpoint)|No such (?:API )?endpoint/i.test(
+    String(err?.message ?? ''),
+  );
 }
 
 const realGateway: StripeGateway = {
@@ -383,19 +406,63 @@ const realGateway: StripeGateway = {
     return { refundId: refund.id, status: refund.status ?? null };
   },
 
-  async createExpressAccount({ driverId, email, country }) {
+  async createExpressAccount({ driverId, email, name, country }) {
     const stripe = getStripe();
+    const accountCountry = (country ?? env.STRIPE_CONNECT_COUNTRY ?? 'US').toUpperCase();
+
+    // Stripe is retiring Accounts v1 for new integrations and now refuses
+    // v1 account creation on many platform accounts. Create an Accounts v2
+    // recipient account instead. Stripe keeps v2 accounts interoperable with
+    // the v1 account-link, retrieve and transfer endpoints used by the rest
+    // of this integration.
+    try {
+      const account = await stripe.v2.core.accounts.create(
+        {
+          contact_email: email ?? undefined,
+          display_name: name ?? undefined,
+          identity: { country: accountCountry },
+          configuration: {
+            recipient: {
+              capabilities: {
+                stripe_balance: {
+                  stripe_transfers: { requested: true },
+                },
+              },
+            },
+          },
+          // Express-hosted onboarding requires the platform to carry fees
+          // and losses for the connected account.
+          defaults: {
+            responsibilities: {
+              fees_collector: 'application',
+              losses_collector: 'application',
+            },
+          },
+          dashboard: 'express',
+          metadata: { netride_driver_id: driverId },
+        },
+        { idempotencyKey: `netride-driver-account:${driverId}` },
+      );
+      return { accountId: account.id };
+    } catch (err: any) {
+      if (!isAccountsV2Unavailable(err)) throw err;
+      // Platform has no Accounts v2 access — fall back to the legacy API.
+      console.warn(
+        `[STRIPE] Accounts v2 unavailable for driver ${driverId}; falling back to Accounts v1: ${err?.message ?? err}`,
+      );
+    }
+
     try {
       const account = await stripe.accounts.create(
         {
           type: 'express',
           email: email ?? undefined,
-          country: country ?? undefined,
+          country: accountCountry,
           // Stripe-hosted onboarding; NetRide never stores identity documents.
           capabilities: { transfers: { requested: true }, card_payments: { requested: true } },
           metadata: { netride_driver_id: driverId },
         },
-        { idempotencyKey: `netride-driver-account:${driverId}` },
+        { idempotencyKey: `netride-driver-account-v1:${driverId}` },
       );
       return { accountId: account.id };
     } catch (err: any) {

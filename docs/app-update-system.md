@@ -84,9 +84,8 @@ The minimum version is authoritative. The latest version is informational.
 
 The Flutter gate in `app_update_gate.dart`:
 
-- Checks policy on launch and on resume when stale.
-- Shows a branded loading gate during the first policy fetch, bounded by a
-  6-second request timeout and an 8-second hard overlay limit.
+- Checks policy on launch and on resume when stale without adding a visual
+  "checking for updates" screen.
 - Shows a non-dismissible full-screen popup when a mandatory update is
   required. Back navigation, barrier taps, and ordinary dismissal are blocked.
 - Uses the configured title, message, button text, supporting text,
@@ -99,11 +98,12 @@ The Flutter gate in `app_update_gate.dart`:
 - Displays clear errors when the store URL is missing or invalid. It never
   reports a fake successful update.
 
-If the configuration request fails, the app uses a previously cached policy for
-up to 24 hours. If no cached policy exists, the app fails open so a network
-outage does not lock users out. A cached mandatory policy continues to enforce
-the update while offline. This favors safety for known mandatory outages while
-avoiding an unrecoverable offline launch.
+The version request is bounded to 6 seconds. If the configuration request
+fails, the app uses a previously cached policy for up to 24 hours. If no cached
+policy exists, the app fails open so a network outage does not lock users out.
+A cached mandatory policy continues to enforce the update while offline. This
+favors safety for known mandatory outages while avoiding an unrecoverable
+offline launch.
 
 ## Server enforcement
 

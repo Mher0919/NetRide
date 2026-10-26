@@ -357,6 +357,11 @@ weekly withdrawal windows are **unchanged**.
 
 ### 7.3 Driver app — in-app Connect payout setup
 
+- Accounts are created with **Accounts v2** (`/v2/core/accounts`, recipient
+  configuration + Express Dashboard) because Stripe now refuses new Accounts
+  v1 connected accounts. The v2 account id is used with the v1 account-link,
+  retrieve, transfer and `account.updated` webhook surfaces, which Stripe
+  keeps interoperable.
 - `POST /api/payments/connect/onboarding` returns the single-use Stripe
   account link, which the driver app now opens in an **in-app web view**
   (`webview_flutter`) instead of an external browser. NetRide still never
@@ -403,13 +408,14 @@ weekly withdrawal windows are **unchanged**.
 
 ## 8. External setup still required (remaining)
 
-1. **Stripe Dashboard → Settings → Developers → API policies → Features:
-   enable "Accounts v1 support"** (`feat_accounts_v1_support`). New Express
-   connected accounts are currently refused by Stripe policy on this test
-   platform account ("Stripe no longer recommends Accounts v1…"). Until this
-   is enabled, account creation fails with
-   `CONNECT_ACCOUNT_CREATION_BLOCKED` and drivers cannot onboard; every other
-   money path (rider + sponsor) already runs green in test mode.
+1. **Connected-account creation uses Accounts v2** (`POST /v2/core/accounts`
+   with the `recipient` configuration, Express Dashboard). This avoids
+   Stripe's retirement of Accounts v1 creation and no longer requires the
+   `Accounts v1 support` API-policy flag. Existing v1 connected accounts
+   remain fully supported: the backend still uses the v1 account-link,
+   retrieve, transfer and `account.updated` webhook surfaces, which Stripe
+   keeps interoperable with v2 accounts. `STRIPE_CONNECT_COUNTRY` (default
+   `US`) controls the account country.
 2. **Webhook subscriptions** for active sync: `setup_intent.succeeded`,
    `payment_intent.succeeded`/`.payment_failed`/`.canceled`,
    `checkout.session.completed`, `charge.refunded`, `account.updated`,

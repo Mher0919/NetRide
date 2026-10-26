@@ -30,7 +30,11 @@ class _MainWrapperState extends State<MainWrapper> {
   @override
   void initState() {
     super.initState();
-    _checkAuth();
+    // Navigation must not run while the first frame is still being built;
+    // schedule the auth guard once the navigator is unlocked.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _checkAuth();
+    });
   }
 
   Future<void> _checkAuth() async {
@@ -47,10 +51,9 @@ class _MainWrapperState extends State<MainWrapper> {
       // Even if this screen is reached via a deep link, back-stack, or a stale
       // local cache, an un-onboarded driver must be sent back to onboarding.
       final complete = await AuthService.isDriverOnboardingComplete();
+      if (!mounted) return;
       if (!complete) {
-        if (mounted) {
-          Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
-        }
+        Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
         return;
       }
 
@@ -63,9 +66,7 @@ class _MainWrapperState extends State<MainWrapper> {
         // Non-fatal; the guard decision is already made from the backend.
       }
 
-      if (mounted) {
-        setState(() => _isChecking = false);
-      }
+      setState(() => _isChecking = false);
     } catch (e) {
       if (e is DioException && e.response?.statusCode == 404) {
         debugPrint('User not found (404), logging out...');

@@ -54,7 +54,11 @@ export class ConnectService {
     };
   }
 
-  /** Creates (once) and returns the driver's Express account id. */
+  /**
+   * Creates (once) and returns the driver's connected account id.
+   * New accounts are Accounts v2 recipient accounts; the id stays
+   * interoperable with the v1 link/retrieve/transfer calls used here.
+   */
   static async ensureAccount(driverId: string): Promise<{ accountId: string }> {
     const gateway = gatewayOrNull();
     if (!gateway) throw new Error('Stripe is not configured');
@@ -67,10 +71,14 @@ export class ConnectService {
       return { accountId: existing.rows[0].stripe_account_id };
     }
 
-    const user = await pool.query(`SELECT email FROM users WHERE id = $1`, [driverId]);
+    const user = await pool.query(
+      `SELECT email, full_name FROM users WHERE id = $1`,
+      [driverId],
+    );
     const { accountId } = await gateway.createExpressAccount({
       driverId,
       email: user.rows[0]?.email ?? null,
+      name: user.rows[0]?.full_name ?? null,
     });
     await pool.query(
       `INSERT INTO driver_stripe_accounts (driver_id, stripe_account_id)
@@ -93,12 +101,33 @@ export class ConnectService {
     const gateway = gatewayOrNull();
     if (!gateway) throw new Error('Stripe is not configured');
     const { accountId } = await this.ensureAccount(driverId);
-    const link = await gateway.createAccountLink({
-      accountId,
-      refreshUrl: urls.refreshUrl,
-      returnUrl: urls.returnUrl,
-    });
-    return { url: link.url };
+    try {
+      const link = await gateway.createAccountLink({
+        accountId,
+        refreshUrl: urls.refreshUrl,
+        returnUrl: urls.returnUrl,
+      });
+      return { url: link.url };
+    } catch (err: any) {
+      // A stored account id can become orphaned when the server switches
+      // Stripe mode/account (test ↔ live). Drop only that stale pointer and
+      // provision a fresh account once.
+      if (!/No such account|does not exist|not found/i.test(String(err?.message ?? ''))) {
+        throw err;
+      }
+      await pool.query(
+        `DELETE FROM driver_stripe_accounts
+         WHERE driver_id = $1 AND stripe_account_id = $2`,
+        [driverId, accountId],
+      );
+      const recreated = await this.ensureAccount(driverId);
+      const link = await gateway.createAccountLink({
+        accountId: recreated.accountId,
+        refreshUrl: urls.refreshUrl,
+        returnUrl: urls.returnUrl,
+      });
+      return { url: link.url };
+    }
   }
 
   /** Pulls the authoritative account state from Stripe and persists it. */

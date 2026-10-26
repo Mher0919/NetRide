@@ -37,9 +37,11 @@ class _MainWrapperState extends State<MainWrapper> {
     // Apply any tab request that arrived while this wrapper was off-tree
     // (e.g. a deep link or a sheet fired during a trip screen).
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _onNavRequest();
+      if (mounted) {
+        _onNavRequest();
+        _checkAuth();
+      }
     });
-    _checkAuth();
   }
 
   @override
