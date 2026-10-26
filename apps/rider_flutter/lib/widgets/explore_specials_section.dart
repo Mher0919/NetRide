@@ -26,7 +26,12 @@ import 'special_business_sheet.dart';
 import 'special_card.dart';
 
 class ExploreSpecialsSection extends StatefulWidget {
-  const ExploreSpecialsSection({super.key});
+  const ExploreSpecialsSection({super.key, this.onSeeAll});
+
+  /// Opens the dedicated Specials tab. Injected by MainWrapper (via
+  /// MapScreen) so the header works even when the global AppNav channel is
+  /// unavailable; falls back to AppNav when used standalone.
+  final VoidCallback? onSeeAll;
 
   @override
   State<ExploreSpecialsSection> createState() => _ExploreSpecialsSectionState();
@@ -89,7 +94,9 @@ class _ExploreSpecialsSectionState extends State<ExploreSpecialsSection> {
                 borderRadius: BorderRadius.circular(14),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(14),
-                  onTap: () => AppNav.instance.goToTab(AppNav.specials),
+                  onTap:
+                      widget.onSeeAll ??
+                      () => AppNav.instance.goToTab(AppNav.specials),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     child: Row(

@@ -167,10 +167,10 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
     final googleHero = !hasAdminImage && (business?.photos.isNotEmpty ?? false)
         ? business!.photos.first
         : null;
+    // Google imagery is only used when the business has no uploaded photos,
+    // so the attribution only belongs under that fallback gallery.
     final galleryHasGoogle =
-        business != null &&
-        business.photos.isNotEmpty &&
-        (hasAdminImage || business.photos.length > 1);
+        !hasAdminImage && (business?.photos.length ?? 0) > 1;
 
     return DraggableScrollableSheet(
       controller: _sheetController,
@@ -337,7 +337,7 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
       child: SizedBox(
-        height: 168,
+        height: 210,
         width: double.infinity,
         child: Stack(
           fit: StackFit.expand,
@@ -347,11 +347,12 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                 imageUrl: url,
                 fit: BoxFit.cover,
                 fadeInDuration: const Duration(milliseconds: 260),
+                memCacheWidth: 900,
                 placeholder: (_, _) => _heroFallback(),
                 errorWidget: (_, _, _) => _heroFallback(),
               )
             else if (loading)
-              const _SkeletonBox(height: 168, radius: 0)
+              const _SkeletonBox(height: 210, radius: 0)
             else
               _heroFallback(),
             if (googlePhoto?.attributionName != null)
@@ -409,6 +410,7 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
     final reviewCount = business?.reviewCount;
     final category = business?.category ?? specialCategoryLabel(s.businessType);
     final openNow = business?.openNow;
+    final eta = _etaLabel(s);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -428,6 +430,29 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                 ),
               ),
             ),
+            if (eta != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 8, top: 3),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.schedule_rounded,
+                      size: 14,
+                      color: Color(0xFF5B7760),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      eta,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF5B7760),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (openNow != null)
               Container(
                 margin: const EdgeInsets.only(left: 8, top: 3),
@@ -687,11 +712,8 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
         : s.address;
     final phone = business.phone;
     final website = business.website;
-    final eta = _etaLabel(s);
     final hasActions =
-        eta != null ||
-        (phone?.isNotEmpty ?? false) ||
-        (website?.isNotEmpty ?? false);
+        (phone?.isNotEmpty ?? false) || (website?.isNotEmpty ?? false);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -734,9 +756,7 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
           const SizedBox(height: 12),
           Row(
             children: [
-              if (eta != null) Expanded(child: _EtaTile(label: eta)),
-              if (phone != null && phone.isNotEmpty) ...[
-                if (eta != null) const SizedBox(width: 8),
+              if (phone != null && phone.isNotEmpty)
                 Expanded(
                   child: _ActionButton(
                     icon: Icons.call_rounded,
@@ -745,10 +765,8 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
                         _openExternal('tel:${phone.replaceAll(' ', '')}'),
                   ),
                 ),
-              ],
               if (website != null && website.isNotEmpty) ...[
-                if (eta != null || (phone?.isNotEmpty ?? false))
-                  const SizedBox(width: 8),
+                if (phone?.isNotEmpty ?? false) const SizedBox(width: 8),
                 Expanded(
                   child: _ActionButton(
                     icon: Icons.language_rounded,
@@ -803,35 +821,46 @@ class _SpecialBusinessSheetState extends State<SpecialBusinessSheet> {
     List<String> images,
     bool showGoogleAttribution,
   ) {
+    final photoWidth = math.min(MediaQuery.sizeOf(context).width - 72, 300.0);
+    const photoHeight = 190.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _SectionTitle('Photos'),
         const SizedBox(height: 10),
         SizedBox(
-          height: 104,
+          height: photoHeight,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
             itemCount: images.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
             itemBuilder: (context, i) {
               final url = images[i];
               return Semantics(
                 image: true,
                 label: 'Business photo',
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(16),
                   child: CachedNetworkImage(
                     imageUrl: url,
-                    width: 140,
-                    height: 104,
+                    width: photoWidth,
+                    height: photoHeight,
                     fit: BoxFit.cover,
-                    placeholder: (_, _) =>
-                        const _SkeletonBox(width: 140, height: 104, radius: 0),
-                    errorWidget: (_, _, _) => const SizedBox(
-                      width: 140,
-                      height: 104,
-                      child: _SkeletonBox(width: 140, height: 104, radius: 0),
+                    memCacheWidth: 900,
+                    placeholder: (_, _) => _SkeletonBox(
+                      width: photoWidth,
+                      height: photoHeight,
+                      radius: 0,
+                    ),
+                    errorWidget: (_, _, _) => SizedBox(
+                      width: photoWidth,
+                      height: photoHeight,
+                      child: _SkeletonBox(
+                        width: photoWidth,
+                        height: photoHeight,
+                        radius: 0,
+                      ),
                     ),
                   ),
                 ),
@@ -1008,46 +1037,6 @@ class _ActionButton extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _EtaTile extends StatelessWidget {
-  const _EtaTile({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 44,
-      decoration: BoxDecoration(
-        color: const Color(0xFFE5F0EB),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFB7CDBF)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.schedule_rounded,
-            size: 16,
-            color: Color(0xFF5B7760),
-          ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF2F3A32),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -689,10 +689,21 @@ class _SpecialListTile extends StatelessWidget {
 
   final SponsorSpecial sponsor;
 
-  String? _imageUrl(SpecialsProvider specials) => specialPrimaryImageUrl(
-    sponsor,
-    specials.businessFor(sponsor.id)?.business,
-  );
+  String? _imageUrl(SpecialsProvider specials) {
+    // Prefer the provider's live copy: it is refreshed whenever the tab
+    // opens (the paginated page list can be older and miss photo uploads).
+    SponsorSpecial current = sponsor;
+    for (final s in specials.sponsors) {
+      if (s.id == sponsor.id) {
+        current = s;
+        break;
+      }
+    }
+    return specialPrimaryImageUrl(
+      current,
+      specials.businessFor(sponsor.id)?.business,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -738,6 +749,7 @@ class _SpecialListTile extends StatelessWidget {
                             imageUrl: imageUrl,
                             fit: BoxFit.cover,
                             fadeInDuration: const Duration(milliseconds: 240),
+                            memCacheWidth: 240,
                             placeholder: (_, _) => _fallback(),
                             errorWidget: (_, _, _) => _fallback(),
                           )

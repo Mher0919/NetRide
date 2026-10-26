@@ -156,6 +156,49 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
     user: { max: 60, windowMs: MINUTE },
   },
 
+  // Specials discovery + detail (cards, sheet, pagination). These are
+  // read-only and cheap; a dedicated bucket keeps them from starving the
+  // shared default bucket when Explore and the Specials tab both refresh.
+  'GET /api/specials': {
+    user: { max: 120, windowMs: MINUTE },
+    ip: { max: 240, windowMs: MINUTE },
+  },
+  'GET /api/specials/count': {
+    user: { max: 120, windowMs: MINUTE },
+    ip: { max: 240, windowMs: MINUTE },
+  },
+  'GET /api/specials/intro-state': {
+    user: { max: 60, windowMs: MINUTE },
+    ip: { max: 120, windowMs: MINUTE },
+  },
+  'GET /api/specials/redemptions/current': {
+    user: { max: 120, windowMs: MINUTE },
+    ip: { max: 240, windowMs: MINUTE },
+  },
+  'GET /api/specials/redemptions/pending': {
+    user: { max: 120, windowMs: MINUTE },
+    ip: { max: 240, windowMs: MINUTE },
+  },
+  'GET /api/specials/:id': {
+    user: { max: 120, windowMs: MINUTE },
+    ip: { max: 240, windowMs: MINUTE },
+  },
+  'GET /api/specials/:id/business': {
+    user: { max: 120, windowMs: MINUTE },
+    ip: { max: 240, windowMs: MINUTE },
+  },
+  // Uploaded business photos + the Google photo proxy. Image-heavy screens
+  // (cards, sheet gallery) burst several of these at once; the shared
+  // default bucket made pictures intermittently 429 and never render.
+  'GET /api/files/:id': {
+    user: { max: 600, windowMs: MINUTE },
+    ip: { max: 600, windowMs: MINUTE },
+  },
+  'GET /api/places/photo': {
+    user: { max: 600, windowMs: MINUTE },
+    ip: { max: 600, windowMs: MINUTE },
+  },
+
   // Upload endpoint — generous for legitimate usage, but not unlimited
   'POST /api/admin/users/:id/request-vehicle-resubmission': {
     user: { max: 30, windowMs: MINUTE },

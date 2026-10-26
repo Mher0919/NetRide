@@ -22,16 +22,17 @@ class _MainWrapperState extends State<MainWrapper> {
 
   // Navigation stays: Explore / Specials / Activity / Account. Specials is
   // the dedicated discovery page; Explore keeps its inline SPECIALS section.
-  final List<Widget> _screens = [
-    const MapScreen(),
-    const SpecialsScreen(),
-    const ActivityScreen(),
-    const ProfileScreen(),
-  ];
+  late final List<Widget> _screens;
 
   @override
   void initState() {
     super.initState();
+    _screens = [
+      MapScreen(onOpenSpecials: () => _onItemTapped(AppNav.specials)),
+      const SpecialsScreen(),
+      const ActivityScreen(),
+      const ProfileScreen(),
+    ];
     AppNav.instance.addListener(_onNavRequest);
     // Apply any tab request that arrived while this wrapper was off-tree
     // (e.g. a deep link or a sheet fired during a trip screen).

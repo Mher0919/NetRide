@@ -106,9 +106,10 @@ String specialDistanceLabel(SponsorSpecial s) {
   return place.isEmpty ? 'Local' : place;
 }
 
-/// Resolved photo URLs for a Special. Admin-uploaded imagery always wins:
-/// cover image → admin gallery → Google business photos. Duplicates are
-/// dropped so the hero and the gallery never repeat the same picture.
+/// Resolved photo URLs for a Special. Admin-uploaded imagery always wins and
+/// is used EXCLUSIVELY when present — Google photos are only a fallback for
+/// Specials with no uploaded photos (so no empty Google placeholders ever sit
+/// beside real pictures). Duplicates are dropped.
 List<String> specialImageUrls(
   SponsorSpecial sponsor, [
   GoogleBusiness? business,
@@ -124,6 +125,10 @@ List<String> specialImageUrls(
   for (final photo in sponsor.photoUrls) {
     add(resolveFileUrl(photo));
   }
+
+  // Uploaded pictures exist: never mix in Google imagery/placeholders.
+  if (urls.isNotEmpty) return urls;
+
   for (final photo in business?.photos ?? const <GoogleBusinessPhoto>[]) {
     final raw = photo.url.isNotEmpty ? photo.url : photo.thumbUrl;
     if (raw.isNotEmpty) add(resolveApiUrl(raw));
@@ -299,6 +304,7 @@ class SpecialCard extends StatelessWidget {
       imageUrl: imageUrl,
       fit: BoxFit.cover,
       fadeInDuration: const Duration(milliseconds: 260),
+      memCacheWidth: 560,
       placeholder: (_, _) => _fallback(),
       errorWidget: (_, _, _) => _fallback(),
     );

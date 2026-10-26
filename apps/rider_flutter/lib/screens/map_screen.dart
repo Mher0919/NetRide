@@ -37,7 +37,12 @@ import '../widgets/special_card.dart';
 import 'wallet_screen.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({super.key, this.onOpenSpecials});
+
+  /// Direct tab switch supplied by MainWrapper to the Explore SPECIALS
+  /// header, so opening the dedicated Specials page never depends on the
+  /// global navigation channel.
+  final VoidCallback? onOpenSpecials;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -1521,7 +1526,9 @@ class _MapScreenState extends State<MapScreen>
                                           // reports zero eligible active specials (the
                                           // widget's own visibility rule), so Explore
                                           // stays clean in both cases.
-                                          const ExploreSpecialsSection(),
+                                          ExploreSpecialsSection(
+                                            onSeeAll: widget.onOpenSpecials,
+                                          ),
                                         ], // end of the non-fullscreen spread
                                         const SizedBox(height: 14),
                                         if (_smoothedPosition != null)
