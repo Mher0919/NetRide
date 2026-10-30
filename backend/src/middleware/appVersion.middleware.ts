@@ -100,11 +100,7 @@ export function createAppVersionEnforcement(
         platform as AppPlatform,
       );
 
-      if (
-        !config.isActive ||
-        config.campaignStatus !== 'PUBLISHED' ||
-        !isValidVersion(config.minimumVersion)
-      ) {
+      if (!config.isActive || !isValidVersion(config.minimumVersion)) {
         return next();
       }
 

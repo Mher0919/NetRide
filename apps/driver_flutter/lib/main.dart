@@ -134,6 +134,8 @@ Future<void> _bootstrap() async {
   await CacheService.instance.init(prefs);
 
   String? token = SecureTokenStore.token;
+  // Keep synchronous private-file image headers working after a cold start.
+  AuthService.rememberJwt(token);
 
   final supabase = Supabase.instance.client;
   if (token != null && AuthService.isJwtExpired(token)) {
@@ -172,6 +174,9 @@ Future<void> _bootstrap() async {
     }
   }
 
+  // A refreshed token must replace the synchronous image-auth mirror too.
+  AuthService.rememberJwt(token);
+
   if (token != null) {
     // Determine the correct startup destination from authoritative backend
     // state. Never assume onboarding is complete based on a local token alone.
@@ -207,7 +212,9 @@ Future<void> _bootstrap() async {
           NotificationService.instance.offerVisible =
               () => provider.incomingRequest != null;
           if (token != null) {
-            provider.initSocket(token);
+            // Token application starts the session/profile initialization
+            // immediately (before the splash completes) and is idempotent.
+            provider.updateToken(token);
             // Socket-independent recovery: adopt an authoritative active
             // trip over REST even if the WebSocket never connects.
             provider.hydrateFromServer();
@@ -237,6 +244,7 @@ class _NetRideDriverState extends State<NetRideDriver> with WidgetsBindingObserv
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    AuthService.isAuthenticatedNotifier.addListener(_onAuthChanged);
     _initDeepLinks();
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _flushPendingNotificationTap(),
@@ -245,8 +253,25 @@ class _NetRideDriverState extends State<NetRideDriver> with WidgetsBindingObserv
 
   @override
   void dispose() {
+    AuthService.isAuthenticatedNotifier.removeListener(_onAuthChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// Notification-independent session bridge. Registration/OTP/login all
+  /// persist the token first and then flip the notifier; this listener applies
+  /// that token to the provider even if the auth service could not resolve a
+  /// navigator context at the exact moment the session was created.
+  void _onAuthChanged() {
+    final provider = context.read<DriverProvider>();
+    if (AuthService.isAuthenticatedNotifier.value) {
+      final token = SecureTokenStore.token;
+      if (token != null && token.isNotEmpty) {
+        provider.updateToken(token);
+      }
+    } else {
+      provider.resetSession();
+    }
   }
 
   @override

@@ -9,6 +9,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../components/skeletons.dart';
 import '../providers/ride_provider.dart';
 import '../services/api_service.dart';
 import 'credits_screen.dart';
@@ -211,7 +212,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Widget _buildBody(ThemeData theme) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const NotificationsSkeleton();
     }
     if (_error != null && (_items == null || _items!.isEmpty)) {
       return RefreshIndicator(

@@ -1,9 +1,7 @@
-import 'package:dio/dio.dart';
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'dart:io';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import '../providers/driver_provider.dart';
@@ -25,14 +23,29 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  StreamSubscription<AuthState>? _oauthSubscription;
+
+  @override
+  void dispose() {
+    _oauthSubscription?.cancel();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   Future<void> _handleOAuth(String provider) async {
     setState(() => _isLoading = true);
     try {
       final supabase = Supabase.instance.client;
-      
+
+      // An abandoned OAuth attempt must not keep consuming session events and
+      // overwrite the account created by a later registration flow.
+      await _oauthSubscription?.cancel();
+      _oauthSubscription = null;
+
       // 1. Listen for the FIRST session event to complete the login
-      final subscription = supabase.auth.onAuthStateChange.listen((data) async {
+      late final StreamSubscription<AuthState> subscription;
+      subscription = supabase.auth.onAuthStateChange.listen((data) async {
         final session = data.session;
         if (session != null) {
           try {
@@ -41,6 +54,10 @@ class _LoginScreenState extends State<LoginScreen> {
               fullName: session.user.userMetadata?['full_name'] ?? 'NetRide Driver',
               profileImageUrl: session.user.userMetadata?['avatar_url'],
               role: 'DRIVER',
+              // The backend verifies this Supabase access token before it
+              // will mint a consumer session. Without it OAuth registration
+              // always failed and could leave the app in a partial state.
+              token: session.accessToken,
             );
             
             if (mounted) {
@@ -73,9 +90,15 @@ class _LoginScreenState extends State<LoginScreen> {
                  SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
                );
              }
+           } finally {
+             await subscription.cancel();
+             if (identical(_oauthSubscription, subscription)) {
+               _oauthSubscription = null;
+             }
            }
         }
       });
+      _oauthSubscription = subscription;
 
       // 2. Trigger the OAuth flow. The consent-screen label
       // ("Logging in for NetRide") is configured in Supabase Auth → Providers
@@ -96,6 +119,8 @@ class _LoginScreenState extends State<LoginScreen> {
       Future.delayed(const Duration(minutes: 5), () => subscription.cancel());
 
     } catch (e) {
+      await _oauthSubscription?.cancel();
+      _oauthSubscription = null;
       if (mounted) {
         final message = ErrorHandler.friendly(
           e,

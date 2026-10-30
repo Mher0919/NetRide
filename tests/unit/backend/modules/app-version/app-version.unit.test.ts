@@ -54,7 +54,7 @@ test('isBelowVersion uses build number when version names are equal', () => {
   assert.equal(isBelowVersion('1.0.0', 9, '1.0.0', null), false);
 });
 
-test('evaluateVersion returns optional update when current is between minimum and latest', () => {
+test('evaluateVersion reports an available update between minimum and latest', () => {
   assert.deepEqual(evaluateVersion(baseConfig, '1.5.0', 15), {
     updateRequired: false,
     updateAvailable: true,
@@ -146,9 +146,7 @@ test('default release configs cover every app and platform', () => {
       assert.equal(isValidVersion(config.minimumVersion), true);
       assert.ok(compareVersions(config.latestVersion, config.minimumVersion) >= 0);
       assert.equal(config.storeUrl, '');
-      assert.equal(config.campaignStatus, 'PUBLISHED');
-      assert.ok(config.popupTitle.length > 0);
-      assert.ok(config.popupMessage.length > 0);
+      assert.equal(config.isActive, false);
     }
   }
 });

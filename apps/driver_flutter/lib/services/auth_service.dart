@@ -41,6 +41,17 @@ class AuthService {
     }
   }
 
+  static void _resetProvider() {
+    try {
+      final context = ApiService.navigatorKey.currentContext;
+      if (context != null) {
+        Provider.of<DriverProvider>(context, listen: false).resetSession();
+      }
+    } catch (e) {
+      debugPrint('[AuthService] ⚠️ Could not reset DriverProvider: $e');
+    }
+  }
+
   static Future<Map<String, dynamic>> loginWithOAuth({
     required String email,
     required String fullName,
@@ -444,6 +455,7 @@ class AuthService {
     }
     await SecureTokenStore.clear();
     rememberJwt(null);
+    _resetProvider();
     isAuthenticatedNotifier.value = false;
   }
 
@@ -526,16 +538,15 @@ class AuthService {
 
   /// True only when the backend reports Driver onboarding (phone verified +
   /// all steps complete, step >= 5) is finished.
+  ///
+  /// Errors are propagated instead of being collapsed into `false`: a
+  /// temporarily unreachable backend must not be mistaken for "onboarding
+  /// incomplete" (which previously bounced registered drivers back into
+  /// onboarding until the app was restarted).
   static Future<bool> isDriverOnboardingComplete() async {
-    try {
-      final status = await getOnboardingStatus();
-      final driver = status['driver'];
-      if (driver is Map && driver['onboarding_complete'] == true) return true;
-      return false;
-    } catch (_) {
-      // If the backend can't be reached, DO NOT bypass onboarding.
-      return false;
-    }
+    final status = await getOnboardingStatus();
+    final driver = status['driver'];
+    return driver is Map && driver['onboarding_complete'] == true;
   }
 
   /// Canonical application identity, used to assert correct OAuth branding.

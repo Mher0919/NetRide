@@ -120,6 +120,35 @@ class SpecialsProvider extends ChangeNotifier {
   double? get geoLat => _geoLat;
   double? get geoLng => _geoLng;
 
+  /// Drops every user-scoped value. Called when the authenticated identity
+  /// changes (logout / fresh registration) so a previous rider's current
+  /// redemption, pending codes or cached business data can never render in
+  /// the new session, and the next Explore build performs a real refresh.
+  void reset() {
+    _sponsors = [];
+    _pending = [];
+    _codes.clear();
+    _readyQueue.clear();
+    _rewardQueue.clear();
+    _count = 0;
+    _loaded = false;
+    _loading = false;
+    _error = null;
+    _introSeen = false;
+    _introChecked = false;
+    _current = null;
+    _busy = false;
+    _lastCode = null;
+    _geoLat = null;
+    _geoLng = null;
+    _selectedSpecialId = null;
+    _businessBySpecial.clear();
+    _businessLoading.clear();
+    _businessFullRequested.clear();
+    _photoHydrationRequested.clear();
+    notifyListeners();
+  }
+
   /// Full refresh: count + discovery + intro state + resumable redemption.
   /// When [lat]/[lng] are provided they become the persistent geo origin.
   ///

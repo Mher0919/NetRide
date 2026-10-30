@@ -286,13 +286,28 @@ function setupSocketGateway(io) {
          * ADMIN MONITORING EVENTS
          */
         if (role === types_1.UserRole.ADMIN) {
-            socket.on('subscribeToMonitoring', () => {
-                console.log(`[SOCKET] 👁️ Admin ${id} subscribed to MONITORING`);
+            socket.on('subscribeToMonitoring', async () => {
+                // The role was resolved at handshake time. Re-check before joining
+                // global monitoring rooms so a demoted/deactivated admin cannot keep
+                // a privileged subscription on an existing socket.
+                try {
+                    const live = await database_1.pool.query('SELECT role, is_active FROM users WHERE id = $1', [id]);
+                    const row = live.rows[0];
+                    if (!row || row.role !== types_1.UserRole.ADMIN || row.is_active === false) {
+                        socket.emit('error', { message: 'Administrator privileges required.' });
+                        return;
+                    }
+                }
+                catch (err) {
+                    socket.emit('error', { message: 'Unable to verify monitoring authorization.' });
+                    return;
+                }
+                console.log(`[SOCKET] Admin ${id} subscribed to MONITORING`);
                 socket.join('monitoring:all_rides');
                 socket.join('monitoring:all_drivers');
             });
             socket.on('unsubscribeFromMonitoring', () => {
-                console.log(`[SOCKET] 🙈 Admin ${id} unsubscribed from MONITORING`);
+                console.log(`[SOCKET] Admin ${id} unsubscribed from MONITORING`);
                 socket.leave('monitoring:all_rides');
                 socket.leave('monitoring:all_drivers');
             });
@@ -1132,15 +1147,25 @@ function setupSocketGateway(io) {
                     };
                 console.log(`[SOCKET] Trip cancellation from rider ${id} for trip: ${tripId}`);
                 try {
-                    // Clean up any active driver offer before cancelling
-                    const { DriverOfferService } = await Promise.resolve().then(() => __importStar(require('../services/driver-offer.service')));
-                    const releasedDriver = await DriverOfferService.cancelRideOffers(tripId);
-                    if (releasedDriver) {
-                        console.log(`[SOCKET] Released driver ${releasedDriver} from cancelled ride ${tripId}`);
-                    }
+                    // Authorize + cancel the ride FIRST. Previously the offer cleanup
+                    // ran before RideService's rider/driver ownership check, so any
+                    // authenticated rider who knew a trip UUID could cancel that
+                    // ride's dispatch offer without being a participant.
                     await ride_service_1.RideService.cancelTrip(tripId, id, cancelOpts);
                     clearCachedCurrentRide(id, types_1.UserRole.RIDER);
                     driverArrivalTimes.delete(tripId);
+                    // Cleanup is best-effort AFTER the authorized cancellation. A
+                    // cleanup failure must not be reported as a failed cancellation.
+                    try {
+                        const { DriverOfferService } = await Promise.resolve().then(() => __importStar(require('../services/driver-offer.service')));
+                        const releasedDriver = await DriverOfferService.cancelRideOffers(tripId);
+                        if (releasedDriver) {
+                            console.log(`[SOCKET] Released driver ${releasedDriver} from cancelled ride ${tripId}`);
+                        }
+                    }
+                    catch (cleanupErr) {
+                        console.error(`[SOCKET] Offer cleanup after cancel failed: ${cleanupErr.message}`);
+                    }
                 }
                 catch (err) {
                     console.error(`[SOCKET] Cancel trip failed: ${err.message}`);

@@ -3,8 +3,9 @@
 // Guards the HUD's speed-limit sourcing:
 //   * a route without a limit map starts with NO fake limit (the old
 //     hard-coded 30 mph was indistinguishable from a real Google limit);
-//   * the per-minute Google Roads result fills the HUD when the route has no
-//     limit of its own, and a failed lookup keeps the last known value.
+//   * the Google Roads result from a street change fills the HUD when the
+//     route has no limit of its own, and a failed lookup keeps the last
+//     known value.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:driver_flutter/services/speed_monitor.dart';

@@ -81,7 +81,16 @@ router.get('/favorites', authMiddleware, async (req: AuthRequest, res) => {
             where: { rider_id: riderId },
             include: {
                 driver: {
-                    include: {
+                    // Only public-facing driver card fields. The Driver model
+                    // also holds license/insurance/registration document URLs
+                    // and the FCM token; returning the whole record here leaked
+                    // private onboarding data to any rider who had completed a
+                    // trip with the driver.
+                    select: {
+                        user_id: true,
+                        rating: true,
+                        total_rides: true,
+                        is_active: true,
                         user: {
                             select: {
                                 full_name: true,

@@ -15,7 +15,20 @@ import { v4 as uuidv4 } from 'uuid';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 
-const UPLOADS_DIR = path.join(__dirname, '../../uploads');
+const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
+
+/**
+ * Resolve a stored `local/...` path inside UPLOADS_DIR and refuse traversal.
+ * Legacy rows (migration 029) embedded a path extracted from a user-supplied
+ * URL, so containment must be enforced at read/delete time as well.
+ */
+function resolveLocalPath(storedPath: string): string | null {
+  const relative = String(storedPath ?? '').replace(/^local\//, '');
+  const resolved = path.resolve(UPLOADS_DIR, relative);
+  const prefix = UPLOADS_DIR + path.sep;
+  if (resolved !== UPLOADS_DIR && !resolved.startsWith(prefix)) return null;
+  return resolved;
+}
 
 interface StoredFile extends StoredFileRecord {
   bucket: 'supabase' | 'local';
@@ -117,20 +130,32 @@ export class StorageService {
    *                 copy must be migrated; see
    *                 scripts/migrate-storage-visibility.cjs).
    */
-  static async getAccessUrl(fileId: string): Promise<{ url: string | null; mimetype: string | null; file: StoredFile | null }> {
-    const file = await this.getFileRecord(fileId);
+  static async getAccessUrl(
+    fileId: string,
+    knownFile?: StoredFile | null,
+  ): Promise<{ url: string | null; mimetype: string | null; file: StoredFile | null }> {
+    const file = knownFile ?? (await this.getFileRecord(fileId));
     if (!file) return { url: null, mimetype: null, file: null };
 
     if (file.bucket === 'supabase') {
-      if (file.visibility === 'public') {
-        const bucket = file.storage_bucket || PUBLIC_BUCKET;
-        const publicUrl = publicStorageUrl(file.path, bucket);
-        return { url: publicUrl, mimetype: file.mimetype, file };
-      }
-      // Private: signed URL only. TTL is short; the API proxies immediately.
-      const bucket = file.storage_bucket || PRIVATE_BUCKET;
+      // Every Supabase object is delivered through a short-lived signed URL.
+      // The `uploads` bucket is private (migration
+      // 20261028_private_uploads_bucket); public *visibility* means "anyone may
+      // ask /api/files/:id", not "the underlying object has a public URL".
+      const bucket =
+        file.storage_bucket ||
+        (file.visibility === 'public' ? PUBLIC_BUCKET : PRIVATE_BUCKET);
       const signed = await createSignedStorageUrl(file.path, 300, bucket);
       if (signed) return { url: signed, mimetype: file.mimetype, file };
+      if (file.visibility === 'public') {
+        // Legacy fallback only for a deployment that has not applied the
+        // private-bucket migration yet.
+        return {
+          url: publicStorageUrl(file.path, bucket),
+          mimetype: file.mimetype,
+          file,
+        };
+      }
       if (file.storage_bucket === PUBLIC_BUCKET) {
         // Last-resort fallback for un-migrated legacy objects; still requires
         // the signed URL path and MUST be migrated to the private bucket.
@@ -142,8 +167,10 @@ export class StorageService {
     }
 
     // Local bucket
-    const localPath = path.join(UPLOADS_DIR, file.path.replace('local/', ''));
-    if (!fs.existsSync(localPath)) return { url: null, mimetype: file.mimetype, file };
+    const localPath = resolveLocalPath(file.path);
+    if (!localPath || !fs.existsSync(localPath)) {
+      return { url: null, mimetype: file.mimetype, file };
+    }
 
     return { url: localPath, mimetype: file.mimetype, file };
   }
@@ -177,9 +204,9 @@ export class StorageService {
         await deleteStorageObject(filePath, PUBLIC_BUCKET).catch(() => false);
       }
     } else if (bucket === 'local') {
-      const localPath = path.join(UPLOADS_DIR, filePath.replace('local/', ''));
+      const localPath = resolveLocalPath(filePath);
       try {
-        if (fs.existsSync(localPath)) await fs.promises.unlink(localPath);
+        if (localPath && fs.existsSync(localPath)) await fs.promises.unlink(localPath);
       } catch { /* ignore */ }
     }
 

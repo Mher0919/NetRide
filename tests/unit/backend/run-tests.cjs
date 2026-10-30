@@ -41,7 +41,6 @@ const SUITES = [
   './modules/routing/routing.unit.test.ts',
   './routing/astar-routing.test.ts',
   './modules/app-version/app-version.unit.test.ts',
-  './modules/app-version/app-update.validation.unit.test.ts',
   './modules/app-version/app-version-enforcement.unit.test.ts',
   './modules/rewards/rewards.unit.test.ts',
   './modules/ride/ride-cancellation.unit.test.ts',
@@ -82,6 +81,7 @@ const SUITES = [
   './security/security-headers.unit.test.ts',
   './security/migration-file-guard.unit.test.cjs',
   './security/auth-hardening.unit.test.ts',
+  './security/token-purpose.unit.test.ts',
   './security/ride-transition-guards.unit.test.ts',
 ];
 

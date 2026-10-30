@@ -13,6 +13,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../utils/file_url.dart';
 import '../utils/pick_image.dart';
 import '../services/api_service.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
@@ -42,6 +43,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isSaving = false;
   bool _isEditing = false;
   bool _isVerified = false;
+  String? _verificationStatus;
   bool _hasPassword = false;
   bool _showVerificationHint = false;
   double _rating = 5.0;
@@ -80,6 +82,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _emailController.text = _email;
         _profileImageUrl = profile['profile_image_url'];
         _isVerified = profile['is_verified'] == true || profile['is_verified'] == 'true';
+        // The persisted verification status is authoritative. Absence of a
+        // value is not treated as "unverified" while data is still resolving;
+        // this screen only renders after a successful profile fetch.
+        _verificationStatus = profile['verification_status']?.toString();
         _hasPassword = profile['has_password'] == true;
         _rating = (profile['rating'] as num?)?.toDouble() ?? 5.0;
         _ratingCount = profile['rating_count'] as int? ?? 0;
@@ -450,6 +456,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetchProfile,
+        loadingWidget: const ProfileSkeleton(),
         successWidget: RefreshIndicator(
           color: const Color(0xFF5B7760),
           onRefresh: _refreshProfile,
@@ -603,6 +610,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileHeader(ThemeData theme) {
+    final status = _verificationStatus?.toUpperCase();
+    final isVerified = _isVerified || status == 'VERIFIED';
+    final isRejected = status == 'REJECTED' || status == 'BLOCKED';
+    final badgeColor = isVerified
+        ? const Color(0xFF5B7760)
+        : isRejected
+            ? const Color(0xFFC65A5A)
+            : const Color(0xFFC79A4A);
+    final badgeBackground = isVerified
+        ? const Color(0xFF6E8B74).withOpacity(0.1)
+        : isRejected
+            ? const Color(0xFFC65A5A).withOpacity(0.1)
+            : const Color(0xFFC79A4A).withOpacity(0.12);
+    final badgeLabel = isVerified
+        ? 'VERIFIED'
+        : isRejected
+            ? 'VERIFICATION REJECTED'
+            : 'PENDING VERIFICATION';
+    final badgeIcon = isVerified
+        ? Icons.verified_user
+        : isRejected
+            ? Icons.error_outline_rounded
+            : Icons.hourglass_empty_rounded;
+
     return Center(
       child: Column(
         children: [
@@ -663,7 +694,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 12),
           GestureDetector(
             onTap: () {
-              if (!_isVerified) {
+              if (!isVerified) {
                 setState(() => _showVerificationHint = true);
                 Future.delayed(const Duration(seconds: 3), () {
                   if (mounted) setState(() => _showVerificationHint = false);
@@ -673,25 +704,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: _isVerified ? const Color(0xFF6E8B74).withOpacity(0.1) : const Color(0xFFC65A5A).withOpacity(0.1),
+                color: badgeBackground,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    _isVerified ? Icons.verified_user : Icons.error_outline_rounded,
-                    size: 14,
-                    color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
-                  ),
+                  Icon(badgeIcon, size: 14, color: badgeColor),
                   const SizedBox(width: 6),
                   Text(
-                    _isVerified ? 'VERIFIED' : 'UNVERIFIED',
+                    badgeLabel,
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.5,
-                      color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                      color: badgeColor,
                     ),
                   ),
                 ],
@@ -699,11 +726,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           if (_showVerificationHint)
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0),
+            const Padding(
+              padding: EdgeInsets.only(top: 8.0),
               child: Text(
-                'Age should be verified to become verified.',
-                style: TextStyle(fontSize: 10, color: const Color(0xFFC65A5A), fontWeight: FontWeight.w500),
+                'Submit your ID to complete identity verification.',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Color(0xFFC65A5A),
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
         ],

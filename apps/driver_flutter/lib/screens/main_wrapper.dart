@@ -1,12 +1,11 @@
-import 'dart:async';
 import '../services/secure_token_store.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'availability_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
-import '../services/user_service.dart';
+import '../components/initialization_failure.dart';
+import '../components/skeletons.dart';
 import '../services/auth_service.dart';
 import '../providers/driver_provider.dart';
 
@@ -20,6 +19,8 @@ class MainWrapper extends StatefulWidget {
 class _MainWrapperState extends State<MainWrapper> {
   int _selectedIndex = 0;
   bool _isChecking = true;
+  bool _redirecting = false;
+  String? _initializationError;
 
   final List<Widget> _screens = [
     const AvailabilityScreen(),
@@ -39,47 +40,82 @@ class _MainWrapperState extends State<MainWrapper> {
 
   Future<void> _checkAuth() async {
     final token = SecureTokenStore.token;
-    if (token == null) {
-      if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-      }
+    if (token == null || token.isEmpty) {
+      _goToLogin();
+      return;
+    }
+
+    final provider = context.read<DriverProvider>();
+    await provider.initialize();
+    if (!mounted) return;
+
+    if (provider.initializationFailed) {
+      setState(() {
+        _isChecking = false;
+        _initializationError = provider.initErrorMessage ??
+            'We could not load your driver account. Please try again.';
+      });
       return;
     }
 
     try {
       // The backend is the single source of truth for onboarding completion.
-      // Even if this screen is reached via a deep link, back-stack, or a stale
-      // local cache, an un-onboarded driver must be sent back to onboarding.
-      final complete = await AuthService.isDriverOnboardingComplete();
+      // Crucially, a failed request is NOT interpreted as "onboarding
+      // incomplete" — that would bounce a fully registered driver back into
+      // onboarding on a transient network error.
+      final status = await AuthService.getOnboardingStatus();
       if (!mounted) return;
+      final driver = status['driver'];
+      final complete =
+          driver is Map && driver['onboarding_complete'] == true;
       if (!complete) {
-        Navigator.pushNamedAndRemoveUntil(context, '/onboarding', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          '/onboarding',
+          (route) => false,
+        );
         return;
       }
 
-      // Warm the cache for downstream screens, but do NOT use it for the
-      // onboarding decision above.
-      try {
-        final provider = Provider.of<DriverProvider>(context, listen: false);
-        unawaited(provider.fetchProfile());
-      } catch (_) {
-        // Non-fatal; the guard decision is already made from the backend.
-      }
-
-      setState(() => _isChecking = false);
+      setState(() {
+        _isChecking = false;
+        _initializationError = null;
+      });
     } catch (e) {
-      if (e is DioException && e.response?.statusCode == 404) {
-        debugPrint('User not found (404), logging out...');
-        await AuthService.logout();
-        if (mounted) {
-          Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-        }
-        return;
-      }
-      if (mounted) {
-        setState(() => _isChecking = false);
-      }
+      debugPrint('[MAIN] Driver onboarding check failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _isChecking = false;
+        _initializationError =
+            'We could not confirm your account status. Check your connection and retry.';
+      });
     }
+  }
+
+  void _goToLogin() {
+    if (_redirecting) return;
+    _redirecting = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+    });
+  }
+
+  Future<void> _retryInitialization() async {
+    final provider = context.read<DriverProvider>();
+    setState(() {
+      _isChecking = true;
+      _initializationError = null;
+    });
+    await provider.initialize(forceRefresh: true);
+    if (!mounted) return;
+    await _checkAuth();
+  }
+
+  Future<void> _signOut() async {
+    await AuthService.logout();
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
   }
 
   void _onItemTapped(int index) {
@@ -90,9 +126,30 @@ class _MainWrapperState extends State<MainWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isChecking) {
+    final provider = context.watch<DriverProvider>();
+
+    if (provider.initState == DriverInitState.failed &&
+        _initializationError == null) {
+      return InitializationFailure(
+        message: provider.initErrorMessage,
+        onRetry: _retryInitialization,
+        onSignOut: _signOut,
+      );
+    }
+
+    if (_initializationError != null) {
+      return InitializationFailure(
+        message: _initializationError,
+        onRetry: _retryInitialization,
+        onSignOut: _signOut,
+      );
+    }
+
+    if (_isChecking || provider.initState == DriverInitState.loading) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        backgroundColor: Color(0xFFEEEBE6),
+        body: DriverDashboardSkeleton(),
+        bottomNavigationBar: SkeletonBottomNavigation(),
       );
     }
 

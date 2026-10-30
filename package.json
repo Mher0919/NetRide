@@ -5,7 +5,7 @@
   "scripts": {
     "test": "npm --prefix backend test",
     "test:e2e": "npm --prefix backend run e2e:cancellation",
-    "test:security": "node tests/security/run-security-checks.cjs"
+    "test:security": "node tests/security/run-security-checks.cjs && node tests/security/database-security-checks.cjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

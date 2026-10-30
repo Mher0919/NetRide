@@ -21,13 +21,8 @@ class AppVersionService {
   static const String _appId = 'rider';
   static const String _cacheKey = 'app_version_policy_rider';
   static const String _cacheAtKey = 'app_version_policy_rider_at';
-  static const String _optionalSkipKey = 'app_version_optional_skipped_rider';
-  static const String _optionalSkipAtKey = 'app_version_optional_skipped_rider_at';
   static const Duration _cacheMaxAge = Duration(hours: 24);
-  static const Duration _optionalPromptWindow = Duration(hours: 24);
   static const Duration _requestTimeout = Duration(seconds: 6);
-
-  StreamSubscription<InstallStatus>? _flexibleUpdateSubscription;
 
   Future<AppUpdatePolicy?> check({
     Duration timeout = _requestTimeout,
@@ -79,28 +74,7 @@ class AppVersionService {
     );
   }
 
-  Future<bool> shouldPromptOptional(AppUpdatePolicy policy) async {
-    final prefs = await SharedPreferences.getInstance();
-    final skippedVersion = prefs.getString(_optionalSkipKey);
-    final skippedAt = prefs.getInt(_optionalSkipAtKey) ?? 0;
-    if (skippedVersion != policy.latestVersion) return true;
-    final age = DateTime.now().millisecondsSinceEpoch - skippedAt;
-    return age >= _optionalPromptWindow.inMilliseconds;
-  }
-
-  Future<void> dismissOptional(AppUpdatePolicy policy) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_optionalSkipKey, policy.latestVersion);
-    await prefs.setInt(
-      _optionalSkipAtKey,
-      DateTime.now().millisecondsSinceEpoch,
-    );
-  }
-
-  Future<AppUpdateLaunchResult> openStore(
-    AppUpdatePolicy policy, {
-    required bool immediate,
-  }) async {
+  Future<AppUpdateLaunchResult> openStore(AppUpdatePolicy policy) async {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       try {
         final info = await InAppUpdate.checkForUpdate();
@@ -109,24 +83,10 @@ class AppVersionService {
             info.updateAvailability ==
                 UpdateAvailability.developerTriggeredUpdateInProgress;
 
-        if (hasPlayUpdate && immediate && info.immediateUpdateAllowed) {
+        if (hasPlayUpdate && info.immediateUpdateAllowed) {
           final result = await InAppUpdate.performImmediateUpdate();
           if (result == AppUpdateResult.success) {
             return AppUpdateLaunchResult.updateStarted;
-          }
-          if (result == AppUpdateResult.userDeniedUpdate) {
-            return AppUpdateLaunchResult.cancelled;
-          }
-        } else if (hasPlayUpdate &&
-            !immediate &&
-            info.flexibleUpdateAllowed) {
-          final result = await InAppUpdate.startFlexibleUpdate();
-          if (result == AppUpdateResult.success) {
-            _watchFlexibleUpdate();
-            return AppUpdateLaunchResult.flexibleStarted;
-          }
-          if (result == AppUpdateResult.userDeniedUpdate) {
-            return AppUpdateLaunchResult.cancelled;
           }
         }
       } catch (error) {
@@ -155,30 +115,6 @@ class AppVersionService {
       debugPrint('[APP-UPDATE] Could not open store: $error');
       return AppUpdateLaunchResult.failed;
     }
-  }
-
-  Future<void> completePendingFlexibleUpdate() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    try {
-      final info = await InAppUpdate.checkForUpdate();
-      if (info.installStatus == InstallStatus.downloaded) {
-        await InAppUpdate.completeFlexibleUpdate();
-      }
-    } catch (error) {
-      debugPrint('[APP-UPDATE] Flexible update completion skipped: $error');
-    }
-  }
-
-  void _watchFlexibleUpdate() {
-    _flexibleUpdateSubscription ??=
-        InAppUpdate.installUpdateListener.listen((status) async {
-      if (status != InstallStatus.downloaded) return;
-      try {
-        await InAppUpdate.completeFlexibleUpdate();
-      } catch (error) {
-        debugPrint('[APP-UPDATE] Could not install downloaded update: $error');
-      }
-    });
   }
 
   String get _platformName {

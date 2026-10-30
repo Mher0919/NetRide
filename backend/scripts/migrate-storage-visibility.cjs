@@ -41,7 +41,20 @@ const authHeaders = { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KE
 
 async function ensurePrivateBucket() {
   const check = await fetch(`${storageBase}/bucket/${PRIVATE_BUCKET}`, { headers: authHeaders });
-  if (check.status === 200) return;
+  if (check.status === 200) {
+    const bucket = await check.json().catch(() => null);
+    if (bucket?.public === false) return;
+    const repair = await fetch(`${storageBase}/bucket/${PRIVATE_BUCKET}`, {
+      method: 'PUT',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ public: false }),
+    });
+    if (!repair.ok) {
+      throw new Error(`Bucket ${PRIVATE_BUCKET} is public and could not be repaired (${repair.status})`);
+    }
+    console.warn(`[migrate-storage] bucket ${PRIVATE_BUCKET} was public; made private.`);
+    return;
+  }
   const create = await fetch(`${storageBase}/bucket`, {
     method: 'POST',
     headers: { ...authHeaders, 'Content-Type': 'application/json' },
@@ -94,7 +107,7 @@ async function deletePublicObject(path) {
 
   console.log(`[migrate-storage] ${rows.length} private object(s) still in the public bucket.`);
   if (DRY_RUN) {
-    for (const row of rows) console.log(`  would copy ${row.id}`); // object paths are sensitive metadata ó never printed
+    for (const row of rows) console.log(`  would copy ${row.id}`); // object paths are sensitive metadata ÔøΩ never printed
     await client.end();
     return;
   }
@@ -106,7 +119,8 @@ async function deletePublicObject(path) {
   for (const row of rows) {
     const result = await copyObject(row.path).catch((err) => ({ ok: false, reason: err.message }));
     if (!result.ok) {
-      console.error(`  ‚ùå ${row.id} (${row.path}): ${result.reason}`);
+      // Object paths are sensitive metadata; report the row id only.
+      console.error(`  FAIL ${row.id}: ${result.reason}`);
       failed++;
       continue;
     }

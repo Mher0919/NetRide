@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../components/skeletons.dart';
 import '../providers/driver_provider.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
@@ -216,7 +217,7 @@ class _DocumentResubmissionScreenState
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const DriverDetailSkeleton()
           : _requirements.isEmpty
               ? Center(
                   child: Padding(

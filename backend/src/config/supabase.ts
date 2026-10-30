@@ -59,8 +59,32 @@ export async function ensurePrivateBucket(): Promise<boolean> {
       headers: { 'Authorization': `Bearer ${authKey}`, 'apikey': authKey },
     });
     if (res.status === 200) {
-      privateBucketVerified = true;
-      return true;
+      // A 200 only proves the bucket exists. An existing bucket that was
+      // created (or flipped) public would silently defeat the entire
+      // document-confidentiality model, so verify and repair the flag.
+      const existing: any = await res.json().catch(() => null);
+      if (existing?.public === false) {
+        privateBucketVerified = true;
+        return true;
+      }
+      const repair = await fetch(`${storageBaseUrl()}/bucket/${PRIVATE_BUCKET}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${authKey}`,
+          'apikey': authKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ public: false }),
+      });
+      if (repair.ok) {
+        console.warn(`[SUPABASE] ? Bucket ${PRIVATE_BUCKET} was public; made private.`);
+        privateBucketVerified = true;
+        return true;
+      }
+      console.error(
+        `[SUPABASE] Bucket ${PRIVATE_BUCKET} exists but is not private and could not be repaired (${repair.status}).`,
+      );
+      return false;
     }
     // 400/404 → create it explicitly, private.
     const create = await fetch(`${storageBaseUrl()}/bucket`, {

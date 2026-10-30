@@ -35,8 +35,7 @@ export class AppVersionController {
 
     try {
       const config = await getReleaseConfig(app, platform);
-      const enabled =
-        config.isActive && config.campaignStatus === 'PUBLISHED';
+      const enabled = config.isActive;
       const decision =
         enabled && currentVersion
           ? evaluateVersion(config, currentVersion, buildNumber ?? null)
@@ -53,20 +52,11 @@ export class AppVersionController {
         app: config.app,
         platform: config.platform,
         enabled,
-        campaign_status: config.campaignStatus,
         latest_version: config.latestVersion,
         minimum_version: config.minimumVersion,
         latest_build: config.latestBuild,
         minimum_build: config.minimumBuild,
         store_url: storeUrl,
-        release_notes: config.releaseNotes,
-        popup_title: config.popupTitle,
-        popup_message: config.popupMessage,
-        button_text: config.buttonText,
-        supporting_text: config.supportingText,
-        announcement_label: config.announcementLabel,
-        accent_color: config.accentColor,
-        published_at: config.publishedAt,
         update_required: decision.updateRequired,
         update_available: decision.updateAvailable,
       });

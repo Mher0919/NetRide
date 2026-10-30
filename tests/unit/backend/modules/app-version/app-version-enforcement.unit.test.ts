@@ -14,7 +14,6 @@ const activeConfig = {
   latestBuild: 21,
   storeUrl:
     'https://play.google.com/store/apps/details?id=com.netride.rider.rider_flutter',
-  campaignStatus: 'PUBLISHED' as const,
   isActive: true,
 };
 
@@ -76,7 +75,7 @@ function runMiddleware(
 test('exempt paths never enforce app version requirements', () => {
   assert.equal(isExemptFromAppUpdateEnforcement('GET', '/api/app/version'), true);
   assert.equal(isExemptFromAppUpdateEnforcement('POST', '/api/auth/oauth'), true);
-  assert.equal(isExemptFromAppUpdateEnforcement('GET', '/api/admin/app-updates'), true);
+  assert.equal(isExemptFromAppUpdateEnforcement('GET', '/api/admin/users'), true);
   assert.equal(isExemptFromAppUpdateEnforcement('GET', '/health'), true);
   assert.equal(isExemptFromAppUpdateEnforcement('POST', '/api/ride/request'), false);
 });
@@ -130,11 +129,10 @@ test('a supported version continues normally', async () => {
   }
 });
 
-test('disabled campaigns do not block protected operations', async () => {
+test('inactive release configs do not block protected operations', async () => {
   const middleware = createAppVersionEnforcement({
     getConfig: async () => ({
       ...activeConfig,
-      campaignStatus: 'DISABLED' as const,
       isActive: false,
     }),
   });

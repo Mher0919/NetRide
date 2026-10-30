@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import '../services/secure_token_store.dart';
 import 'package:provider/provider.dart';
+import '../components/initialization_failure.dart';
+import '../components/skeletons.dart';
 import '../providers/ride_provider.dart';
+import '../providers/session_provider.dart';
 import '../providers/specials_provider.dart';
 import '../services/app_nav.dart';
+import '../services/auth_service.dart';
 import 'map_screen.dart';
 import 'specials_screen.dart';
 import 'activity_screen.dart';
@@ -18,7 +22,7 @@ class MainWrapper extends StatefulWidget {
 
 class _MainWrapperState extends State<MainWrapper> {
   int _selectedIndex = 0;
-  bool _isChecking = true;
+  bool _redirectingToLogin = false;
 
   // Navigation stays: Explore / Specials / Activity / Account. Specials is
   // the dedicated discovery page; Explore keeps its inline SPECIALS section.
@@ -59,17 +63,29 @@ class _MainWrapperState extends State<MainWrapper> {
   }
 
   Future<void> _checkAuth() async {
-    final token = SecureTokenStore.token;
-    if (token == null) {
-      if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-      }
+    if (!SecureTokenStore.hasToken) {
+      _goToLogin();
       return;
     }
-
-    if (mounted) {
-      setState(() => _isChecking = false);
+    final session = context.read<SessionProvider>();
+    if (!session.isReady) {
+      await session.initialize();
     }
+  }
+
+  void _goToLogin() {
+    if (_redirectingToLogin) return;
+    _redirectingToLogin = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+    });
+  }
+
+  Future<void> _signOut() async {
+    await AuthService.logout();
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
   }
 
   void _onItemTapped(int index) {
@@ -89,8 +105,30 @@ class _MainWrapperState extends State<MainWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isChecking) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    final session = context.watch<SessionProvider>();
+
+    if (session.status == SessionStatus.unauthenticated) {
+      // The auth flow that cleared the session owns the navigation. Rendering
+      // a neutral skeleton here avoids a duplicate login push during logout.
+      return const Scaffold(
+        body: ExploreSkeleton(),
+        bottomNavigationBar: SkeletonBottomNavigation(),
+      );
+    }
+
+    if (session.isBusy) {
+      return const Scaffold(
+        body: ExploreSkeleton(),
+        bottomNavigationBar: SkeletonBottomNavigation(),
+      );
+    }
+
+    if (session.status == SessionStatus.failed) {
+      return InitializationFailure(
+        message: session.errorMessage,
+        onRetry: session.retry,
+        onSignOut: _signOut,
+      );
     }
 
     return Scaffold(

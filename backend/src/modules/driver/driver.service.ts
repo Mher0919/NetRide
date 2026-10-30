@@ -21,6 +21,13 @@ export class DriverService {
       [userId]
     );
     const profile = res.rows[0];
+    if (profile) {
+      // `u.*` includes credential and internal-risk columns. They are never
+      // part of the driver profile contract.
+      delete profile.password_hash;
+      delete profile.fcm_token;
+      delete profile.device_risk_state;
+    }
     if (profile && profile.user_id) {
       // Always return the authoritative active/approved vehicle first.
       // Legacy vehicles with NULL vehicle_status are treated as APPROVED.

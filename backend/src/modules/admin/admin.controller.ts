@@ -24,6 +24,16 @@ import { isPortalIdentity } from '../portal/portal-identities';
 import { jsonSafe } from '../../utils/json-safe';
 
 export class AdminController {
+  /** Strip credential/internal columns from Prisma User rows before JSON. */
+  private static safeUser(user: any): any {
+    if (!user || typeof user !== 'object') return user;
+    const safe = { ...user };
+    delete safe.password_hash;
+    delete safe.fcm_token;
+    delete safe.device_risk_state;
+    return safe;
+  }
+
   private static toJSON(value: any): any {
     // BigInt/Decimal/Date-aware deep clone (see utils/json-safe.ts). The
     // previous hand-rolled recursion turned every Date into `{}` and every
@@ -703,7 +713,7 @@ export class AdminController {
         },
       });
 
-      res.json({ message: 'User verified successfully', user });
+      res.json({ message: 'User verified successfully', user: AdminController.safeUser(user) });
     } catch (error: any) {
       console.error(`[ADMIN] ❌ Verify user error: ${error.message}`);
       res.status(500).json({ error: 'Failed to verify user.' });
@@ -750,7 +760,7 @@ export class AdminController {
         },
       });
 
-      res.json({ message: 'User rejected', user });
+      res.json({ message: 'User rejected', user: AdminController.safeUser(user) });
     } catch (error: any) {
       console.error(`[ADMIN] ❌ Reject user error: ${error.message}`);
       res.status(500).json({ error: 'Failed to reject user.' });
@@ -789,7 +799,7 @@ export class AdminController {
         },
       });
 
-      res.json({ message: 'User status set to pending', user });
+      res.json({ message: 'User status set to pending', user: AdminController.safeUser(user) });
     } catch (error: any) {
       console.error(`[ADMIN] ❌ Set pending error: ${error.message}`);
       res.status(500).json({ error: 'Failed to update user status.' });
@@ -833,7 +843,7 @@ export class AdminController {
         },
       });
 
-      res.json({ message: 'User blocked', user });
+      res.json({ message: 'User blocked', user: AdminController.safeUser(user) });
     } catch (error: any) {
       console.error(`[ADMIN] ❌ Block user error: ${error.message}`);
       res.status(500).json({ error: 'Failed to block user.' });
@@ -871,7 +881,7 @@ export class AdminController {
         },
       });
 
-      res.json({ message: 'User unblocked', user });
+      res.json({ message: 'User unblocked', user: AdminController.safeUser(user) });
     } catch (error: any) {
       console.error(`[ADMIN] ❌ Unblock user error: ${error.message}`);
       res.status(500).json({ error: 'Failed to unblock user.' });
@@ -1785,6 +1795,21 @@ export class AdminController {
   static async getLiveDrivers(req: AuthRequest, res: Response) {
     try {
       const { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } = await import('../../config/redis');
+      // The shared client is lazyConnect + enableOfflineQueue:false. If the
+      // admin dashboard is the first caller after a cold start, give the
+      // connection a bounded chance to come up instead of failing with
+      // "Stream isn't writeable"; if Redis is genuinely down, return a
+      // retryable 503 rather than a 500.
+      if (redis.status === 'wait') {
+        redis.connect().catch(() => undefined);
+      }
+      const deadline = Date.now() + 5000;
+      while (redis.status !== 'ready' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (redis.status !== 'ready') {
+        return res.status(503).json({ error: 'Live driver data is temporarily unavailable. Retry shortly.' });
+      }
       const driverIds = await redis.zrange(DRIVER_LOCATIONS_KEY, 0, -1);
       
       const liveDrivers = [];

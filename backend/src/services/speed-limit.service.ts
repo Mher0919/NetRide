@@ -3,9 +3,10 @@
 // Server-side speed-limit lookup for the driver HUD.
 //
 // Google Routes does not return legal speed limits, so the driver app asks
-// this endpoint once a minute while navigating. The lookup is backed by the
-// Google Roads API `speedLimits` endpoint (requested in MPH), cached for one
-// minute per ~10 m coordinate cell so a 1 Hz HUD never floods Google.
+// this endpoint whenever the driver turns onto a new street while navigating.
+// The lookup is backed by the Google Roads API `speedLimits` endpoint
+// (requested in MPH), cached for one minute per ~10 m coordinate cell so
+// repeated turns near an intersection never flood Google.
 //
 // The client keeps its last known limit when this service cannot resolve one
 // (no key / Roads API not enabled / transient upstream failure). We never

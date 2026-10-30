@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../components/skeletons.dart';
 import '../services/favorite_driver_service.dart';
 import '../utils/file_url.dart';
 
@@ -100,9 +101,7 @@ class _FavoriteDriversScreenState extends State<FavoriteDriversScreen> {
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Color(0xFF5B7760)),
-      );
+      return const FavoriteDriversSkeleton();
     }
 
     if (_error != null) {

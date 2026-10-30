@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
@@ -243,6 +244,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetch,
+        loadingWidget: const ReferralSkeleton(),
         successWidget: _info == null ? const SizedBox.shrink() : _buildContent(theme),
       ),
     );

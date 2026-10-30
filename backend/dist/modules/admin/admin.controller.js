@@ -51,6 +51,16 @@ const testUser_1 = require("../../utils/testUser");
 const portal_identities_1 = require("../portal/portal-identities");
 const json_safe_1 = require("../../utils/json-safe");
 class AdminController {
+    /** Strip credential/internal columns from Prisma User rows before JSON. */
+    static safeUser(user) {
+        if (!user || typeof user !== 'object')
+            return user;
+        const safe = { ...user };
+        delete safe.password_hash;
+        delete safe.fcm_token;
+        delete safe.device_risk_state;
+        return safe;
+    }
     static toJSON(value) {
         // BigInt/Decimal/Date-aware deep clone (see utils/json-safe.ts). The
         // previous hand-rolled recursion turned every Date into `{}` and every
@@ -661,7 +671,7 @@ class AdminController {
                     details: `User ${user.email} verified by admin.`,
                 },
             });
-            res.json({ message: 'User verified successfully', user });
+            res.json({ message: 'User verified successfully', user: AdminController.safeUser(user) });
         }
         catch (error) {
             console.error(`[ADMIN] ❌ Verify user error: ${error.message}`);
@@ -704,7 +714,7 @@ class AdminController {
                     details: `User ${user.email} rejected. Reason: ${reason}`,
                 },
             });
-            res.json({ message: 'User rejected', user });
+            res.json({ message: 'User rejected', user: AdminController.safeUser(user) });
         }
         catch (error) {
             console.error(`[ADMIN] ❌ Reject user error: ${error.message}`);
@@ -740,7 +750,7 @@ class AdminController {
                     details: `User ${user.email} set back to pending.`,
                 },
             });
-            res.json({ message: 'User status set to pending', user });
+            res.json({ message: 'User status set to pending', user: AdminController.safeUser(user) });
         }
         catch (error) {
             console.error(`[ADMIN] ❌ Set pending error: ${error.message}`);
@@ -779,7 +789,7 @@ class AdminController {
                     details: `User ${user.email} blocked. Reason: ${reason}`,
                 },
             });
-            res.json({ message: 'User blocked', user });
+            res.json({ message: 'User blocked', user: AdminController.safeUser(user) });
         }
         catch (error) {
             console.error(`[ADMIN] ❌ Block user error: ${error.message}`);
@@ -814,7 +824,7 @@ class AdminController {
                     details: `User ${user.email} unblocked.`,
                 },
             });
-            res.json({ message: 'User unblocked', user });
+            res.json({ message: 'User unblocked', user: AdminController.safeUser(user) });
         }
         catch (error) {
             console.error(`[ADMIN] ❌ Unblock user error: ${error.message}`);
@@ -1622,6 +1632,21 @@ class AdminController {
     static async getLiveDrivers(req, res) {
         try {
             const { redis, DRIVER_LOCATIONS_KEY, DRIVER_HEARTBEAT_PREFIX } = await Promise.resolve().then(() => __importStar(require('../../config/redis')));
+            // The shared client is lazyConnect + enableOfflineQueue:false. If the
+            // admin dashboard is the first caller after a cold start, give the
+            // connection a bounded chance to come up instead of failing with
+            // "Stream isn't writeable"; if Redis is genuinely down, return a
+            // retryable 503 rather than a 500.
+            if (redis.status === 'wait') {
+                redis.connect().catch(() => undefined);
+            }
+            const deadline = Date.now() + 5000;
+            while (redis.status !== 'ready' && Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            if (redis.status !== 'ready') {
+                return res.status(503).json({ error: 'Live driver data is temporarily unavailable. Retry shortly.' });
+            }
             const driverIds = await redis.zrange(DRIVER_LOCATIONS_KEY, 0, -1);
             const liveDrivers = [];
             for (const id of driverIds) {

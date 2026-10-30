@@ -13,6 +13,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../components/skeletons.dart';
 import '../models/special_models.dart';
 import '../providers/specials_provider.dart';
 import '../services/app_nav.dart';
@@ -108,7 +109,7 @@ class _SpecialRedemptionScreenState extends State<SpecialRedemptionScreen> {
           if (specials.loading &&
               specials.current == null &&
               specials.pending.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
+            return const WalletSkeleton();
           }
           final r = _resolve(specials);
           if (r == null) {

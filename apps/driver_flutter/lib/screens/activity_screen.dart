@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../providers/driver_provider.dart';
 import '../services/api_service.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import 'report_sheet.dart';
 
@@ -123,6 +124,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetchHistory,
+        loadingWidget: const DriverActivitySkeleton(),
         successWidget: _history.isEmpty
             ? RefreshIndicator(
                 color: const Color(0xFF5B7760),

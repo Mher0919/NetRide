@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
+import '../components/skeletons.dart';
 import '../services/api_service.dart';
 
 class ReasonOption {
@@ -329,9 +330,17 @@ class _ReportSheetState extends State<ReportSheet> {
           ),
           const SizedBox(height: 16),
           if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: CircularProgressIndicator()),
+            const SkeletonPulse(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SkeletonLine(width: 190, height: 14),
+                  SizedBox(height: 12),
+                  SkeletonBox(height: 52, borderRadius: 12),
+                  SizedBox(height: 10),
+                  SkeletonBox(height: 52, borderRadius: 12),
+                ],
+              ),
             )
           else if (_loadError != null)
             Padding(

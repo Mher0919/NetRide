@@ -15,34 +15,6 @@ export const RATE_LIMITS: Record<string, RateLimitEntry> = {
   'GET /api/app/version': {
     ip: { max: 120, windowMs: MINUTE },
   },
-  'GET /api/admin/app-updates': {
-    user: { max: 60, windowMs: MINUTE },
-    ip: { max: 120, windowMs: MINUTE },
-  },
-  'GET /api/admin/app-updates/:app/:platform': {
-    user: { max: 60, windowMs: MINUTE },
-    ip: { max: 120, windowMs: MINUTE },
-  },
-  'GET /api/admin/app-updates/:app/:platform/history': {
-    user: { max: 60, windowMs: MINUTE },
-    ip: { max: 120, windowMs: MINUTE },
-  },
-  'PUT /api/admin/app-updates/:app/:platform/draft': {
-    user: { max: 30, windowMs: MINUTE },
-    ip: { max: 60, windowMs: MINUTE },
-  },
-  'DELETE /api/admin/app-updates/:app/:platform/draft': {
-    user: { max: 20, windowMs: MINUTE },
-    ip: { max: 40, windowMs: MINUTE },
-  },
-  'POST /api/admin/app-updates/:app/:platform/publish': {
-    user: { max: 10, windowMs: MINUTE },
-    ip: { max: 20, windowMs: MINUTE },
-  },
-  'POST /api/admin/app-updates/:app/:platform/deactivate': {
-    user: { max: 10, windowMs: MINUTE },
-    ip: { max: 20, windowMs: MINUTE },
-  },
 
   // Authentication endpoints — strict limits. Keys MUST match the mounted
   // route paths (authRoutes mounted at /api/auth) or they never apply.

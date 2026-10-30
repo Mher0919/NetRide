@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.partnerMiddleware = exports.driverMiddleware = exports.riderMiddleware = exports.sponsorMiddleware = exports.adminMiddleware = exports.authMiddleware = void 0;
 const auth_service_1 = require("../modules/auth/auth.service");
 const database_1 = require("../config/database");
+const token_purpose_1 = require("../security/token-purpose");
 const authMiddleware = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader?.split(' ')[1];
@@ -14,9 +15,12 @@ const authMiddleware = async (req, res, next) => {
     let decoded;
     try {
         decoded = auth_service_1.AuthService.verifyToken(token);
+        if (!(0, token_purpose_1.isSessionAccessToken)(decoded)) {
+            throw new Error('Token is not a session access token');
+        }
     }
     catch (err) {
-        console.error(`[AUTH] ❌ Verification failed for ${req.originalUrl}: ${err.message}`);
+        console.error(`[AUTH] �?O Verification failed for ${req.originalUrl}: ${err.message}`);
         return res.status(401).json({ error: 'Unauthorized: Invalid token' });
     }
     // Re-check the token subject against current database state so that
@@ -125,6 +129,10 @@ const partnerMiddleware = async (req, res, next) => {
        LIMIT 1`, [req.user.id]);
         if (result.rows.length === 0) {
             return res.status(403).json({ error: 'Partner account not found.' });
+        }
+        // Suspended/archived partners must not keep reading earnings or usage.
+        if (String(result.rows[0].status ?? '').toUpperCase() !== 'ACTIVE') {
+            return res.status(403).json({ error: 'Your partner account is inactive or suspended.' });
         }
         // Server-side temporary-password enforcement (mirrors sponsorMiddleware).
         if (result.rows[0].must_change_password) {

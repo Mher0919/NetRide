@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middleware/auth.middleware';
 export declare class AdminController {
+    /** Strip credential/internal columns from Prisma User rows before JSON. */
+    private static safeUser;
     private static toJSON;
     static getStats(req: AuthRequest, res: Response): Promise<void>;
     static listFleets(req: AuthRequest, res: Response): Promise<void>;
@@ -101,7 +103,7 @@ export declare class AdminController {
     static listRegions(req: AuthRequest, res: Response): Promise<void>;
     /** Create / update a region (admin-only). Validated server-side. */
     static upsertRegion(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
-    static getLiveDrivers(req: AuthRequest, res: Response): Promise<void>;
+    static getLiveDrivers(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
     /**
      * Fleet-wide view of recent speeding violations, newest first.
      * Used by the /speeding admin dashboard.

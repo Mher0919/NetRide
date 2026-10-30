@@ -22,12 +22,26 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  StreamSubscription<AuthState>? _oauthSubscription;
+
+  @override
+  void dispose() {
+    _oauthSubscription?.cancel();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   Future<void> _handleOAuth(String provider) async {
     setState(() => _isLoading = true);
     try {
       final supabase = Supabase.instance.client;
-      
+
+      // Never leave a listener from an abandoned OAuth attempt alive: it could
+      // otherwise consume a later session event and overwrite the account
+      // state created by a different registration/login flow.
+      await _oauthSubscription?.cancel();
+      _oauthSubscription = null;
       StreamSubscription<AuthState>? subscription;
 
       // 1. Listen for the FIRST session event to complete the login
@@ -69,10 +83,14 @@ class _LoginScreenState extends State<LoginScreen> {
               );
             }
           } finally {
-            subscription?.cancel();
+            await subscription?.cancel();
+            if (identical(_oauthSubscription, subscription)) {
+              _oauthSubscription = null;
+            }
           }
         }
       });
+      _oauthSubscription = subscription;
 
       // 2. Trigger the OAuth flow.
       // The consent-screen label ("Logging in for NetRide") is configured in
@@ -93,6 +111,8 @@ class _LoginScreenState extends State<LoginScreen> {
       Future.delayed(const Duration(minutes: 5), () => subscription?.cancel());
 
     } catch (e) {
+      await _oauthSubscription?.cancel();
+      _oauthSubscription = null;
       if (mounted) {
         final message = ErrorHandler.friendly(
           e,

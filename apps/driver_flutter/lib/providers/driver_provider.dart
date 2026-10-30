@@ -29,7 +29,30 @@ enum DriverComplianceStatus {
   headshotActionRequired,
 }
 
+/// Deterministic driver-session initialization state.
+///
+/// `ready` means the authoritative profile (and the driver's own verification
+/// fields) has been resolved. Until then the dashboard must render a skeleton
+/// or a retryable error — never a definitive "pending/unverified" account.
+enum DriverInitState { uninitialized, loading, ready, failed }
+
 class DriverProvider with ChangeNotifier {
+  DriverProvider({
+    Future<Map<String, dynamic>> Function()? profileLoader,
+    Future<Map<String, dynamic>> Function()? documentLoader,
+    String? Function()? tokenReader,
+    String? Function()? userIdReader,
+  })  : _profileLoader = profileLoader ?? UserService.getProfile,
+        _documentLoader =
+            documentLoader ?? UserService.getDocumentRequirements,
+        _tokenReader = tokenReader ?? (() => SecureTokenStore.token),
+        _userIdReader = userIdReader ?? (() => SecureTokenStore.userId);
+
+  final Future<Map<String, dynamic>> Function() _profileLoader;
+  final Future<Map<String, dynamic>> Function() _documentLoader;
+  final String? Function() _tokenReader;
+  final String? Function() _userIdReader;
+
   models.DriverStatus _status = models.DriverStatus.offline;
 
   models.Trip? _currentTrip;
@@ -120,9 +143,18 @@ class DriverProvider with ChangeNotifier {
   bool _headshotActionRequired = false;
 
   bool _isVerified = false;
-  String _verificationStatus = 'PENDING';
+  String? _verificationStatus;
   String? _rejectionReason;
   bool _feedbackSeen = true;
+
+  // Session / initialization state
+  DriverInitState _initState = DriverInitState.uninitialized;
+  String? _initErrorMessage;
+  Map<String, dynamic>? _profile;
+  String? _activeToken;
+  String? _sessionUserId;
+  int _sessionGeneration = 0;
+  Future<void>? _initInFlight;
 
   // Cache infrastructure
   final _cacheRepo = UserCacheRepository();
@@ -150,9 +182,15 @@ class DriverProvider with ChangeNotifier {
     notifyListeners();
   }
   bool get isVerified => _isVerified;
-  String get verificationStatus => _verificationStatus;
+  String? get verificationStatus => _verificationStatus;
   String? get rejectionReason => _rejectionReason;
   bool get feedbackSeen => _feedbackSeen;
+
+  DriverInitState get initState => _initState;
+  bool get profileReady => _initState == DriverInitState.ready;
+  bool get initializationFailed => _initState == DriverInitState.failed;
+  String? get initErrorMessage => _initErrorMessage;
+  Map<String, dynamic>? get profile => _profile;
 
   models.DriverStatus get status => _status;
 
@@ -190,6 +228,7 @@ class DriverProvider with ChangeNotifier {
   bool get showApprovedToast => _showApprovedToast;
 
   bool get canGoOnline =>
+      profileReady &&
       _isVerified &&
       !_hasPendingProfileChange &&
       !_hasDocumentActionRequired &&
@@ -197,6 +236,7 @@ class DriverProvider with ChangeNotifier {
       !_headshotActionRequired;
 
   DriverComplianceStatus? buildDriverComplianceStatus() {
+    if (!profileReady) return null;
     if (_hasPendingProfileChange) return DriverComplianceStatus.profileChangePending;
     if (_verificationStatus == 'REJECTED') return DriverComplianceStatus.backgroundCheckRejected;
     if (_hasDocumentActionRequired) return DriverComplianceStatus.documentActionRequired;
@@ -253,11 +293,12 @@ class DriverProvider with ChangeNotifier {
 
   Map<String, dynamic>? _cacheHydrateProfile() {
     try {
-      final cached = CacheService.instance.get(CacheKeys.driverProfile(
-        _cacheRepo.driverId,
-      ));
+      final userId = _currentDriverId;
+      if (userId == null) return null;
+      final cached = CacheService.instance.get(CacheKeys.driverProfile(userId));
       if (cached == null) return null;
       final profile = Map<String, dynamic>.from(cached as Map);
+      _profile = profile;
       _applyProfileState(profile);
       return profile;
     } catch (_) {
@@ -365,17 +406,244 @@ class DriverProvider with ChangeNotifier {
     }
   }
 
-  // ── Token / socket initialization ────────────────────────────────
+  // ── Session / token initialization ───────────────────────────────
 
+  /// Applies a newly authenticated token exactly once and resolves the
+  /// authoritative driver profile before the shell renders. Repeated calls
+  /// with the same token are no-ops, so registration callbacks, notifier
+  /// listeners and lifecycle events cannot start duplicate sessions.
   void updateToken(String token) {
+    if (token.isEmpty) {
+      resetSession();
+      return;
+    }
+    if (token == _activeToken && _initState != DriverInitState.uninitialized) {
+      return;
+    }
+
+    final subject = _userIdFromToken(token);
+    final nextUserId = subject ?? _userIdReader();
+    if (_sessionUserId != null &&
+        nextUserId != null &&
+        _sessionUserId != nextUserId) {
+      _clearUserScopedState();
+    }
+    _activeToken = token;
+    _sessionUserId = nextUserId;
     initSocket(token);
+    initialize(forceRefresh: true);
+  }
+
+  /// Drops every user-scoped in-memory value. Called on logout or when the
+  /// authenticated identity changes, so a previous driver's verification or
+  /// document state can never leak into a new registration.
+  void resetSession() {
+    _sessionGeneration++;
+    _initInFlight = null;
+    _activeToken = null;
+    _sessionUserId = null;
+    _initState = DriverInitState.uninitialized;
+    _initErrorMessage = null;
+    _clearUserScopedState();
+    _cacheHydrated = false;
+    _cacheRepo.setDriverId(null);
+    _socket?.off('');
+    _socket?.disconnect();
+    _socket?.dispose();
+    _socket = null;
+    _isConnected = false;
+    notifyListeners();
+  }
+
+  void _clearUserScopedState() {
+    _isVerified = false;
+    _verificationStatus = null;
+    _rejectionReason = null;
+    _feedbackSeen = true;
+    _hasPendingProfileChange = false;
+    _pendingRequestId = null;
+    _pendingSince = null;
+    _pendingChangesSummary = null;
+    _hasDocumentActionRequired = false;
+    _hasVehicleInspectionRequired = false;
+    _hasDocumentSubmitted = false;
+    _documentRequirements = [];
+    _documentTypesWithActionRequired = {};
+    _headshotActionRequired = false;
+    _showApprovedToast = false;
+    _profile = null;
+    _cacheHydrated = false;
+
+    // Ride / availability state is also user-scoped. A new registration must
+    // never inherit an offer, active trip or online lease from the previous
+    // session while the new socket/REST snapshot is still loading.
+    _clearOfferNotification();
+    _cancelConfirmTimer?.cancel();
+    _cancelConfirmTimer = null;
+    _cancelling = false;
+    _cancelConfirmFailed = false;
+    _lastCancelError = null;
+    _currentTrip = null;
+    _incomingRequest = null;
+    _lastCancelledTrip = null;
+    _lastCompletedTrip = null;
+    _messages = [];
+    _riderLocation = null;
+    _settledTripIds.clear();
+    _currentTripUpdatedAt = null;
+    _tripActionPending = false;
+    _socketError = null;
+    _status = models.DriverStatus.offline;
+    _serverOnline = false;
+    _availabilityPending = false;
+    _availabilityExpiresAt = null;
+    _lastAvailabilityError = null;
+  }
+
+  /// Loads the authoritative profile (and independent document requirements)
+  /// for the current identity. Concurrent calls share one attempt; [force]
+  /// starts a new attempt and invalidates any older response.
+  Future<void> initialize({bool forceRefresh = false}) {
+    final existing = _initInFlight;
+    if (existing != null && !forceRefresh) return existing;
+    final future = _initializeSession(forceRefresh: forceRefresh);
+    _initInFlight = future;
+    future.whenComplete(() {
+      if (identical(_initInFlight, future)) _initInFlight = null;
+    });
+    return future;
+  }
+
+  Future<void> _initializeSession({required bool forceRefresh}) async {
+    final token = _tokenReader();
+    if (token == null || token.isEmpty) {
+      resetSession();
+      return;
+    }
+
+    final generation = ++_sessionGeneration;
+    final userId = _userIdReader() ?? _sessionUserId;
+    if (userId != null) {
+      _sessionUserId = userId;
+      _cacheRepo.setDriverId(userId);
+    }
+
+    _initState = DriverInitState.loading;
+    _initErrorMessage = null;
+    notifyListeners();
+
+    try {
+      final profile = await _profileLoader();
+      if (!_isCurrentSession(generation, token, userId)) return;
+
+      _profile = profile;
+      _applyProfileState(profile);
+      if (userId != null) {
+        await CacheService.instance.set(
+          CacheKeys.driverProfile(userId),
+          profile,
+          CachePolicy.profile,
+        );
+      }
+      _initState = DriverInitState.ready;
+      notifyListeners();
+
+      // Document requirements are independent of the minimum profile needed
+      // to render the dashboard. They load progressively and never block the
+      // profile from becoming ready.
+      _loadDocumentRequirementsForSession(generation, token, userId);
+    } catch (e) {
+      if (!_isCurrentSession(generation, token, userId)) return;
+
+      final cached = _readCachedProfile(userId);
+      if (cached != null) {
+        debugPrint('[SESSION] Profile fetch failed; using cached driver profile');
+        _profile = cached;
+        _applyProfileState(cached);
+        _initState = DriverInitState.ready;
+        notifyListeners();
+        _loadDocumentRequirementsForSession(generation, token, userId);
+        return;
+      }
+
+      debugPrint('[SESSION] Driver initialization failed: $e');
+      _initErrorMessage =
+          'We could not load your driver profile. Please check your connection and try again.';
+      _initState = DriverInitState.failed;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadDocumentRequirementsForSession(
+    int generation,
+    String token,
+    String? userId,
+  ) async {
+    try {
+      final docReqs = await _documentLoader();
+      if (!_isCurrentSession(generation, token, userId)) return;
+      final reqs = (docReqs['requirements'] as List?)
+              ?.map((r) => Map<String, dynamic>.from(r as Map))
+              .toList() ??
+          [];
+      _applyDocumentRequirements(reqs);
+      if (userId != null) {
+        await CacheService.instance.set(
+          CacheKeys.driverDocumentRequirements(userId),
+          reqs,
+          CachePolicy.documentRequirements,
+        );
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[SESSION] Document requirements unavailable: $e');
+    }
+  }
+
+  Map<String, dynamic>? _readCachedProfile(String? userId) {
+    if (userId == null || userId.isEmpty) return null;
+    final cached = CacheService.instance.get(CacheKeys.driverProfile(userId));
+    if (cached is Map) return Map<String, dynamic>.from(cached);
+    return null;
+  }
+
+  bool _isCurrentSession(int generation, String token, String? userId) {
+    if (generation != _sessionGeneration) return false;
+    if (_tokenReader() != token) return false;
+    final currentUserId = _userIdReader();
+    if (userId != null && currentUserId != null && currentUserId != userId) {
+      return false;
+    }
+    return true;
+  }
+
+  String? _userIdFromToken(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return null;
+      String payload = parts[1];
+      switch (payload.length % 4) {
+        case 2:
+          payload += '==';
+          break;
+        case 3:
+          payload += '=';
+          break;
+      }
+      final decoded = utf8.decode(base64Url.decode(base64Url.normalize(payload)));
+      final json = jsonDecode(decoded) as Map<String, dynamic>;
+      final id = json['id']?.toString();
+      return (id == null || id.isEmpty) ? null : id;
+    } catch (_) {
+      return null;
+    }
   }
 
   // ── Cache-aware profile fetching ─────────────────────────────────
 
   /// Cache-first profile fetch with background revalidation.
   Future<Map<String, dynamic>> fetchProfile() async {
-    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    final driverId = _currentDriverId;
 
     if (!_cacheHydrated && driverId != null) {
       _cacheRepo.setDriverId(driverId);
@@ -404,10 +672,16 @@ class DriverProvider with ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> _fetchAndCacheProfile() async {
+    final generation = _sessionGeneration;
     try {
-      final profile = await UserService.getProfile();
+      final profile = await _profileLoader();
+      if (generation != _sessionGeneration) {
+        debugPrint('[SESSION] Ignoring stale profile refresh');
+        return profile;
+      }
+      _profile = profile;
       _applyProfileState(profile);
-      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      final driverId = _currentDriverId;
       if (driverId != null) {
         await CacheService.instance.set(
           CacheKeys.driverProfile(driverId),
@@ -421,6 +695,15 @@ class DriverProvider with ChangeNotifier {
       debugPrint('Error fetching profile: $e');
       rethrow;
     }
+  }
+
+  String? get _currentDriverId {
+    final userId = _userIdReader();
+    if (userId != null && userId.isNotEmpty) return userId;
+    if (_sessionUserId != null && _sessionUserId!.isNotEmpty) {
+      return _sessionUserId;
+    }
+    return null;
   }
 
   void _applyProfileState(Map<String, dynamic> profile) {
@@ -438,14 +721,19 @@ class DriverProvider with ChangeNotifier {
       _pendingChangesSummary = null;
     }
 
-    _verificationStatus = (profile['background_check_status'] ?? 'PENDING').toString();
+    // Absence of a verification field is "not resolved", never a definitive
+    // PENDING/UNVERIFIED result. The provider only renders as ready after an
+    // authoritative profile response (or validated cache fallback).
+    final rawStatus = profile['background_check_status']?.toString().trim();
+    _verificationStatus =
+        (rawStatus == null || rawStatus.isEmpty) ? null : rawStatus;
     _rejectionReason = profile['rejection_reason']?.toString();
     _feedbackSeen = profile['verification_feedback_seen'] == true;
     _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
 
     // Cache verification status separately (Class B)
-    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
-    if (driverId != null) {
+    final driverId = _currentDriverId;
+    if (driverId != null && _verificationStatus != null) {
       CacheService.instance.set(
         CacheKeys.driverVerificationStatus(driverId),
         _verificationStatus,
@@ -457,7 +745,7 @@ class DriverProvider with ChangeNotifier {
   // ── Cache-aware document requirements fetching ───────────────────
 
   Future<void> fetchDocumentRequirements() async {
-    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    final driverId = _currentDriverId;
 
     // Cache-first
     if (driverId != null) {
@@ -481,14 +769,16 @@ class DriverProvider with ChangeNotifier {
   }
 
   Future<void> _fetchAndCacheDocumentRequirements() async {
+    final generation = _sessionGeneration;
     try {
-      final docReqs = await UserService.getDocumentRequirements();
+      final docReqs = await _documentLoader();
+      if (generation != _sessionGeneration) return;
       final reqs = (docReqs['requirements'] as List?)
               ?.map((r) => Map<String, dynamic>.from(r as Map))
               .toList() ??
           [];
       _applyDocumentRequirements(reqs);
-      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      final driverId = _currentDriverId;
       if (driverId != null) {
         await CacheService.instance.set(
           CacheKeys.driverDocumentRequirements(driverId),
@@ -763,7 +1053,7 @@ class DriverProvider with ChangeNotifier {
 
     _socket!.on('documentRequirementsChanged', (data) async {
       debugPrint('[SOCKET] documentRequirementsChanged received — invalidating cache');
-      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      final driverId = _currentDriverId;
       if (driverId != null) {
         await CacheService.instance.invalidate(CacheKeys.driverDocumentRequirements(driverId));
         await CacheService.instance.invalidate(CacheKeys.driverProfile(driverId));
@@ -778,7 +1068,7 @@ class DriverProvider with ChangeNotifier {
 
     _socket!.on('vehicleRequirementsChanged', (data) async {
       debugPrint('[SOCKET] vehicleRequirementsChanged received — invalidating cache');
-      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      final driverId = _currentDriverId;
       if (driverId != null) {
         await CacheService.instance.invalidate(CacheKeys.driverVehicle(driverId));
         await CacheService.instance.invalidate(CacheKeys.driverProfile(driverId));
@@ -790,7 +1080,7 @@ class DriverProvider with ChangeNotifier {
 
     _socket!.on('profileChangeReviewed', (data) async {
       debugPrint('[SOCKET] profileChangeReviewed received — invalidating cache');
-      final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+      final driverId = _currentDriverId;
       if (driverId != null) {
         await CacheService.instance.invalidateAll([
           CacheKeys.driverProfile(driverId),
@@ -1079,7 +1369,7 @@ class DriverProvider with ChangeNotifier {
   /// Pulls the latest profile from the server, bypasses cache.
   Future<Map<String, dynamic>> refreshProfile() async {
     // Invalidate profile cache
-    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    final driverId = _currentDriverId;
     if (driverId != null) {
       await CacheService.instance.invalidate(CacheKeys.driverProfile(driverId));
     }
@@ -1090,7 +1380,7 @@ class DriverProvider with ChangeNotifier {
   /// Call after a document/vehicle resubmission so compliance cards (e.g. the
   /// "vehicle inspection required" card) never render stale state.
   Future<void> refreshDocumentRequirements() async {
-    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    final driverId = _currentDriverId;
     if (driverId != null) {
       await CacheService.instance.invalidate(CacheKeys.driverDocumentRequirements(driverId));
     }
@@ -1101,7 +1391,7 @@ class DriverProvider with ChangeNotifier {
   /// cache. Call after any mutation (uploads, resubmissions, profile
   /// changes) and from pull-to-refresh so all compliance cards are fresh.
   Future<void> refreshAll() async {
-    final driverId = _cacheRepo.driverId.isNotEmpty ? _cacheRepo.driverId : null;
+    final driverId = _currentDriverId;
     if (driverId != null) {
       await CacheService.instance.invalidate(CacheKeys.driverProfile(driverId));
       await CacheService.instance.invalidate(CacheKeys.driverDocumentRequirements(driverId));

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/auth_service.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../utils/file_url.dart';
 import '../utils/pick_image.dart';
@@ -357,6 +358,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _initData,
+        loadingWidget: const OnboardingSkeleton(),
         successWidget: PageView(
           controller: _pageController,
           physics: const NeverScrollableScrollPhysics(),

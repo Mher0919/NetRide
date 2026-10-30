@@ -33,7 +33,8 @@ class TripScreen extends StatefulWidget {
   State<TripScreen> createState() => _TripScreenState();
 }
 
-class _TripScreenState extends State<TripScreen> {
+class _TripScreenState extends State<TripScreen>
+    with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   LatLng? _riderLocation;
   StreamSubscription<Position>? _positionSubscription;
@@ -42,6 +43,21 @@ class _TripScreenState extends State<TripScreen> {
   /// Comfortable current-location zoom: close enough to navigate, wide
   /// enough to see the surrounding streets and the car ahead.
   static const double _defaultMapZoom = 14.5;
+
+  bool _isMapReady = false;
+
+  /// Uber-style "follow my driver" camera mode. Tapping the locate control
+  /// turns it on; any manual pan/zoom hands control back to the rider.
+  /// While on, each driver fix re-centers the map on the driver's live
+  /// position — position only, the camera never rotates.
+  bool _followDriver = false;
+  LatLng? _followDriverLocation;
+
+  late final AnimationController _cameraFollowController;
+  LatLng? _cameraFollowFrom;
+  LatLng? _cameraFollowTo;
+  double _cameraFollowFromZoom = _defaultMapZoom;
+  double _cameraFollowToZoom = _defaultMapZoom;
 
   /// Throttles raw GPS fixes into a bounded 1 Hz stream so the backend
   /// is never flooded (and its socket budget never silently drops
@@ -59,6 +75,10 @@ class _TripScreenState extends State<TripScreen> {
   @override
   void initState() {
     super.initState();
+    _cameraFollowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..addListener(_tickCameraFollow);
     _locationReporter = LocationReporter(
       minDistanceM: 5,
       onReport: (lat, lng, {heading = 0}) {
@@ -100,9 +120,61 @@ class _TripScreenState extends State<TripScreen> {
         });
   }
 
+  /// Turns on driver-follow mode and eases the camera onto the driver.
+  void _startFollowingDriver(LatLng target) {
+    setState(() {
+      _followDriver = true;
+      _followDriverLocation = target;
+    });
+    _animateCameraTo(target);
+  }
+
+  /// Manual map gestures opt the rider out of follow mode so the camera
+  /// never fights the rider's pan/zoom.
+  void _stopFollowingDriver() {
+    if (!_followDriver) return;
+    _cameraFollowController.stop();
+    setState(() => _followDriver = false);
+  }
+
+  /// Eases the camera center/zoom to [target], preserving rotation.
+  void _animateCameraTo(LatLng target) {
+    if (!_isMapReady) return;
+    try {
+      _cameraFollowFrom = _mapController.camera.center;
+      _cameraFollowFromZoom = _mapController.camera.zoom;
+    } catch (_) {
+      _cameraFollowFrom = null;
+      return;
+    }
+    _cameraFollowTo = target;
+    _cameraFollowToZoom = _defaultMapZoom;
+    _cameraFollowController.forward(from: 0);
+  }
+
+  void _tickCameraFollow() {
+    final from = _cameraFollowFrom;
+    final to = _cameraFollowTo;
+    if (from == null || to == null || !_isMapReady) return;
+    final t = _cameraFollowController.value;
+    try {
+      _mapController.move(
+        LatLng(
+          from.latitude + (to.latitude - from.latitude) * t,
+          from.longitude + (to.longitude - from.longitude) * t,
+        ),
+        _cameraFollowFromZoom +
+            (_cameraFollowToZoom - _cameraFollowFromZoom) * t,
+      );
+    } catch (_) {
+      // Map detached mid-animation — nothing to do.
+    }
+  }
+
   @override
   void dispose() {
     _positionSubscription?.cancel();
+    _cameraFollowController.dispose();
     super.dispose();
   }
 
@@ -416,6 +488,15 @@ class _TripScreenState extends State<TripScreen> {
             rideProvider.currentTrip!.pickup.lng,
           );
 
+    // While follow mode is on, every fresh driver fix re-centers the map.
+    if (_followDriver && _followDriverLocation != driverLocation) {
+      _followDriverLocation = driverLocation;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_followDriver) return;
+        _animateCameraTo(driverLocation);
+      });
+    }
+
     return Scaffold(
       body: Stack(
         children: [
@@ -426,7 +507,21 @@ class _TripScreenState extends State<TripScreen> {
               initialZoom: _defaultMapZoom,
               minZoom: 12,
               maxZoom: 18,
-              onMapReady: () {},
+              // Rider map stays north-up: follow the driver's position,
+              // never rotate the camera with the vehicle heading.
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
+              onMapReady: () {
+                _isMapReady = true;
+                final target = _followDriverLocation;
+                if (_followDriver && target != null) {
+                  _animateCameraTo(target);
+                }
+              },
+              onPositionChanged: (_, hasGesture) {
+                if (hasGesture) _stopFollowingDriver();
+              },
             ),
             children: [
               TileLayer(
@@ -624,24 +719,35 @@ class _TripScreenState extends State<TripScreen> {
             ),
           ),
 
-          // Center-on-driver control during the ride. After pickup the rider
-          // moves with the driver, so "current location" is the driver's
-          // live marker.
-          if (rideProvider.status == models.TripStatus.IN_PROGRESS)
+          // Center-on-driver control. Available while the driver is
+          // approaching AND during the ride. Tapping follows the driver's
+          // live position (north-up); panning/zooming opts out.
+          if (rideProvider.isPrePickup ||
+              rideProvider.status == models.TripStatus.IN_PROGRESS)
             Positioned(
               bottom: 292,
               right: 16,
               child: FloatingActionButton(
                 heroTag: 'rider_trip_locate_fab',
                 mini: true,
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFF2F3A32),
+                backgroundColor: _followDriver
+                    ? const Color(0xFF2F3A32)
+                    : Colors.white,
+                foregroundColor: _followDriver
+                    ? Colors.white
+                    : const Color(0xFF2F3A32),
                 elevation: 4,
                 shape: const CircleBorder(),
-                onPressed: () {
-                  _mapController.move(driverLocation, _defaultMapZoom);
-                },
-                child: const Icon(Icons.my_location_rounded, size: 22),
+                tooltip: _followDriver
+                    ? 'Following your driver'
+                    : 'Follow your driver',
+                onPressed: () => _startFollowingDriver(driverLocation),
+                child: Icon(
+                  _followDriver
+                      ? Icons.my_location_rounded
+                      : Icons.location_searching_rounded,
+                  size: 22,
+                ),
               ),
             ),
 

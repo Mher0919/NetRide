@@ -27,6 +27,7 @@ import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
 import '../services/payments_service.dart';
 import 'address_search_delegate.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
 import '../components/animated_price.dart';
@@ -1543,6 +1544,7 @@ class _MapScreenState extends State<MapScreen>
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _initLiveLocation,
+        loadingWidget: const ExploreSkeleton(),
         successWidget: LayoutBuilder(
           builder: (context, constraints) {
             final fullMapHeight = constraints.maxHeight;

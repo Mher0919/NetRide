@@ -18,6 +18,7 @@ import '../services/error_handler.dart';
 import '../utils/phone_utils.dart';
 import '../utils/pick_image.dart';
 import '../widgets/phone_input_field.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../cache/cache_service.dart';
 import '../utils/file_url.dart';
@@ -53,6 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isRequestingPayout = false;
   late Future<Map<String, dynamic>> _connectStatusFuture;
   bool _isVerified = false;
+  String? _backgroundCheckStatus;
   bool _hasPassword = false;
   final Set<String> _hiddenPayoutIds = {};
   bool _showVerificationHint = false;
@@ -224,6 +226,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _emailController.text = _email;
     _profileImageUrl = profile['profile_image_url'];
     _isVerified = profile['is_active'] == true || profile['is_active'] == 'true';
+    _backgroundCheckStatus =
+        profile['background_check_status']?.toString().toUpperCase();
     _hasPassword = profile['has_password'] == true;
     _dobLocked = profile['dob_locked'] == true;
     _rating = double.tryParse(profile['rating']?.toString() ?? '') ?? 5.0;
@@ -968,6 +972,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetchProfile,
+        loadingWidget: const DriverProfileSkeleton(),
         successWidget: RefreshIndicator(
           color: const Color(0xFF5B7760),
           onRefresh: _refreshProfileData,
@@ -1118,6 +1123,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileHeader(ThemeData theme) {
+    final rejected = _backgroundCheckStatus == 'REJECTED';
+    final verified = _isVerified && !rejected;
+    final badgeColor = verified
+        ? const Color(0xFF5B7760)
+        : rejected
+            ? const Color(0xFFC65A5A)
+            : const Color(0xFFC79A4A);
+    final badgeBackground = verified
+        ? const Color(0xFF6E8B74).withOpacity(0.1)
+        : rejected
+            ? const Color(0xFFC65A5A).withOpacity(0.1)
+            : const Color(0xFFC79A4A).withOpacity(0.12);
+    final badgeLabel = verified
+        ? 'VERIFIED DRIVER'
+        : rejected
+            ? 'APPLICATION REJECTED'
+            : 'PENDING VERIFICATION';
+    final badgeIcon = verified
+        ? Icons.verified_user
+        : rejected
+            ? Icons.error_outline_rounded
+            : Icons.hourglass_empty_rounded;
+
     return Center(
       child: Column(
         children: [
@@ -1208,7 +1236,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 12),
           GestureDetector(
             onTap: () {
-              if (!_isVerified) {
+              if (!verified) {
                 setState(() => _showVerificationHint = true);
                 Future.delayed(const Duration(seconds: 3), () {
                   if (mounted) setState(() => _showVerificationHint = false);
@@ -1218,25 +1246,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: _isVerified ? const Color(0xFF6E8B74).withOpacity(0.1) : const Color(0xFFC65A5A).withOpacity(0.1),
+                color: badgeBackground,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    _isVerified ? Icons.verified_user : Icons.error_outline_rounded,
-                    size: 14,
-                    color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
-                  ),
+                  Icon(badgeIcon, size: 14, color: badgeColor),
                   const SizedBox(width: 6),
                   Text(
-                    _isVerified ? 'VERIFIED DRIVER' : 'PENDING VERIFICATION',
+                    badgeLabel,
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.5,
-                      color: _isVerified ? const Color(0xFF5B7760) : const Color(0xFFC65A5A),
+                      color: badgeColor,
                     ),
                   ),
                 ],
@@ -1244,11 +1268,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           if (_showVerificationHint)
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0),
+            const Padding(
+              padding: EdgeInsets.only(top: 8.0),
               child: Text(
-                'Age should be verified to become verified.',
-                style: TextStyle(fontSize: 10, color: const Color(0xFFC65A5A), fontWeight: FontWeight.w500),
+                'We review your documents before activating your account.',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Color(0xFFC79A4A),
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
         ],

@@ -10,6 +10,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { astarEngine } from '../engine/astar-engine';
 import { logger } from '../../observability/logger';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth.middleware';
 
 const router = Router();
 
@@ -22,24 +23,6 @@ const SnapSchema = z.object({
   lat: z.number(),
   lng: z.number(),
 });
-
-/**
- * Diagnostic/state-changing routing endpoints are administrator-only. The
- * global identifyUser middleware populates req.user from the bearer token;
- * this guard rejects anonymous and non-admin callers.
- */
-function requireAdmin(req: Request, res: Response): boolean {
-  const user = (req as any).user;
-  if (!user) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return false;
-  }
-  if (String(user.role).toUpperCase() !== 'ADMIN') {
-    res.status(403).json({ error: 'Administrator privileges required.' });
-    return false;
-  }
-  return true;
-}
 
 /**
  * POST /api/routing/route
@@ -146,8 +129,7 @@ router.post('/snap', async (req: Request, res: Response) => {
  * GET /api/routing/stats
  * Engine statistics and health check.
  */
-router.get('/stats', (req: Request, res: Response) => {
-  if (!requireAdmin(req, res)) return;
+router.get('/stats', authMiddleware, adminMiddleware, (_req: Request, res: Response) => {
   const stats = astarEngine.stats();
   res.json({
     ...stats,
@@ -160,8 +142,7 @@ router.get('/stats', (req: Request, res: Response) => {
  * POST /api/routing/cache/clear
  * Clear all routing caches. Administrator-only (state-changing / DoS vector).
  */
-router.post('/cache/clear', (req: Request, res: Response) => {
-  if (!requireAdmin(req, res)) return;
+router.post('/cache/clear', authMiddleware, adminMiddleware, (_req: Request, res: Response) => {
   astarEngine.clearCache();
   res.json({ success: true, message: 'Cache cleared' });
 });

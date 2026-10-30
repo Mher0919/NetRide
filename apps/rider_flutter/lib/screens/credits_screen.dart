@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
@@ -65,6 +66,7 @@ class _CreditsScreenState extends State<CreditsScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetch,
+        loadingWidget: const CreditsSkeleton(),
         successWidget: _account == null ? const SizedBox.shrink() : _buildContent(),
       ),
     );

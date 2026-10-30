@@ -11,6 +11,8 @@ import '../models/trip_models.dart' as models;
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../components/initialization_failure.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../components/driver_status_card.dart';
 import '../services/sound_service.dart';
@@ -158,16 +160,14 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
     try {
       if (!SecureTokenStore.hasToken) return;
 
-      // Use cache-first fetch via DriverProvider
       final provider = Provider.of<DriverProvider>(context, listen: false);
-      Map<String, dynamic> profile;
-      try {
-        profile = await provider.fetchProfile();
-      } catch (_) {
-        // Fallback: direct fetch if provider cache isn't ready
-        profile = await UserService.getProfile();
+      if (!provider.profileReady) {
+        await provider.initialize();
       }
+      if (!mounted || !provider.profileReady) return;
 
+      final profile =
+          provider.profile ?? await provider.fetchProfile();
       if (mounted) {
         setState(() {
           final fullName = profile['full_name'] ?? 'Driver';
@@ -194,6 +194,14 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
       }
       debugPrint('Error fetching profile: $e');
     }
+  }
+
+  Future<void> _retryInitialization() async {
+    final provider = Provider.of<DriverProvider>(context, listen: false);
+    await provider.initialize(forceRefresh: true);
+    if (!mounted) return;
+    await _fetchProfile();
+    if (mounted) setState(() {});
   }
 
   Future<void> _dismissFeedback() async {
@@ -834,7 +842,23 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
   @override
   Widget build(BuildContext context) {
     final driverProvider = Provider.of<DriverProvider>(context);
-    
+
+    // The dashboard's account-dependent controls are never rendered from
+    // unresolved defaults. A failed initialization is recoverable; a loading
+    // one is represented by a layout-matched skeleton.
+    if (driverProvider.initializationFailed) {
+      return InitializationFailure(
+        message: driverProvider.initErrorMessage,
+        onRetry: _retryInitialization,
+      );
+    }
+    if (!driverProvider.profileReady) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFEEEBE6),
+        body: DriverDashboardSkeleton(),
+      );
+    }
+
     if (driverProvider.currentTrip != null && !TripScreen.isOpen) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !TripScreen.isOpen) {
@@ -912,6 +936,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _checkPermissions,
+        loadingWidget: const DriverDashboardSkeleton(),
         successWidget: LayoutBuilder(
           builder: (context, constraints) {
             final screenH = constraints.maxHeight;

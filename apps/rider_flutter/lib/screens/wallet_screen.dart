@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:intl/intl.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
 import '../services/rewards_service.dart';
@@ -225,6 +226,7 @@ class _WalletScreenState extends State<WalletScreen> {
             ? 'We couldn\'t load your payment information. Please try again.'
             : _errorMessage,
         onRetry: _fetch,
+        loadingWidget: const WalletSkeleton(),
         successWidget: _account == null ? const SizedBox.shrink() : _buildContent(),
       ),
     );

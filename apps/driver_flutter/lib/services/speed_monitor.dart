@@ -77,7 +77,8 @@ class SpeedLimitMap {
     // is on for the majority of the leg (the detector makes the
     // same simplification on the backend). When the route carries no
     // limit map (Google plan), the HUD starts without a limit and the
-    // per-minute Google Roads lookup fills it in — never a fake 30 mph.
+    // Google Roads lookup on the next street change fills it in — never a
+    // fake 30 mph.
     String name = '';
     int limit = 0;
     bool isFw = false;
@@ -128,8 +129,8 @@ class SpeedMonitor extends ChangeNotifier {
   StreamSubscription<GpsFix>? _sub;
   SpeedLimitMap? _limits;
 
-  /// Limit resolved by the per-minute Google Roads lookup. Used when the
-  /// route itself does not carry a speed-limit map (Google Routes plan).
+  /// Limit resolved by the Google Roads lookup on a street change. Used when
+  /// the route itself does not carry a speed-limit map (Google Routes plan).
   int _externalLimitMph = 0;
 
   // Exponential moving average for speed smoothing.
@@ -151,8 +152,9 @@ class SpeedMonitor extends ChangeNotifier {
     _recompute(); // force a HUD update with new limit
   }
 
-  /// Applies a Google Roads limit (refreshed once a minute by the
-  /// navigation screen). A failed lookup passes 0 and keeps the last value.
+  /// Applies a Google Roads limit (refreshed by NavigationService whenever
+  /// the driver enters a new street). A failed lookup passes 0 and keeps the
+  /// last value.
   void applyExternalLimit(int speedLimitMph, {String? roadName}) {
     if (speedLimitMph <= 0) return;
     if (_externalLimitMph == speedLimitMph && roadName == null) return;
@@ -203,8 +205,9 @@ class SpeedMonitor extends ChangeNotifier {
   void _recompute() {
     final mph = (_smoothedMps * _mpsToMph).round();
     final routeLimit = _limits?.limitMph ?? 0;
-    // The per-minute Google Roads lookup is the freshest source; the
-    // route-derived map remains a fallback when no external limit is known.
+    // The Google Roads lookup at the last street change is the freshest
+    // source; the route-derived map remains a fallback when no external
+    // limit is known.
     final limit = _externalLimitMph > 0 ? _externalLimitMph : routeLimit;
     final isFw = _limits?.isFreeway ?? false;
     final threshold = (isFw ? limit + 10 : limit).toInt();

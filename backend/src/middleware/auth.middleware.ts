@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../modules/auth/auth.service';
 import { pool } from '../config/database';
 import { env } from '../config/env';
+import { isSessionAccessToken } from '../security/token-purpose';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -25,8 +26,11 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
   let decoded: any;
   try {
     decoded = AuthService.verifyToken(token);
+    if (!isSessionAccessToken(decoded)) {
+      throw new Error('Token is not a session access token');
+    }
   } catch (err: any) {
-    console.error(`[AUTH] ❌ Verification failed for ${req.originalUrl}: ${err.message}`);
+    console.error(`[AUTH] �?O Verification failed for ${req.originalUrl}: ${err.message}`);
     return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
 
@@ -140,6 +144,10 @@ export const partnerMiddleware = async (req: AuthRequest & { partner?: any }, re
     );
     if (result.rows.length === 0) {
       return res.status(403).json({ error: 'Partner account not found.' });
+    }
+    // Suspended/archived partners must not keep reading earnings or usage.
+    if (String(result.rows[0].status ?? '').toUpperCase() !== 'ACTIVE') {
+      return res.status(403).json({ error: 'Your partner account is inactive or suspended.' });
     }
     // Server-side temporary-password enforcement (mirrors sponsorMiddleware).
     if (result.rows[0].must_change_password) {

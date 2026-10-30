@@ -1,28 +1,11 @@
-enum UpdateUrgency { none, optional, required }
-
-enum AppUpdateChoice { update, later }
+enum UpdateUrgency { none, required }
 
 enum AppUpdateLaunchResult {
   storeOpened,
   updateStarted,
-  flexibleStarted,
-  cancelled,
   missingStoreUrl,
   failed,
 }
-
-const Set<String> kAllowedAccentColors = {
-  '#42573F',
-  '#5B7760',
-  '#3F5363',
-  '#8A5A12',
-  '#7A3E3E',
-};
-
-const String kDefaultUpdateTitle = 'Update required';
-const String kDefaultUpdateMessage =
-    'A required update is ready. Please update to the latest version to continue using NetRide.';
-const String kDefaultUpdateButton = 'Update Now';
 
 const Map<String, String> kAndroidPackages = {
   'rider': 'com.netride.rider.rider_flutter',
@@ -38,13 +21,6 @@ class AppUpdatePolicy {
     required this.latestBuild,
     required this.minimumBuild,
     required this.storeUrl,
-    required this.releaseNotes,
-    required this.popupTitle,
-    required this.popupMessage,
-    required this.buttonText,
-    required this.supportingText,
-    required this.announcementLabel,
-    required this.accentColor,
     required this.urgency,
     required this.enabled,
   });
@@ -56,17 +32,9 @@ class AppUpdatePolicy {
   final int? latestBuild;
   final int? minimumBuild;
   final String storeUrl;
-  final String? releaseNotes;
-  final String popupTitle;
-  final String popupMessage;
-  final String buttonText;
-  final String? supportingText;
-  final String? announcementLabel;
-  final String? accentColor;
   final UpdateUrgency urgency;
   final bool enabled;
 
-  bool get hasUpdate => urgency != UpdateUrgency.none;
   bool get isRequired => urgency == UpdateUrgency.required;
 }
 
@@ -92,17 +60,7 @@ AppUpdatePolicy buildAppUpdatePolicy({
             minimumVersion,
             minimumBuild,
           ));
-  final available = enabled &&
-      (required ||
-          raw['update_available'] == true ||
-          isBelowVersion(
-            currentVersion,
-            currentBuild,
-            latestVersion,
-            latestBuild,
-          ));
 
-  final accent = _stringValue(raw['accent_color']);
   final storeUrl = _stringValue(raw['store_url']) ?? '';
 
   return AppUpdatePolicy(
@@ -116,20 +74,7 @@ AppUpdatePolicy buildAppUpdatePolicy({
         isAllowedStoreUrl(storeUrl, appId: appId, platform: platform)
             ? storeUrl
             : '',
-    releaseNotes: _stringValue(raw['release_notes']),
-    popupTitle: _stringValue(raw['popup_title']) ?? kDefaultUpdateTitle,
-    popupMessage:
-        _stringValue(raw['popup_message']) ?? kDefaultUpdateMessage,
-    buttonText: _stringValue(raw['button_text']) ?? kDefaultUpdateButton,
-    supportingText: _stringValue(raw['supporting_text']),
-    announcementLabel: _stringValue(raw['announcement_label']),
-    accentColor:
-        accent != null && kAllowedAccentColors.contains(accent) ? accent : null,
-    urgency: required
-        ? UpdateUrgency.required
-        : available
-            ? UpdateUrgency.optional
-            : UpdateUrgency.none,
+    urgency: required ? UpdateUrgency.required : UpdateUrgency.none,
     enabled: enabled,
   );
 }

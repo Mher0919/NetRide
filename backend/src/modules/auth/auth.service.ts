@@ -181,16 +181,34 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(data.password, 10);
-    const createRes = await pool.query(
-      `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       RETURNING *`,
-      [data.email, data.full_name, passwordHash, role, false, true]
-    );
-    const user = createRes.rows[0];
+    // The consumer identity and the role-specific profile are ONE logical
+    // registration. Without a transaction a failed driver-row insert could
+    // leave an authenticated user whose driver profile never existed — the
+    // partial state that required a restart (or a fresh signup) to repair.
+    const client = await pool.connect();
+    let user: any;
+    try {
+      await client.query('BEGIN');
+      const createRes = await client.query(
+        `INSERT INTO users (email, full_name, password_hash, role, is_verified, is_active, password_changed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         RETURNING *`,
+        [data.email, data.full_name, passwordHash, role, false, true]
+      );
+      user = createRes.rows[0];
 
-    if (role === UserRole.DRIVER) {
-      await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
+      if (role === UserRole.DRIVER) {
+        await client.query(
+          'INSERT INTO drivers (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
+          [user.id],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
 
     // Bind the code to a completed signup: verifyOTP only redeems a LOGIN
@@ -249,7 +267,11 @@ export class AuthService {
       if (data.trusted_device_token) {
         try {
           const decoded = this.verifyToken(data.trusted_device_token);
-          if (decoded.email === user.email && decoded.role === UserRole.ADMIN) {
+          if (
+            decoded.email === user.email &&
+            decoded.role === UserRole.ADMIN &&
+            decoded.t === 'trusted-device'
+          ) {
             isTrusted = true;
           }
         } catch (e) {
@@ -533,17 +555,33 @@ export class AuthService {
     let user = existingRes.rows[0];
 
     if (!user) {
-      // 3. Create User - Default to UNVERIFIED (is_verified = false) even for OAuth
-      const createRes = await pool.query(
-        `INSERT INTO users (email, full_name, profile_image_url, role, is_verified, is_active, password_changed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
-         RETURNING *`,
-        [email, data.full_name, data.profile_image_url, role, false, true]
-      );
-      user = createRes.rows[0];
+      // 3. Create User - Default to UNVERIFIED (is_verified = false) even for
+      // OAuth. The user row and its role-specific profile are committed
+      // together so an interrupted insert can never leave a half-created
+      // account that only a restart appears to fix.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const createRes = await client.query(
+          `INSERT INTO users (email, full_name, profile_image_url, role, is_verified, is_active, password_changed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+           RETURNING *`,
+          [email, data.full_name, data.profile_image_url, role, false, true]
+        );
+        user = createRes.rows[0];
 
-      if (role === 'DRIVER') {
-        await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
+        if (role === 'DRIVER') {
+          await client.query(
+            'INSERT INTO drivers (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
+            [user.id],
+          );
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
       }
     } else {
       // Reactivate if deactivated
@@ -553,12 +591,13 @@ export class AuthService {
       }
 
       // Dual-role support: create a driver profile for the existing user
-      // so they can complete driver onboarding without losing their rider account.
+      // so they can complete driver onboarding without losing their rider
+      // account. ON CONFLICT makes concurrent OAuth callbacks idempotent.
       if (role === 'DRIVER') {
-        const driverCheck = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [user.id]);
-        if (driverCheck.rows.length === 0) {
-          await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
-        }
+        await pool.query(
+          'INSERT INTO drivers (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
+          [user.id],
+        );
       }
     }
 
@@ -634,17 +673,32 @@ export class AuthService {
         throw new Error('User not found. Please sign up.');
       }
 
-      // Create User (Signup) - Default to UNVERIFIED
-      const createRes = await pool.query(
-        `INSERT INTO users (email, full_name, role, is_verified, is_active, password_changed_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())
-         RETURNING *`,
-        [data.email, data.full_name, role, false, true]
-      );
-      user = createRes.rows[0];
+      // Create User (Signup) - Default to UNVERIFIED. The role profile is
+      // committed in the same transaction; a failure rolls the user back so
+      // verification can never yield a user without its driver profile.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const createRes = await client.query(
+          `INSERT INTO users (email, full_name, role, is_verified, is_active, password_changed_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())
+           RETURNING *`,
+          [data.email, data.full_name, role, false, true]
+        );
+        user = createRes.rows[0];
 
-      if (role === 'DRIVER') {
-        await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
+        if (role === 'DRIVER') {
+          await client.query(
+            'INSERT INTO drivers (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
+            [user.id],
+          );
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
       }
     } else {
       // Reactivate if deactivated
@@ -653,12 +707,13 @@ export class AuthService {
         user.is_active = true;
       }
 
-      // Dual-role support: create a driver profile for the existing user
+      // Dual-role support: create a driver profile for the existing user.
+      // Idempotent under concurrent verification retries.
       if (role === 'DRIVER') {
-        const driverCheck = await pool.query('SELECT 1 FROM drivers WHERE user_id = $1', [user.id]);
-        if (driverCheck.rows.length === 0) {
-          await pool.query('INSERT INTO drivers (user_id) VALUES ($1)', [user.id]);
-        }
+        await pool.query(
+          'INSERT INTO drivers (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
+          [user.id],
+        );
       }
     }
 
@@ -782,7 +837,7 @@ export class AuthService {
     // via resolveActiveRole() from the client's app context.
     const role = roleOverride ?? user.role;
     return jwt.sign(
-      { id: user.id, role, email: user.email },
+      { id: user.id, role, email: user.email, t: 'access' },
       env.JWT_SECRET,
       { expiresIn: '30d', algorithm: 'HS256' }
     );

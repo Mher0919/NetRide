@@ -60,6 +60,7 @@ const logger_1 = require("./observability/logger");
 const pinoHttp_1 = require("./middleware/pinoHttp");
 const jsonShapeGuard_middleware_1 = require("./middleware/jsonShapeGuard.middleware");
 const securityHeaders_middleware_1 = require("./middleware/securityHeaders.middleware");
+const token_purpose_1 = require("./security/token-purpose");
 const health_controller_1 = __importDefault(require("./health/health.controller"));
 const files_routes_1 = __importDefault(require("./routes/files.routes"));
 const metrics_1 = require("./observability/metrics");
@@ -101,7 +102,6 @@ const portal_routes_1 = __importDefault(require("./modules/portal/portal.routes"
 const payments_routes_1 = __importDefault(require("./modules/payments/payments.routes"));
 const admin_payments_routes_1 = __importDefault(require("./modules/payments/admin-payments.routes"));
 const app_version_routes_1 = __importDefault(require("./modules/app-version/app-version.routes"));
-const app_update_admin_routes_1 = __importDefault(require("./modules/app-version/app-update.admin.routes"));
 const app_version_service_1 = require("./modules/app-version/app-version.service");
 const app_version_utils_1 = require("./modules/app-version/app-version.utils");
 const payments_controller_1 = require("./modules/payments/payments.controller");
@@ -304,6 +304,9 @@ io.use(async (socket, next) => {
     try {
         const pureToken = token.toString().replace('Bearer ', '');
         const decoded = auth_service_1.AuthService.verifyToken(pureToken);
+        if (!(0, token_purpose_1.isSessionAccessToken)(decoded)) {
+            return next(new Error('Authentication error: Invalid token'));
+        }
         // Reject tokens of deactivated users / demoted admins / pre-password-
         // change sessions immediately (fails closed on lookup errors).
         await auth_service_1.AuthService.assertTokenStillValid(decoded);
@@ -325,7 +328,6 @@ io.use(async (socket, next) => {
                 const buildRaw = String(socket.handshake.auth.build ?? '').trim();
                 const appBuild = /^\d+$/.test(buildRaw) ? Number(buildRaw) : null;
                 if (config.isActive &&
-                    config.campaignStatus === 'PUBLISHED' &&
                     (0, app_version_utils_1.isValidVersion)(config.minimumVersion) &&
                     (0, app_version_utils_1.evaluateVersion)(config, appVersion, appBuild).updateRequired) {
                     return next(new Error('APP_UPDATE_REQUIRED'));
@@ -379,7 +381,6 @@ app.use('/api/geospatial', geospatial_routes_1.default);
 app.use('/api/navigation', navigation_routes_1.default);
 app.use('/api/routing', routing_routes_1.default);
 app.use('/api/routing', routing_api_1.default);
-app.use('/api/admin', app_update_admin_routes_1.default);
 app.use('/api/admin', admin_routes_1.default);
 app.use('/api/admin', admin_rewards_routes_1.default);
 app.use('/api/app', app_version_routes_1.default);
@@ -789,14 +790,6 @@ async function runMigrations() {
             const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
             await database_1.pool.query(schema);
             console.log('App release config schema (20261020) applied');
-        }
-        const hasAppUpdateCampaigns = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'app_release_configs' AND column_name = 'draft_config'");
-        if (hasAppUpdateCampaigns.rowCount === 0) {
-            console.log('Applying app update campaign schema (20261021)...');
-            const schemaPath = path_1.default.join(__dirname, '../migrations/20261021_app_update_campaigns.sql');
-            const schema = fs_1.default.readFileSync(schemaPath, 'utf8');
-            await database_1.pool.query(schema);
-            console.log('App update campaign schema (20261021) applied');
         }
         const hasPayoutHidden = await database_1.pool.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'payouts' AND column_name = 'hidden_at'");
         if (hasPayoutHidden.rowCount === 0) {

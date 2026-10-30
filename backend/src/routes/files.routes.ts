@@ -37,7 +37,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 
   try {
-    const { url, mimetype, file } = await StorageService.getAccessUrl(fileId);
+    const file = await StorageService.getFileRecord(fileId);
     if (!file) {
       return res.status(404).json({ error: 'File not found' });
     }
@@ -50,10 +50,30 @@ router.get('/:id', async (req: Request, res: Response) => {
     if (!requester && typeof req.query.token === 'string') {
       const token = verifyFileAccessToken(req.query.token);
       if (token && token.fileId === fileId) {
-        const userRes = await pool.query('SELECT id, role FROM users WHERE id = $1', [token.userId]);
+        const userRes = await pool.query(
+          'SELECT id, role, is_active FROM users WHERE id = $1',
+          [token.userId],
+        );
         const dbUser = userRes.rows[0];
-        if (dbUser) requester = { id: dbUser.id, role: dbUser.role };
+        if (dbUser && dbUser.is_active !== false) {
+          requester = { id: dbUser.id, role: dbUser.role };
+        }
       }
+    }
+
+    // Bearer tokens are only signature-verified by the global identifyUser
+    // middleware. Re-read the role/active state here so a demoted or
+    // deactivated administrator cannot keep reading private files until JWT
+    // expiry (the same rule the query-token path already enforces).
+    if (requester) {
+      const userRes = await pool.query(
+        'SELECT id, role, is_active FROM users WHERE id = $1',
+        [requester.id],
+      );
+      const dbUser = userRes.rows[0];
+      requester = dbUser && dbUser.is_active !== false
+        ? { id: dbUser.id, role: dbUser.role }
+        : null;
     }
 
     if (!canAccessFile(file, requester)) {
@@ -61,6 +81,10 @@ router.get('/:id', async (req: Request, res: Response) => {
       // this id exists to unauthorized callers.
       return res.status(404).json({ error: 'File not found' });
     }
+
+    // Authorize BEFORE minting a signed storage URL. Knowing a file UUID must
+    // never trigger a service-role signing request.
+    const { url, mimetype } = await StorageService.getAccessUrl(fileId, file);
 
     if (!url) {
       return res.status(404).json({ error: 'File not found' });

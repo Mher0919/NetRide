@@ -9,6 +9,7 @@ import 'route_matcher.dart';
 import 'route_progress_calculator.dart';
 import 'routing_service.dart';
 import 'route_errors.dart';
+import 'speed_limit_service.dart';
 import 'speed_monitor.dart';
 import 'navigation_voice_service.dart';
 
@@ -250,6 +251,15 @@ class NavigationService extends ChangeNotifier {
   RouteProgress? _progress;
   bool _isNavigating = false;
 
+  /// Street the external speed-limit lookup was last resolved for. The
+  /// lookup runs only when the driver turns onto a new street (or a new,
+  /// unnamed route step), never on a wall-clock timer.
+  String _speedLimitRoad = '';
+  int _speedLimitStepIndex = -1;
+
+  /// Invalidates an in-flight lookup whose street is no longer current.
+  int _speedLimitRequestId = 0;
+
   /// Monotonically increasing request counter so stale route results
   /// (e.g. route A finishes after route B was already applied) never
   /// overwrite the latest route.
@@ -275,6 +285,9 @@ class NavigationService extends ChangeNotifier {
     _route = route;
     _matcher = RouteMatcher.forPolyline(route.polyline);
     _progress = null;
+    _speedLimitRoad = '';
+    _speedLimitStepIndex = -1;
+    _speedLimitRequestId++;
     // Voice guard reset: a NEW route means the step/distance vocabulary has
     // changed, so the next GPS event may announce the new current step ONCE
     // (threshold-guarded in _onGpsFix). Preview re-speaks are blocked
@@ -543,6 +556,9 @@ class NavigationService extends ChangeNotifier {
     _progress = null;
     _tripId = null;
     _routeRequestVersion++;
+    _speedLimitRoad = '';
+    _speedLimitStepIndex = -1;
+    _speedLimitRequestId++;
     _gpsSub?.cancel();
     _gpsSub = null;
     _speedMonitor.stop();
@@ -621,6 +637,7 @@ class NavigationService extends ChangeNotifier {
         progress.currentStepIndex,
         route.rawSteps,
       );
+      _maybeRefreshSpeedLimit(progress, fix.position);
 
       // Voice: event-driven + threshold-guarded (spec §20–§22). An
       // announcement fires ONLY when navigation actually progressed —
@@ -644,6 +661,33 @@ class NavigationService extends ChangeNotifier {
     );
 
     notifyListeners();
+  }
+
+  /// Resolve the external speed limit only when the driver enters a new
+  /// street. Routes that carry `speedLimitsByRoad` are already handled by
+  /// [SpeedMonitor.notifyStepChanged]; this lookup covers the Google Routes
+  /// plan (empty limit map) and refreshes the HUD at every turn.
+  void _maybeRefreshSpeedLimit(RouteProgress progress, LatLng position) {
+    final road = progress.currentStep?.name.trim() ?? '';
+    final stepChanged = progress.currentStepIndex != _speedLimitStepIndex;
+    final streetChanged = road.isNotEmpty && road != _speedLimitRoad;
+    if (!streetChanged && !(road.isEmpty && stepChanged)) return;
+    _speedLimitRoad = road;
+    _speedLimitStepIndex = progress.currentStepIndex;
+    unawaited(_refreshSpeedLimit(position, road.isEmpty ? null : road));
+  }
+
+  Future<void> _refreshSpeedLimit(LatLng position, String? roadName) async {
+    final requestId = ++_speedLimitRequestId;
+    final result = await SpeedLimitService.lookup(position);
+    // A newer street was entered while this lookup was in flight.
+    if (requestId != _speedLimitRequestId) return;
+    final limit = result.speedLimitMph;
+    if (limit == null || limit <= 0) return;
+    _speedMonitor.applyExternalLimit(
+      limit,
+      roadName: result.roadName ?? roadName,
+    );
   }
 
   void _speakRoutePreview({

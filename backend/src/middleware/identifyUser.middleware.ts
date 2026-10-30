@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../modules/auth/auth.service';
+import { isSessionAccessToken } from '../security/token-purpose';
 
 export const identifyUser = (req: Request, _res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
@@ -10,7 +11,9 @@ export const identifyUser = (req: Request, _res: Response, next: NextFunction) =
 
   try {
     const decoded = AuthService.verifyToken(token);
-    (req as any).user = decoded;
+    if (isSessionAccessToken(decoded)) {
+      (req as any).user = decoded;
+    }
   } catch {
     // Token invalid or expired — continue without user context
   }

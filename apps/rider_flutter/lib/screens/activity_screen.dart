@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/secure_token_store.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
+import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import 'report_sheet.dart';
 
@@ -118,6 +119,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
         state: _state,
         errorMessage: _errorMessage,
         onRetry: _fetchHistory,
+        loadingWidget: const ActivitySkeleton(),
         successWidget: RefreshIndicator(
           color: const Color(0xFF5B7760),
           onRefresh: _refreshHistory,

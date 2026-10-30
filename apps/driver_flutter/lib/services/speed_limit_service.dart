@@ -1,9 +1,9 @@
 // apps/driver_flutter/lib/services/speed_limit_service.dart
 //
 // Fetches the legal speed limit for the driver's current position from the
-// backend (which proxies Google Roads `speedLimits`). The navigation screen
-// refreshes it once a minute; failures are silent and the HUD keeps the last
-// known limit.
+// backend (which proxies Google Roads `speedLimits`). NavigationService
+// refreshes it when the driver turns onto a new street; failures are silent
+// and the HUD keeps the last known limit.
 
 import 'package:dio/dio.dart';
 import 'package:latlong2/latlong.dart';

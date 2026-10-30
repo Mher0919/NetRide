@@ -16,7 +16,6 @@ import '../services/navigation_service.dart';
 import '../services/off_route_detector.dart';
 import '../services/reroute_controller.dart';
 import '../services/route_progress_calculator.dart';
-import '../services/speed_limit_service.dart';
 import '../services/speed_monitor.dart';
 import '../services/communication_service.dart';
 import '../services/sound_service.dart';
@@ -73,7 +72,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
   bool _following = true;
   bool _mapReady = false;
   Timer? _followPauseTimer;
-  Timer? _speedLimitTimer;
   static const Duration _followPause = Duration(seconds: 12);
   GpsFix? _lastFollowedFix;
   double _lastHeadingDeg = 0;
@@ -82,20 +80,11 @@ class _NavigationScreenState extends State<NavigationScreen> {
   void initState() {
     super.initState();
     GpsTracker.instance.addListener(_onGpsTick);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refreshSpeedLimit();
-    });
-    // Google Roads speed limits refresh once a minute while navigating.
-    _speedLimitTimer = Timer.periodic(
-      const Duration(minutes: 1),
-      (_) => _refreshSpeedLimit(),
-    );
   }
 
   @override
   void dispose() {
     _followPauseTimer?.cancel();
-    _speedLimitTimer?.cancel();
     GpsTracker.instance.removeListener(_onGpsTick);
     super.dispose();
   }
@@ -137,18 +126,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
       _lastHeadingDeg = fix.headingDeg;
     }
     _followCamera(fix.position);
-  }
-
-  Future<void> _refreshSpeedLimit() async {
-    if (!mounted) return;
-    final fix = GpsTracker.instance.lastFix;
-    if (fix == null) return;
-    final result = await SpeedLimitService.lookup(fix.position);
-    if (!mounted || result.speedLimitMph == null) return;
-    Provider.of<NavigationService>(
-      context,
-      listen: false,
-    ).speedMonitor.applyExternalLimit(result.speedLimitMph!);
   }
 
   void _onUserMapGesture() {

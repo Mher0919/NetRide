@@ -22,6 +22,7 @@ import { logger } from './observability/logger';
 import { requestContext, requestLogger } from './middleware/pinoHttp';
 import { jsonShapeGuard } from './middleware/jsonShapeGuard.middleware';
 import { securityHeaders } from './middleware/securityHeaders.middleware';
+import { isSessionAccessToken } from './security/token-purpose';
 import healthRouter from './health/health.controller';
 import fileRoutes from './routes/files.routes';
 import { register } from './observability/metrics';
@@ -66,7 +67,6 @@ import portalRoutes from './modules/portal/portal.routes';
 import paymentsRoutes from './modules/payments/payments.routes';
 import adminPaymentsRoutes from './modules/payments/admin-payments.routes';
 import appVersionRoutes from './modules/app-version/app-version.routes';
-import appUpdateAdminRoutes from './modules/app-version/app-update.admin.routes';
 import { getReleaseConfig } from './modules/app-version/app-version.service';
 import {
   APP_IDS,
@@ -284,6 +284,9 @@ io.use(async (socket, next) => {
   try {
     const pureToken = token.toString().replace('Bearer ', '');
     const decoded = AuthService.verifyToken(pureToken);
+    if (!isSessionAccessToken(decoded)) {
+      return next(new Error('Authentication error: Invalid token'));
+    }
 
     // Reject tokens of deactivated users / demoted admins / pre-password-
     // change sessions immediately (fails closed on lookup errors).
@@ -313,7 +316,6 @@ io.use(async (socket, next) => {
         const appBuild = /^\d+$/.test(buildRaw) ? Number(buildRaw) : null;
         if (
           config.isActive &&
-          config.campaignStatus === 'PUBLISHED' &&
           isValidVersion(config.minimumVersion) &&
           evaluateVersion(config, appVersion, appBuild).updateRequired
         ) {
@@ -372,7 +374,6 @@ app.use('/api/geospatial', geospatialRoutes);
 app.use('/api/navigation', navigationRoutes);
 app.use('/api/routing', routingRoutes);
 app.use('/api/routing', routingApi);
-app.use('/api/admin', appUpdateAdminRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin', adminRewardsRoutes);
 app.use('/api/app', appVersionRoutes);
@@ -853,17 +854,6 @@ async function runMigrations() {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
       console.log('App release config schema (20261020) applied');
-    }
-
-    const hasAppUpdateCampaigns = await pool.query(
-      "SELECT 1 FROM information_schema.columns WHERE table_name = 'app_release_configs' AND column_name = 'draft_config'"
-    );
-    if (hasAppUpdateCampaigns.rowCount === 0) {
-      console.log('Applying app update campaign schema (20261021)...');
-      const schemaPath = path.join(__dirname, '../migrations/20261021_app_update_campaigns.sql');
-      const schema = fs.readFileSync(schemaPath, 'utf8');
-      await pool.query(schema);
-      console.log('App update campaign schema (20261021) applied');
     }
 
     const hasPayoutHidden = await pool.query(

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/ride_provider.dart';
+import 'providers/session_provider.dart';
 import 'providers/specials_provider.dart';
 import 'services/communication_service.dart';
 import 'screens/map_screen.dart';
@@ -234,6 +235,10 @@ Future<void> _bootstrap() async {
   runApp(
     MultiProvider(
       providers: [
+        // Authoritative session/profile initialization gate. Constructed after
+        // the stored token has been restored, so it immediately resolves the
+        // authenticated profile before any authenticated screen is rendered.
+        ChangeNotifierProvider(create: (_) => SessionProvider()),
         ChangeNotifierProvider(create: (_) {
           final provider = RideProvider();
           if (token != null) {
@@ -294,11 +299,26 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
   /// so it must be rebuilt here — otherwise every rider mutation emitted
   /// through a null/dead socket was silently dropped.
   Future<void> _onAuthChanged() async {
-    if (AuthService.isAuthenticatedNotifier.value != true) return;
+    if (AuthService.isAuthenticatedNotifier.value != true) {
+      // Logout / session expiry: drop every user-scoped in-memory value so a
+      // subsequent registration can never inherit the previous rider's ride
+      // or specials state (the restart-only-looking failure).
+      try {
+        context.read<RideProvider>().reset();
+        context.read<SpecialsProvider>().reset();
+      } catch (e) {
+        debugPrint('[AUTH] Session cleanup failed: $e');
+      }
+      return;
+    }
     try {
       final token = SecureTokenStore.token;
       if (token == null || token.isEmpty) return;
       final provider = context.read<RideProvider>();
+      // A new authenticated identity must start from a clean ride/specials
+      // snapshot; the authoritative hydration below repopulates it.
+      provider.reset();
+      context.read<SpecialsProvider>().reset();
       provider.updateToken(token);
       // Same recovery guarantee as cold start: adopt an active ride at once.
       provider.hydrateFromServer();

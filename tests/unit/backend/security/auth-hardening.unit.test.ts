@@ -194,6 +194,19 @@ test('auth middleware: missing/invalid/revoked tokens fail closed with 401', asy
   assert.equal(result.statusCode, 0);
   assert.equal(result.nextCalled, true);
   assert.equal(result.req.user.id, 'u1');
+
+  // A trusted-device token is signed with the same secret but is not a
+  // general session credential.
+  verifyImpl = () => ({ id: 'admin', role: 'ADMIN', t: 'trusted-device', iat: 1 });
+  result = await run('Bearer trusted-device');
+  assert.equal(result.statusCode, 401);
+  assert.equal(result.nextCalled, false);
+
+  // A file-access token is likewise not a session credential.
+  verifyImpl = () => ({ fid: 'f1', uid: 'u1', t: 'file-access', iat: 1 });
+  result = await run('Bearer file-access');
+  assert.equal(result.statusCode, 401);
+  assert.equal(result.nextCalled, false);
 });
 
 // ---------------------------------------------------------------------------

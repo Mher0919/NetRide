@@ -39,7 +39,6 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import PriceChangeIcon from '@mui/icons-material/PriceChange';
 import PaidIcon from '@mui/icons-material/Paid';
 import FlagIcon from '@mui/icons-material/Flag';
-import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getDangerousDrivers, listProfileChanges, getPendingDocumentReviewsCount } from '../api/admin';
@@ -105,7 +104,6 @@ const MainLayout: React.FC = () => {
     { text: 'Ride Credits', icon: <StarsIcon />, path: '/credits' },
     { text: 'Fleet Partners', icon: <GroupsIcon />, path: '/fleets' },
     { text: 'Sponsors', icon: <StorefrontIcon />, path: '/sponsors' },
-    { text: 'App Updates', icon: <SystemUpdateAltIcon />, path: '/app-updates' },
     { text: 'Pricing', icon: <PriceChangeIcon />, path: '/pricing' },
     { text: 'Revenue', icon: <PaidIcon />, path: '/revenue' },
     { text: 'Reports', icon: <FlagIcon />, path: '/reports' },
