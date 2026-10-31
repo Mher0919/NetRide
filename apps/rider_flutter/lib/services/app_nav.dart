@@ -14,8 +14,9 @@ class AppNav extends ChangeNotifier {
   /// Tab indexes used by MainWrapper.
   static const int explore = 0;
   static const int specials = 1;
-  static const int activity = 2;
-  static const int account = 3;
+  static const int groups = 2;
+  static const int activity = 3;
+  static const int account = 4;
 
   int? _pending;
 

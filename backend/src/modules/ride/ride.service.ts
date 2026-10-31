@@ -137,21 +137,31 @@ export class RideService {
       if (!ride) throw new Error('Ride not found');
       if (ride.status !== 'COMPLETED') throw new Error('Ride is not completed');
 
-      // Determine roles
+      // Determine roles. A GROUP participant is a legitimate rider of the
+      // shared booking even though the host owns rides.rider_id, so each
+      // friend independently rates the same driver.
       let target_id: string;
       let target_role: string;
 
-      if (ride.rider_id === data.rater_id) {
-        // Rider is rating Driver
-        if (!ride.driver_id) throw new Error('No driver assigned to this ride');
-        target_id = ride.driver_id;
-        target_role = 'DRIVER';
-      } else if (ride.driver_id === data.rater_id) {
-        // Driver is rating Rider
+      if (ride.driver_id === data.rater_id) {
+        // Driver is rating the booking rider (host).
         target_id = ride.rider_id;
         target_role = 'RIDER';
       } else {
-        throw new Error('Unauthorized');
+        let isRiderParty = ride.rider_id === data.rater_id;
+        if (!isRiderParty && ride.group_id) {
+          const participant = await client.query(
+            `SELECT 1 FROM ride_group_members
+              WHERE group_id = $1 AND user_id = $2
+                AND status IN ('PICKED_UP','COMPLETED')`,
+            [ride.group_id, data.rater_id],
+          );
+          isRiderParty = (participant.rowCount ?? 0) > 0;
+        }
+        if (!isRiderParty) throw new Error('Unauthorized');
+        if (!ride.driver_id) throw new Error('No driver assigned to this ride');
+        target_id = ride.driver_id;
+        target_role = 'DRIVER';
       }
 
       // 2. Check if already rated by this person for this ride
@@ -301,6 +311,26 @@ export class RideService {
         );
         if (activeRes.rows.length > 0) {
           const active = activeRes.rows[0];
+          throw new ActiveRideExistsError(active.id, active.status);
+        }
+
+        // A passenger already riding in a group booking must not create a
+        // second personal ride. Point the client at the shared ride so it
+        // re-hydrates the authoritative group trip.
+        const activeGroupRide = await client.query(
+          `SELECT r.id, r.status
+             FROM ride_group_members m
+             JOIN ride_groups g ON g.id = m.group_id
+             JOIN rides r ON r.id = g.active_ride_id
+            WHERE m.user_id = $1
+              AND m.status IN ('JOINED','PICKUP_PENDING','PICKUP_CONFIRMED','PICKED_UP')
+              AND g.status IN ('RIDE_REQUESTED','DRIVER_MATCHING','DRIVER_ASSIGNED','IN_PROGRESS')
+              AND r.status NOT IN ('COMPLETED','CANCELLED')
+            LIMIT 1`,
+          [riderId],
+        );
+        if (activeGroupRide.rows.length > 0) {
+          const active = activeGroupRide.rows[0];
           throw new ActiveRideExistsError(active.id, active.status);
         }
 
@@ -635,8 +665,34 @@ export class RideService {
       }
     }
 
+    // GROUP RIDE: rebuild the authoritative multi-stop plan from the driver's
+    // ACTUAL location. This runs after the regular pickup-leg cache so the
+    // group navigation event is the final word for the driver app.
+    if ((updatedTrip as any).group_id) {
+      try {
+        const { GroupRideService } = await import('../groups/group-ride.service');
+        await GroupRideService.onDriverAssigned(tripId, driverId, driverLoc);
+        const refreshed = await RideRepository.findById(tripId);
+        if (refreshed) {
+          Object.assign(updatedTrip, refreshed);
+          if (driverLoc) (updatedTrip as any).driver_location = driverLoc;
+        }
+      } catch (err: any) {
+        console.error(`[RIDE] ⚠️ Group driver-plan build failed for ${tripId}: ${err.message}`);
+      }
+    }
+
     getIo().to(`rider:${trip.rider_id}`).emit('tripUpdate', updatedTrip);
     getIo().to(`driver:${driverId}`).emit('tripUpdate', updatedTrip);
+    // Every group participant (not only the host) receives the authoritative
+    // ride state so their shared map leaves "matching".
+    if ((updatedTrip as any).group_id) {
+      const { GroupService } = await import('../groups/group.service');
+      GroupService.broadcastGroupRide((updatedTrip as any).group_id, {
+        event: 'DRIVER_ASSIGNED',
+        trip: updatedTrip,
+      }).catch(() => undefined);
+    }
     dispatchAcceptOutcomeTotal.inc({ outcome: 'accepted' });
 
     // Broadcast to Admin Monitoring
@@ -944,9 +1000,12 @@ export class RideService {
           `[RIDE] ⚠️ Settlement amount read failed (non-blocking) for trip ${tripId}: ${err.message}`
         );
       }
+      const isGroupRide = !!(updatedTrip as any).group_id;
+      // Group rides are PREPAID by their participants before the booking.
+      // Charging the host's wallet here would double-charge the group.
       let walletChargeCents = 0;
       try {
-        if (dueCents > 0) {
+        if (!isGroupRide && dueCents > 0) {
           const charged = await WalletService.chargeForRide(
             updatedTrip.rider_id,
             tripId,
@@ -995,12 +1054,12 @@ export class RideService {
           promotionCents: centsValue(rideMoney.promo_discount_cents),
           creditsCents: centsValue(rideMoney.credits_applied_cents),
           tipCents,
-          walletPaymentCents: walletChargeCents,
-          amountOwedCents: Math.max(0, dueCents - walletChargeCents),
+          walletPaymentCents: isGroupRide ? dueCents : walletChargeCents,
+          amountOwedCents: isGroupRide ? 0 : Math.max(0, dueCents - walletChargeCents),
           driverShareCents: allocation?.driverShareCents ?? 0,
           platformShareCents: allocation?.platformShareCents ?? 0,
           netrideShareCents: allocation?.netrideShareCents ?? 0,
-          paymentProvider: 'wallet',
+          paymentProvider: isGroupRide ? 'group_split' : 'wallet',
           paymentReference: tripId,
           completedAt: updatedTrip.completed_at ? new Date(updatedTrip.completed_at) : new Date(),
           originalFareCents: breakdown ? Number(breakdown.original_fare_cents) : dueCents,
@@ -1019,6 +1078,15 @@ export class RideService {
         console.warn(
           `[RIDE] ⚠️ Financial ledger write failed (non-blocking) for trip ${tripId}: ${err.message}`
         );
+      }
+
+      if (isGroupRide) {
+        try {
+          const { GroupRideService } = await import('../groups/group-ride.service');
+          await GroupRideService.onRideCompleted(tripId);
+        } catch (err: any) {
+          console.warn(`[RIDE] ⚠️ Group completion sync failed for ${tripId}: ${err.message}`);
+        }
       }
 
 // Rewards ecosystem: finalize promo usage + partner commission and
@@ -1128,8 +1196,24 @@ export class RideService {
     // credits untouched) is released back to the pool and re-dispatched, and
     // the rider gets an apology. The driver still earns a star penalty +
     // the accepted-cancellation counter, reason or no reason.
+    let groupHasPickedUpPassenger = false;
+    if ((trip as any).group_id && userId === trip.driver_id) {
+      try {
+        const picked = await pool.query(
+          `SELECT 1 FROM ride_group_members
+            WHERE group_id = $1 AND status = 'PICKED_UP' LIMIT 1`,
+          [(trip as any).group_id],
+        );
+        groupHasPickedUpPassenger = (picked.rowCount ?? 0) > 0;
+      } catch {
+        // Fail safe: if we cannot prove nobody is on board, treat the
+        // cancellation as terminal rather than silently re-matching.
+        groupHasPickedUpPassenger = true;
+      }
+    }
     const isDriverPrePickupCancel =
       userId === trip.driver_id &&
+      !groupHasPickedUpPassenger &&
       (trip.status === TripStatus.ACCEPTED || trip.status === TripStatus.DRIVER_ARRIVING);
 
     // Accepted-ride cancellation by the DRIVER mid-trip (IN_PROGRESS) is a
@@ -1284,6 +1368,24 @@ export class RideService {
         reasonText: (opts.reasonText ?? '').trim().slice(0, 300) || null,
       });
       getIo().to('monitoring:all_rides').emit('tripUpdate', rematchedTrip);
+
+      if ((rematchedTrip as any).group_id) {
+        try {
+          await pool.query(
+            `UPDATE ride_groups SET status = 'DRIVER_MATCHING', updated_at = NOW()
+              WHERE id = $1 AND status = 'DRIVER_ASSIGNED'`,
+            [(rematchedTrip as any).group_id],
+          );
+          const { GroupService } = await import('../groups/group.service');
+          await GroupService.broadcastGroupRide((rematchedTrip as any).group_id, {
+            event: 'DRIVER_RELEASED',
+            trip: rematchedTrip,
+            reasonText: opts.reasonText ?? null,
+          });
+        } catch (err: any) {
+          console.error(`[RIDE] ⚠️ Group re-match sync failed: ${err.message}`);
+        }
+      }
 
       // Re-dispatch the SAME ride id through the regular pipeline.
       const pickup = rematchedTrip.pickup;
@@ -1474,6 +1576,25 @@ export class RideService {
       getIo().to(`driver:${trip.driver_id}`).emit('tripUpdate', updatedTrip);
     }
     getIo().to('monitoring:all_rides').emit('tripUpdate', updatedTrip);
+
+    // GROUP RIDE: refund every prepaid participant, close the group, and
+    // broadcast the terminal state to friend apps (they are not the host and
+    // therefore do not receive the host's rider: room tripUpdate).
+    if ((updatedTrip as any).group_id) {
+      try {
+        const { GroupRideService } = await import('../groups/group-ride.service');
+        await GroupRideService.onRideCancelled(tripId, reasonText ?? 'cancelled');
+        const { GroupService } = await import('../groups/group.service');
+        await GroupService.broadcastGroupRide((updatedTrip as any).group_id, {
+          event: 'CANCELLED',
+          trip: updatedTrip,
+          reasonText: reasonText ?? null,
+          cancelledBy,
+        });
+      } catch (err: any) {
+        console.error(`[RIDE] ⚠️ Group cancellation sync failed for ${tripId}: ${err.message}`);
+      }
+    }
 
     // Real phone notification carrying WHO cancelled and WHY. EVERY party
     // is told except the actor — and each with their OWN role key. The

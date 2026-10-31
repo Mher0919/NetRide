@@ -30,13 +30,13 @@ import 'address_search_delegate.dart';
 import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../components/smooth_driver_marker.dart';
-import '../components/animated_price.dart';
 import '../components/driver_cancelled_dialog.dart';
 import '../widgets/branded_map_tile.dart';
 import '../widgets/explore_specials_section.dart';
 import '../widgets/explore_validation_section.dart';
 import '../widgets/special_business_sheet.dart';
 import '../widgets/special_card.dart';
+import '../widgets/vehicle_selection_card.dart';
 import 'wallet_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -1474,6 +1474,7 @@ class _MapScreenState extends State<MapScreen>
     // ever a SEARCHING state.
     final activeTripForNavigation =
         rideProvider.tripId != null &&
+        !rideProvider.isGroupParticipant &&
         (rideProvider.status == models.TripStatus.ACCEPTED ||
             rideProvider.status == models.TripStatus.DRIVER_ARRIVING ||
             rideProvider.status == models.TripStatus.IN_PROGRESS);
@@ -3433,214 +3434,24 @@ class _MapScreenState extends State<MapScreen>
     });
   }
 
-  /// The single ride class card: premium SUV visual, class details, ETA,
-  /// and the animated price breakdown (fare → promo → credits → final).
+  /// Shared vehicle-selection card (the exact same widget the group flow
+  /// uses). Kept as the single visual implementation of the ride card.
   Widget _buildRideCard(ThemeData theme) {
     final fareCents = _fareCents;
     final finalCents = _finalCents;
     final savedCents = _totalSavedCents;
     final etaMinutes = (_estimateDurationSeconds / 60).round().clamp(1, 99);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF5B7760).withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF5B7760), width: 2),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.asset(
-                  'assets/images/car-logo.png',
-                  width: 149,
-                  height: 95,
-                  fit: BoxFit.contain,
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'NetRide Premium',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                        color: Color(0xFF2F3A32),
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Premium SUV or executive vehicle',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: Colors.grey,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Professional driver · Upfront fare',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF5B7760),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Flexible(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'Est. · ~$etaMinutes min',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade500,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    if (fareCents > 0)
-                      AnimatedPriceReduction(
-                        originalCents: fareCents,
-                        finalCents: finalCents,
-                        savedCents: savedCents,
-                        priceStyle: const TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF2F3A32),
-                          letterSpacing: -0.5,
-                        ),
-                      )
-                    else if (_farePending || _loadingEstimates)
-                      const Text(
-                        'Calculating…',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF5B7760),
-                        ),
-                      )
-                    else
-                      const Text(
-                        '—',
-                        style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF2F3A32),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (savedCents > 0) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: SavedBadge(cents: savedCents),
-            ),
-          ],
-          // Price breakdown: discounts then final total. Only shown when
-          // something is applied so the card stays quiet for a plain ride.
-          // The TOP price (AnimatedPriceReduction) shows ONE unified discount
-          // (fare → you pay); this bottom list itemizes each component.
-          if (savedCents > 0) ...[
-            const SizedBox(height: 10),
-            if (_promoDiscountCents > 0)
-              _priceBreakdownRow(
-                label: _promoCodeController.text.trim().isNotEmpty
-                    ? 'Promo ${_promoCodeController.text.trim().toUpperCase()}'
-                    : 'Promo',
-                amount: -_promoDiscountCents,
-                color: const Color(0xFF5B7760),
-              ),
-            if (_specialDiscountCents > 0)
-              _priceBreakdownRow(
-                label: 'Special discount',
-                amount: -_specialDiscountCents,
-                color: const Color(0xFF5B7760),
-              ),
-            if (_creditsToUseCents > 0)
-              _priceBreakdownRow(
-                label: 'Ride credits',
-                amount: -_creditsToUseCents,
-                color: const Color(0xFF5B7760),
-              ),
-            const SizedBox(height: 8),
-            const Divider(height: 1),
-            const SizedBox(height: 8),
-            _priceBreakdownRow(
-              label: 'You pay',
-              amount: finalCents,
-              isBold: true,
-              priceStyle: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF2F3A32),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _priceBreakdownRow({
-    required String label,
-    required int amount,
-    bool isBold = false,
-    Color? color,
-    TextStyle? priceStyle,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
-                color: color ?? Colors.grey.shade700,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            amount == 0 ? '' : formatCents(amount),
-            style:
-                priceStyle ??
-                TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
-                  color: const Color(0xFF2F3A32),
-                ),
-          ),
-        ],
-      ),
+    return VehicleSelectionCard(
+      fareCents: fareCents,
+      finalCents: finalCents,
+      savedCents: savedCents,
+      etaMinutes: etaMinutes,
+      showBreakdown: true,
+      promoLabel: _promoCodeController.text.trim().toUpperCase(),
+      promoDiscountCents: _promoDiscountCents,
+      specialDiscountCents: _specialDiscountCents,
+      creditsCents: _creditsToUseCents,
     );
   }
 

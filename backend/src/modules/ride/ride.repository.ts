@@ -233,7 +233,14 @@ export class RideRepository {
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
       ${RideRepository.DRIVER_VEHICLE_JOIN}
-      WHERE r.rider_id = $1 
+      WHERE (
+        r.rider_id = $1
+        OR r.group_id IN (
+          SELECT m.group_id FROM ride_group_members m
+           WHERE m.user_id = $1
+             AND m.status IN ('JOINED','PICKUP_PENDING','PICKUP_CONFIRMED','PICKED_UP','COMPLETED')
+        )
+      )
       ORDER BY r.created_at DESC
     `, [riderId]);
     return res.rows.map(row => this.mapToTrip(row));
@@ -267,7 +274,15 @@ export class RideRepository {
       LEFT JOIN users u ON r.rider_id = u.id
       LEFT JOIN users d ON r.driver_id = d.id
       ${RideRepository.DRIVER_VEHICLE_JOIN}
-      WHERE r.rider_id = $1 AND r.status NOT IN ($2, $3) 
+      WHERE (
+        r.rider_id = $1
+        OR r.group_id IN (
+          SELECT m.group_id FROM ride_group_members m
+           WHERE m.user_id = $1
+             AND m.status IN ('JOINED','PICKUP_PENDING','PICKUP_CONFIRMED','PICKED_UP','COMPLETED')
+        )
+      )
+        AND r.status NOT IN ($2, $3)
       ORDER BY r.created_at DESC LIMIT 1
     `, [riderId, TripStatus.COMPLETED, TripStatus.CANCELLED]);
     return res.rows[0] ? this.mapToTrip(res.rows[0]) : null;
@@ -329,6 +344,7 @@ export class RideRepository {
       `DELETE FROM rides
        WHERE id = $1
          AND (rider_id = $2 OR driver_id = $2)
+         AND group_id IS NULL
          AND status IN ('COMPLETED', 'CANCELLED')`,
       [id, userId]
     );
@@ -340,6 +356,7 @@ export class RideRepository {
       id: row.id,
       rider_id: row.rider_id,
       driver_id: row.driver_id,
+      group_id: row.group_id ?? null,
       status: row.status as TripStatus,
       requested_class: row.requested_class as any,
       snapshot_rider_rating: row.snapshot_rider_rating ? parseFloat(row.snapshot_rider_rating) : undefined,

@@ -299,6 +299,36 @@ export function setupSocketGateway(io: Server) {
     socket.join(`${roomRole}:${id}`);
     console.log(`[SOCKET] 🏠 ${id} joined room: ${roomRole}:${id}`);
 
+    // GROUP RIDES: a socket may only join a group's real-time room after the
+    // server verifies current membership. Never let a client subscribe to an
+    // arbitrary group id.
+    socket.on('subscribeGroup', async (payload: { groupId?: string } | string) => {
+      const groupId = typeof payload === 'string' ? payload : payload?.groupId;
+      if (!groupId || typeof groupId !== 'string') return;
+      try {
+        const member = await pool.query(
+          `SELECT 1 FROM ride_group_members
+            WHERE group_id = $1::uuid AND user_id = $2::uuid
+              AND status IN ('JOINED','PICKUP_PENDING','PICKUP_CONFIRMED','PICKED_UP','COMPLETED')
+            LIMIT 1`,
+          [groupId, id],
+        );
+        if ((member.rowCount ?? 0) === 0) {
+          socket.emit('groupSubscriptionFailed', { groupId, message: 'Not a group member' });
+          return;
+        }
+        socket.join(`group:${groupId}`);
+        socket.emit('groupSubscribed', { groupId });
+      } catch {
+        socket.emit('groupSubscriptionFailed', { groupId, message: 'Unable to subscribe' });
+      }
+    });
+
+    socket.on('unsubscribeGroup', (payload: { groupId?: string } | string) => {
+      const groupId = typeof payload === 'string' ? payload : payload?.groupId;
+      if (groupId && typeof groupId === 'string') socket.leave(`group:${groupId}`);
+    });
+
     // Track online presence for push notification delivery.
     // When a user disconnects, their presence key expires (60s TTL)
     // and the system falls back to FCM push notifications.
@@ -621,6 +651,31 @@ export function setupSocketGateway(io: Server) {
             driverId: id,
             ...validated.data
           });
+          if ((currentTrip as any).group_id) {
+            io.to(`group:${(currentTrip as any).group_id}`).emit('groupDriverLocation', {
+              groupId: (currentTrip as any).group_id,
+              tripId: currentTrip.id,
+              driverId: id,
+              lat: validated.data.lat,
+              lng: validated.data.lng,
+              heading: (validated.data as any).heading ?? null,
+              timestamp: new Date().toISOString(),
+            });
+
+            // Traffic / drift-aware pickup re-optimization. Throttled to once
+            // per 90 s per ride; failures are non-fatal and the previous
+            // authoritative plan remains in force.
+            try {
+              const key = `group:reopt:${currentTrip.id}`;
+              const claimed = await redis.set(key, '1', 'EX', 90, 'NX');
+              if (claimed) {
+                const { GroupRideService } = await import('../modules/groups/group-ride.service');
+                GroupRideService.replanRemaining(currentTrip.id, id).catch(() => undefined);
+              }
+            } catch {
+              /* optional */
+            }
+          }
 
           // Live ETA push (throttled to 10 s per trip): compute the
           // remaining distance over the stored authoritative leg and
@@ -677,6 +732,13 @@ export function setupSocketGateway(io: Server) {
                   io.to(`rider:${currentTrip.rider_id}`).emit('tripUpdate', arriving.trip);
                   io.to(`driver:${id}`).emit('tripUpdate', arriving.trip);
                   io.to('monitoring:all_rides').emit('tripUpdate', arriving.trip);
+                  if ((arriving.trip as any).group_id) {
+                    io.to(`group:${(arriving.trip as any).group_id}`).emit('groupRideUpdated', {
+                      groupId: (arriving.trip as any).group_id,
+                      event: 'DRIVER_ARRIVING',
+                      trip: arriving.trip,
+                    });
+                  }
                 }
                 notifyDriverArrived(
                   currentTrip.rider_id,

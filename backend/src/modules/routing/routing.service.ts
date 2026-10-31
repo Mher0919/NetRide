@@ -23,7 +23,13 @@
 import { MLEtaService } from '../../services/ml-eta.service';
 import { computeEstimate, FareBreakdown } from '../../services/pricing.service';
 import { RouteEngine } from './route-engine';
-import { GoogleRoutesEngine } from './google-routes.engine';
+import {
+  GoogleRoutesEngine,
+  googleRoutesMatrix,
+  googleRoutesWithWaypoints,
+  type GoogleRouteMatrix,
+  type WaypointRoute,
+} from './google-routes.engine';
 import { RoutingError } from './routing.errors';
 import {
   routingRequestsTotal,
@@ -236,6 +242,136 @@ export class RoutingService {
       durationSeconds: route.durationSeconds,
     });
     return { route, fare };
+  }
+
+  /**
+   * Road-network cost matrix for the group-route optimizer.
+   *
+   * One Google distance-matrix call in production. When the provider is
+   * unavailable we degrade to this service's normal route() call for every
+   * pair (which itself has a deterministic synthetic fallback), so the
+   * optimizer never silently falls back to join order.
+   */
+  static async routeMatrix(
+    origins: LatLng[],
+    destinations: LatLng[],
+  ): Promise<GoogleRouteMatrix> {
+    const google = await googleRoutesMatrix(origins, destinations).catch(() => null);
+    if (google) {
+      // Treat every missing cell as unreachable so the optimizer rejects an
+      // incomplete plan rather than inventing a distance.
+      return google;
+    }
+
+    const distances: number[][] = origins.map(() => destinations.map(() => -1));
+    const durations: number[][] = origins.map(() => destinations.map(() => 0));
+    const pairs: Array<{ oi: number; di: number }> = [];
+    for (let oi = 0; oi < origins.length; oi++) {
+      for (let di = 0; di < destinations.length; di++) {
+        pairs.push({ oi, di });
+      }
+    }
+    const concurrency = 6;
+    let cursor = 0;
+    const workers = new Array(Math.min(concurrency, pairs.length)).fill(0).map(async () => {
+      while (cursor < pairs.length) {
+        const { oi, di } = pairs[cursor++];
+        if (oi === di) {
+          distances[oi][di] = 0;
+          durations[oi][di] = 0;
+          continue;
+        }
+        try {
+          const route = await this.route(origins[oi], destinations[di]);
+          distances[oi][di] = route.distanceMeters;
+          durations[oi][di] = route.durationSeconds;
+        } catch {
+          distances[oi][di] = -1;
+          durations[oi][di] = 0;
+        }
+      }
+    });
+    await Promise.all(workers);
+    return { distances, durations };
+  }
+
+  /**
+   * One continuous route through an EXPLICIT, already-optimized stop order.
+   * Google returns a single polyline; if that call is unavailable we stitch
+   * the individual road legs (still road-network geometry, never a straight
+   * line between pickups).
+   */
+  static async calculateRouteWithWaypoints(
+    origin: LatLng,
+    waypoints: LatLng[],
+    destination: LatLng,
+  ): Promise<RoutingResult & { legs: Array<{ distanceMeters: number; durationSeconds: number }> }> {
+    if (waypoints.length === 0) {
+      const direct = await this.route(origin, destination);
+      return {
+        ...direct,
+        legs: [{ distanceMeters: direct.distanceMeters, durationSeconds: direct.durationSeconds }],
+      };
+    }
+
+    const google: WaypointRoute | null = await googleRoutesWithWaypoints(
+      origin,
+      waypoints,
+      destination,
+    ).catch(() => null);
+    if (google) {
+      return {
+        distanceMeters: google.distanceMeters,
+        durationSeconds: google.durationSeconds,
+        staticDurationSeconds: google.staticDurationSeconds,
+        etaSeconds:
+          google.durationSeconds *
+          MLEtaService.predictMultiplier(origin[0], origin[1], google.distanceMeters),
+        geometry: google.geometry,
+        confidence: 1,
+        engine: 'GoogleRoutes',
+        cacheHit: false,
+        steps: google.steps,
+        speedLimitsByRoad: {},
+        legs: google.legs,
+      };
+    }
+
+    const points: LatLng[] = [origin, ...waypoints, destination];
+    const legs: Array<{ distanceMeters: number; durationSeconds: number }> = [];
+    const coordinates: Array<[number, number]> = [];
+    const steps: any[] = [];
+    let distanceMeters = 0;
+    let durationSeconds = 0;
+    let etaSeconds = 0;
+    let engine: RoutingResult['engine'] = 'Synthetic';
+    for (let i = 0; i < points.length - 1; i++) {
+      const leg = await this.route(points[i], points[i + 1]);
+      legs.push({ distanceMeters: leg.distanceMeters, durationSeconds: leg.durationSeconds });
+      distanceMeters += leg.distanceMeters;
+      durationSeconds += leg.durationSeconds;
+      etaSeconds += leg.etaSeconds;
+      engine = leg.engine;
+      steps.push(...leg.steps);
+      const coords = leg.geometry.coordinates;
+      for (const c of coords) {
+        if (coordinates.length === 0 || coordinates[coordinates.length - 1][0] !== c[0] || coordinates[coordinates.length - 1][1] !== c[1]) {
+          coordinates.push(c);
+        }
+      }
+    }
+    return {
+      distanceMeters,
+      durationSeconds,
+      etaSeconds,
+      geometry: { type: 'LineString', coordinates },
+      confidence: engine === 'GoogleRoutes' ? 1 : 0.4,
+      engine,
+      cacheHit: false,
+      steps,
+      speedLimitsByRoad: {},
+      legs,
+    };
   }
 
   /** Decode a polyline6-encoded string to [lng,lat] coordinates. */

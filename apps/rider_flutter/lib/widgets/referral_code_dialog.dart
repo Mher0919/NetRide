@@ -6,8 +6,13 @@
 
 import 'package:flutter/material.dart';
 
-Future<String?> promptForReferralCode(BuildContext context) async {
-  final controller = TextEditingController();
+Future<String?> promptForReferralCode(
+  BuildContext context, {
+  String? initialCode,
+}) async {
+  final controller = TextEditingController(
+    text: (initialCode ?? '').trim().toUpperCase(),
+  );
   final code = await showDialog<String>(
     context: context,
     barrierDismissible: false,

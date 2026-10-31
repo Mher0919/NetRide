@@ -133,6 +133,10 @@ class Trip {
   final String? cancellationReasonCode;
   final String? cancellationReasonText;
 
+  /// Shared group booking indicator + least-privilege summary from the offer.
+  final bool isGroup;
+  final GroupOfferSummary? group;
+
   Trip({
     required this.id,
     required this.riderId,
@@ -164,6 +168,8 @@ class Trip {
     this.cancelledBy,
     this.cancellationReasonCode,
     this.cancellationReasonText,
+    this.isGroup = false,
+    this.group,
   });
 
   bool get isTestTrip => isTestTripFor(riderInfo?.email, driverInfo?.email);
@@ -203,8 +209,166 @@ class Trip {
       cancelledBy: json['cancelled_by']?.toString(),
       cancellationReasonCode: json['cancellation_reason_code']?.toString(),
       cancellationReasonText: json['cancellation_reason_text']?.toString(),
+      isGroup:
+          json['is_group'] == true || json['group'] is Map || json['group_id'] != null,
+      group: json['group'] is Map
+          ? GroupOfferSummary.fromJson(Map<String, dynamic>.from(json['group']))
+          : (json['group_id'] != null ? GroupOfferSummary(id: json['group_id'].toString()) : null),
     );
   }
+}
+
+class GroupOfferSummary {
+  final String id;
+  final String name;
+  final int participantCount;
+  final int stopCount;
+  final List<String> pickupSummary;
+  final String? destinationAddress;
+
+  GroupOfferSummary({
+    required this.id,
+    this.name = 'Group ride',
+    this.participantCount = 0,
+    this.stopCount = 0,
+    this.pickupSummary = const [],
+    this.destinationAddress,
+  });
+
+  factory GroupOfferSummary.fromJson(Map<String, dynamic> json) =>
+      GroupOfferSummary(
+        id: (json['id'] ?? '').toString(),
+        name: (json['name'] ?? 'Group ride').toString(),
+        participantCount: (json['participantCount'] as num?)?.toInt() ?? 0,
+        stopCount: (json['stopCount'] as num?)?.toInt() ?? 0,
+        pickupSummary: (json['pickupSummary'] as List? ?? [])
+            .map((e) => e.toString())
+            .toList(),
+        destinationAddress: json['destinationAddress']?.toString(),
+      );
+}
+
+class DriverGroupPassenger {
+  final String userId;
+  final String name;
+  final String status;
+  final DateTime? pickedUpAt;
+
+  DriverGroupPassenger({
+    required this.userId,
+    required this.name,
+    required this.status,
+    this.pickedUpAt,
+  });
+
+  bool get isPickedUp =>
+      status == 'PICKED_UP' || status == 'COMPLETED' || status == 'NO_SHOW';
+
+  factory DriverGroupPassenger.fromJson(Map<String, dynamic> json) =>
+      DriverGroupPassenger(
+        userId: json['userId'].toString(),
+        name: (json['name'] ?? 'Passenger').toString(),
+        status: (json['status'] ?? 'JOINED').toString(),
+        pickedUpAt: json['pickedUpAt'] != null
+            ? DateTime.tryParse(json['pickedUpAt'].toString())
+            : null,
+      );
+}
+
+class DriverGroupStop {
+  final int sequence;
+  final double lat;
+  final double lng;
+  final String address;
+  final List<DriverGroupPassenger> passengers;
+  final bool completed;
+
+  DriverGroupStop({
+    required this.sequence,
+    required this.lat,
+    required this.lng,
+    required this.address,
+    required this.passengers,
+    this.completed = false,
+  });
+
+  factory DriverGroupStop.fromJson(Map<String, dynamic> json) =>
+      DriverGroupStop(
+        sequence: (json['sequence'] as num?)?.toInt() ?? 1,
+        lat: (json['lat'] as num).toDouble(),
+        lng: (json['lng'] as num).toDouble(),
+        address: (json['address'] ?? '').toString(),
+        passengers: (json['passengers'] as List? ?? [])
+            .whereType<Map>()
+            .map((e) => DriverGroupPassenger.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
+        completed: json['completed'] == true,
+      );
+}
+
+class DriverGroupRideView {
+  final String rideId;
+  final String groupId;
+  final String groupName;
+  final String groupStatus;
+  final String rideStatus;
+  final List<DriverGroupStop> stops;
+  final int currentStopIndex;
+  final Location? destination;
+  final Map<String, dynamic>? geometry;
+  final int totalDistanceMeters;
+  final int totalDurationSeconds;
+  final Location? driverLocation;
+  final bool allPickedUp;
+
+  DriverGroupRideView({
+    required this.rideId,
+    required this.groupId,
+    required this.groupName,
+    required this.groupStatus,
+    required this.rideStatus,
+    required this.stops,
+    required this.currentStopIndex,
+    this.destination,
+    this.geometry,
+    this.totalDistanceMeters = 0,
+    this.totalDurationSeconds = 0,
+    this.driverLocation,
+    this.allPickedUp = false,
+  });
+
+  DriverGroupStop? get currentStop =>
+      currentStopIndex >= 0 && currentStopIndex < stops.length
+          ? stops[currentStopIndex]
+          : null;
+
+  factory DriverGroupRideView.fromJson(Map<String, dynamic> json) =>
+      DriverGroupRideView(
+        rideId: (json['rideId'] ?? '').toString(),
+        groupId: (json['groupId'] ?? '').toString(),
+        groupName: (json['groupName'] ?? 'Group ride').toString(),
+        groupStatus: (json['groupStatus'] ?? '').toString(),
+        rideStatus: (json['rideStatus'] ?? '').toString(),
+        stops: (json['stops'] as List? ?? [])
+            .whereType<Map>()
+            .map((e) => DriverGroupStop.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
+        currentStopIndex: (json['currentStopIndex'] as num?)?.toInt() ?? 0,
+        destination: json['destination'] is Map
+            ? Location.fromJson(Map<String, dynamic>.from(json['destination']))
+            : null,
+        geometry: json['geometry'] is Map
+            ? Map<String, dynamic>.from(json['geometry'])
+            : null,
+        totalDistanceMeters:
+            (json['totalDistanceMeters'] as num?)?.toInt() ?? 0,
+        totalDurationSeconds:
+            (json['totalDurationSeconds'] as num?)?.toInt() ?? 0,
+        driverLocation: json['driverLocation'] is Map
+            ? Location.fromJson(Map<String, dynamic>.from(json['driverLocation']))
+            : null,
+        allPickedUp: json['allPickedUp'] == true,
+      );
 }
 
 class ChatMessage {

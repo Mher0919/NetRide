@@ -6,6 +6,8 @@ class ReferralInfo {
   final String code;
   final String qrPayload;
   final String referralUrl;
+  final String? iosStoreUrl;
+  final String? androidStoreUrl;
   final DateTime issuedAt;
   final DateTime expiresAt;
   final bool canScan;
@@ -19,6 +21,8 @@ class ReferralInfo {
     required this.code,
     required this.qrPayload,
     required this.referralUrl,
+    this.iosStoreUrl,
+    this.androidStoreUrl,
     required this.issuedAt,
     required this.expiresAt,
     required this.canScan,
@@ -35,6 +39,8 @@ class ReferralInfo {
       code: json['code'] as String? ?? '',
       qrPayload: json['qr_payload'] as String? ?? '',
       referralUrl: json['referral_url'] as String? ?? '',
+      iosStoreUrl: json['ios_store_url'] as String?,
+      androidStoreUrl: json['android_store_url'] as String?,
       issuedAt: DateTime.tryParse(json['issued_at'] as String? ?? '') ?? DateTime.now(),
       expiresAt: DateTime.tryParse(json['expires_at'] as String? ?? '') ?? DateTime.now(),
       canScan: json['can_scan'] as bool? ?? false,

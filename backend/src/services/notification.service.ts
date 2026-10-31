@@ -44,7 +44,13 @@ export type NotificationType =
   | 'referral_reward'
   | 'special_reward_ready'
   | 'special_settled'
-  | 'driver_connectivity';
+  | 'driver_connectivity'
+  | 'group_invitation'
+  | 'group_member_joined'
+  | 'group_payment'
+  | 'group_ride'
+  | 'friend_request'
+  | 'friend_accepted';
 
 /** Money formatting used in every notification copy ($X.YZ). */
 export function fmtMoney(cents: number): string {
@@ -72,6 +78,12 @@ export const NOTIFICATION_META: Record<NotificationType, { channel: string; rout
   special_reward_ready: { channel: 'special', route: '/trip' },
   special_settled: { channel: 'special', route: '/trip' },
   driver_connectivity: { channel: 'ride', route: '/trip' },
+  group_invitation: { channel: 'group', route: '/groups' },
+  group_member_joined: { channel: 'group', route: '/groups' },
+  group_payment: { channel: 'group', route: '/groups' },
+  group_ride: { channel: 'group', route: '/groups' },
+  friend_request: { channel: 'group', route: '/groups' },
+  friend_accepted: { channel: 'group', route: '/groups' },
 };
 
 export interface NotifyArgs {

@@ -78,6 +78,21 @@ class RideProvider with ChangeNotifier {
   Stream<Map<String, dynamic>> get specialRedemptionUpdates =>
       _specialRedemptionUpdates.stream;
 
+  /// Group ride real-time relay. The GroupProvider owns group state and
+  /// subscribes to the same authenticated socket this provider owns, so the
+  /// app never opens a second socket for groups.
+  final StreamController<Map<String, dynamic>> _groupEvents =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get groupEvents => _groupEvents.stream;
+
+  void subscribeGroup(String groupId) {
+    _socket?.emit('subscribeGroup', {'groupId': groupId});
+  }
+
+  void unsubscribeGroup(String groupId) {
+    _socket?.emit('unsubscribeGroup', {'groupId': groupId});
+  }
+
   /// Authoritative route pushed by the backend (navigationStarted /
   /// navigationRerouteRequested). Rendering this — instead of calling
   /// the routing API from the trip screen — keeps the rider map in sync
@@ -161,8 +176,19 @@ class RideProvider with ChangeNotifier {
   /// still matching (initial request OR re-match after a driver cancel).
   /// The ONE predicate the map screen uses to keep the existing search UI
   /// alive across both flows.
+  /// True when the current booking belongs to someone else (a group host).
+  /// Friends still receive tracking updates, but must never be shown the
+  /// host's ride-request/search controls or auto-navigated into the host's
+  /// personal trip screen.
+  bool get isGroupParticipant =>
+      _currentTrip?.groupId != null &&
+      _currentTrip!.riderId.isNotEmpty &&
+      _currentTrip!.riderId != SecureTokenStore.userId;
+
   bool get isSearchingForDriver =>
-      _status == TripStatus.REQUESTED && _tripId != null;
+      _status == TripStatus.REQUESTED &&
+      _tripId != null &&
+      !isGroupParticipant;
 
   /// True while a driver is assigned but the trip has not started:
   /// ACCEPTED (en route to pickup) or DRIVER_ARRIVING (at pickup).
@@ -395,6 +421,30 @@ class RideProvider with ChangeNotifier {
       );
       if (data is Map<String, dynamic>) _specialRedemptionUpdates.add(data);
     });
+
+    const groupEvents = [
+      'groupUpdated',
+      'groupMessageReceived',
+      'groupPaymentUpdated',
+      'groupRideUpdated',
+      'groupDriverLocation',
+      'groupPickupConfirmed',
+      'groupActivity',
+      'groupInvitationReceived',
+      'groupLeft',
+      'groupSubscribed',
+      'groupSubscriptionFailed',
+      'friendRequestReceived',
+    ];
+    for (final event in groupEvents) {
+      _socket!.on(event, (data) {
+        if (data is Map) {
+          _groupEvents.add({...Map<String, dynamic>.from(data), 'event': event});
+        } else {
+          _groupEvents.add({'event': event});
+        }
+      });
+    }
 
     // A ride request was REJECTED server-side (e.g. the special is no longer
     // attachable). Never a silent hang: the searching sheet reads this and
@@ -1203,6 +1253,7 @@ class RideProvider with ChangeNotifier {
   void dispose() {
     _socket?.disconnect();
     _notificationPing.close();
+    _groupEvents.close();
     super.dispose();
   }
 }

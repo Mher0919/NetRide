@@ -15,8 +15,20 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  */
 async function hasCompletedRideWith(riderId: string, driverId: string): Promise<boolean> {
     const res = await pool.query(
-        `SELECT 1 FROM rides
-          WHERE rider_id = $1 AND driver_id = $2 AND status = 'COMPLETED'
+        `SELECT 1 FROM rides r
+          WHERE r.driver_id = $2 AND r.status = 'COMPLETED'
+            AND (
+              r.rider_id = $1
+              OR (
+                r.group_id IS NOT NULL
+                AND EXISTS (
+                  SELECT 1 FROM ride_group_members m
+                   WHERE m.group_id = r.group_id
+                     AND m.user_id = $1
+                     AND m.status = 'COMPLETED'
+                )
+              )
+            )
           LIMIT 1`,
         [riderId, driverId],
     );

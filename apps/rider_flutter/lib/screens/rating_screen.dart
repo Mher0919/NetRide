@@ -7,7 +7,21 @@ import '../models/trip_models.dart' as models;
 
 class RatingScreen extends StatefulWidget {
   final models.Trip trip;
-  const RatingScreen({super.key, required this.trip});
+
+  /// Optional post-rating destination. Group rides use this to return to the
+  /// conversation instead of the Explore root.
+  final VoidCallback? onFinished;
+
+  /// Tips remain a single booking-party action in the existing payment
+  /// architecture. Group friends review the driver without a tip field.
+  final bool allowTip;
+
+  const RatingScreen({
+    super.key,
+    required this.trip,
+    this.onFinished,
+    this.allowTip = true,
+  });
 
   @override
   State<RatingScreen> createState() => _RatingScreenState();
@@ -25,6 +39,11 @@ class _RatingScreenState extends State<RatingScreen> {
   /// reveal an empty black navigator. Always return to a fresh Explore.
   void _finish() {
     if (!mounted) return;
+    if (widget.onFinished != null) {
+      Navigator.of(context).pop();
+      widget.onFinished!();
+      return;
+    }
     Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
   }
 
@@ -33,8 +52,8 @@ class _RatingScreenState extends State<RatingScreen> {
     setState(() => _isSubmitting = true);
     final rideProvider = Provider.of<RideProvider>(context, listen: false);
     try {
-      // 1. Submit Tip if any
-      if (_tipAmount > 0) {
+      // 1. Submit Tip if any (booking-party only)
+      if (widget.allowTip && _tipAmount > 0) {
         await rideProvider.submitTip(widget.trip.id, _tipAmount);
       }
       
@@ -144,44 +163,46 @@ class _RatingScreenState extends State<RatingScreen> {
             ),
             const SizedBox(height: 48),
 
-            // Tipping Section
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Add a Tip', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14)),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [0.0, 1.0, 3.0, 5.0].map((amount) {
-                final isSelected = _tipAmount == amount;
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: GestureDetector(
-                      onTap: () => setState(() => _tipAmount = amount),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          color: isSelected ? Colors.black : Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: isSelected ? Colors.black : Colors.grey.shade300),
-                        ),
-                        child: Text(
-                          amount == 0 ? 'No Tip' : '\$${amount.toInt()}',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.black,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13
+            if (widget.allowTip) ...[
+              // Tipping Section
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Add a Tip', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14)),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [0.0, 1.0, 3.0, 5.0].map((amount) {
+                  final isSelected = _tipAmount == amount;
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: GestureDetector(
+                        onTap: () => setState(() => _tipAmount = amount),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.black : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: isSelected ? Colors.black : Colors.grey.shade300),
+                          ),
+                          child: Text(
+                            amount == 0 ? 'No Tip' : '\$${amount.toInt()}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: isSelected ? Colors.white : Colors.black,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 48),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 48),
+            ],
 
             // Favorite Toggle
             Container(

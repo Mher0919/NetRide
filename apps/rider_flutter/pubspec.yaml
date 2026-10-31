@@ -46,6 +46,7 @@ dependencies:
   # Card numbers/CVCs are collected by Stripe's SDK; NetRide only ever sees
   # the brand/last4/expiry from its own backend.
   flutter_stripe: ^14.1.0
+  flutter_contacts: ^2.1.0
 
 dev_dependencies:
   flutter_test:

@@ -840,6 +840,8 @@ export class PaymentsService {
     description?: string;
     idempotencyKey: string;
     requireConsent?: boolean;
+    /** Additional non-secret metadata persisted on stripe_payments. */
+    metadata?: Record<string, string>;
   }): Promise<OffSessionChargeResult> {
     const amountCents = Math.round(args.amountCents);
     if (amountCents <= 0) return { ok: false, reason: 'declined', failureReason: 'Non-positive charge amount' };
@@ -883,7 +885,7 @@ export class PaymentsService {
         env.STRIPE_CURRENCY,
         profile.stripeCustomerId,
         args.idempotencyKey,
-        JSON.stringify({ description: args.description ?? null }),
+        JSON.stringify({ description: args.description ?? null, ...(args.metadata ?? {}) }),
       ],
     );
     if (claimed.rows.length === 0) {
@@ -915,6 +917,7 @@ export class PaymentsService {
           stripe_payment_id: paymentRowId,
           ride_id: args.rideId ?? '',
           rider_id: args.riderId,
+          ...(args.metadata ?? {}),
         },
         idempotencyKey: `charge-${paymentRowId}`,
       });

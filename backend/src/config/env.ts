@@ -98,6 +98,11 @@ const envSchema = z.object({
   ADMIN_NOTIFY_EMAIL: z.string().default('support@netride.org'),
   APP_URL: z.string().default('http://localhost:3000'),
   ADMIN_URL: z.string().default('http://localhost:5173'),
+  // Optional store links embedded in contact invitation / referral SMS.
+  // When omitted the universal invitation landing page still works; the
+  // backend never invents an app-store URL.
+  IOS_APP_STORE_URL: z.string().optional(),
+  ANDROID_PLAY_STORE_URL: z.string().optional(),
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),

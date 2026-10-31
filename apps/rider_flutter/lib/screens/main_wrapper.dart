@@ -4,12 +4,14 @@ import 'package:provider/provider.dart';
 import '../components/initialization_failure.dart';
 import '../components/skeletons.dart';
 import '../providers/ride_provider.dart';
+import '../providers/group_provider.dart';
 import '../providers/session_provider.dart';
 import '../providers/specials_provider.dart';
 import '../services/app_nav.dart';
 import '../services/auth_service.dart';
 import 'map_screen.dart';
 import 'specials_screen.dart';
+import 'groups_screen.dart';
 import 'activity_screen.dart';
 import 'profile_screen.dart';
 
@@ -24,8 +26,8 @@ class _MainWrapperState extends State<MainWrapper> {
   int _selectedIndex = 0;
   bool _redirectingToLogin = false;
 
-  // Navigation stays: Explore / Specials / Activity / Account. Specials is
-  // the dedicated discovery page; Explore keeps its inline SPECIALS section.
+  // Navigation: Explore / Specials / Groups / Activity / Account.
+  // Groups is a first-class destination between discovery and history.
   late final List<Widget> _screens;
 
   @override
@@ -34,6 +36,7 @@ class _MainWrapperState extends State<MainWrapper> {
     _screens = [
       MapScreen(onOpenSpecials: () => _onItemTapped(AppNav.specials)),
       const SpecialsScreen(),
+      const GroupsScreen(),
       const ActivityScreen(),
       const ProfileScreen(),
     ];
@@ -101,11 +104,18 @@ class _MainWrapperState extends State<MainWrapper> {
     if (index == 0 || index == 1) {
       context.read<SpecialsProvider>().refresh();
     }
+    if (index == AppNav.groups) {
+      final groups = context.read<GroupProvider>();
+      groups.refreshGroups(silent: true);
+      groups.refreshFriends();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionProvider>();
+    final groupProvider = context.watch<GroupProvider>();
+    final groupBadge = groupProvider.unreadTotal + groupProvider.incomingInvitations.length;
 
     if (session.status == SessionStatus.unauthenticated) {
       // The auth flow that cleared the session owns the navigation. Rendering
@@ -173,6 +183,17 @@ class _MainWrapperState extends State<MainWrapper> {
                   activeIcon: Icon(Icons.local_offer, size: 24),
                   label: 'Specials',
                 ),
+                BottomNavigationBarItem(
+                  icon: _BadgedIcon(
+                    icon: Icons.groups_2_outlined,
+                    count: groupBadge,
+                  ),
+                  activeIcon: _BadgedIcon(
+                    icon: Icons.groups_2,
+                    count: groupBadge,
+                  ),
+                  label: 'Groups',
+                ),
                 const BottomNavigationBarItem(
                   icon: Icon(Icons.receipt_long_outlined, size: 24),
                   activeIcon: Icon(Icons.receipt_long, size: 24),
@@ -206,6 +227,46 @@ class _MainWrapperState extends State<MainWrapper> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _BadgedIcon extends StatelessWidget {
+  const _BadgedIcon({required this.icon, required this.count});
+  final IconData icon;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Icon(icon, size: 24),
+        if (count > 0)
+          Positioned(
+            right: -8,
+            top: -5,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+              constraints: const BoxConstraints(minWidth: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFC65A5A),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+              child: Text(
+                count > 99 ? '99+' : '$count',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w800,
+                  height: 1.1,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

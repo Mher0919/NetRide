@@ -154,6 +154,15 @@ export class StripeWebhookService {
               paymentIntentId: object.id ?? null,
             });
           }
+          // Group participants pay BEFORE a ride exists, so the ride
+          // settlement hook above is intentionally a no-op for these rows.
+          // Reconcile the group payment record from the verified event too:
+          // a server crash between the Stripe charge and the local update
+          // must never leave the group stuck at "awaiting payment".
+          if (metadata.group_payment_id) {
+            const { GroupPaymentsService } = await import('../groups/group-payments.service');
+            await GroupPaymentsService.applyVerifiedStripeSuccess(stripePaymentId);
+          }
         }
         return 'processed';
       }
@@ -182,6 +191,13 @@ export class StripeWebhookService {
             rideId: metadata.ride_id || null,
             failureReason: object.last_payment_error?.message ?? null,
           });
+          if (metadata.group_payment_id) {
+            const { GroupPaymentsService } = await import('../groups/group-payments.service');
+            await GroupPaymentsService.applyVerifiedStripeFailure(
+              stripePaymentId,
+              object.last_payment_error?.message ?? object.cancellation_reason ?? event.type,
+            );
+          }
         }
         return 'processed';
       }

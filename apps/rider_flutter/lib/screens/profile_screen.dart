@@ -576,6 +576,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       MaterialPageRoute(builder: (context) => const ReferralScreen()),
                     ),
                   ),
+                  _buildMenuTile(
+                    icon: Icons.contacts_rounded,
+                    title: 'Invite Through Contacts',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            const ReferralScreen(openContacts: true),
+                      ),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 24),

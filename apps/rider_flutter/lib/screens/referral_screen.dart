@@ -5,20 +5,37 @@
 // has NOT used a referral code yet, it also offers to scan a friend's QR or
 // enter a code (usable later even if the post-signup offer was skipped).
 
+import 'dart:io' show Platform;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../components/skeletons.dart';
 import '../components/state_container.dart';
 import '../models/reward_models.dart';
+import '../providers/session_provider.dart';
+import '../services/contact_invite_service.dart';
 import '../services/rewards_service.dart';
 import '../widgets/referral_code_dialog.dart';
 import 'qr_scanner_screen.dart';
 
 class ReferralScreen extends StatefulWidget {
-  const ReferralScreen({super.key});
+  const ReferralScreen({
+    super.key,
+    this.openContacts = false,
+    this.initialCode,
+  });
+
+  /// Account-page "Invite Through Contacts" opens the same referral screen
+  /// and immediately launches the native contact picker after loading the
+  /// existing referral code.
+  final bool openContacts;
+
+  /// Referral deep link (`netride://referral?code=...` or `/r/<code>`):
+  /// link the code automatically once the authenticated screen loads.
+  final String? initialCode;
 
   @override
   State<ReferralScreen> createState() => _ReferralScreenState();
@@ -28,6 +45,8 @@ class _ReferralScreenState extends State<ReferralScreen> {
   ViewState _state = ViewState.loading;
   String? _errorMessage;
   ReferralInfo? _info;
+  bool _contactsOpened = false;
+  bool _autoLinkTried = false;
 
   @override
   void initState() {
@@ -47,6 +66,19 @@ class _ReferralScreenState extends State<ReferralScreen> {
         _info = info;
         _state = ViewState.success;
       });
+      if (widget.openContacts && !_contactsOpened) {
+        _contactsOpened = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _inviteThroughContacts();
+        });
+      }
+      final linkedCode = widget.initialCode?.trim().toUpperCase();
+      if (linkedCode != null && linkedCode.isNotEmpty && !_autoLinkTried) {
+        _autoLinkTried = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _linkCode(linkedCode);
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -62,6 +94,48 @@ class _ReferralScreenState extends State<ReferralScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label copied to clipboard')),
     );
+  }
+
+  /// Contact-based referral invitation: native picker + native SMS composer.
+  /// The existing referral code/URL is reused — no second referral system.
+  Future<void> _inviteThroughContacts() async {
+    final info = _info;
+    if (info == null) return;
+    try {
+      final contact = await ContactInviteService.pickOne();
+      if (contact == null || !mounted) return;
+      final profile = context.read<SessionProvider>().profile;
+      final name = (profile?['full_name'] ?? '').toString().trim();
+      final storeUrl = Platform.isIOS ? info.iosStoreUrl : info.androidStoreUrl;
+      final message = ContactInviteService.referralInviteMessage(
+        inviterName: name.isEmpty ? 'Your friend' : name.split(' ').first,
+        referralCode: info.code,
+        referralUrl: info.referralUrl,
+        downloadUrl: storeUrl,
+      );
+      final opened = await ContactInviteService.openSmsComposer(
+        phone: contact.phone,
+        message: message,
+      );
+      if (!mounted) return;
+      if (!opened) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No messaging app was available. Copy your referral link instead.'),
+          ),
+        );
+      }
+    } on ContactPickerException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('We couldn\'t open your SMS app.')),
+      );
+    }
   }
 
   /// Account-page entry: scan a friend's QR and link it. The scanner shows
@@ -80,6 +154,10 @@ class _ReferralScreenState extends State<ReferralScreen> {
   Future<void> _enterCode() async {
     final code = await promptForReferralCode(context);
     if (code == null || !mounted) return;
+    await _linkCode(code);
+  }
+
+  Future<void> _linkCode(String code) async {
     try {
       final result = await RewardsService.scanReferral(code: code);
       if (!mounted) return;
@@ -378,6 +456,23 @@ class _ReferralScreenState extends State<ReferralScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _inviteThroughContacts,
+                    icon: const Icon(Icons.contacts_outlined, size: 18),
+                    label: const Text('Invite Through Contacts'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5B7760),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),

@@ -136,6 +136,29 @@ export class RideSettlementService {
     try {
       const breakdown = await getFareBreakdown(rideId);
       if (!breakdown) return;
+
+      // GROUP RIDES ARE PREPAID. Each participant's share was collected (card
+      // and/or ride credits) BEFORE the booking was submitted; the host must
+      // not be charged again here. Mark the rider component as collected from
+      // those verified group payments.
+      const groupRide = await pool.query(
+        `SELECT group_id FROM rides WHERE id = $1 AND group_id IS NOT NULL`,
+        [rideId],
+      );
+      if (groupRide.rows[0]) {
+        const riderShare = Number(breakdown.rider_share_cents ?? 0);
+        await pool.query(
+          `UPDATE ride_fare_breakdowns
+              SET rider_collected_cents = $2,
+                  settlement_status = 'SETTLED',
+                  settled_at = COALESCE(settled_at, NOW()),
+                  reconciliation_note = COALESCE(reconciliation_note, 'group prepaid'),
+                  updated_at = NOW()
+            WHERE ride_id = $1`,
+          [rideId, riderShare],
+        );
+        return;
+      }
       const settlement = await pool.query(`SELECT * FROM financial_transactions WHERE ride_id = $1`, [rideId]);
       const tx = settlement.rows[0];
 

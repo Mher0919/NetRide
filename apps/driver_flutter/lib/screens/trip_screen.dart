@@ -16,6 +16,7 @@ import '../services/navigation_voice_service.dart';
 import '../components/trip_completed_dialog.dart';
 import '../components/state_container.dart';
 import 'navigation_screen.dart';
+import 'group_navigation_screen.dart';
 import 'chat_sheet.dart';
 import 'report_sheet.dart';
 
@@ -364,6 +365,27 @@ class _TripScreenState extends State<TripScreen> {
     DriverProvider driverProvider,
     NavigationService navService,
   ) {
+    if (trip.isGroup) {
+      return Stack(
+        children: [
+          GroupNavigationScreen(
+            trip: trip,
+            actionPending: driverProvider.tripActionPending,
+            onCompleteTrip: () => _completeTripThenRate(driverProvider, trip),
+          ),
+          if (trip.status == models.TripStatus.ACCEPTED ||
+              trip.status == models.TripStatus.DRIVER_ARRIVING)
+            Positioned(
+              right: 12,
+              top: 76,
+              child: _RideActionMenu(
+                onCancel: () => _showCancelDialog(context, driverProvider, trip),
+              ),
+            ),
+        ],
+      );
+    }
+
     // Keep the NavigationService's leg in sync with the trip status.
     // Accept/Requested → pickup, InProgress → destination.
     final desiredLeg = trip.status == models.TripStatus.IN_PROGRESS

@@ -291,6 +291,7 @@ model Ride {
   snapshot_rider_rating Decimal?      @db.Decimal(3, 2)
   compliance_snapshot   Json?         @default("{}")
   idempotency_key       String?       @unique
+  group_id              String?       @db.Uuid
 
   pickup_lat          Float?
   pickup_lng          Float?
@@ -342,7 +343,9 @@ model Ride {
 
   rider          User?              @relation("RiderRides", fields: [rider_id], references: [id])
   driver         User?              @relation("DriverRides", fields: [driver_id], references: [id])
-  rating         Rating?
+  /// One review per ride participant (migration 20261030 changed the unique
+  /// key from ride_id to (ride_id, rater_id)).
+  ratings        Rating[]
   payouts        Payout[]           @relation("RidePayouts")
   price_snapshot RidePriceSnapshot?
   reports        RideReport[]
@@ -510,7 +513,7 @@ model RevenueConfig {
 
 model Rating {
   id                 String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  ride_id            String    @unique @db.Uuid
+  ride_id            String    @db.Uuid
   rater_id           String    @db.Uuid
   target_id          String    @db.Uuid
   target_role        UserRole
@@ -521,6 +524,7 @@ model Rating {
 
   ride Ride @relation(fields: [ride_id], references: [id], onDelete: Cascade)
 
+  @@unique([ride_id, rater_id])
   @@map("ratings")
 }
 
@@ -1068,4 +1072,221 @@ model SpecialRedemption {
   @@index([sponsor_id, status, created_at(sort: Desc)])
   @@index([status, created_at(sort: Desc)])
   @@map("special_redemptions")
+}
+
+// ---------------------------------------------------------------------------
+// Group rides ecosystem (migration 20261030_group_rides.sql)
+// ---------------------------------------------------------------------------
+
+model RideGroupSettings {
+  id                    Int      @id
+  max_participants      Int      @default(5)
+  quote_ttl_seconds     Int      @default(1200)
+  invite_ttl_seconds    Int      @default(604800)
+  route_plan_ttl_seconds Int     @default(1800)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("ride_group_settings")
+}
+
+model Friendship {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_low     String   @db.Uuid
+  user_high    String   @db.Uuid
+  requested_by String   @db.Uuid
+  status       String   @default("PENDING")
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([user_low, user_high])
+  @@index([user_low, status])
+  @@index([user_high, status])
+  @@map("friendships")
+}
+
+model RideGroup {
+  id                      String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  host_id                 String    @db.Uuid
+  name                    String
+  status                  String    @default("COLLECTING_MEMBERS")
+  destination_lat         Float?
+  destination_lng         Float?
+  destination_address     String?
+  destination_place_id    String?
+  vehicle_category        String    @default("CORE")
+  split_method            String    @default("HOST_PAYS")
+  active_ride_id          String?   @unique @db.Uuid
+  current_quote_id        String?   @db.Uuid
+  configuration_version   Int       @default(0)
+  locked_at               DateTime? @db.Timestamptz(6)
+  created_at              DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([host_id, created_at(sort: Desc)])
+  @@index([status, updated_at(sort: Desc)])
+  @@map("ride_groups")
+}
+
+model RideGroupMember {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  group_id        String    @db.Uuid
+  user_id         String    @db.Uuid
+  role            String    @default("MEMBER")
+  status          String    @default("JOINED")
+  pickup_lat      Float?
+  pickup_lng      Float?
+  pickup_address  String?
+  pickup_place_id String?
+  pickup_source   String?
+  pickup_set_at   DateTime? @db.Timestamptz(6)
+  payment_status  String    @default("NOT_REQUIRED")
+  last_read_at    DateTime? @db.Timestamptz(6)
+  joined_at       DateTime? @db.Timestamptz(6)
+  picked_up_at    DateTime? @db.Timestamptz(6)
+  left_at         DateTime? @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([group_id, user_id])
+  @@index([user_id, status])
+  @@index([group_id, status])
+  @@map("ride_group_members")
+}
+
+model RideGroupInvitation {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  group_id        String    @db.Uuid
+  inviter_id      String    @db.Uuid
+  invited_user_id String?   @db.Uuid
+  invited_phone   String?
+  invited_name    String?
+  token_hash      String    @unique
+  status          String    @default("PENDING")
+  expires_at      DateTime  @db.Timestamptz(6)
+  accepted_at     DateTime? @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([group_id, status, created_at(sort: Desc)])
+  @@index([invited_user_id, status])
+  @@map("ride_group_invitations")
+}
+
+model RideGroupMessage {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  group_id     String   @db.Uuid
+  sender_id    String?  @db.Uuid
+  message_type String   @default("TEXT")
+  content      String
+  metadata     Json     @default("{}")
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([group_id, created_at(sort: Desc)])
+  @@map("ride_group_messages")
+}
+
+model RideGroupRoutePlan {
+  id                     String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  group_id               String   @db.Uuid
+  ride_id                String?  @db.Uuid
+  phase                  String   @default("ESTIMATE")
+  version                Int      @default(1)
+  origin_lat             Float?
+  origin_lng             Float?
+  destination_lat        Float
+  destination_lng        Float
+  destination_address    String?
+  stops                  Json     @default("[]")
+  total_distance_meters  Int      @default(0)
+  total_duration_seconds Int      @default(0)
+  engine                 String   @default("GoogleRoutes")
+  provider_ref           String?
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([group_id, version])
+  @@index([group_id, version(sort: Desc)])
+  @@index([ride_id])
+  @@map("ride_group_route_plans")
+}
+
+model RideGroupQuote {
+  id                     String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  group_id               String    @db.Uuid
+  version                Int
+  status                 String    @default("ACTIVE")
+  route_plan_id          String    @db.Uuid
+  split_method           String
+  vehicle_category       String    @default("CORE")
+  currency               String    @default("USD")
+  original_fare_cents    BigInt
+  promo_discount_cents   BigInt    @default(0)
+  discounted_total_cents BigInt
+  promo_id               String?   @db.Uuid
+  promo_code             String?
+  pickup_snapshot        Json      @default("[]")
+  fare_components        Json      @default("{}")
+  route_snapshot         Json      @default("{}")
+  expires_at             DateTime  @db.Timestamptz(6)
+  created_by             String    @db.Uuid
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([group_id, version])
+  @@index([group_id, status, version(sort: Desc)])
+  @@map("ride_group_quotes")
+}
+
+model RideGroupQuoteShare {
+  quote_id        String   @db.Uuid
+  user_id         String   @db.Uuid
+  amount_cents    BigInt
+  distance_meters Int      @default(0)
+  weight          Decimal  @default(0) @db.Decimal(14, 6)
+  required        Boolean  @default(true)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([quote_id, user_id])
+  @@map("ride_group_quote_shares")
+}
+
+model RideGroupPayment {
+  id                       String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  group_id                 String    @db.Uuid
+  quote_id                 String    @db.Uuid
+  participant_id           String    @db.Uuid
+  amount_cents             BigInt
+  currency                 String    @default("USD")
+  status                   String    @default("PENDING")
+  method                   String    @default("CARD")
+  stripe_payment_id        String?   @db.Uuid
+  stripe_payment_intent_id String?
+  credit_transaction_id    String?   @db.Uuid
+  credit_cents             BigInt    @default(0)
+  card_cents               BigInt    @default(0)
+  attempt_count            Int       @default(0)
+  failure_reason           String?
+  succeeded_at             DateTime? @db.Timestamptz(6)
+  refunded_at              DateTime? @db.Timestamptz(6)
+  created_at               DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([quote_id, participant_id])
+  @@index([group_id, status])
+  @@index([participant_id, created_at(sort: Desc)])
+  @@map("ride_group_payments")
+}
+
+model RideGroupTip {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ride_id      String   @db.Uuid
+  group_id     String   @db.Uuid
+  tipper_id    String   @db.Uuid
+  amount_cents BigInt
+  status       String   @default("RECORDED")
+  payout_id    String?  @db.Uuid
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([ride_id, tipper_id])
+  @@index([ride_id, created_at(sort: Desc)])
+  @@index([tipper_id, created_at(sort: Desc)])
+  @@map("ride_group_tips")
 }

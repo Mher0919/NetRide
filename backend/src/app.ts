@@ -66,6 +66,9 @@ import partnerPortalRoutes from './modules/partner/partner-portal.routes';
 import portalRoutes from './modules/portal/portal.routes';
 import paymentsRoutes from './modules/payments/payments.routes';
 import adminPaymentsRoutes from './modules/payments/admin-payments.routes';
+import groupsRoutes from './modules/groups/groups.routes';
+import { renderGroupJoinLanding } from './modules/groups/group-join-page';
+import { renderReferralLanding } from './modules/referral/referral-landing';
 import appVersionRoutes from './modules/app-version/app-version.routes';
 import { getReleaseConfig } from './modules/app-version/app-version.service';
 import {
@@ -394,6 +397,19 @@ app.use('/api', portalRoutes);
 app.use('/api/admin', adminSponsorRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin/payments', adminPaymentsRoutes);
+app.use('/api/groups', groupsRoutes);
+
+// Public universal-link landing page for group invitations. The token is
+// opaque; actual acceptance is authenticated and validated server-side.
+app.get('/join/group/:token', (req, res) => {
+  res.type('html').send(renderGroupJoinLanding(req.params.token));
+});
+
+// Public referral landing (the link already embedded in every rider's
+// referral code/QR). It shows the code and hands off to the installed app.
+app.get('/r/:code', (req, res) => {
+  res.type('html').send(renderReferralLanding(req.params.code));
+});
 // Uploads require an authenticated identity: the owner of the file is taken
 // from the verified token, never from the request body.
 app.post('/api/upload', authMiddleware, UploadService.upload);
@@ -1013,6 +1029,16 @@ export function startServer(): void {
       .then((n) => { if (n > 0) logger.info({ reconciled: n }, 'cron_special_settlement_reconcile'); })
       .catch((err: any) => logger.error({ err: err.message }, 'cron_special_settlement_reconcile_error'));
   }, 5 * 60 * 1000);
+
+  // Group quote refunds: retry any refund that could not complete when a
+  // host changed a quote (or a quote expired). Idempotent and bounded.
+  import('./modules/groups/group-payments.service').then(({ GroupPaymentsService }) => {
+    setInterval(() => {
+      GroupPaymentsService.sweepPendingQuoteRefunds()
+        .then((n) => { if (n > 0) logger.info({ refundedQuotes: n }, 'group_quote_refunds_retried'); })
+        .catch((err: any) => logger.error({ err: err.message }, 'group_quote_refunds_error'));
+    }, 10 * 60 * 1000);
+  });
 
   // Scheduled Rides Job (Every 1 minute)
   import('./services/scheduler.service').then(({ SchedulerService }) => {

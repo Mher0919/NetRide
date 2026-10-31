@@ -1794,7 +1794,9 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
                 child: Text(
                   _expired
                       ? 'REQUEST EXPIRED'
-                      : (req.specialAttached ? 'NEW SPECIAL RIDE REQUEST' : 'NEW RIDE REQUEST'),
+                      : req.isGroup
+                          ? 'NEW GROUP RIDE REQUEST'
+                          : (req.specialAttached ? 'NEW SPECIAL RIDE REQUEST' : 'NEW RIDE REQUEST'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1851,6 +1853,52 @@ class _IncomingRequestCardState extends State<_IncomingRequestCard>
                       ),
                     ),
                   ),
+                ],
+              ),
+            ),
+          ],
+          if (req.isGroup) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFF5B7760).withOpacity(0.10),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.groups_2_rounded,
+                          size: 17, color: Color(0xFF5B7760)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${req.group?.participantCount ?? 0} passengers · '
+                          '${req.group?.stopCount ?? 0} pickup stops',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF2F3A32),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (req.group?.pickupSummary.isNotEmpty == true) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      'Pickups: ${req.group!.pickupSummary.join(' → ')}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.35,
+                        color: const Color(0xFF2F3A32).withOpacity(0.7),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -86,6 +86,8 @@ export interface ReferralInfo {
   code: string;
   qr_payload: string;
   referral_url: string;
+  ios_store_url: string | null;
+  android_store_url: string | null;
   issued_at: Date;
   expires_at: Date;
   can_scan: boolean;
@@ -188,6 +190,8 @@ export class ReferralService {
       code: row.code,
       qr_payload: row.qr_payload,
       referral_url: `${env.APP_URL}/r/${row.code}`,
+      ios_store_url: env.IOS_APP_STORE_URL ?? null,
+      android_store_url: env.ANDROID_PLAY_STORE_URL ?? null,
       issued_at: row.issued_at,
       expires_at: row.expires_at,
       can_scan: asReferred.rows.length === 0,

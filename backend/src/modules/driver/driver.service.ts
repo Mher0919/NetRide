@@ -1494,10 +1494,15 @@ export class DriverService {
    * TIP_CREDIT partial unique index plus delta math prevent double-
    * counting, so re-running the same tip request is a no-op.
    */
-  static async creditTipAfterComplete(driverId: string, tipCents: number, rideId: string) {
-    if (!driverId) return;
+  static async creditTipAfterComplete(
+    driverId: string,
+    tipCents: number,
+    rideId: string,
+    reference?: string | null,
+  ): Promise<{ credited: boolean; payoutId: string | null }> {
+    if (!driverId) return { credited: false, payoutId: null };
     const safeTip = Math.max(0, Math.round(tipCents));
-    if (safeTip <= 0) return;
+    if (safeTip <= 0) return { credited: false, payoutId: null };
 
     const client = await pool.connect();
     try {
@@ -1510,16 +1515,16 @@ export class DriverService {
       // creditOnRideComplete: a repeated request must never re-credit the
       // wallet even though the delta math is usually zero.
       const claim = await client.query(
-        `INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id)
-         VALUES ($1, $2, 0, $2, 'PAID', 'TIP_CREDIT', $3)
-         ON CONFLICT (ride_id) WHERE method = 'TIP_CREDIT' DO NOTHING
+        `INSERT INTO payouts (driver_id, amount_cents, fee_cents, net_cents, status, method, ride_id, reference)
+         VALUES ($1, $2, 0, $2, 'PAID', 'TIP_CREDIT', $3, $4)
+         ON CONFLICT DO NOTHING
          RETURNING id`,
-        [driverId, safeTip, rideId]
+        [driverId, safeTip, rideId, reference ?? null]
       );
       if ((claim.rowCount ?? 0) === 0) {
         await client.query('ROLLBACK');
-        console.log(`[WALLET] ↩️ Ride ${rideId}: after-trip tip already credited — no-op`);
-        return;
+        console.log(`[WALLET] 🧾 Ride ${rideId}: after-trip tip already credited — no-op`);
+        return { credited: false, payoutId: null };
       }
       await client.query(
         `UPDATE driver_wallets
@@ -1533,6 +1538,7 @@ export class DriverService {
         `[WALLET] 💰 Ride ${rideId}: after-trip tip of $${(safeTip / 100).toFixed(2)} credited to driver ${driverId}`
       );
       await client.query('COMMIT');
+      return { credited: true, payoutId: claim.rows[0].id };
     } catch (err: any) {
       await client.query('ROLLBACK');
       console.error(`[WALLET] ❌ creditTipAfterComplete failed for driver ${driverId}:`, err.message);

@@ -6,6 +6,8 @@ import 'package:provider/provider.dart';
 import 'providers/ride_provider.dart';
 import 'providers/session_provider.dart';
 import 'providers/specials_provider.dart';
+import 'providers/group_provider.dart';
+import 'screens/group_join_screen.dart';
 import 'services/communication_service.dart';
 import 'screens/map_screen.dart';
 import 'screens/trip_screen.dart';
@@ -19,6 +21,7 @@ import 'screens/splash_screen.dart';
 import 'screens/blocked_account_screen.dart';
 import 'screens/post_auth_gate.dart';
 import 'screens/referral_onboarding_screen.dart';
+import 'screens/referral_screen.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'services/user_service.dart';
@@ -89,6 +92,15 @@ void _routeFromNotification(NetRideNotification notification) {
       break;
     case '/credits':
       nav.pushNamed('/credits');
+      break;
+    case '/groups':
+      final invitationTap = notification.type == 'group_invitation' ||
+          notification.type == 'friend_request' ||
+          notification.type == 'friend_accepted' ||
+          notification.data['invitationId'] != null;
+      nav.pushNamed('/groups', arguments: {
+        if (!invitationTap) 'groupId': notification.data['groupId'],
+      });
       break;
     default:
       break;
@@ -260,6 +272,10 @@ Future<void> _bootstrap() async {
           create: (ctx) =>
               SpecialsProvider(ride: ctx.read<RideProvider>()),
         ),
+        // Group rides + friends. Also relays through the same socket.
+        ChangeNotifierProvider(
+          create: (ctx) => GroupProvider(ride: ctx.read<RideProvider>()),
+        ),
       ],
       child: const NetRideRider(),
     ),
@@ -275,6 +291,8 @@ class NetRideRider extends StatefulWidget {
 
 class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver {
   late AppLinks _appLinks;
+  String? _pendingGroupToken;
+  String? _pendingReferralCode;
 
   @override
   void initState() {
@@ -306,6 +324,7 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
       try {
         context.read<RideProvider>().reset();
         context.read<SpecialsProvider>().reset();
+        context.read<GroupProvider>().reset();
       } catch (e) {
         debugPrint('[AUTH] Session cleanup failed: $e');
       }
@@ -319,9 +338,33 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
       // snapshot; the authoritative hydration below repopulates it.
       provider.reset();
       context.read<SpecialsProvider>().reset();
+      final groups = context.read<GroupProvider>();
+      groups.reset();
       provider.updateToken(token);
       // Same recovery guarantee as cold start: adopt an active ride at once.
       provider.hydrateFromServer();
+      groups.refreshGroups(silent: true);
+      groups.refreshFriends();
+      final pendingToken = _pendingGroupToken;
+      if (pendingToken != null && pendingToken.isNotEmpty) {
+        _pendingGroupToken = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ApiService.navigatorKey.currentState
+                ?.pushNamed('/group/join', arguments: {'token': pendingToken});
+          }
+        });
+      }
+      final pendingReferral = _pendingReferralCode;
+      if (pendingReferral != null && pendingReferral.isNotEmpty) {
+        _pendingReferralCode = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ApiService.navigatorKey.currentState
+                ?.pushNamed('/referral', arguments: {'code': pendingReferral});
+          }
+        });
+      }
       await NotificationService.instance.registerDevice();
       await _initStripe();
     } catch (e) {
@@ -338,6 +381,11 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
         if (context != null) {
           final provider = Provider.of<RideProvider>(context, listen: false);
           provider.onAppForegrounded();
+          final groups = Provider.of<GroupProvider>(context, listen: false);
+          groups.refreshGroups(silent: true);
+          if (groups.currentGroupId != null) {
+            groups.refreshCurrent(silent: true);
+          }
         }
       } catch (e) {
         debugPrint('[LIFECYCLE] Foreground callback error: $e');
@@ -368,6 +416,48 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
       final token = uri.queryParameters['token'];
       if (token != null) {
         ApiService.navigatorKey.currentState?.pushNamed('/reset-password', arguments: {'token': token});
+      }
+    }
+    // Group invitation links:
+    //   netride://group/join?token=...
+    //   https://<host>/join/group/<token>
+    final isGroupScheme = uri.scheme == 'netride' && uri.host == 'group' && uri.path.startsWith('/join');
+    final pathParts = uri.pathSegments;
+    final isGroupUniversal = pathParts.length >= 3 &&
+        pathParts[0] == 'join' &&
+        pathParts[1] == 'group';
+    if (isGroupScheme || isGroupUniversal) {
+      final token = uri.queryParameters['token'] ??
+          (isGroupUniversal ? pathParts[2] : null);
+      if (token != null && token.isNotEmpty) {
+        if (SecureTokenStore.hasToken) {
+          ApiService.navigatorKey.currentState
+              ?.pushNamed('/group/join', arguments: {'token': token});
+        } else {
+          // Signed out (fresh install): keep the token and open it right
+          // after the rider authenticates.
+          _pendingGroupToken = token;
+        }
+      }
+    }
+
+    // Referral links:
+    //   netride://referral?code=ABCDEFGHIJ
+    //   https://<host>/r/<CODE>
+    final isReferralScheme = uri.scheme == 'netride' && uri.host == 'referral';
+    final isReferralUniversal = pathParts.length >= 2 && pathParts[0] == 'r';
+    if (isReferralScheme || isReferralUniversal) {
+      final code = (uri.queryParameters['code'] ??
+              (isReferralUniversal ? pathParts[1] : null))
+          ?.trim()
+          .toUpperCase();
+      if (code != null && code.isNotEmpty) {
+        if (SecureTokenStore.hasToken) {
+          ApiService.navigatorKey.currentState
+              ?.pushNamed('/referral', arguments: {'code': code});
+        } else {
+          _pendingReferralCode = code;
+        }
       }
     }
     // Note: OAuth callback (login-callback) is handled automatically by Supabase
@@ -442,6 +532,20 @@ class _NetRideRiderState extends State<NetRideRider> with WidgetsBindingObserver
                 page = SpecialRedemptionScreen(
                     code: args?['code'] as String?,
                     redemptionId: args?['redemptionId'] as String?);
+                break;
+              case '/groups':
+                final args = settings.arguments as Map<String, dynamic>?;
+                page = GroupOpenScreen(groupId: args?['groupId'] as String?);
+                break;
+              case '/group/join':
+                final args = settings.arguments as Map<String, dynamic>?;
+                page = GroupJoinScreen(token: (args?['token'] ?? '').toString());
+                break;
+              case '/referral':
+                final args = settings.arguments as Map<String, dynamic>?;
+                page = ReferralScreen(
+                  initialCode: args?['code']?.toString(),
+                );
                 break;
               default:
                 page = const MapScreen();

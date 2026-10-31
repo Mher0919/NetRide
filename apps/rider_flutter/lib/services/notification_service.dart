@@ -89,6 +89,7 @@ class NotificationService {
       'promo': ('Promotions', false),
       'referral': ('Referrals', false),
       'special': ('Specials & rewards', true),
+      'group': ('Groups & friends', true),
       'default': ('NetRide', false),
     };
     for (final entry in channels.entries) {

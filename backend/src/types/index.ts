@@ -71,6 +71,8 @@ export interface Trip {
   id: string;
   rider_id: string;
   driver_id?: string;
+  /** Non-null when this ride is the shared booking of a NetRide group. */
+  group_id?: string | null;
   status: TripStatus;
   requested_class: VehicleClass;
   snapshot_rider_rating?: number;

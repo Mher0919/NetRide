@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../services/secure_token_store.dart';
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -56,6 +57,7 @@ class DriverProvider with ChangeNotifier {
   models.DriverStatus _status = models.DriverStatus.offline;
 
   models.Trip? _currentTrip;
+  models.DriverGroupRideView? _groupRide;
   models.Trip? _incomingRequest;
   IO.Socket? _socket;
   bool _isConnected = false;
@@ -195,6 +197,7 @@ class DriverProvider with ChangeNotifier {
   models.DriverStatus get status => _status;
 
   models.Trip? get currentTrip => _currentTrip;
+  models.DriverGroupRideView? get groupRide => _groupRide;
   models.Trip? get incomingRequest => _incomingRequest;
   models.Trip? get lastCancelledTrip => _lastCancelledTrip;
   models.Trip? get lastCompletedTrip => _lastCompletedTrip;
@@ -391,6 +394,7 @@ class DriverProvider with ChangeNotifier {
       if (hadTrip) {
         debugPrint('[RIDE] REST reports no active trip — clearing stale local state');
         _currentTrip = null;
+    _groupRide = null;
         _incomingRequest = null;
         _currentTripUpdatedAt = null;
         _status = _serverOnline
@@ -484,6 +488,7 @@ class DriverProvider with ChangeNotifier {
     _cancelConfirmFailed = false;
     _lastCancelError = null;
     _currentTrip = null;
+    _groupRide = null;
     _incomingRequest = null;
     _lastCancelledTrip = null;
     _lastCompletedTrip = null;
@@ -901,6 +906,7 @@ class DriverProvider with ChangeNotifier {
       if (hadTrip) {
         debugPrint('[RIDE] Server reports no current trip — clearing stale local state');
         _currentTrip = null;
+    _groupRide = null;
         _incomingRequest = null;
         _currentTripUpdatedAt = null;
         if (_status == models.DriverStatus.onTrip) {
@@ -1047,6 +1053,22 @@ class DriverProvider with ChangeNotifier {
       }
     });
 
+    // GROUP RIDES: authoritative multi-stop updates (accept, per-passenger
+    // pickup, route re-optimization, completion/cancellation).
+    for (final event in ['groupRideUpdated', 'groupPickupConfirmed']) {
+      _socket!.on(event, (data) {
+        final trip = _currentTrip;
+        if (trip == null) return;
+        final groupId = data is Map ? data['groupId']?.toString() : null;
+        if (groupId != null &&
+            _groupRide?.groupId != null &&
+            groupId != _groupRide!.groupId) {
+          return;
+        }
+        loadGroupRide(trip.id);
+      });
+    }
+
     // ── Cache-aware Socket.IO event handlers ──────────────────────
     // These events signal remote admin changes. We invalidate the
     // affected cache keys and re-fetch authoritative data.
@@ -1159,6 +1181,7 @@ class DriverProvider with ChangeNotifier {
           _currentTrip!.status == models.TripStatus.REQUESTED &&
           (failedTripId == null || failedTripId == _currentTrip!.id)) {
         _currentTrip = null;
+    _groupRide = null;
         _status = _serverOnline
             ? models.DriverStatus.online
             : models.DriverStatus.offline;
@@ -1294,6 +1317,9 @@ class DriverProvider with ChangeNotifier {
       _status = models.DriverStatus.onTrip;
       _clearOfferNotification();
       notifyListeners();
+      if (trip.isGroup) {
+        loadGroupRide(trip.id);
+      }
     } else if (trip.status == models.TripStatus.COMPLETED) {
       if (_incomingRequest?.id == trip.id) {
         _incomingRequest = null;
@@ -1305,6 +1331,7 @@ class DriverProvider with ChangeNotifier {
       _settledTripIds.add(trip.id);
       _ackTerminalNotice(trip.id);
       _currentTrip = null;
+    _groupRide = null;
       _currentTripUpdatedAt = null;
       _tripActionPending = false;
       _status = _serverOnline
@@ -1322,6 +1349,7 @@ class DriverProvider with ChangeNotifier {
       _settledTripIds.add(trip.id);
       _ackTerminalNotice(trip.id);
       _currentTrip = null;
+    _groupRide = null;
       _currentTripUpdatedAt = null;
       _tripActionPending = false;
       _messages = [];
@@ -1614,6 +1642,107 @@ class DriverProvider with ChangeNotifier {
   /// Start the trip. Guarded: the UI disables the CTA while pending, and
   /// this guard stops a programmatic/double tap from emitting twice. The
   /// authoritative IN_PROGRESS tripUpdate (or a socket error) clears it.
+  /// Loads the authoritative multi-stop plan + per-passenger pickup state.
+  /// The driver app never constructs or reorders stops locally.
+  Future<void> loadGroupRide(String rideId) async {
+    final trip = _currentTrip;
+    if (trip != null && !trip.isGroup) return;
+    try {
+      final res = await ApiService.dio.get('/groups/rides/$rideId/driver');
+      if (res.data is! Map) return;
+      final view = models.DriverGroupRideView.fromJson(
+        Map<String, dynamic>.from(res.data as Map),
+      );
+      if (_currentTrip != null && _currentTrip!.id != rideId) return;
+      _groupRide = view;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[GROUP] loadGroupRide failed: $e');
+    }
+  }
+
+  /// Confirms ONE passenger's pickup at the current authoritative stop.
+  Future<String?> confirmGroupPickup(
+    String rideId,
+    String participantId,
+  ) {
+    return _submitGroupPickup(rideId, participantId, 'pickups');
+  }
+
+  Future<String?> markGroupNoShow(
+    String rideId,
+    String participantId,
+  ) {
+    return _submitGroupPickup(rideId, participantId, 'no-show');
+  }
+
+  Future<String?> _submitGroupPickup(
+    String rideId,
+    String participantId,
+    String action,
+  ) async {
+    if (_tripActionPending) return 'A pickup is already being confirmed.';
+    _tripActionPending = true;
+    notifyListeners();
+    try {
+      final res = await ApiService.dio.post(
+        '/groups/rides/$rideId/$action/$participantId',
+      );
+      await loadGroupRide(rideId);
+      if (res.data is Map && (res.data as Map)['status'] == 'IN_PROGRESS') {
+        final trip = _currentTrip;
+        if (trip != null) {
+          _currentTrip = models.Trip(
+            id: trip.id,
+            riderId: trip.riderId,
+            driverId: trip.driverId,
+            status: models.TripStatus.IN_PROGRESS,
+            pickup: trip.pickup,
+            destination: trip.destination,
+            fareAmount: trip.fareAmount,
+            tipAmount: trip.tipAmount,
+            initialMaxFare: trip.initialMaxFare,
+            savingLikelihood: trip.savingLikelihood,
+            riderInfo: trip.riderInfo,
+            driverInfo: trip.driverInfo,
+            calculatedPrice: trip.calculatedPrice,
+            driverEarningsCents: trip.driverEarningsCents,
+            tripDistanceMeters: trip.tripDistanceMeters,
+            tripDurationSeconds: trip.tripDurationSeconds,
+            routeGeometry: trip.routeGeometry,
+            driverToPickupEta: trip.driverToPickupEta,
+            driverToPickupDistance: trip.driverToPickupDistance,
+            driverPricePerMile: trip.driverPricePerMile,
+            offerId: trip.offerId,
+            expiresAt: trip.expiresAt,
+            requestedAt: trip.requestedAt,
+            updatedAt: DateTime.now(),
+            specialAttached: trip.specialAttached,
+            sponsorSubsidyCents: trip.sponsorSubsidyCents,
+            riderPaymentCents: trip.riderPaymentCents,
+            cancelledBy: trip.cancelledBy,
+            cancellationReasonCode: trip.cancellationReasonCode,
+            cancellationReasonText: trip.cancellationReasonText,
+            isGroup: trip.isGroup,
+            group: trip.group,
+          );
+        }
+      }
+      notifyListeners();
+      return null;
+    } on DioException catch (e) {
+      final msg = e.response?.data is Map
+          ? (e.response!.data as Map)['error']?.toString()
+          : null;
+      return msg ?? 'We could not confirm that pickup. Please try again.';
+    } catch (_) {
+      return 'We could not confirm that pickup. Please try again.';
+    } finally {
+      _tripActionPending = false;
+      notifyListeners();
+    }
+  }
+
   void pickUpRider(String tripId) {
     if (_tripActionPending) return;
     if (!_isConnected) {

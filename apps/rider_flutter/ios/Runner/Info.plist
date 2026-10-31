@@ -37,6 +37,8 @@
 	<string>NetRide uses the camera to take photos of your profile and ID documents.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>NetRide accesses your photo library so you can upload profile photos and documents.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>NetRide opens the contact picker so you can invite a friend to a group ride or send a referral invitation. Only the contact you select is used.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>NetRide uses your location to show nearby drivers, calculate fares, and navigate your ride.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
@@ -93,6 +95,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>io.supabase.netride</string>
+				<string>netride</string>
 			</array>
 		</dict>
 	</array>

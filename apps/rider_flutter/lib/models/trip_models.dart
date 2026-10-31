@@ -133,6 +133,7 @@ class Trip {
   final String id;
   final String riderId;
   final String? driverId;
+  final String? groupId;
   final TripStatus status;
   final Location pickup;
   final Location destination;
@@ -160,6 +161,7 @@ class Trip {
     required this.id,
     required this.riderId,
     this.driverId,
+    this.groupId,
     required this.status,
     required this.pickup,
     required this.destination,
@@ -183,6 +185,7 @@ class Trip {
       id: json['id'],
       riderId: json['rider_id'],
       driverId: json['driver_id'],
+      groupId: json['group_id']?.toString(),
       status: TripStatus.values.firstWhere(
         (e) => e.toString().split('.').last == json['status'],
         orElse: () => TripStatus.REQUESTED,

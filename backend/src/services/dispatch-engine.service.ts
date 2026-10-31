@@ -218,6 +218,45 @@ export class DispatchEngine {
       }
     })();
 
+    // Group rides carry a least-privilege multi-stop summary on the offer so
+    // the driver understands this is a shared booking before accepting.
+    const groupInfo = await (async () => {
+      if (!(trip as any).group_id) return null;
+      try {
+        const groupRes = await pool.query(
+          `SELECT g.name, g.destination_address,
+                  (SELECT COUNT(*)::int FROM ride_group_members m
+                    WHERE m.group_id = g.id
+                      AND m.status IN ('JOINED','PICKUP_PENDING','PICKUP_CONFIRMED')) AS participant_count
+             FROM ride_groups g WHERE g.id = $1`,
+          [(trip as any).group_id],
+        );
+        const row = groupRes.rows[0];
+        if (!row) return null;
+        const planRes = await pool.query(
+          `SELECT p.stops, p.total_distance_meters, p.total_duration_seconds
+             FROM ride_group_route_plans p
+            WHERE p.group_id = $1 AND p.ride_id = $2
+            ORDER BY p.version DESC LIMIT 1`,
+          [(trip as any).group_id, trip.id],
+        );
+        const plan = planRes.rows[0];
+        const stops = plan?.stops?.stops ?? [];
+        return {
+          id: (trip as any).group_id,
+          name: row.name,
+          participantCount: Number(row.participant_count ?? 0),
+          stopCount: stops.length,
+          pickupSummary: stops.map((s: any) => s.address).filter(Boolean).slice(0, 5),
+          destinationAddress: row.destination_address,
+          routeDistanceMeters: Number(plan?.total_distance_meters ?? 0),
+          routeDurationSeconds: Number(plan?.total_duration_seconds ?? 0),
+        };
+      } catch {
+        return null;
+      }
+    })();
+
     // The full least-privilege offer card the driver app renders. Built
     // ONCE and persisted on the offer so a reconnect can replay it exactly
     // (no recomputed price drift) and the push payload matches the socket
@@ -241,6 +280,16 @@ export class DispatchEngine {
       driver_to_pickup_distance: driverToPickupRoute ? driverToPickupRoute.distance : null,
       expires_at: offer.expiresAt,
       offerId: offer.offerId,
+      ...(groupInfo
+        ? {
+            is_group: true,
+            group: groupInfo,
+            // The full optimized multi-stop journey, not the direct
+            // pickup→destination shortcut.
+            trip_distance_meters: groupInfo.routeDistanceMeters,
+            trip_duration_seconds: groupInfo.routeDurationSeconds,
+          }
+        : {}),
       ...(specialInfo ?? {}),
     };
     await DriverOfferService.attachPayload(offer.offerId, offerPayload).catch(

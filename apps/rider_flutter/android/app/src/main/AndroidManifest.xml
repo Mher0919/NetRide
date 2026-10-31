@@ -5,6 +5,10 @@
     <!-- Android 13+ runtime notification permission (POST_NOTIFICATIONS is a
          runtime permission; the app requests it once at startup). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Group/referral invitations: read access is requested ONLY when the
+         native picker needs it to return the selected contact's phone number.
+         NetRide never uploads the address book. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <application
         android:label="NetRide Rider"
         android:name="${applicationName}"
@@ -58,6 +62,29 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="io.supabase.netride" android:host="login-callback" />
+            </intent-filter>
+
+            <!-- Group invitation deep links. The https filter becomes a
+                 verified App Link once assetlinks.json is hosted; the custom
+                 scheme works immediately when the app is installed. -->
+            <intent-filter android:label="NetRide group invitation">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="netride" android:host="group" android:pathPrefix="/join" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true" android:label="NetRide universal link">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="netride.onrender.com" android:pathPrefix="/join/group" />
+                <data android:scheme="https" android:host="netride.onrender.com" android:pathPrefix="/r" />
+            </intent-filter>
+            <intent-filter android:label="NetRide referral">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="netride" android:host="referral" />
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

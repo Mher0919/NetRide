@@ -1091,7 +1091,8 @@ export class AdminController {
               }
             } 
           },
-          rating: true
+          // A ride can now have one review per participant (group rides).
+          ratings: true
         },
       });
 
@@ -1279,7 +1280,7 @@ export class AdminController {
               driver_profile: true
             } 
           },
-          rating: true
+          ratings: true
         }
       });
 
@@ -1299,7 +1300,10 @@ export class AdminController {
         timeline,
         compliance_snapshot: (ride as any).compliance_snapshot,
         ratings: {
-          rider_to_driver: (ride as any).rating?.target_role === 'DRIVER' ? (ride as any).rating : null,
+          rider_to_driver:
+            ((ride as any).ratings ?? []).find(
+              (r: any) => r.target_role === 'DRIVER',
+            ) ?? null,
           all_ratings: await prisma.rating.findMany({ where: { ride_id: id } })
         }
       });

@@ -8,6 +8,7 @@ import { DriverService } from '../driver/driver.service';
 import { CreditsService } from '../credits/credits.service';
 import { getRevenueAllocationForRide } from '../../services/pricing.service';
 import { validateTipAmount } from '../../security/tip-policy';
+import { pool } from '../../config/database';
 
 const router = Router();
 
@@ -30,9 +31,138 @@ router.post('/:rideId/tip', authMiddleware, async (req: AuthRequest, res) => {
         });
 
         if (!ride) return res.status(404).json({ error: 'Ride not found.' });
-        if (ride.rider_id !== riderId) return res.status(403).json({ error: 'Unauthorized.' });
+        // Read group_id through the pool: the Prisma client may predate the
+        // group-rides migration in a rolling deployment.
+        const groupRow = await pool.query(
+            `SELECT group_id FROM rides WHERE id = $1`,
+            [rideId],
+        );
+        const groupId = groupRow.rows[0]?.group_id ?? null;
+        const isGroupRide = !!groupId;
+        if (!isGroupRide && ride.rider_id !== riderId) {
+            return res.status(403).json({ error: 'Unauthorized.' });
+        }
         if (ride.status === 'CANCELLED') {
             return res.status(400).json({ error: 'Tips are not available for cancelled rides.' });
+        }
+
+        // -----------------------------------------------------------------
+        // GROUP RIDES: every participant can tip the driver independently.
+        // One immutable tip per (ride, participant); each creates its own
+        // idempotent TIP_CREDIT payout scoped by `group-tip:<userId>`.
+        // -----------------------------------------------------------------
+        if (isGroupRide) {
+            if (ride.status !== 'COMPLETED') {
+                return res.status(400).json({ error: 'Tips are available after the ride is completed.' });
+            }
+            const member = await pool.query(
+                `SELECT status FROM ride_group_members
+                  WHERE group_id = $1 AND user_id = $2`,
+                [groupId, riderId],
+            );
+            if (!member.rows[0] || !['PICKED_UP', 'COMPLETED'].includes(member.rows[0].status)) {
+                return res.status(403).json({ error: 'Only group passengers can tip this ride.' });
+            }
+
+            const share = await pool.query(
+                `SELECT amount_cents FROM ride_group_payments
+                  WHERE group_id = $1 AND participant_id = $2
+                  ORDER BY created_at DESC LIMIT 1`,
+                [groupId, riderId],
+            );
+            const shareDollars = Number(share.rows[0]?.amount_cents ?? 0) / 100;
+            const fallbackDollars = Math.max(
+                0,
+                parseFloat(String((ride as any).fare_amount ?? '0')) || 0,
+            );
+            const boundedGroup = validateTipAmount(
+                numericAmount,
+                shareDollars > 0 ? shareDollars : fallbackDollars,
+            );
+            if (!boundedGroup.ok) {
+                return res.status(400).json({ error: boundedGroup.error });
+            }
+            if (numericAmount === 0) {
+                return res.json({ message: 'Tip successfully added.' });
+            }
+
+            const existing = await pool.query(
+                `SELECT id, amount_cents FROM ride_group_tips
+                  WHERE ride_id = $1 AND tipper_id = $2`,
+                [rideId, riderId],
+            );
+            if (existing.rows[0]) {
+                return res.json({
+                    message: 'Your tip was already recorded.',
+                    alreadyTipped: true,
+                    amountCents: Number(existing.rows[0].amount_cents),
+                });
+            }
+
+            const tipCents = Math.round(numericAmount * 100);
+            let payoutId: string | null = null;
+            if (ride.driver_id) {
+                try {
+                    const credit = await DriverService.creditTipAfterComplete(
+                        ride.driver_id,
+                        tipCents,
+                        rideId,
+                        `group-tip:${riderId}`,
+                    );
+                    payoutId = credit.payoutId;
+                    if (!payoutId) {
+                        const existingPayout = await pool.query(
+                            `SELECT id FROM payouts
+                              WHERE ride_id = $1 AND method = 'TIP_CREDIT' AND reference = $2
+                              LIMIT 1`,
+                            [rideId, `group-tip:${riderId}`],
+                        );
+                        payoutId = existingPayout.rows[0]?.id ?? null;
+                    }
+                } catch (err: any) {
+                    console.warn(
+                        `[RIDE] ⚠️ Group tip credit failed for ride ${rideId}: ${err.message}`,
+                    );
+                    return res.status(500).json({ error: 'Failed to process tip.' });
+                }
+            }
+
+            await pool.query(
+                `INSERT INTO ride_group_tips
+                   (ride_id, group_id, tipper_id, amount_cents, status, payout_id)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (ride_id, tipper_id) DO NOTHING`,
+                [
+                    rideId,
+                    groupId,
+                    riderId,
+                    tipCents,
+                    payoutId ? 'CREDITED' : 'RECORDED',
+                    payoutId,
+                ],
+            );
+
+            let tipperName = 'A group passenger';
+            try {
+                const tipper = await prisma.user.findUnique({
+                    where: { id: riderId },
+                    select: { full_name: true },
+                });
+                if (tipper?.full_name) tipperName = tipper.full_name;
+            } catch { /* non-fatal */ }
+
+            if (ride.driver_id) {
+                getIo().to(`driver:${ride.driver_id}`).emit('tipReceived', {
+                    rideId,
+                    amount: numericAmount,
+                    tipperName,
+                });
+            }
+            getIo().to(`rider:${riderId}`).emit('tipReceived', {
+                rideId,
+                amount: numericAmount,
+            });
+            return res.json({ message: 'Tip successfully added.' });
         }
 
         // Server-side bounds: a tip is at most the ride fare (min $5, hard
